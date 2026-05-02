@@ -11,6 +11,7 @@ import '../services/audio_service.dart';
 import '../services/recording_service.dart';
 import '../services/streak_service.dart';
 import '../services/tts_service.dart';
+import '../services/auth_service.dart';
 
 final supabaseClientProvider = Provider<SupabaseClient>((_) {
   return Supabase.instance.client;
@@ -44,3 +45,5 @@ final minimalPairsProvider = FutureProvider<List<MinimalPair>>((ref) {
 });
 
 final streakServiceProvider = Provider<StreakService>((ref) => StreakService());
+
+// Auth providers are in auth_service.dart

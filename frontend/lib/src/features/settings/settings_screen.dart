@@ -1,0 +1,159 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../core/services/tts_service.dart';
+import '../../core/services/streak_service.dart';
+import '../../core/constants/supported_languages.dart';
+import '../../core/providers/app_providers.dart';
+
+class SettingsScreen extends ConsumerWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final languageCode = ref.watch(selectedLanguageCodeProvider);
+    final tts = ref.watch(ttsServiceProvider);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Settings')),
+      body: ListView(
+        children: [
+          const ListTile(
+            leading: Icon(Icons.language),
+            title: Text('Learning Language'),
+            subtitle: Text('Change your target language'),
+          ),
+          ...supportedLanguages.map(
+            (lang) => RadioListTile<String>(
+              title: Text(lang.label),
+              value: lang.code,
+              groupValue: languageCode,
+              onChanged: (value) {
+                if (value != null) {
+                  ref
+                      .read(onboardingControllerProvider.notifier)
+                      .selectLanguage(value);
+                }
+              },
+            ),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.record_voice_over),
+            title: const Text('Text-to-Speech'),
+            subtitle: const Text('Voice settings'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showTtsDialog(context, ref),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.delete_forever, color: Colors.red),
+            title: const Text('Reset Progress',
+                style: TextStyle(color: Colors.red)),
+            subtitle: const Text('Clear all local data'),
+            onTap: () => _showResetDialog(context, ref),
+          ),
+          const Divider(),
+          const ListTile(
+            leading: Icon(Icons.info_outline),
+            title: Text('About'),
+            subtitle: Text('Linguist v0.1.0'),
+          ),
+          Card(
+            margin: const EdgeInsets.all(16),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Credits',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('• IPA data: ipa-dict (MIT)'),
+                  const Text('• Audio: Wikipedia (CC BY-SA 3.0)'),
+                  const Text('• Backend: Supabase'),
+                  const Text('• Frontend: Flutter'),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'License: MIT',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showTtsDialog(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Voice Settings'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('TTS voice is device-dependent.'),
+            const SizedBox(height: 16),
+            ListTile(
+              title: const Text('Rate'),
+              subtitle: Slider(
+                value: 0.5,
+                onChanged: (value) {},
+              ),
+            ),
+            ListTile(
+              title: const Text('Pitch'),
+              subtitle: Slider(
+                value: 1.0,
+                min: 0.5,
+                max: 2.0,
+                onChanged: (value) {},
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showResetDialog(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reset Progress?'),
+        content: const Text(
+            'This will clear your streak and all local progress. This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              await ref.read(streakServiceProvider).resetStreak();
+              if (context.mounted) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Progress reset')),
+                );
+              }
+            },
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+  }
+}
