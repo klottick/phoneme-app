@@ -34,7 +34,7 @@ Most language learners struggle with pronunciation not because they don't know v
 ## Project Structure
 
 ```
-phoneme-app/
+linguist/
 ├── README.md                   # This file
 ├── docs/
 │   └── implementation-plan.md  # Detailed phase-by-phase plan
