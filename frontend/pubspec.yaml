@@ -1,4 +1,4 @@
-name: phoneme_app
+name: linguist
 description: Mobile app for phoneme-focused language learning.
 publish_to: "none"
 version: 0.1.0+1
@@ -14,6 +14,12 @@ dependencies:
   go_router: ^14.2.7
   supabase_flutter: ^2.6.0
   flutter_dotenv: ^5.1.0
+  shared_preferences: ^2.3.2
+  audioplayers: ^6.1.0
+  record: ^5.1.2
+  flutter_tts: ^4.0.2
+  path_provider: ^2.1.4
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:

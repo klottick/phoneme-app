@@ -1,27 +1,37 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-class OnboardingScreen extends StatelessWidget {
+import '../../core/constants/supported_languages.dart';
+import '../../core/providers/app_providers.dart';
+
+class OnboardingScreen extends ConsumerWidget {
   const OnboardingScreen({super.key});
 
-  static const _languages = <String>['English', 'French', 'Japanese'];
-
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Select target language')),
+      appBar: AppBar(title: const Text('Choose learning language')),
       body: ListView.separated(
         padding: const EdgeInsets.all(16),
-        itemCount: _languages.length,
+        itemCount: supportedLanguages.length,
         separatorBuilder: (_, __) => const SizedBox(height: 12),
         itemBuilder: (BuildContext context, int index) {
-          final language = _languages[index];
+          final language = supportedLanguages[index];
           return FilledButton.tonal(
-            onPressed: () => context.go('/home'),
+            onPressed: () async {
+              await ref
+                  .read(onboardingControllerProvider.notifier)
+                  .selectLanguage(language.code);
+              if (!context.mounted) {
+                return;
+              }
+              context.go('/home');
+            },
             style: FilledButton.styleFrom(padding: const EdgeInsets.all(16)),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text(language),
+              child: Text(language.label),
             ),
           );
         },
