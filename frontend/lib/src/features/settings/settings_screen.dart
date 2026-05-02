@@ -5,6 +5,7 @@ import '../../core/services/tts_service.dart';
 import '../../core/services/streak_service.dart';
 import '../../core/constants/supported_languages.dart';
 import '../../core/providers/app_providers.dart';
+import '../../core/theme/theme_controller.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -12,12 +13,45 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final languageCode = ref.watch(selectedLanguageCodeProvider);
-    final tts = ref.watch(ttsServiceProvider);
+    final themeMode = ref.watch(themeControllerProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         children: [
+          // Theme section
+          ListTile(
+            leading: Icon(
+              themeMode == ThemeMode.dark ? Icons.dark_mode : Icons.light_mode,
+            ),
+            title: const Text('Appearance'),
+            subtitle: Text(_getThemeLabel(themeMode)),
+          ),
+          SegmentedButton<ThemeMode>(
+            segments: const [
+              ButtonSegment(
+                value: ThemeMode.system,
+                label: Text('Auto'),
+                icon: Icon(Icons.brightness_auto),
+              ),
+              ButtonSegment(
+                value: ThemeMode.light,
+                label: Text('Light'),
+                icon: Icon(Icons.light_mode),
+              ),
+              ButtonSegment(
+                value: ThemeMode.dark,
+                label: Text('Dark'),
+                icon: Icon(Icons.dark_mode),
+              ),
+            ],
+            selected: {themeMode},
+            onSelectionChanged: (modes) {
+              ref.read(themeControllerProvider.notifier).setTheme(modes.first);
+            },
+          ),
+          const Divider(),
+          // Language section
           const ListTile(
             leading: Icon(Icons.language),
             title: Text('Learning Language'),
@@ -89,7 +123,17 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  void _showTtsDialog(BuildContext context, WidgetRef ref) {
+  String _getThemeLabel(ThemeMode mode) {
+    switch (mode) {
+      case ThemeMode.system:
+        return 'Follow system';
+      case ThemeMode.light:
+        return 'Light';
+      case ThemeMode.dark:
+        return 'Dark';
+    }
+  }
+}
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
