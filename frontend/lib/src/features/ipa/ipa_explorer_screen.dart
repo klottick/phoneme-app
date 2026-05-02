@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/app_providers.dart';
+import '../../core/services/audio_service.dart';
+import '../../core/services/tts_service.dart';
 
 class IpaExplorerScreen extends ConsumerWidget {
   const IpaExplorerScreen({super.key});
@@ -28,13 +30,20 @@ class IpaExplorerScreen extends ConsumerWidget {
                 child: ListTile(
                   title: Text(item.ipaSymbol, style: const TextStyle(fontSize: 24)),
                   subtitle: Text(item.descriptor),
-                  trailing: FilledButton.tonal(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Audio play planned for ${item.ipaSymbol}')),
-                      );
-                    },
-                    child: const Text('Play'),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.volume_up),
+                        tooltip: 'Play with TTS',
+                        onPressed: () => _speakPhoneme(ref, item.ipaSymbol, item.descriptor),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.play_arrow),
+                        tooltip: 'Play audio',
+                        onPressed: () => _playAudio(ref, item),
+                      ),
+                    ],
                   ),
                 ),
               );
@@ -45,5 +54,18 @@ class IpaExplorerScreen extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
       ),
     );
+  }
+
+  Future<void> _speakPhoneme(WidgetRef ref, String ipaSymbol, String descriptor) async {
+    final tts = ref.read(ttsServiceProvider);
+    await tts.speak('$ipaSymbol - $descriptor');
+  }
+
+  Future<void> _playAudio(WidgetRef ref, dynamic phoneme) async {
+    final audio = ref.read(audioServiceProvider);
+    // TODO: Use real Supabase storage URL when audio assets are uploaded
+    // For now, fall back to TTS as placeholder
+    final tts = ref.read(ttsServiceProvider);
+    await tts.speak('Audio for ${phoneme.ipaSymbol}');
   }
 }

@@ -54,8 +54,9 @@ class HomeScreen extends ConsumerWidget {
               spacing: 10,
               runSpacing: 10,
               children: [
+                FilledButton(onPressed: () => context.push('/speak'), child: const Text('Speaking')),
                 FilledButton(onPressed: () => context.push('/ipa'), child: const Text('IPA Explorer')),
-                FilledButton(onPressed: () => context.push('/drill'), child: const Text('Start Drill')),
+                FilledButton(onPressed: () => context.push('/drill'), child: const Text('Listening Drill')),
                 FilledButton(onPressed: () => context.push('/review'), child: const Text('Due Review')),
                 FilledButton(onPressed: () => context.push('/progress'), child: const Text('Progress')),
               ],

@@ -9,6 +9,7 @@ import '../features/ipa/ipa_explorer_screen.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/progress/progress_screen.dart';
 import '../features/review/review_screen.dart';
+import '../features/speak/speak_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final onboarding = ref.watch(onboardingControllerProvider);
@@ -53,6 +54,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/drill',
         builder: (BuildContext context, GoRouterState state) {
           return const DrillScreen();
+        },
+      ),
+      GoRoute(
+        path: '/speak',
+        builder: (BuildContext context, GoRouterState state) {
+          return const SpeakScreen();
         },
       ),
       GoRoute(
