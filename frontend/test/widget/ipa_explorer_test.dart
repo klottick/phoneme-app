@@ -27,8 +27,8 @@ void main() {
 
     testWidgets('shows loading indicator when fetching', (WidgetTester tester) async {
       await tester.pumpWidget(
-        ProviderScope(
-          child: const MaterialApp(
+        const ProviderScope(
+          child: MaterialApp(
             home: IpaExplorerScreen(),
           ),
         ),

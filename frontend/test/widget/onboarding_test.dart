@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:linguist/src/features/onboarding/onboarding_screen.dart';
-import 'package:linguist/src/core/providers/app_providers.dart';
 
 void main() {
   group('OnboardingScreen', () {
