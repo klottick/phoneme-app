@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/constants/supported_languages.dart';
 import '../../core/providers/app_providers.dart';
-import '../../core/services/streak_service.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -22,7 +21,7 @@ class HomeScreen extends ConsumerWidget {
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
+children: <Widget>[
             FutureBuilder<List<int>>(
               future: Future.wait([
                 ref.read(streakServiceProvider).getCurrentStreak(),
@@ -59,6 +58,15 @@ class HomeScreen extends ConsumerWidget {
                 FilledButton(onPressed: () => context.push('/speak'), child: const Text('Speaking')),
                 FilledButton(onPressed: () => context.push('/ipa'), child: const Text('IPA Explorer')),
                 FilledButton(onPressed: () => context.push('/drill'), child: const Text('Listening Drill')),
+                FilledButton(onPressed: () => context.push('/phoneme-id'), child: const Text('Phoneme ID')),
+                FilledButton(onPressed: () => context.push('/phoneme-test'), child: const Text('Phoneme Test')),
+                FilledButton(onPressed: () => context.push('/compare'), child: const Text('Audio Compare')),
+                FilledButton(onPressed: () => context.push('/lessons'), child: const Text('Lessons')),
+                FilledButton(onPressed: () => context.push('/analytics'), child: const Text('Analytics')),
+                FilledButton(onPressed: () => context.push('/insights'), child: const Text('Insights')),
+                FilledButton(onPressed: () => context.push('/modes'), child: const Text('Challenge')),
+                FilledButton(onPressed: () => context.push('/custom'), child: const Text('Custom')),
+                FilledButton(onPressed: () => context.push('/export'), child: const Text('Export')),
                 FilledButton(onPressed: () => context.push('/review'), child: const Text('Due Review')),
                 FilledButton(onPressed: () => context.push('/progress'), child: const Text('Progress')),
               ],

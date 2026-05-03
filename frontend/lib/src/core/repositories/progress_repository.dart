@@ -53,9 +53,20 @@ class ProgressRepository {
             'lesson_id': lessonId,
             'phoneme_id': phonemeId,
             'is_correct': isCorrect,
-          },
+},
         },
       );
     }
+  }
+
+  Future<Map<String, dynamic>> getStats() async {
+    return {
+      'totalAttempts': 0,
+      'accuracy': 0.0,
+      'correctToday': 0,
+      'totalToday': 0,
+      'currentStreak': 0,
+      'longestStreak': 0,
+    };
   }
 }

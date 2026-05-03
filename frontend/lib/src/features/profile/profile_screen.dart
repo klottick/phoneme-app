@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/services/auth_service.dart';
-import '../../core/services/streak_service.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/constants/supported_languages.dart';
 

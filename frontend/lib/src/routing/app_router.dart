@@ -8,9 +8,18 @@ import '../features/auth/login_screen.dart';
 import '../features/drills/drill_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/ipa/ipa_explorer_screen.dart';
+import '../features/audio/audio_compare_screen.dart';
+import '../features/content/content_manager_screen.dart';
+import '../features/modes/challenge_mode_screen.dart';
 import '../features/onboarding/onboarding_screen.dart';
+import '../core/services/curriculum_service.dart';
+import '../core/services/data_export_service.dart';
+import '../core/services/insights_service.dart';
+import '../features/phoneme_id/phoneme_identify_screen.dart';
+import '../features/phoneme_test/phoneme_test_screen.dart';
 import '../features/profile/profile_screen.dart';
 import '../features/progress/progress_screen.dart';
+import '../features/progress/progress_analytics_screen.dart';
 import '../features/review/review_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/speak/speak_screen.dart';
@@ -90,6 +99,61 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/speak',
         builder: (BuildContext context, GoRouterState state) {
           return const SpeakScreen();
+        },
+      ),
+      GoRoute(
+        path: '/phoneme-id',
+        builder: (BuildContext context, GoRouterState state) {
+          return const PhonemeIdentifyScreen();
+        },
+      ),
+      GoRoute(
+        path: '/phoneme-test',
+        builder: (BuildContext context, GoRouterState state) {
+          return const PhonemeTestScreen();
+        },
+      ),
+      GoRoute(
+        path: '/compare',
+        builder: (BuildContext context, GoRouterState state) {
+          return const AudioCompareScreen();
+        },
+      ),
+      GoRoute(
+        path: '/analytics',
+        builder: (BuildContext context, GoRouterState state) {
+          return const ProgressAnalyticsScreen();
+        },
+      ),
+      GoRoute(
+        path: '/modes',
+        builder: (BuildContext context, GoRouterState state) {
+          return const ChallengeModeScreen();
+        },
+      ),
+      GoRoute(
+        path: '/custom',
+        builder: (BuildContext context, GoRouterState state) {
+          return const ContentManagerScreen();
+        },
+      ),
+      GoRoute(
+        path: '/lessons',
+        builder: (BuildContext context, GoRouterState state) {
+          final code = state.uri.queryParameters['lang'] ?? 'en';
+          return LessonPlanScreen(languageCode: code);
+        },
+      ),
+      GoRoute(
+        path: '/export',
+        builder: (BuildContext context, GoRouterState state) {
+          return const DataExportScreen();
+        },
+      ),
+      GoRoute(
+        path: '/insights',
+        builder: (BuildContext context, GoRouterState state) {
+          return const InsightsScreen();
         },
       ),
       GoRoute(

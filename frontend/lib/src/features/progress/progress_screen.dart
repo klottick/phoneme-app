@@ -17,11 +17,11 @@ class ProgressScreen extends ConsumerWidget {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              Card(
+              const Card(
                 child: ListTile(
-                  title: const Text('Daily Goal'),
-                  subtitle: const Text('Complete 10 discrimination items'),
-                  trailing: const Text('2 / 10'),
+                  title: Text('Daily Goal'),
+                  subtitle: Text('Complete 10 discrimination items'),
+                  trailing: Text('2 / 10'),
                 ),
               ),
               const SizedBox(height: 12),

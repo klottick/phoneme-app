@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/services/tts_service.dart';
-import '../../core/services/streak_service.dart';
 import '../../core/constants/supported_languages.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/theme/theme_controller.dart';
@@ -77,7 +75,7 @@ class SettingsScreen extends ConsumerWidget {
             title: const Text('Text-to-Speech'),
             subtitle: const Text('Voice settings'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => _showTtsDialog(context, ref),
+            onTap: () => _showTtsDialog(context),
           ),
           const Divider(),
           ListTile(
@@ -93,24 +91,24 @@ class SettingsScreen extends ConsumerWidget {
             title: Text('About'),
             subtitle: Text('Linguist v0.1.0'),
           ),
-          Card(
-            margin: const EdgeInsets.all(16),
+          const Card(
+            margin: EdgeInsets.all(16),
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Credits',
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
-                  const SizedBox(height: 8),
-                  const Text('• IPA data: ipa-dict (MIT)'),
-                  const Text('• Audio: Wikipedia (CC BY-SA 3.0)'),
-                  const Text('• Backend: Supabase'),
-                  const Text('• Frontend: Flutter'),
-                  const SizedBox(height: 16),
-                  const Text(
+                  SizedBox(height: 8),
+                  Text('• IPA data: ipa-dict (MIT)'),
+                  Text('• Audio: Wikipedia (CC BY-SA 3.0)'),
+                  Text('• Backend: Supabase'),
+                  Text('• Frontend: Flutter'),
+                  SizedBox(height: 16),
+                  Text(
                     'License: MIT',
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
@@ -133,30 +131,31 @@ class SettingsScreen extends ConsumerWidget {
         return 'Dark';
     }
   }
-}
+
+  void _showTtsDialog(BuildContext context) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Voice Settings'),
-        content: Column(
+        content: const Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('TTS voice is device-dependent.'),
-            const SizedBox(height: 16),
+            Text('TTS voice is device-dependent.'),
+            SizedBox(height: 16),
             ListTile(
-              title: const Text('Rate'),
+              title: Text('Rate'),
               subtitle: Slider(
                 value: 0.5,
-                onChanged: (value) {},
+                onChanged: null,
               ),
             ),
             ListTile(
-              title: const Text('Pitch'),
+              title: Text('Pitch'),
               subtitle: Slider(
                 value: 1.0,
                 min: 0.5,
                 max: 2.0,
-                onChanged: (value) {},
+                onChanged: null,
               ),
             ),
           ],

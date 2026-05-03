@@ -7,11 +7,9 @@ import '../models/phoneme.dart';
 import '../models/review_item.dart';
 import '../repositories/curriculum_repository.dart';
 import '../repositories/progress_repository.dart';
-import '../services/audio_service.dart';
-import '../services/recording_service.dart';
 import '../services/streak_service.dart';
-import '../services/tts_service.dart';
-import '../services/auth_service.dart';
+import '../services/phoneme_assessment_service.dart';
+import '../services/recording_service.dart' hide recordingServiceProvider;
 
 final supabaseClientProvider = Provider<SupabaseClient>((_) {
   return Supabase.instance.client;
@@ -44,6 +42,20 @@ final minimalPairsProvider = FutureProvider<List<MinimalPair>>((ref) {
   return ref.watch(curriculumRepositoryProvider).getMinimalPairs(languageCode);
 });
 
+final dueReviewItemsProvider = FutureProvider<List<ReviewItem>>((ref) {
+  return ref.watch(progressRepositoryProvider).getDueReviews();
+});
+
 final streakServiceProvider = Provider<StreakService>((ref) => StreakService());
+
+final recordingServiceProvider = Provider<RecordingService>((ref) {
+  final service = RecordingService();
+  ref.onDispose(() => service.dispose());
+  return service;
+});
+
+final phonemeAssessmentServiceProvider = Provider<PhonemeAnalyzer>((ref) {
+  return PhonemeAssessmentService(useLocalModels: true, apiKey: null);
+});
 
 // Auth providers are in auth_service.dart

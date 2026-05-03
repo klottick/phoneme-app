@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'design_system.dart';
@@ -69,7 +70,7 @@ final lightTheme = ThemeData(
   ),
   
   // Card theme
-  cardTheme: CardTheme(
+  cardTheme: const CardThemeData(
     elevation: DesignElevation.sm,
     shape: RoundedRectangleBorder(
       borderRadius: DesignRadius.borderRadiusMd,
@@ -81,7 +82,7 @@ final lightTheme = ThemeData(
   filledButtonTheme: FilledButtonThemeData(
     style: FilledButton.styleFrom(
       minimumSize: const Size(88, DesignAccessibility.minTouchTarget),
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: DesignRadius.borderRadiusMd,
       ),
     ),
@@ -90,7 +91,7 @@ final lightTheme = ThemeData(
   outlinedButtonTheme: OutlinedButtonThemeData(
     style: OutlinedButton.styleFrom(
       minimumSize: const Size(88, DesignAccessibility.minTouchTarget),
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: DesignRadius.borderRadiusMd,
       ),
     ),
@@ -112,7 +113,7 @@ final lightTheme = ThemeData(
   inputDecorationTheme: InputDecorationTheme(
     filled: true,
     fillColor: DesignColors.surfaceLight,
-    border: OutlineInputBorder(
+    border: const OutlineInputBorder(
       borderRadius: DesignRadius.borderRadiusMd,
       borderSide: BorderSide.none,
     ),
@@ -120,9 +121,9 @@ final lightTheme = ThemeData(
       borderRadius: DesignRadius.borderRadiusMd,
       borderSide: BorderSide(color: Colors.grey.shade300),
     ),
-    focusedBorder: OutlineInputBorder(
+    focusedBorder: const OutlineInputBorder(
       borderRadius: DesignRadius.borderRadiusMd,
-      borderSide: const BorderSide(color: DesignColors.primary, width: 2),
+      borderSide: BorderSide(color: DesignColors.primary, width: 2),
     ),
     contentPadding: const EdgeInsets.symmetric(
       horizontal: DesignSpacing.md,
@@ -145,7 +146,7 @@ final lightTheme = ThemeData(
   ),
   
   // Snackbar
-  snackBarTheme: SnackBarThemeData(
+  snackBarTheme: const SnackBarThemeData(
     behavior: SnackBarBehavior.floating,
     shape: RoundedRectangleBorder(
       borderRadius: DesignRadius.borderRadiusMd,
@@ -153,7 +154,7 @@ final lightTheme = ThemeData(
   ),
   
   // Dialog
-  dialogTheme: DialogTheme(
+  dialogTheme: const DialogThemeData(
     shape: RoundedRectangleBorder(
       borderRadius: DesignRadius.borderRadiusLg,
     ),
@@ -228,7 +229,7 @@ final darkTheme = ThemeData(
   ),
   
   // Card theme
-  cardTheme: CardTheme(
+  cardTheme: const CardThemeData(
     elevation: DesignElevation.sm,
     shape: RoundedRectangleBorder(
       borderRadius: DesignRadius.borderRadiusMd,
@@ -240,7 +241,7 @@ final darkTheme = ThemeData(
   filledButtonTheme: FilledButtonThemeData(
     style: FilledButton.styleFrom(
       minimumSize: const Size(88, DesignAccessibility.minTouchTarget),
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: DesignRadius.borderRadiusMd,
       ),
     ),
@@ -249,7 +250,7 @@ final darkTheme = ThemeData(
   outlinedButtonTheme: OutlinedButtonThemeData(
     style: OutlinedButton.styleFrom(
       minimumSize: const Size(88, DesignAccessibility.minTouchTarget),
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: DesignRadius.borderRadiusMd,
       ),
     ),
@@ -271,7 +272,7 @@ final darkTheme = ThemeData(
   inputDecorationTheme: InputDecorationTheme(
     filled: true,
     fillColor: DesignColors.surfaceDark,
-    border: OutlineInputBorder(
+    border: const OutlineInputBorder(
       borderRadius: DesignRadius.borderRadiusMd,
       borderSide: BorderSide.none,
     ),
@@ -279,9 +280,9 @@ final darkTheme = ThemeData(
       borderRadius: DesignRadius.borderRadiusMd,
       borderSide: BorderSide(color: Colors.grey.shade700),
     ),
-    focusedBorder: OutlineInputBorder(
+    focusedBorder: const OutlineInputBorder(
       borderRadius: DesignRadius.borderRadiusMd,
-      borderSide: const BorderSide(color: DesignColors.primaryLight, width: 2),
+      borderSide: BorderSide(color: DesignColors.primaryLight, width: 2),
     ),
     contentPadding: const EdgeInsets.symmetric(
       horizontal: DesignSpacing.md,
@@ -304,7 +305,7 @@ final darkTheme = ThemeData(
   ),
   
   // Snackbar
-  snackBarTheme: SnackBarThemeData(
+  snackBarTheme: const SnackBarThemeData(
     behavior: SnackBarBehavior.floating,
     shape: RoundedRectangleBorder(
       borderRadius: DesignRadius.borderRadiusMd,
@@ -312,7 +313,7 @@ final darkTheme = ThemeData(
   ),
   
   // Dialog
-  dialogTheme: DialogTheme(
+  dialogTheme: const DialogThemeData(
     shape: RoundedRectangleBorder(
       borderRadius: DesignRadius.borderRadiusLg,
     ),

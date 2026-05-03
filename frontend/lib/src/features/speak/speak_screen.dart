@@ -3,8 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../core/providers/app_providers.dart';
-import '../../core/services/recording_service.dart';
-import '../../core/services/streak_service.dart';
 
 class SpeakScreen extends ConsumerStatefulWidget {
   const SpeakScreen({super.key});
@@ -145,12 +143,12 @@ class _SpeakScreenState extends ConsumerState<SpeakScreen> {
         return;
       }
 
-      final path = await recorder.startRecording('practice-${DateTime.now().millisecondsSinceEpoch}');
-      if (path != null) {
-        setState(() {
-          _isRecording = true;
-        });
-      }
+      final dir = await getApplicationDocumentsDirectory();
+      final path = '${dir.path}/practice_${DateTime.now().millisecondsSinceEpoch}.wav';
+      await recorder.startRecording(path);
+      setState(() {
+        _isRecording = true;
+      });
     }
   }
 
