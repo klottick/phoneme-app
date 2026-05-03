@@ -4,6 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 class AudioService {
   final Map<String, AudioPlayer> _players = {};
 
+  Future<void> play(String path) async {
+    final player = AudioPlayer();
+    await player.stop();
+    await player.play(DeviceFileSource(path));
+  }
+
   Future<void> playPhoneme(String phonemeId, String audioUrl) async {
     await _play(phonemeId, audioUrl);
   }

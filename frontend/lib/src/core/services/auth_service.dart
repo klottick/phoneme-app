@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -46,8 +45,8 @@ final authServiceProvider = Provider<AuthService>((ref) {
   return AuthService(Supabase.instance.client);
 });
 
-class AuthState {
-  const AuthState({
+class AppAuthState {
+  const AppAuthState({
     required this.user,
     required this.isLoading,
     this.error,
@@ -60,22 +59,22 @@ class AuthState {
   bool get isAuthenticated => user != null;
 }
 
-class AuthController extends StateNotifier<AuthState> {
+class AuthController extends StateNotifier<AppAuthState> {
   final AuthService _authService;
 
   AuthController(this._authService)
-      : super(AuthState(user: _authService.currentUser, isLoading: false)) {
+      : super(AppAuthState(user: _authService.currentUser, isLoading: false)) {
     _authService.authStateChanges.listen((event) {
       if (event.event == AuthChangeEvent.signedIn) {
-        state = AuthState(user: event.session?.user, isLoading: false);
+        state = AppAuthState(user: event.session?.user, isLoading: false);
       } else if (event.event == AuthChangeEvent.signedOut) {
-        state = const AuthState(user: null, isLoading: false);
+        state = const AppAuthState(user: null, isLoading: false);
       }
     });
   }
 
   Future<void> signIn(String email, String password) async {
-    state = AuthState(user: state.user, isLoading: true, error: null);
+    state = AppAuthState(user: state.user, isLoading: true, error: null);
 
     try {
       final response = await _authService.signIn(
@@ -84,16 +83,16 @@ class AuthController extends StateNotifier<AuthState> {
       );
 
       if (response.session != null) {
-        state = AuthState(user: response.user, isLoading: false);
+        state = AppAuthState(user: response.user, isLoading: false);
       } else {
-        state = AuthState(
+        state = const AppAuthState(
           user: null,
           isLoading: false,
           error: 'Sign up successful. Please check your email.',
         );
       }
     } catch (e) {
-      state = AuthState(
+      state = AppAuthState(
         user: state.user,
         isLoading: false,
         error: e.toString(),
@@ -102,7 +101,7 @@ class AuthController extends StateNotifier<AuthState> {
   }
 
   Future<void> signUp(String email, String password) async {
-    state = AuthState(user: state.user, isLoading: true, error: null);
+    state = AppAuthState(user: state.user, isLoading: true, error: null);
 
     try {
       final response = await _authService.signUp(
@@ -111,16 +110,16 @@ class AuthController extends StateNotifier<AuthState> {
       );
 
       if (response.session != null) {
-        state = AuthState(user: response.user, isLoading: false);
+        state = AppAuthState(user: response.user, isLoading: false);
       } else {
-        state = AuthState(
+        state = const AppAuthState(
           user: null,
           isLoading: false,
           error: 'Check your email to confirm account.',
         );
       }
     } catch (e) {
-      state = AuthState(
+      state = AppAuthState(
         user: state.user,
         isLoading: false,
         error: e.toString(),
@@ -130,16 +129,16 @@ class AuthController extends StateNotifier<AuthState> {
 
   Future<void> signOut() async {
     await _authService.signOut();
-    state = const AuthState(user: null, isLoading: false);
+    state = const AppAuthState(user: null, isLoading: false);
   }
 
   void clearError() {
-    state = AuthState(user: state.user, isLoading: false);
+    state = AppAuthState(user: state.user, isLoading: false);
   }
 }
 
 final authControllerProvider =
-    StateNotifierProvider<AuthController, AuthState>((ref) {
+    StateNotifierProvider<AuthController, AppAuthState>((ref) {
   final authService = ref.watch(authServiceProvider);
   return AuthController(authService);
 });

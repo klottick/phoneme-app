@@ -1,4 +1,3 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class StreakService {
@@ -73,5 +72,3 @@ class StreakService {
     await prefs.setInt(_currentStreakKey, 0);
   }
 }
-
-final streakServiceProvider = Provider<StreakService>((ref) => StreakService());

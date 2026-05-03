@@ -1,42 +1,47 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:record/record.dart';
-import 'package:path_provider/path_provider.dart';
 
 class RecordingService {
-  final AudioRecorder _recorder = AudioRecorder();
+  AudioRecorder? _recorder;
 
   Future<bool> hasPermission() async {
-    return await _recorder.hasPermission();
+    final recorder = _recorder ?? AudioRecorder();
+    return await recorder.hasPermission();
   }
 
-  Future<String?> startRecording(String sessionId) async {
-    if (!await hasPermission()) return null;
-
-    final dir = await getApplicationDocumentsDirectory();
-    final path = '${dir.path}/recordings/$sessionId.wav';
-
-    await _recorder.start(
-      const RecordConfig(encoder: AudioEncoder.wav),
-      path: path,
-    );
-    return path;
+  Future<void> startRecording(String path) async {
+    _recorder = AudioRecorder();
+    if (await hasPermission()) {
+      await _recorder!.start(
+        const RecordConfig(encoder: AudioEncoder.wav),
+        path: path,
+      );
+    }
   }
 
   Future<String?> stopRecording() async {
-    final path = await _recorder.stop();
-    return path;
+    if (_recorder != null) {
+      final path = await _recorder!.stop();
+      return path;
+    }
+    return null;
   }
 
   Future<bool> isRecording() async {
-    return await _recorder.isRecording();
+    if (_recorder != null) {
+      return await _recorder!.isRecording();
+    }
+    return false;
   }
 
   Future<void> cancel() async {
-    await _recorder.stop();
+    if (_recorder != null) {
+      await _recorder!.stop();
+    }
   }
 
   void dispose() {
-    _recorder.dispose();
+    _recorder?.dispose();
   }
 }
 
