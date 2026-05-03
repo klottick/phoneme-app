@@ -22,4 +22,12 @@ class Phoneme {
       difficultyLevel: json['difficulty_level'] as int? ?? 1,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'languageCode': languageCode,
+        'ipa_symbol': ipaSymbol,
+        'descriptor': descriptor,
+        'difficulty_level': difficultyLevel,
+      };
 }

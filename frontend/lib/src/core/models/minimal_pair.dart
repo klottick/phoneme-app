@@ -22,4 +22,12 @@ class MinimalPair {
       phonemeB: json['phoneme_b']?['ipa_symbol'] as String? ?? '',
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'word_a': wordA,
+        'word_b': wordB,
+        'phoneme_a': phonemeA,
+        'phoneme_b': phonemeB,
+      };
 }
