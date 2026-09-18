@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -151,7 +153,7 @@ class SpacedRepetitionNotifier extends StateNotifier<List<SpacedRepetitionItem>>
     final data = prefs.getString(_storageKey);
     if (data != null) {
       try {
-        final List<dynamic> decoded = [];
+        final decoded = jsonDecode(data) as List<dynamic>;
         state = decoded
             .map((e) => SpacedRepetitionItem.fromJson(e as Map<String, dynamic>))
             .toList();
@@ -164,7 +166,7 @@ class SpacedRepetitionNotifier extends StateNotifier<List<SpacedRepetitionItem>>
   Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
     final data = state.map((e) => e.toJson()).toList();
-    await prefs.setString(_storageKey, data.toString());
+    await prefs.setString(_storageKey, jsonEncode(data));
   }
 
   Future<void> addPhoneme(String phonemeId) async {

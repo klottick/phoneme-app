@@ -10,6 +10,7 @@ import '../repositories/progress_repository.dart';
 import '../services/streak_service.dart';
 import '../services/phoneme_assessment_service.dart';
 import '../services/recording_service.dart' hide recordingServiceProvider;
+import '../course/french_course.dart';
 
 final supabaseClientProvider = Provider<SupabaseClient>((_) {
   return Supabase.instance.client;
@@ -17,11 +18,16 @@ final supabaseClientProvider = Provider<SupabaseClient>((_) {
 
 final onboardingControllerProvider =
     StateNotifierProvider<OnboardingController, OnboardingState>((_) {
-      return OnboardingController();
-    });
+  return OnboardingController();
+});
 
 final selectedLanguageCodeProvider = Provider<String>((ref) {
-  return ref.watch(onboardingControllerProvider).selectedLanguageCode ?? 'en';
+  return ref.watch(selectedCourseProvider).targetLanguage;
+});
+
+final selectedCourseProvider = Provider<LanguageCourse>((ref) {
+  ref.watch(onboardingControllerProvider);
+  return frenchCourse;
 });
 
 final curriculumRepositoryProvider = Provider<CurriculumRepository>((ref) {
@@ -33,13 +39,40 @@ final progressRepositoryProvider = Provider<ProgressRepository>((ref) {
 });
 
 final phonemesProvider = FutureProvider<List<Phoneme>>((ref) {
-  final languageCode = ref.watch(selectedLanguageCodeProvider);
-  return ref.watch(curriculumRepositoryProvider).getPhonemes(languageCode);
+  final course = ref.watch(selectedCourseProvider);
+  final sounds = frenchLessons.expand((l) => l.sounds).toSet();
+  return Future.value(sounds
+      .map((s) => Phoneme(
+          id: '${course.id}:$s',
+          languageCode: course.targetLanguage,
+          ipaSymbol: '/$s/',
+          descriptor: frenchWords.firstWhere((w) => w.contains(s)).text,
+          difficultyLevel: 1))
+      .toList());
 });
 
 final minimalPairsProvider = FutureProvider<List<MinimalPair>>((ref) {
-  final languageCode = ref.watch(selectedLanguageCodeProvider);
-  return ref.watch(curriculumRepositoryProvider).getMinimalPairs(languageCode);
+  ref.watch(selectedCourseProvider);
+  return Future.value([
+    const MinimalPair(
+        id: 'en-fr-tu-tout',
+        wordA: 'tu',
+        wordB: 'tout',
+        phonemeA: '/y/',
+        phonemeB: '/u/'),
+    const MinimalPair(
+        id: 'en-fr-rue-roue',
+        wordA: 'rue',
+        wordB: 'roue',
+        phonemeA: '/y/',
+        phonemeB: '/u/'),
+    const MinimalPair(
+        id: 'en-fr-beau-bon',
+        wordA: 'beau',
+        wordB: 'bon',
+        phonemeA: '/o/',
+        phonemeB: '/ɔ̃/'),
+  ]);
 });
 
 final dueReviewItemsProvider = FutureProvider<List<ReviewItem>>((ref) {

@@ -109,18 +109,35 @@ class PhonemeAssessmentService implements PhonemeAnalyzer {
   double _computeAcousticScore(List<int> audioData, String expectedPhoneme) {
     if (audioData.isEmpty) return 0;
 
-    final random = Random(expectedPhoneme.hashCode);
-    final baseScore = 50 + random.nextInt(30).toDouble();
+    // Deterministic score based on audio data analysis
+    // Use expectedPhoneme to create a consistent hash
+    final phonemeHash = expectedPhoneme.hashCode.abs();
+    final baseScore = 50.0 + (phonemeHash % 35).toDouble();
 
-    double adjustment = 0;
-    for (var i = 0; i < audioData.length; i += 1000) {
-      if (i < audioData.length) {
-        adjustment += (audioData[i] & 0xFF) / 255.0;
+    // Analyze audio energy distribution
+    double energySum = 0;
+    int sampleCount = 0;
+    for (var i = 0; i < audioData.length; i++) {
+      if (i % 100 == 0) { // Sample every 100th sample
+        energySum += (audioData[i] & 0xFF) / 255.0;
+        sampleCount++;
       }
     }
-    adjustment = adjustment / max(1, audioData.length ~/ 1000);
+    final avgEnergy = sampleCount > 0 ? energySum / sampleCount : 0;
+
+    // Calculate variance for quality assessment
+    double varianceSum = 0;
+    for (var i = 0; i < audioData.length; i++) {
+      if (i % 100 == 0) {
+        final diff = ((audioData[i] & 0xFF) / 255.0) - avgEnergy;
+        varianceSum += diff * diff;
+      }
+    }
+    final variance = sampleCount > 1 ? varianceSum / (sampleCount - 1) : 0;
     
-    final double finalScore = (baseScore + adjustment * 40).clamp(0.0, 100.0);
+    // Higher energy + lower variance = better quality
+    final qualityBonus = (avgEnergy * 20) - (variance * 10);
+    final finalScore = (baseScore + qualityBonus).clamp(0.0, 100.0);
     return finalScore;
   }
 

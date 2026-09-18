@@ -5,7 +5,10 @@ class AudioService {
   final Map<String, AudioPlayer> _players = {};
 
   Future<void> play(String path) async {
-    final player = AudioPlayer();
+    if (!_players.containsKey('_default')) {
+      _players['_default'] = AudioPlayer();
+    }
+    final player = _players['_default']!;
     await player.stop();
     await player.play(DeviceFileSource(path));
   }
@@ -22,6 +25,13 @@ class AudioService {
     final player = _players.putIfAbsent(id, () => AudioPlayer());
     await player.stop();
     await player.play(UrlSource(url));
+  }
+
+  Future<void> stop(String id) async {
+    final player = _players[id];
+    if (player != null) {
+      await player.stop();
+    }
   }
 
   Future<void> stopAll() async {

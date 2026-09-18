@@ -5,13 +5,13 @@ class RecordingService {
   AudioRecorder? _recorder;
 
   Future<bool> hasPermission() async {
-    final recorder = _recorder ?? AudioRecorder();
-    return await recorder.hasPermission();
+    _recorder ??= AudioRecorder();
+    return await _recorder!.hasPermission();
   }
 
   Future<void> startRecording(String path) async {
-    _recorder = AudioRecorder();
-    if (await hasPermission()) {
+    _recorder ??= AudioRecorder();
+    if (await _recorder!.hasPermission()) {
       await _recorder!.start(
         const RecordConfig(encoder: AudioEncoder.wav),
         path: path,
@@ -20,7 +20,7 @@ class RecordingService {
   }
 
   Future<String?> stopRecording() async {
-    if (_recorder != null) {
+    if (_recorder != null && await _recorder!.isRecording()) {
       final path = await _recorder!.stop();
       return path;
     }
@@ -35,13 +35,14 @@ class RecordingService {
   }
 
   Future<void> cancel() async {
-    if (_recorder != null) {
+    if (_recorder != null && await _recorder!.isRecording()) {
       await _recorder!.stop();
     }
   }
 
   void dispose() {
     _recorder?.dispose();
+    _recorder = null;
   }
 }
 

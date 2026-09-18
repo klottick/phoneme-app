@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -72,7 +74,8 @@ class AccessibilityNotifier extends StateNotifier<AccessibilitySettings> {
     final data = prefs.getString(_key);
     if (data != null) {
       try {
-        state = AccessibilitySettings.fromJson(<String, dynamic>{});
+        final decoded = jsonDecode(data) as Map<String, dynamic>;
+        state = AccessibilitySettings.fromJson(decoded);
       } catch (e) {
         state = const AccessibilitySettings();
       }
@@ -81,7 +84,7 @@ class AccessibilityNotifier extends StateNotifier<AccessibilitySettings> {
 
   Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
-    prefs.setString(_key, state.toJson().toString());
+    prefs.setString(_key, jsonEncode(state.toJson()));
   }
 
   void setFontScale(double scale) {

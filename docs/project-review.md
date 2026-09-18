@@ -1,5 +1,8 @@
 # Linguist App - Project Review & Roadmap
 
+> Historical review of the language-only prototype. See `course-arcade.md` and
+> `roadmap-status.md` for the current English → French course direction.
+
 ## Current State (v0.1.0)
 
 ### What's Built

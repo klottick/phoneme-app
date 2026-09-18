@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/app_providers.dart';
-import '../../core/services/audio_service.dart';
 import '../../core/services/tts_service.dart';
+import '../../core/course/french_course.dart';
 
 class IpaExplorerScreen extends ConsumerWidget {
   const IpaExplorerScreen({super.key});
@@ -28,7 +28,8 @@ class IpaExplorerScreen extends ConsumerWidget {
               final item = phonemes[index];
               return Card(
                 child: ListTile(
-                  title: Text(item.ipaSymbol, style: const TextStyle(fontSize: 24)),
+                  title: Text(item.ipaSymbol,
+                      style: const TextStyle(fontSize: 24)),
                   subtitle: Text(item.descriptor),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -36,7 +37,8 @@ class IpaExplorerScreen extends ConsumerWidget {
                       IconButton(
                         icon: const Icon(Icons.volume_up),
                         tooltip: 'Play with TTS',
-                        onPressed: () => _speakPhoneme(ref, item.ipaSymbol, item.descriptor),
+                        onPressed: () =>
+                            _speakPhoneme(ref, item.ipaSymbol, item.descriptor),
                       ),
                       IconButton(
                         icon: const Icon(Icons.play_arrow),
@@ -50,22 +52,21 @@ class IpaExplorerScreen extends ConsumerWidget {
             },
           );
         },
-        error: (error, _) => Center(child: Text('Failed to load phonemes: $error')),
+        error: (error, _) =>
+            Center(child: Text('Failed to load phonemes: $error')),
         loading: () => const Center(child: CircularProgressIndicator()),
       ),
     );
   }
 
-  Future<void> _speakPhoneme(WidgetRef ref, String ipaSymbol, String descriptor) async {
+  Future<void> _speakPhoneme(
+      WidgetRef ref, String ipaSymbol, String descriptor) async {
     final tts = ref.read(ttsServiceProvider);
-    await tts.speak('$ipaSymbol - $descriptor');
+    final word = frenchWords.firstWhere((w) => w.contains(ipaSymbol));
+    await tts.speak(word.text, languageCode: 'fr');
   }
 
   Future<void> _playAudio(WidgetRef ref, dynamic phoneme) async {
-    final audio = ref.read(audioServiceProvider);
-    // TODO: Use real Supabase storage URL when audio assets are uploaded
-    // For now, fall back to TTS as placeholder
-    final tts = ref.read(ttsServiceProvider);
-    await tts.speak('Audio for ${phoneme.ipaSymbol}');
+    await _speakPhoneme(ref, phoneme.ipaSymbol, phoneme.descriptor);
   }
 }

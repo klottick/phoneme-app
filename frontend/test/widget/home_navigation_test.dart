@@ -1,70 +1,29 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:linguist/main.dart' as app;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:linguist/src/app.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  testWidgets('app smoke test', (WidgetTester tester) async {
-    await app.main();
+  setUp(() =>
+      SharedPreferences.setMockInitialValues({'selected_course_id': 'en-fr'}));
+  testWidgets('course home opens its next lesson', (tester) async {
+    await tester.pumpWidget(const ProviderScope(child: LinguistApp()));
     await tester.pumpAndSettle();
-
-    expect(find.text('Linguist'), findsOneWidget);
+    await tester.tap(find.text('Continue lesson'));
+    await tester.pumpAndSettle();
+    expect(find.text('Listen to French word'), findsOneWidget);
+    expect(find.text('Listen 1 of 4'), findsOneWidget);
   });
-
-  testWidgets('home screen shows all feature buttons', (WidgetTester tester) async {
-    await app.main();
+  testWidgets('course progress and settings remain accessible', (tester) async {
+    await tester.pumpWidget(const ProviderScope(child: LinguistApp()));
     await tester.pumpAndSettle();
-
-    expect(find.text('Identify'), findsOneWidget);
-    expect(find.text('Test'), findsOneWidget);
-    expect(find.text('Explore'), findsOneWidget);
-  });
-
-  testWidgets('tap identify navigates correctly', (WidgetTester tester) async {
-    await app.main();
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Identify'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Identify Phoneme'), findsOneWidget);
-  });
-
-  testWidgets('tap test navigates correctly', (WidgetTester tester) async {
-    await app.main();
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Test'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Speaking Test'), findsOneWidget);
-  });
-
-  testWidgets('tap explore navigates correctly', (WidgetTester tester) async {
-    await app.main();
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Explore'));
-    await tester.pumpAndSettle();
-
-    expect(find.byTooltip('Search'), findsOneWidget);
-  });
-
-  testWidgets('settings accessible from home', (WidgetTester tester) async {
-    await app.main();
-    await tester.pumpAndSettle();
-
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-
-    expect(find.text('Difficulty'), findsOneWidget);
-  });
-
-  testWidgets('analytics accessible from home', (WidgetTester tester) async {
-    await app.main();
+    expect(find.text('English → French'), findsOneWidget);
+    await tester.pageBack();
     await tester.pumpAndSettle();
-
-    await tester.tap(find.byTooltip('Analytics'));
+    await tester.tap(find.byTooltip('Progress'));
     await tester.pumpAndSettle();
-
-    expect(find.text('Progress'), findsOneWidget);
+    expect(find.text('0/5 lessons complete'), findsOneWidget);
   });
 }

@@ -16,17 +16,17 @@ class ReviewItem {
   final DateTime dueAt;
 
   factory ReviewItem.fromJson(Map<String, dynamic> json) {
-    final phoneme = (json['phonemes'] as Map<String, dynamic>? ?? {});
-    final language =
-        (phoneme['languages'] as Map<String, dynamic>? ?? <String, dynamic>{});
+    // Handle both nested (API) and flat (local) formats
+    final phoneme = json['phonemes'] as Map<String, dynamic>? ?? json;
+    final language = phoneme['languages'] as Map<String, dynamic>? ?? json;
 
     return ReviewItem(
-      queueId: json['id'] as String,
-      phonemeId: phoneme['id'] as String? ?? '',
-      ipaSymbol: phoneme['ipa_symbol'] as String? ?? '',
-      descriptor: phoneme['descriptor'] as String? ?? '',
-      languageCode: language['code'] as String? ?? '',
-      dueAt: DateTime.tryParse(json['due_at'] as String? ?? '') ?? DateTime.now(),
+      queueId: json['id'] as String? ?? json['queueId'] as String? ?? '',
+      phonemeId: phoneme['id'] as String? ?? json['phonemeId'] as String? ?? '',
+      ipaSymbol: phoneme['ipa_symbol'] as String? ?? json['ipaSymbol'] as String? ?? phoneme['ipaSymbol'] as String? ?? '',
+      descriptor: phoneme['descriptor'] as String? ?? json['descriptor'] as String? ?? phoneme['descriptor'] as String? ?? '',
+      languageCode: language['code'] as String? ?? json['languageCode'] as String? ?? json['language_code'] as String? ?? '',
+      dueAt: DateTime.tryParse(json['due_at'] as String? ?? json['dueAt'] as String? ?? '') ?? DateTime.now(),
     );
   }
 }

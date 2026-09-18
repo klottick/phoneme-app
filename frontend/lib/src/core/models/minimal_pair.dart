@@ -15,11 +15,15 @@ class MinimalPair {
 
   factory MinimalPair.fromJson(Map<String, dynamic> json) {
     return MinimalPair(
-      id: json['id'] as String,
-      wordA: json['word_a'] as String? ?? '',
-      wordB: json['word_b'] as String? ?? '',
-      phonemeA: json['phoneme_a']?['ipa_symbol'] as String? ?? '',
-      phonemeB: json['phoneme_b']?['ipa_symbol'] as String? ?? '',
+      id: json['id'] as String? ?? '',
+      wordA: json['word_a'] as String? ?? json['wordA'] as String? ?? '',
+      wordB: json['word_b'] as String? ?? json['wordB'] as String? ?? '',
+      phonemeA: json['phoneme_a'] is String
+          ? json['phoneme_a'] as String
+          : json['phoneme_a']?['ipa_symbol'] as String? ?? '',
+      phonemeB: json['phoneme_b'] is String
+          ? json['phoneme_b'] as String
+          : json['phoneme_b']?['ipa_symbol'] as String? ?? '',
     );
   }
 

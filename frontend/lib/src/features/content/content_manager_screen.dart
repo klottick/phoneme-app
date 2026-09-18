@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-
 class CustomPhoneme {
   final String id;
   final String ipaSymbol;
@@ -74,6 +73,18 @@ class ContentManagerNotifier extends StateNotifier<List<CustomPhoneme>> {
     state = state.where((p) => p.id != id).toList();
     await save();
   }
+
+  Future<void> updatePhoneme(CustomPhoneme phoneme) async {
+    final index = state.indexWhere((p) => p.id == phoneme.id);
+    if (index != -1) {
+      state = [
+        ...state.sublist(0, index),
+        phoneme,
+        ...state.sublist(index + 1),
+      ];
+      await save();
+    }
+  }
 }
 
 final contentManagerProvider =
@@ -85,10 +96,15 @@ class ContentManagerScreen extends ConsumerStatefulWidget {
   const ContentManagerScreen({super.key});
 
   @override
-  ConsumerState<ContentManagerScreen> createState() => _ContentManagerScreenState();
+  ConsumerState<ContentManagerScreen> createState() =>
+      _ContentManagerScreenState();
 }
 
 class _ContentManagerScreenState extends ConsumerState<ContentManagerScreen> {
+  TextEditingController? _ipaController;
+  TextEditingController? _nameController;
+  TextEditingController? _descController;
+
   @override
   void initState() {
     super.initState();
@@ -113,9 +129,13 @@ class _ContentManagerScreenState extends ConsumerState<ContentManagerScreen> {
               itemBuilder: (context, index) {
                 final phoneme = customPhonemes[index];
                 return ListTile(
-                  leading: CircleAvatar(child: Text(phoneme.ipaSymbol)),
+                  leading: CircleAvatar(
+                    child: Text(phoneme.ipaSymbol),
+                  ),
                   title: Text(phoneme.name),
-                  subtitle: phoneme.description != null ? Text(phoneme.description!) : null,
+                  subtitle: phoneme.description != null
+                      ? Text(phoneme.description!)
+                      : null,
                   trailing: IconButton(
                     icon: const Icon(Icons.delete),
                     onPressed: () => _deletePhoneme(phoneme.id),
@@ -131,51 +151,60 @@ class _ContentManagerScreenState extends ConsumerState<ContentManagerScreen> {
   }
 
   void _showAddDialog() {
-    final ipaController = TextEditingController();
-    final nameController = TextEditingController();
-    final descController = TextEditingController();
+    _ipaController = TextEditingController();
+    _nameController = TextEditingController();
+    _descController = TextEditingController();
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Add Custom Phoneme'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
-              controller: ipaController,
-              decoration: const InputDecoration(labelText: 'IPA Symbol', hintText: 'e.g., æ'),
+              controller: _ipaController,
+              decoration:
+                  const InputDecoration(labelText: 'IPA Symbol', hintText: 'æ'),
             ),
             const SizedBox(height: 8),
             TextField(
-              controller: nameController,
-              decoration: const InputDecoration(labelText: 'Name', hintText: 'e.g., near-open front'),
+              controller: _nameController,
+              decoration:
+                  const InputDecoration(labelText: 'Name', hintText: 'near-open front'),
             ),
             const SizedBox(height: 8),
             TextField(
-              controller: descController,
-              decoration: const InputDecoration(labelText: 'Description (optional)'),
+              controller: _descController,
+              decoration:
+                  const InputDecoration(labelText: 'Description (optional)'),
             ),
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _disposeControllers();
+            },
             child: const Text('Cancel'),
           ),
           FilledButton(
             onPressed: () {
-              if (ipaController.text.isNotEmpty && nameController.text.isNotEmpty) {
+              if (_ipaController!.text.isNotEmpty &&
+                  _nameController!.text.isNotEmpty) {
                 final phoneme = CustomPhoneme(
                   id: 'custom_${DateTime.now().millisecondsSinceEpoch}',
-                  ipaSymbol: ipaController.text,
-                  name: nameController.text,
-                  description: descController.text.isEmpty ? null : descController.text,
+                  ipaSymbol: _ipaController!.text,
+                  name: _nameController!.text,
+                  description:
+                      _descController!.text.isEmpty ? null : _descController!.text,
                   audioUrl: null,
                   createdAt: DateTime.now(),
                 );
                 ref.read(contentManagerProvider.notifier).addPhoneme(phoneme);
-                Navigator.pop(context);
+                Navigator.pop(dialogContext);
+                _disposeControllers();
               }
             },
             child: const Text('Add'),
@@ -185,7 +214,22 @@ class _ContentManagerScreenState extends ConsumerState<ContentManagerScreen> {
     );
   }
 
+  void _disposeControllers() {
+    _ipaController?.dispose();
+    _nameController?.dispose();
+    _descController?.dispose();
+    _ipaController = null;
+    _nameController = null;
+    _descController = null;
+  }
+
   void _deletePhoneme(String id) {
     ref.read(contentManagerProvider.notifier).removePhoneme(id);
+  }
+
+  @override
+  void dispose() {
+    _disposeControllers();
+    super.dispose();
   }
 }

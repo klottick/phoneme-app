@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-import '../../core/constants/supported_languages.dart';
 import '../../core/providers/app_providers.dart';
+
 import '../../core/theme/theme_controller.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -10,7 +9,6 @@ class SettingsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final languageCode = ref.watch(selectedLanguageCodeProvider);
     final themeMode = ref.watch(themeControllerProvider);
 
     return Scaffold(
@@ -52,22 +50,8 @@ class SettingsScreen extends ConsumerWidget {
           // Language section
           const ListTile(
             leading: Icon(Icons.language),
-            title: Text('Learning Language'),
-            subtitle: Text('Change your target language'),
-          ),
-          ...supportedLanguages.map(
-            (lang) => RadioListTile<String>(
-              title: Text(lang.label),
-              value: lang.code,
-              groupValue: languageCode,
-              onChanged: (value) {
-                if (value != null) {
-                  ref
-                      .read(onboardingControllerProvider.notifier)
-                      .selectLanguage(value);
-                }
-              },
-            ),
+            title: Text('English → French'),
+            subtitle: Text('French pronunciation for English speakers'),
           ),
           const Divider(),
           ListTile(
@@ -80,9 +64,9 @@ class SettingsScreen extends ConsumerWidget {
           const Divider(),
           ListTile(
             leading: const Icon(Icons.delete_forever, color: Colors.red),
-            title: const Text('Reset Progress',
-                style: TextStyle(color: Colors.red)),
-            subtitle: const Text('Clear all local data'),
+            title:
+                const Text('Reset Streak', style: TextStyle(color: Colors.red)),
+            subtitle: const Text('Clear your practice streak'),
             onTap: () => _showResetDialog(context, ref),
           ),
           const Divider(),
@@ -174,9 +158,8 @@ class SettingsScreen extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Reset Progress?'),
-        content: const Text(
-            'This will clear your streak and all local progress. This cannot be undone.'),
+        title: const Text('Reset Streak?'),
+        content: const Text('This will clear your local practice streak.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),

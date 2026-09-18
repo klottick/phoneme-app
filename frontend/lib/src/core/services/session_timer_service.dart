@@ -49,6 +49,7 @@ class SessionTimerNotifier extends StateNotifier<SessionTimer> {
   void start() {
     if (state.isRunning) return;
     
+    _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       state = state.copyWith(elapsedSeconds: state.elapsedSeconds + 1);
     });
@@ -58,11 +59,13 @@ class SessionTimerNotifier extends StateNotifier<SessionTimer> {
 
   void pause() {
     _timer?.cancel();
+    _timer = null;
     state = state.copyWith(isRunning: false);
   }
 
   void reset() {
     _timer?.cancel();
+    _timer = null;
     state = const SessionTimer();
   }
 
@@ -94,11 +97,18 @@ class SessionHistory {
   const SessionHistory({required this.date, required this.durationSeconds});
 
   factory SessionHistory.fromString(String data) {
-    final parts = data.split(',');
-    return SessionHistory(
-      date: DateTime.parse(parts[0]),
-      durationSeconds: int.parse(parts[1]),
-    );
+    try {
+      final parts = data.split(',');
+      if (parts.length != 2) {
+        return SessionHistory(date: DateTime.now(), durationSeconds: 0);
+      }
+      return SessionHistory(
+        date: DateTime.parse(parts[0]),
+        durationSeconds: int.tryParse(parts[1]) ?? 0,
+      );
+    } catch (e) {
+      return SessionHistory(date: DateTime.now(), durationSeconds: 0);
+    }
   }
 
   String get formatted {

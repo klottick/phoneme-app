@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/providers/app_providers.dart';
-import '../core/services/auth_service.dart';
+import '../features/arcade/arcade_screen.dart';
+import '../features/course/course_lesson_screen.dart';
+import '../features/course/course_progress_screen.dart';
 import '../features/auth/login_screen.dart';
 import '../features/drills/drill_screen.dart';
 import '../features/home/home_screen.dart';
@@ -26,7 +28,6 @@ import '../features/speak/speak_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final onboarding = ref.watch(onboardingControllerProvider);
-  final authState = ref.watch(authControllerProvider);
 
   return GoRouter(
     initialLocation: '/onboarding',
@@ -35,24 +36,42 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         return '/onboarding';
       }
 
-      final hasLanguage = onboarding.selectedLanguageCode != null;
+      final hasLanguage = onboarding.courseId != null;
       final isOnboarding = state.matchedLocation == '/onboarding';
       if (!hasLanguage && !isOnboarding) {
         return '/onboarding';
       }
-      
+
       // Auth requirement - for now, skip auth redirect
       //final needsAuth = state.matchedLocation != '/login';
       //if (!authState.isAuthenticated && needsAuth) {
       //  return '/login';
       //}
-      
+
       if (hasLanguage && isOnboarding) {
         return '/home';
       }
       return null;
     },
     routes: <RouteBase>[
+      GoRoute(path: '/arcade', builder: (_, __) => const ArcadeLobby()),
+      GoRoute(
+          path: '/arcade/sound',
+          builder: (_, __) => const ArcadeScreen(silent: false)),
+      GoRoute(
+          path: '/arcade/word',
+          builder: (_, __) => const ArcadeScreen(silent: true)),
+      GoRoute(
+          path: '/course-lesson/:id',
+          builder: (_, state) => CourseLessonScreen(
+              lessonId: state.pathParameters['id']!,
+              review: state.uri.queryParameters['review'] == 'true')),
+      GoRoute(
+          path: '/course-progress',
+          builder: (_, __) => const CourseProgressScreen()),
+      GoRoute(
+          path: '/course-review',
+          builder: (_, __) => const CourseProgressScreen(review: true)),
       GoRoute(
         path: '/login',
         builder: (BuildContext context, GoRouterState state) {
@@ -140,7 +159,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/lessons',
         builder: (BuildContext context, GoRouterState state) {
-          final code = state.uri.queryParameters['lang'] ?? 'en';
+          final code = state.uri.queryParameters['lang'] ?? 'fr';
           return LessonPlanScreen(languageCode: code);
         },
       ),

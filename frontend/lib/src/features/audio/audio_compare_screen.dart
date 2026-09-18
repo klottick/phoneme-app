@@ -53,7 +53,7 @@ class _AudioCompareScreenState extends ConsumerState<AudioCompareScreen> {
             const Icon(Icons.volume_up, size: 48, color: Colors.blue),
             const SizedBox(height: 12),
             Text(
-              'Reference (TTS)',
+              'French reference: tu /ty/ (TTS)',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 16),
@@ -85,7 +85,8 @@ class _AudioCompareScreenState extends ConsumerState<AudioCompareScreen> {
               FilledButton.icon(
                 onPressed: _isPlayingUser ? null : _playUserRecording,
                 icon: Icon(_isPlayingUser ? Icons.stop : Icons.play_arrow),
-                label: Text(_isPlayingUser ? 'Playing...' : 'Play Your Recording'),
+                label:
+                    Text(_isPlayingUser ? 'Playing...' : 'Play Your Recording'),
               ),
               const SizedBox(height: 8),
               TextButton.icon(
@@ -125,7 +126,7 @@ class _AudioCompareScreenState extends ConsumerState<AudioCompareScreen> {
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 16),
-Row(
+            Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 OutlinedButton.icon(
@@ -167,7 +168,7 @@ Row(
   Future<void> _playReference() async {
     setState(() => _isPlaying = true);
     final tts = ref.read(ttsServiceProvider);
-    await tts.speak('æ');
+    await tts.speak('tu', languageCode: 'fr');
     if (mounted) {
       setState(() => _isPlaying = false);
     }
@@ -186,7 +187,7 @@ Row(
   Future<void> _playBoth() async {
     setState(() => _isPlaying = true);
     final tts = ref.read(ttsServiceProvider);
-    await tts.speak('æ');
+    await tts.speak('tu', languageCode: 'fr');
     await Future.delayed(const Duration(milliseconds: 800));
     if (!mounted) return;
     setState(() => _isPlaying = false);
@@ -200,7 +201,8 @@ Row(
 
   Future<void> _startRecording() async {
     final recorder = ref.read(recordingServiceProvider);
-    final path = '/storage/emulated/0/linguist/compare_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    final path =
+        '/storage/emulated/0/linguist/compare_${DateTime.now().millisecondsSinceEpoch}.m4a';
     await recorder.startRecording(path);
     setState(() => _isRecording = true);
   }
@@ -210,7 +212,8 @@ Row(
     await recorder.stopRecording();
     setState(() {
       _isRecording = false;
-      _userRecordingPath = '/storage/emulated/0/linguist/compare_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      _userRecordingPath =
+          '/storage/emulated/0/linguist/compare_${DateTime.now().millisecondsSinceEpoch}.m4a';
     });
   }
 

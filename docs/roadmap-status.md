@@ -1,16 +1,24 @@
-# Roadmap Status
+# Roadmap status — English → French courses
 
-## Completed Foundations
-- Broad implementation plan documented.
-- Supabase schema for languages, phonemes, minimal pairs, attempts, review queue, and analytics.
-- Seed content for English, French, and Japanese starter phonemes/minimal pairs.
-- Flutter scaffold with Riverpod, GoRouter, onboarding state, and core navigation.
+## Implemented
+- Directional course onboarding and a guided five-lesson English → French path.
+- Shared curated French words with explicit phoneme membership and spelling hints.
+- Sound Match: swap-to-match-three, cascades, stars, optional listening bonuses.
+- Word Match: silent word chains, obstacles, stars, fading spelling hints.
+- 60-second rounds, continuation, background pause, account/course-scoped checkpoints.
+- Local lesson completion, separate listening/spelling evidence, next-day reviews,
+  and arcade scores. Optional idempotent Supabase upload with a persistent outbox.
+- Automated engine, flow, persistence, audio-failure and SQL isolation tests.
 
-## In Progress
-- Drill fidelity is currently text-based; audio playback is still pending.
-- Mastery calculations are not yet surfaced from backend-derived metrics.
+## Next validation priorities
+1. Playtest on iOS and Android: touch/drag feel, French voice availability, microphone
+   handling, screen sizes, and whether the games feel primarily recreational.
+2. Replace device TTS references with a linguistically reviewed recording set.
+3. Tune challenge frequency, targets, power-ups and lesson sequence from playtests.
+4. Add cross-device cloud download/merge; current cloud integration backs up
+   signed-in events while dashboards read local progress.
+5. Expand Word Match beyond the initial /u/–/y/ contrast and author additional
+   directional courses only after English → French is validated.
 
-## Next Build Priorities
-1. Audio asset ingestion pipeline and prefetch in Flutter.
-2. Real progress dashboard with confusion-pair heat map.
-3. Daily review reminders and push notification scheduling.
+Older services and screens remain in the repository as supporting/legacy tools.
+They should not be interpreted as fully integrated features of the new course path.

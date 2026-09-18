@@ -1,83 +1,58 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
-class AuthService {
-  final SupabaseClient _client;
-
-  AuthService(this._client);
-
-  User? get currentUser => _client.auth.currentUser;
-
-  bool get isAuthenticated => currentUser != null;
-
-  Stream<AuthState> get authStateChanges => _client.auth.onAuthStateChange;
-
-  Future<AuthResponse> signUp({
-    required String email,
-    required String password,
-  }) async {
-    return await _client.auth.signUp(
-      email: email,
-      password: password,
-    );
-  }
-
-  Future<AuthResponse> signIn({
-    required String email,
-    required String password,
-  }) async {
-    return await _client.auth.signInWithPassword(
-      email: email,
-      password: password,
-    );
-  }
-
-  Future<void> signOut() async {
-    await _client.auth.signOut();
-  }
-
-  Future<void> resetPassword(String email) async {
-    await _client.auth.resetPasswordForEmail(email);
-  }
-}
-
-final authServiceProvider = Provider<AuthService>((ref) {
-  return AuthService(Supabase.instance.client);
-});
+import '../course/backend.dart';
 
 class AppAuthState {
-  const AppAuthState({
-    required this.user,
-    required this.isLoading,
-    this.error,
-  });
-
   final User? user;
   final bool isLoading;
   final String? error;
+
+  const AppAuthState({
+    this.user,
+    this.isLoading = false,
+    this.error,
+  });
 
   bool get isAuthenticated => user != null;
 }
 
 class AuthController extends StateNotifier<AppAuthState> {
-  final AuthService _authService;
+  final SupabaseClient? _client;
+  StreamSubscription? _authSubscription;
 
-  AuthController(this._authService)
-      : super(AppAuthState(user: _authService.currentUser, isLoading: false)) {
-    _authService.authStateChanges.listen((event) {
-      if (event.event == AuthChangeEvent.signedIn) {
-        state = AppAuthState(user: event.session?.user, isLoading: false);
-      } else if (event.event == AuthChangeEvent.signedOut) {
+  AuthController(this._client) : super(const AppAuthState(isLoading: true)) {
+    _init();
+  }
+
+  Future<void> _init() async {
+    final user = _client?.auth.currentUser;
+    if (user != null) {
+      state = AppAuthState(user: user, isLoading: false);
+    } else {
+      state = const AppAuthState(isLoading: false);
+    }
+
+    _authSubscription = _client?.auth.onAuthStateChange.listen((event) {
+      if (event.session != null) {
+        state = AppAuthState(user: event.session!.user, isLoading: false);
+      } else {
         state = const AppAuthState(user: null, isLoading: false);
       }
     });
   }
 
   Future<void> signIn(String email, String password) async {
+    if (_client == null) {
+      state = const AppAuthState(
+          error: 'This is the offline demo. Configure Supabase to sign in.');
+      return;
+    }
     state = AppAuthState(user: state.user, isLoading: true, error: null);
 
     try {
-      final response = await _authService.signIn(
+      final response = await _client.auth.signInWithPassword(
         email: email,
         password: password,
       );
@@ -88,12 +63,12 @@ class AuthController extends StateNotifier<AppAuthState> {
         state = const AppAuthState(
           user: null,
           isLoading: false,
-          error: 'Sign up successful. Please check your email.',
+          error: 'Sign in failed',
         );
       }
     } catch (e) {
       state = AppAuthState(
-        user: state.user,
+        user: null,
         isLoading: false,
         error: e.toString(),
       );
@@ -101,26 +76,27 @@ class AuthController extends StateNotifier<AppAuthState> {
   }
 
   Future<void> signUp(String email, String password) async {
+    if (_client == null) {
+      state = const AppAuthState(
+          error:
+              'This is the offline demo. Configure Supabase to create an account.');
+      return;
+    }
     state = AppAuthState(user: state.user, isLoading: true, error: null);
 
     try {
-      final response = await _authService.signUp(
+      await _client.auth.signUp(
         email: email,
         password: password,
       );
-
-      if (response.session != null) {
-        state = AppAuthState(user: response.user, isLoading: false);
-      } else {
-        state = const AppAuthState(
-          user: null,
-          isLoading: false,
-          error: 'Check your email to confirm account.',
-        );
-      }
+      state = const AppAuthState(
+        user: null,
+        isLoading: false,
+        error: 'Check your email to confirm account',
+      );
     } catch (e) {
       state = AppAuthState(
-        user: state.user,
+        user: null,
         isLoading: false,
         error: e.toString(),
       );
@@ -128,17 +104,19 @@ class AuthController extends StateNotifier<AppAuthState> {
   }
 
   Future<void> signOut() async {
-    await _authService.signOut();
+    state = AppAuthState(user: state.user, isLoading: true);
+    await _client?.auth.signOut();
     state = const AppAuthState(user: null, isLoading: false);
   }
 
-  void clearError() {
-    state = AppAuthState(user: state.user, isLoading: false);
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    super.dispose();
   }
 }
 
 final authControllerProvider =
     StateNotifierProvider<AuthController, AppAuthState>((ref) {
-  final authService = ref.watch(authServiceProvider);
-  return AuthController(authService);
+  return AuthController(courseBackend);
 });

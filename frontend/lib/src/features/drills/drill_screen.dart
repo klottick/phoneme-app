@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/app_providers.dart';
-import '../../core/services/audio_service.dart';
+import '../../core/course/course_audio.dart';
+import '../../core/course/course_progress.dart';
 
 class DrillScreen extends ConsumerStatefulWidget {
   const DrillScreen({super.key});
@@ -17,6 +18,7 @@ class _DrillScreenState extends ConsumerState<DrillScreen> {
   int _index = 0;
   int _correct = 0;
   bool _isPlaying = false;
+  bool _heard = false;
 
   @override
   Widget build(BuildContext context) {
@@ -44,7 +46,8 @@ class _DrillScreenState extends ConsumerState<DrillScreen> {
           }
 
           final current = items[_index % items.length];
-          final options = <String>[current.wordA, current.wordB]..shuffle(Random());
+          final options = <String>[current.wordA, current.wordB]
+            ..shuffle(Random());
 
           return Padding(
             padding: const EdgeInsets.all(16),
@@ -80,7 +83,10 @@ class _DrillScreenState extends ConsumerState<DrillScreen> {
                     child: SizedBox(
                       width: double.infinity,
                       child: FilledButton.tonal(
-                        onPressed: () => _handleAnswer(option, current.wordA, current),
+                        onPressed: _heard && !_isPlaying
+                            ? () =>
+                                _handleAnswer(option, current.wordA, current)
+                            : null,
                         child: Text(option, textAlign: TextAlign.center),
                       ),
                     ),
@@ -96,28 +102,29 @@ class _DrillScreenState extends ConsumerState<DrillScreen> {
             ),
           );
         },
-        error: (error, _) => Center(child: Text('Failed to load drills: $error')),
+        error: (error, _) =>
+            Center(child: Text('Failed to load drills: $error')),
         loading: () => const Center(child: CircularProgressIndicator()),
       ),
     );
   }
 
   Future<void> _playAudio(dynamic currentPair) async {
-    setState(() => _isPlaying = true);
-    final audio = ref.read(audioServiceProvider);
-    
-    if (!mounted) return;
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Audio playback: Connect audio files in Supabase Storage to enable'),
-        duration: Duration(seconds: 2),
-      ),
-    );
-    
-    await Future.delayed<void>(const Duration(seconds: 2));
-    if (mounted) {
-      setState(() => _isPlaying = false);
+    if (_isPlaying) return;
+    setState(() {
+      _isPlaying = true;
+      _heard = false;
+    });
+    try {
+      await ref.read(courseAudioProvider).speak(currentPair.wordA);
+      if (mounted) setState(() => _heard = true);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('French audio unavailable. Please retry.')));
+      }
+    } finally {
+      if (mounted) setState(() => _isPlaying = false);
     }
   }
 
@@ -131,16 +138,12 @@ class _DrillScreenState extends ConsumerState<DrillScreen> {
       _correct++;
     }
 
-    final phonemes = await ref.read(phonemesProvider.future);
-    final phonemeId = phonemes.isNotEmpty ? phonemes.first.id : 'placeholder-phoneme';
-
-    await ref.read(progressRepositoryProvider).submitAttempt(
-      lessonId: 'lesson-minimal-pairs',
-      phonemeId: phonemeId,
-      minimalPairId: currentPair.id,
-      isCorrect: isCorrect,
-      responseTimeMs: 900,
-    );
+    setState(() => _heard = false);
+    await CourseProgressStore('en-fr').record(
+        (currentPair.phonemeA as String).replaceAll('/', ''),
+        'listening',
+        isCorrect);
+    ref.invalidate(courseProgressProvider);
 
     if (!mounted) return;
 

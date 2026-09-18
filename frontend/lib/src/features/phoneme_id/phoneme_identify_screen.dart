@@ -4,13 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/app_providers.dart';
+import '../../core/course/french_course.dart';
 import '../../core/services/tts_service.dart';
 
 class PhonemeIdentifyScreen extends ConsumerStatefulWidget {
   const PhonemeIdentifyScreen({super.key});
 
   @override
-  ConsumerState<PhonemeIdentifyScreen> createState() => _PhonemeIdentifyScreenState();
+  ConsumerState<PhonemeIdentifyScreen> createState() =>
+      _PhonemeIdentifyScreenState();
 }
 
 class _PhonemeIdentifyScreenState extends ConsumerState<PhonemeIdentifyScreen> {
@@ -20,6 +22,17 @@ class _PhonemeIdentifyScreenState extends ConsumerState<PhonemeIdentifyScreen> {
   bool _isPlaying = false;
   String? _lastResult;
   bool _answered = false;
+  String _getSampleWord(String phoneme) {
+    final words = frenchWords
+        .where((w) => w.contains(phoneme))
+        .map((w) => w.text)
+        .toList();
+    if (words.isNotEmpty) {
+      words.shuffle();
+      return words.first;
+    }
+    return 'tout';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,10 +60,16 @@ class _PhonemeIdentifyScreenState extends ConsumerState<PhonemeIdentifyScreen> {
           }
 
           final current = items[_index % items.length];
-          final allPhonemes = items.map((p) => p.ipaSymbol).toList()..shuffle(Random());
-          final options = (allPhonemes.take(4).toList()..add(current.ipaSymbol)).toSet().take(4).toList()..shuffle(Random());
+          final allPhonemes = items.map((p) => p.ipaSymbol).toList()
+            ..shuffle(Random());
+          final options = (allPhonemes.take(4).toList()..add(current.ipaSymbol))
+              .toSet()
+              .take(4)
+              .toList()
+            ..shuffle(Random());
 
-          final displayOptions = options.length >= 4 ? options : allPhonemes.take(4).toList();
+          final displayOptions =
+              options.length >= 4 ? options : allPhonemes.take(4).toList();
 
           return Padding(
             padding: const EdgeInsets.all(16),
@@ -68,15 +87,38 @@ class _PhonemeIdentifyScreenState extends ConsumerState<PhonemeIdentifyScreen> {
                     padding: const EdgeInsets.all(32),
                     child: Column(
                       children: [
-                        IconButton.filled(
-                          icon: Icon(_isPlaying ? Icons.stop : Icons.volume_up),
-                          iconSize: 48,
-                          onPressed: _isPlaying ? null : () => _playPhoneme(current.ipaSymbol),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            IconButton.filled(
+                              icon: Icon(
+                                  _isPlaying ? Icons.stop : Icons.volume_up),
+                              iconSize: 48,
+                              onPressed: _isPlaying
+                                  ? null
+                                  : () => _playPhoneme(current.ipaSymbol),
+                            ),
+                            const SizedBox(width: 16),
+                            IconButton.filled(
+                              icon: Icon(
+                                  _isPlaying ? Icons.stop : Icons.volume_down),
+                              iconSize: 48,
+                              onPressed: _isPlaying
+                                  ? null
+                                  : () => _playWord(
+                                      _getSampleWord(current.ipaSymbol)),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 16),
                         Text(
                           'Tap to play',
                           style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Left: Play phoneme | Right: Play word',
+                          style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
                     ),
@@ -90,9 +132,10 @@ class _PhonemeIdentifyScreenState extends ConsumerState<PhonemeIdentifyScreen> {
                     crossAxisSpacing: 12,
                     childAspectRatio: 2,
                     children: displayOptions.map((phoneme) {
-                      final isSelected = _lastResult != null && phoneme == current.ipaSymbol;
+                      final isSelected =
+                          _lastResult != null && phoneme == current.ipaSymbol;
                       final isCorrect = phoneme == current.ipaSymbol;
-                      
+
                       Color? bgColor;
                       if (_lastResult != null) {
                         if (isCorrect) {
@@ -101,9 +144,11 @@ class _PhonemeIdentifyScreenState extends ConsumerState<PhonemeIdentifyScreen> {
                           bgColor = Colors.red;
                         }
                       }
-                                            
+
                       return FilledButton.tonal(
-                        onPressed: _answered ? null : () => _handleAnswer(phoneme, current.ipaSymbol),
+                        onPressed: _answered
+                            ? null
+                            : () => _handleAnswer(phoneme, current.ipaSymbol),
                         style: FilledButton.styleFrom(
                           backgroundColor: bgColor,
                         ),
@@ -122,7 +167,9 @@ class _PhonemeIdentifyScreenState extends ConsumerState<PhonemeIdentifyScreen> {
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: _lastResult!.startsWith('✓') ? Colors.green : Colors.orange,
+                      color: _lastResult!.startsWith('✓')
+                          ? Colors.green
+                          : Colors.orange,
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -143,10 +190,21 @@ class _PhonemeIdentifyScreenState extends ConsumerState<PhonemeIdentifyScreen> {
 
   Future<void> _playPhoneme(String phoneme) async {
     setState(() => _isPlaying = true);
-    
+
     final tts = ref.read(ttsServiceProvider);
-    await tts.speak(phoneme);
-    
+    await tts.speak(_getSampleWord(phoneme), languageCode: 'fr');
+
+    if (mounted) {
+      setState(() => _isPlaying = false);
+    }
+  }
+
+  Future<void> _playWord(String word) async {
+    setState(() => _isPlaying = true);
+
+    final tts = ref.read(ttsServiceProvider);
+    await tts.speak(word, languageCode: 'fr');
+
     if (mounted) {
       setState(() => _isPlaying = false);
     }

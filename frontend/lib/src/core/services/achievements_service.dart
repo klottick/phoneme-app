@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -291,8 +293,10 @@ class AchievementsNotifier extends StateNotifier<List<Achievement>> {
     final data = prefs.getString(_storageKey);
     if (data != null) {
       try {
-        final saved = AchievementsService.allAchievements;
-        state = saved;
+        final decoded = jsonDecode(data) as List<dynamic>;
+        state = decoded
+            .map((e) => Achievement.fromJson(e as Map<String, dynamic>))
+            .toList();
       } catch (e) {
         state = AchievementsService.allAchievements;
       }
@@ -302,7 +306,7 @@ class AchievementsNotifier extends StateNotifier<List<Achievement>> {
   Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
     final data = state.map((a) => a.toJson()).toList();
-    await prefs.setString(_storageKey, data.toString());
+    await prefs.setString(_storageKey, jsonEncode(data));
   }
 
   Future<void> checkAndUnlock({

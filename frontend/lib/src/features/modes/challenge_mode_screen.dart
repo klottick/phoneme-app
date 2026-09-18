@@ -224,6 +224,7 @@ class _MarathonScreenState extends ConsumerState<MarathonScreen> {
   }
 
   void _finishMarathon() {
+    if (!mounted) return;
     Navigator.pop(context);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Marathon complete! $_correct / $_total correct')),
