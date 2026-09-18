@@ -156,6 +156,16 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
     }
   }
 
+  Future<void> _switchToWordMatch() async {
+    if (_saving) return;
+    // Freeze the session while persisting it. If storage fails, keep this
+    // screen and its in-memory board so the pause menu can retry the save.
+    setState(() => _session.paused = true);
+    await _save();
+    if (!mounted || _saveError != null) return;
+    context.pushReplacement('/arcade/word');
+  }
+
   Future<void> _record(List<(String, bool)> answers, String skill) async {
     try {
       for (final answer in answers) {
@@ -393,10 +403,7 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
                               style: Theme.of(context).textTheme.bodyLarge),
                           if (!widget.silent)
                             TextButton(
-                                onPressed: () {
-                                  _session.paused = true;
-                                  context.pushReplacement('/arcade/word');
-                                },
+                                onPressed: _switchToWordMatch,
                                 child: const Text(
                                     'Play without audio: Word Match')),
                         ],

@@ -85,15 +85,19 @@ class AuthController extends StateNotifier<AppAuthState> {
     state = AppAuthState(user: state.user, isLoading: true, error: null);
 
     try {
-      await _client.auth.signUp(
+      final response = await _client.auth.signUp(
         email: email,
         password: password,
       );
-      state = const AppAuthState(
-        user: null,
-        isLoading: false,
-        error: 'Check your email to confirm account',
-      );
+      if (response.session != null) {
+        state = AppAuthState(user: response.session!.user, isLoading: false);
+      } else {
+        state = const AppAuthState(
+          user: null,
+          isLoading: false,
+          error: 'Check your email to confirm account',
+        );
+      }
     } catch (e) {
       state = AppAuthState(
         user: null,

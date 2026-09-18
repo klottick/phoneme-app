@@ -16,10 +16,16 @@ class Phoneme {
   factory Phoneme.fromJson(Map<String, dynamic> json) {
     return Phoneme(
       id: json['id'] as String? ?? '',
-      languageCode: json['languageCode'] as String? ?? json['language_code'] as String? ?? '',
-      ipaSymbol: json['ipa_symbol'] as String? ?? json['ipaSymbol'] as String? ?? '',
+      languageCode: json['languageCode'] as String? ??
+          json['language_code'] as String? ??
+          json['languages']?['code'] as String? ??
+          '',
+      ipaSymbol:
+          json['ipa_symbol'] as String? ?? json['ipaSymbol'] as String? ?? '',
       descriptor: json['descriptor'] as String? ?? '',
-      difficultyLevel: json['difficulty_level'] as int? ?? json['difficultyLevel'] as int? ?? 1,
+      difficultyLevel: json['difficulty_level'] as int? ??
+          json['difficultyLevel'] as int? ??
+          1,
     );
   }
 

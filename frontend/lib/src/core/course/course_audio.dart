@@ -19,7 +19,12 @@ class FrenchWordAudio implements CourseAudio {
     await _tts.setSpeechRate(0.4);
     await _tts.awaitSpeakCompletion(true);
     final result = await _tts.speak(word).timeout(const Duration(seconds: 12));
-    if (result != 1) throw StateError('French audio could not be played.');
+    // With awaitSpeakCompletion enabled, web resolves with null on completion;
+    // native implementations return 1. Explicit failure codes still fail, and
+    // platform exceptions or missing completion still propagate above.
+    if (result != null && result != 1) {
+      throw StateError('French audio could not be played.');
+    }
   }
 
   @override

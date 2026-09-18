@@ -3,6 +3,20 @@ import 'package:linguist/src/core/models/phoneme.dart';
 
 void main() {
   group('Phoneme', () {
+    test('reads language from joined Supabase rows', () {
+      final phoneme = Phoneme.fromJson({
+        'id': 'fr-u',
+        'ipa_symbol': 'u',
+        'languages': {'code': 'fr'}
+      });
+      expect(phoneme.languageCode, 'fr');
+    });
+    test('keeps both flat local language formats', () {
+      for (final field in ['languageCode', 'language_code']) {
+        expect(Phoneme.fromJson({field: 'fr'}).languageCode, 'fr');
+      }
+      expect(Phoneme.fromJson({'languages': null}).languageCode, '');
+    });
     test('creates with required fields', () {
       const phoneme = Phoneme(
         id: 'en-æ',
