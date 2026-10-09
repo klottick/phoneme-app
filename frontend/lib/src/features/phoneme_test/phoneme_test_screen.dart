@@ -6,10 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../core/providers/app_providers.dart';
 import '../../core/course/french_course.dart';
-import '../../core/services/recording_service.dart'
-    hide recordingServiceProvider;
 import '../../core/services/tts_service.dart';
-import '../../core/services/phoneme_assessment_service.dart';
 
 class PhonemeTestScreen extends ConsumerStatefulWidget {
   const PhonemeTestScreen({super.key});
@@ -31,7 +28,6 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
   String? _sampleWord;
   String? _wordRecordingPath;
   String? _wordAssessmentResult;
-  bool _hasWordRecording = false;
 
   String? _getSampleWord(String phoneme) {
     final words = frenchWords
@@ -215,7 +211,6 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
                             _hasRecording = false;
                             _recordingPath = null;
                             _assessmentResult = null;
-                            _hasWordRecording = false;
                             _wordRecordingPath = null;
                             _wordAssessmentResult = null;
                           });
@@ -339,7 +334,6 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
     setState(() {
       _isRecording = true;
       _wordMode = true;
-      _hasWordRecording = false;
       _wordAssessmentResult = null;
     });
   }
@@ -350,7 +344,6 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
 
     setState(() {
       _isRecording = false;
-      _hasWordRecording = true;
     });
   }
 
@@ -428,7 +421,6 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
       _showHint = false;
       _wordMode = false;
       _sampleWord = null;
-      _hasWordRecording = false;
       _wordRecordingPath = null;
       _wordAssessmentResult = null;
     });

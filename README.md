@@ -66,16 +66,24 @@ flutter analyze
 flutter build web
 ```
 
+Native permission/configuration checks (from the repository root):
+
+```bash
+python3 scripts/test_mobile_configuration.py
+```
+
 Backend regression test (against local Supabase, from the repository root):
 
 ```bash
 PGPASSWORD=postgres psql -h 127.0.0.1 -p 54322 -U postgres -d postgres \
+  -v ON_ERROR_STOP=1 -f backend/supabase/tests/seed.sql \
   -f backend/supabase/tests/course_events.sql
 ```
 
-That test creates the new schema inside a transaction, verifies event deduplication,
-skill separation and user isolation, then rolls back. Run it before applying this
-migration to the local database.
+The seed test validates curriculum inserts inside a rolled-back transaction. The
+course test creates the new schema inside a transaction, verifies event
+deduplication, skill separation and user isolation, then rolls back. Run these
+before applying the course migration to the local database.
 
 ### Main implementation areas
 

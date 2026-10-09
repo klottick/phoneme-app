@@ -33,7 +33,7 @@ with english_phonemes as (
     ('en', '/dʒ/', 'voiced postalveolar affricate (jump)', 2),
     ('en', '/ŋ/', 'voiced velar nasal (sing)', 2),
     ('en', '/h/', 'voiceless glottal fricative (hot)', 1)
-  ) as v(symbol, descr, diff)
+  ) as v(lang, symbol, descr, diff)
   where l.code = 'en'
   on conflict (language_id, ipa_symbol) do nothing
   returning id, ipa_symbol
@@ -44,7 +44,7 @@ select 1;
 with english_pairs as (
   insert into public.minimal_pairs (language_id, phoneme_a_id, phoneme_b_id, word_a, word_b)
   select l.id, pa.id, pb.id, word_a, word_b
-  from public.languages l,
+  from public.languages l cross join
   (values
     ('en', '/iː/', '/ɪ/', 'sheep', 'ship'),
     ('en', '/iː/', '/ɪ/', 'glee', 'gly'),
@@ -101,7 +101,7 @@ with french_phonemes as (
     ('fr', '/j/', 'voiced palatal approximant (pied)', 1),
     ('fr', '/w/', 'voiced labial-velar approximant (oui)', 1),
     ('fr', '/ɥ/', 'voiced labial-palatal approximant (huit)', 2)
-  ) as v(symbol, descr, diff)
+  ) as v(lang, symbol, descr, diff)
   where l.code = 'fr'
   on conflict (language_id, ipa_symbol) do nothing
   returning id, ipa_symbol
@@ -112,7 +112,7 @@ select 1;
 with french_pairs as (
   insert into public.minimal_pairs (language_id, phoneme_a_id, phoneme_b_id, word_a, word_b)
   select l.id, pa.id, pb.id, word_a, word_b
-  from public.languages l,
+  from public.languages l cross join
   (values
     ('fr', '/a/', '/ɑ/', 'patte', 'pâte'),
     ('fr', '/e/', '/ɛ/', 'clé', 'claire'),
@@ -169,7 +169,7 @@ with japanese_phonemes as (
     ('ja', '/m/', 'bilabial nasal', 1),
     ('ja', '/j/', 'palatal approximant', 1),
     ('ja', '/w/', 'labial-velar approximant', 1)
-  ) as v(symbol, descr, diff)
+  ) as v(lang, symbol, descr, diff)
   where l.code = 'ja'
   on conflict (language_id, ipa_symbol) do nothing
   returning id, ipa_symbol
@@ -180,7 +180,7 @@ select 1;
 with japanese_pairs as (
   insert into public.minimal_pairs (language_id, phoneme_a_id, phoneme_b_id, word_a, word_b)
   select l.id, pa.id, pb.id, word_a, word_b
-  from public.languages l,
+  from public.languages l cross join
   (values
     ('ja', '/ɾ/', '/r/', 'hiragana', 'hiragana'),
     ('ja', '/ɯ/', '/u/', 'fuku', 'fuko'),

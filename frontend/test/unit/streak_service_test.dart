@@ -45,12 +45,12 @@ void main() {
       expect(streak, 0);
     });
 
-    test('getLastPracticeDate returns nullable DateTime', () async {
+    test('getLastPracticeDate returns null before any practice', () async {
       final service = StreakService();
       
       final date = await service.getLastPracticeDate();
       
-      expect(date == null || date is DateTime, true);
+      expect(date, isNull);
     });
   });
 }

@@ -22,3 +22,8 @@
 
 Older services and screens remain in the repository as supporting/legacy tools.
 They should not be interpreted as fully integrated features of the new course path.
+
+## Known arcade follow-up
+- Sound Match currently awards a star when simultaneous three-tile matches clear
+  at least four tiles in total. Align eligibility with the advertised rule of a
+  single match of four or more tiles; learning evidence and persistence are unaffected.

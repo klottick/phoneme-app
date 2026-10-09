@@ -14,7 +14,6 @@ class SpeakScreen extends ConsumerStatefulWidget {
 class _SpeakScreenState extends ConsumerState<SpeakScreen> {
   bool _isRecording = false;
   bool _hasRecording = false;
-  String? _recordingPath;
   bool _isPlaying = false;
 
   @override
@@ -99,7 +98,6 @@ class _SpeakScreenState extends ConsumerState<SpeakScreen> {
                         onPressed: () {
                           setState(() {
                             _hasRecording = false;
-                            _recordingPath = null;
                           });
                         },
                       ),
@@ -131,7 +129,6 @@ class _SpeakScreenState extends ConsumerState<SpeakScreen> {
       setState(() {
         _isRecording = false;
         _hasRecording = path != null;
-        _recordingPath = path;
       });
     } else {
       final hasPermission = await recorder.hasPermission();
@@ -163,7 +160,6 @@ class _SpeakScreenState extends ConsumerState<SpeakScreen> {
     await ref.read(streakServiceProvider).recordPractice();
     setState(() {
       _hasRecording = false;
-      _recordingPath = null;
     });
   }
 }

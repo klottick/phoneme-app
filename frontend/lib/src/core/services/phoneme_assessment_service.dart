@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -95,7 +94,7 @@ class PhonemeAssessmentService implements PhonemeAnalyzer {
       return PhonemeAssessment.incorrect();
     }
 
-    double score = _computeAcousticScore(audioData, expectedPhoneme);
+    final score = _computeAcousticScore(audioData, expectedPhoneme);
     
     if (score >= 85) {
       return PhonemeAssessment.correct();
@@ -153,7 +152,6 @@ class PhonemeAssessmentService implements PhonemeAnalyzer {
     try {
       final file = File(recordingPath);
       final audioBytes = await file.readAsBytes();
-      final base64Audio = base64Encode(audioBytes);
 
       final response = await http.post(
         Uri.parse('https://api.openai.com/v1/audio/transcriptions'),

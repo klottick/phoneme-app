@@ -225,9 +225,6 @@ class _WeeklyChart extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: insights.weeklyStats.map((stat) {
-                  final allAccuracies = insights.weeklyStats.map((s) => s.accuracy).toList();
-                  final maxAccuracy = allAccuracies.isNotEmpty ? allAccuracies.reduce((a, b) => a > b ? a : b) : 0.0;
-                  final double height = maxAccuracy > 0 ? stat.accuracy / maxAccuracy : 0.0;
                   return Column(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [

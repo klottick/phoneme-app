@@ -9,7 +9,7 @@ class ProgressAnalyticsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final srsItems = ref.watch(srsProvider);
+    ref.watch(srsProvider);
     final analytics = ref.read(srsProvider.notifier).getAnalytics();
 
     return Scaffold(

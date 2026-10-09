@@ -9,9 +9,9 @@ class RecordingService {
     return await _recorder!.hasPermission();
   }
 
-  Future<void> startRecording(String path) async {
+  Future<void> startRecording(String path, {bool Function()? isActive}) async {
     _recorder ??= AudioRecorder();
-    if (await _recorder!.hasPermission()) {
+    if (await _recorder!.hasPermission() && (isActive?.call() ?? true)) {
       await _recorder!.start(
         const RecordConfig(encoder: AudioEncoder.wav),
         path: path,

@@ -20,7 +20,6 @@ class LocalCacheService {
   static const String _phonemesKey = 'cache_phonemes';
   static const String _pairsKey = 'cache_minimal_pairs';
   static const String _lastSyncKey = 'last_sync';
-  static const Duration _defaultTtl = Duration(hours: 24);
 
   Future<void> savePhonemes(List<Phoneme> phonemes, {Duration? ttl}) async {
     final prefs = await SharedPreferences.getInstance();

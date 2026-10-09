@@ -171,7 +171,6 @@ class ProfileScreen extends ConsumerWidget {
 
   Future<int> _getTotalPracticeCount(WidgetRef ref) async {
     try {
-      final progressRepo = ref.read(progressRepositoryProvider);
       return 0;
     } catch (_) {
       return 0;

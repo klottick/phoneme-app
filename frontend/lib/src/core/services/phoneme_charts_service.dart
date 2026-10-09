@@ -32,7 +32,7 @@ class PhonemeComparisonChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    var sorted = List<PhonemeChartData>.from(data);
+    final sorted = List<PhonemeChartData>.from(data);
     
     if (sortByAccuracy) {
       sorted.sort((a, b) {

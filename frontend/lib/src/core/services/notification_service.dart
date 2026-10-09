@@ -7,14 +7,14 @@ class NotificationSettings {
   final int reminderHour;
   final int reminderMinute;
   final bool streakReminder;
-  final bool AchievementReminder;
+  final bool achievementReminder;
 
   const NotificationSettings({
     this.practiceReminder = true,
     this.reminderHour = 9,
     this.reminderMinute = 0,
     this.streakReminder = true,
-    this.AchievementReminder = true,
+    this.achievementReminder = true,
   });
 
   NotificationSettings copyWith({
@@ -29,7 +29,7 @@ class NotificationSettings {
       reminderHour: reminderHour ?? this.reminderHour,
       reminderMinute: reminderMinute ?? this.reminderMinute,
       streakReminder: streakReminder ?? this.streakReminder,
-      AchievementReminder: achievementReminder ?? AchievementReminder,
+      achievementReminder: achievementReminder ?? this.achievementReminder,
     );
   }
 }
@@ -44,7 +44,7 @@ class NotificationService {
       reminderHour: prefs.getInt('$_key.hour') ?? 9,
       reminderMinute: prefs.getInt('$_key.minute') ?? 0,
       streakReminder: prefs.getBool('$_key.streak') ?? true,
-      AchievementReminder: prefs.getBool('$_key.achievement') ?? true,
+      achievementReminder: prefs.getBool('$_key.achievement') ?? true,
     );
   }
 
@@ -54,7 +54,7 @@ class NotificationService {
     await prefs.setInt('$_key.hour', settings.reminderHour);
     await prefs.setInt('$_key.minute', settings.reminderMinute);
     await prefs.setBool('$_key.streak', settings.streakReminder);
-    await prefs.setBool('$_key.achievement', settings.AchievementReminder);
+    await prefs.setBool('$_key.achievement', settings.achievementReminder);
   }
 
   String formatTime(int hour, int minute) {
@@ -66,14 +66,14 @@ class NotificationService {
   String getNextReminderText(NotificationSettings settings) {
     final now = DateTime.now();
     var scheduledHour = settings.reminderHour;
-    var scheduledMinute = settings.reminderMinute;
+    final scheduledMinute = settings.reminderMinute;
 
     if (scheduledHour < now.hour ||
         (scheduledHour == now.hour && scheduledMinute <= now.minute)) {
       scheduledHour += 24;
     }
 
-    var diff = (scheduledHour * 60 + scheduledMinute) - (now.hour * 60 + now.minute);
+    final diff = (scheduledHour * 60 + scheduledMinute) - (now.hour * 60 + now.minute);
     final hours = diff ~/ 60;
     final minutes = diff % 60;
 
@@ -115,7 +115,7 @@ class NotificationNotifier extends StateNotifier<NotificationSettings> {
   }
 
   Future<void> toggleAchievementReminder() async {
-    state = state.copyWith(achievementReminder: !state.AchievementReminder);
+    state = state.copyWith(achievementReminder: !state.achievementReminder);
     await _service.save(state);
   }
 
@@ -166,7 +166,7 @@ class NotificationSettingsScreen extends ConsumerWidget {
           SwitchListTile(
             title: const Text('Achievement Notifications'),
             subtitle: const Text('Share when you unlock achievements'),
-            value: settings.AchievementReminder,
+            value: settings.achievementReminder,
             onChanged: (_) => notifier.toggleAchievementReminder(),
           ),
         ],

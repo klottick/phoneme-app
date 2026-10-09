@@ -1,11 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/course/french_course.dart';
 import '../../core/course/course_audio.dart';
 import '../../core/course/course_progress.dart';
-import '../../core/services/recording_service.dart'
-    hide recordingServiceProvider;
-import '../../core/providers/app_providers.dart';
+import '../../core/services/recording_service.dart';
 import '../../core/services/audio_service.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -24,6 +24,7 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen> {
   String _feedback = '';
   String? _recordingPath;
   RecordingService? _recorder;
+  Future<void>? _recordingOperation;
   CourseAudio? _audio;
   CourseLesson get _lesson =>
       frenchLessons.firstWhere((l) => l.id == widget.lessonId,
@@ -42,9 +43,23 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen> {
 
   @override
   void dispose() {
-    if (_recording) _recorder?.stopRecording();
+    final recorder = _recorder;
+    if (recorder != null) unawaited(_releaseRecorder(recorder));
     _audio?.stop().catchError((Object _) {});
     super.dispose();
+  }
+
+  Future<void> _releaseRecorder(RecordingService recorder) async {
+    try {
+      // A native start already in flight must finish before cancellation and
+      // disposal; otherwise it could reactivate the microphone after cleanup.
+      await _recordingOperation;
+      await recorder.cancel();
+    } catch (_) {
+      // Release native resources even when startup or cancellation fails.
+    } finally {
+      recorder.dispose();
+    }
   }
 
   Future<void> _listen() async {
@@ -86,12 +101,20 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen> {
     }
   }
 
-  Future<void> _record() async {
-    _recorder = ref.read(recordingServiceProvider);
+  Future<void> _record() {
+    final operation = _toggleRecording();
+    _recordingOperation = operation;
+    return operation;
+  }
+
+  Future<void> _toggleRecording() async {
+    // The lesson owns this recorder. Delayed cleanup must never stop a recorder
+    // that another screen obtained from the shared application provider.
+    final recorder = _recorder ??= RecordingService();
     setState(() => _busy = true);
     try {
       if (_recording) {
-        final path = await _recorder!.stopRecording();
+        final path = await recorder.stopRecording();
         if (mounted) {
           setState(() {
             _recording = false;
@@ -100,12 +123,14 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen> {
         }
       } else {
         final dir = await getApplicationDocumentsDirectory();
-        if (!await _recorder!.hasPermission()) {
+        if (!mounted) return;
+        if (!await recorder.hasPermission()) {
           throw StateError('Microphone permission denied');
         }
+        if (!mounted) return;
         final path =
             '${dir.path}/course_${DateTime.now().millisecondsSinceEpoch}.wav';
-        await _recorder!.startRecording(path);
+        await recorder.startRecording(path, isActive: () => mounted);
         if (mounted) {
           setState(() {
             _recording = true;
