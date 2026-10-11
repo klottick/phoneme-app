@@ -14,8 +14,45 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 | 2 content/session | merged | `feat/fr-section-session`, `wks_c449fb2828dcbebc` | `ses_ed7aabf1cffe8amV18675aLqw4` | [#4](https://github.com/klottick/phoneme-app/pull/4), head `3a9bf82`, merge `77117b7` | controller: 219 full tests pass, analyzer clean, 8 invalid snapshots rejected |
 | 3 persistence | merged | `feat/fr-section-persistence`, `wks_bccf671bff3e1262` | `ses_ed78b449dffelAD0FF2yNlyWif` | [#6](https://github.com/klottick/phoneme-app/pull/6), head `87d80f7`, merge `deb9906` | controller: 247 full tests and 5 targeted regressions pass; analyzer clean |
 | 4 view | merged | `feat/fr-section-view`, `wks_456f5abd3290f0d6` | `ses_ed7665014ffe67N7wHb8H1Bkle` | [#7](https://github.com/klottick/phoneme-app/pull/7), head `93eeddb`, merge `14ec4c8` | controller: 265 full tests pass; analyzer clean |
-| 5 screen/routes | ready for dispatch | — | — | — | Dependencies 3–4 merged |
-| Final verification | blocked: 5 | — | controller | — | — |
+| 5 screen/routes | merged | `feat/fr-discovery-screen`, `wks_3bfe435ea695759f` | `ses_ed7548eb3ffeXqyZ6xwxLH0Xw6` | [#9](https://github.com/klottick/phoneme-app/pull/9), head `7a6ae08`, merge `a4a5f33` | controller: 301 tests + 7 load/lifecycle regressions pass; analyzer clean; JS build succeeds |
+| Final verification | complete; no important findings open | isolated controller workspace, `docs/fr-section-final-state` | controller | reviewed code matches `origin/main` at `a4a5f33`; final status PR [#8](https://github.com/klottick/phoneme-app/pull/8) | merged-tree 301 tests pass; analyzer clean; JS build succeeds; 1 documentation-only minor deferred |
+
+## Outcome and follow-up gates
+
+The approved `/u/`–`/y/` pilot is implemented and merged. The existing
+`/course-lesson/en-fr-u-y` route now presents ten audio-first puzzles, immediate
+feedback, a section-end explanation even below threshold, configurable completion
+(default 8/10), and finite mistake-only review rounds. Progress resumes locally;
+answers/checkpoints/evidence are retry-safe, account-scoped, and compatible with
+the existing progress-only outbox. `?review=true` does not add completion. Other
+lesson routes and microphone/game implementations remain unchanged.
+
+Final controller review: policy/content/session/store/view/screen/router contracts
+and complete task diffs checked together; important findings addressed. Exact
+merged-tree verification, sequential in `frontend/` with
+`/home/klottick/develop/flutter/bin/flutter`:
+
+- `pub get --enforce-lockfile`: succeeds; lockfile unchanged.
+- `test --no-pub --reporter expanded`: **301 tests passed**.
+- `analyze --no-pub`: **No issues found**.
+- `build web --no-pub`: **Built build/web** (JavaScript).
+- `git diff --exit-code origin/main -- frontend`: empty before verification;
+  verified code is the published merge `a4a5f33`, not unpublished local main.
+- Evidence: `/tmp/opencode/fr-merged-{pub,tests,analyze,build}.log`.
+- Independent load/lifecycle regression evidence (7 passing):
+  `/tmp/opencode/fr-final-controller-repros.log`; full pre-merge gates:
+  `/tmp/opencode/fr-final-controller-{tests,analyze,build}.log`.
+
+Remaining gates: real French voice availability and OS/mobile suspend/resume
+timing require device testing; automated coverage uses actual delayed Futures and
+fake audio/lifecycle hooks. Reviewed reference recordings and linguistic review
+are deferred. Existing third-party `flutter_tts` WebAssembly dry-run warnings do
+not block the approved JavaScript build; Wasm support is not claimed. The broader
+19-ticket path/map/spelling/sentence/assessment backlog and local pronunciation
+grading remain queued, not delivered or newly authorized by this pilot.
+
+All worker worktrees and ignored briefs/reports/review records are retained.
+Existing unpublished Sound Match commits were not reset, overwritten or bundled.
 
 ## Baselines and constraints
 
@@ -39,6 +76,10 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 9. Ruling: `answered` is current-round/current-item boolean submission status, not a Set of historical answers; latestAnswers and answeredItemCount provide aggregate coverage — necessary for retry gating and the consuming store/view contracts; cost if wrong: unshipped session snapshots/tests require schema adjustment. All exposed collections are unmodifiable.
 10. Ruling: failed writes must restore same-process reads to last committed data, not merely leave physical disk unchanged — UI retries without restart and subsequent writers share the preferences cache; cost if wrong: a platform reload on failures, no success-path migration. Explicit fresh saves may recover unusable section state while preserving legacy data and valid sibling sections.
 11. Ruling: the view's `error`/`Retry saving` path is for persistence failures; playback failures use separate generic audio feedback and allow Listen again — avoids presenting a save action for a microphone-free playback error; cost if wrong: the screen's audio notification UI may need refinement. Never display raw exceptions that can contain the hidden word/answer.
+12. Ruling: backgrounding invalidates audio, not recoverable save intent; preserve same-owner pending actions or reconcile committed state on resume — needed for retry-safe progress without stale callback effects; cost if wrong: an additional idempotent retry/load on resume, not lost answers or false unlocks.
+13. Ruling: only `resumed` reopens foreground recovery; `inactive` focus changes must not replay saves or settle suspended navigation — prevents duplicate callbacks and premature exits; cost if wrong: recovery waits for resumed rather than acting during transitional focus loss.
+14. Ruling: final cleanup may modify `lesson_policy.dart` only to correct its false comment alongside the screen load fix — closes the deferred minor without changing policy behavior; cost if wrong: PR #9 adds one documentation-only core-file edit.
+15. Ruling: defer the cleanup comment's new inaccurate “unlike TypeScript” comparison, not the load fix — Dart's actual bool/int claim is corrected and runtime parsing is unchanged; cost if wrong: a misleading cross-language phrase remains until documentation polish. No important behavior finding is parked.
 
 ## Preflight dependency/interface scan
 
@@ -71,7 +112,15 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 - 2026-10-11: Task 3 fix `96e698c..87d80f7` reviewed: important findings addressed, spec compliance and quality approved. Controller verified 247 full Flutter tests and all 5 targeted regressions passed; analyzer and whitespace checks clean. PR #6 merged at `deb9906`. Evidence: `/tmp/opencode/fr-store-controller-tests.log`, `/tmp/opencode/fr-store-controller-repro.log`, `/tmp/opencode/fr-store-controller-analyze.log`.
 - 2026-10-11: Task 4 dispatched to local Qwen on base `deb9906` in workspace `wks_456f5abd3290f0d6`, worker `ses_ed7665014ffe67N7wHb8H1Bkle`. Only stateless view and widget tests owned. Baseline 247 full tests passed (`/tmp/opencode/fr-view-baseline-tests.log`). Screen/audio/store integration remains Task 5.
 - 2026-10-11: Task 4 PR #7 reviewed at `93eeddb`: spec compliance and quality approved. Controller full Flutter suite 265 tests passed, analyzer no issues, whitespace check clean. PR #7 merged at `14ec4c8`. Evidence: `/tmp/opencode/fr-view-controller-tests.log`, `/tmp/opencode/fr-view-controller-analyze.log`. Hiding Review mistakes with no unresolved items meets the contract; audio-failure/save-failure UI distinction carried into Task 5.
+- 2026-10-11: Docs/state PR #5 reviewed (docs-only, whitespace clean) and merged at `71970d1`. Task 5 dispatched to local Qwen on that base in workspace `wks_3bfe435ea695759f`, worker `ses_ed7548eb3ffeXqyZ6xwxLH0Xw6`. Controller baseline: 265 full Flutter tests passed (`/tmp/opencode/fr-screen-baseline-tests.log`). Owned screen/router/flow tests only; merged core/store/view and legacy recording/game files are off limits. Final integrated review/build remains pending.
+- 2026-10-11: Task 5 PR #9 reviewed at `9db752f`: lifecycle changes required. Controller reproduced permanent spinner after backgrounded load, discarded failed-answer retry with Next falsely enabled, and missing audio stop on owner change (`/tmp/opencode/fr-screen-review-results.log`). Tests claiming delayed callbacks did not actually complete them. Fix round 1 requested with real completion gates and safe resume reconciliation. No merge.
+- 2026-10-11: Task 5 fix `9db752f..bc6b8e7` re-reviewed: original reproductions pass, but 3 follow-up cases fail (`/tmp/opencode/fr-screen-rereview-results.log`): held answer enables Next while suspended; inactive/resumed events duplicate one save to 3 calls; suspended Finish navigates on inactive before resumed. Fix round 2 requested for explicit suspension state, coalescing and single-exit guards. PR #9 remains unmerged.
+- 2026-10-11: Task 5 fix `bc6b8e7..df29733` scoped re-review approved. Controller: 298 full tests and all 6 lifecycle reproductions passed, analyzer clean, JavaScript web build succeeds, whitespace clean (`/tmp/opencode/fr-screen-controller-*-round2.log`). Existing TTS Wasm dry-run warnings remain nonblocking for JS.
+- 2026-10-11: Whole-pilot controller review `706744a..df29733` found one important unchanged load race: double Retry loading can publish a late result over an already answered session (`/tmp/opencode/fr-final-load-review-results.log`). Single final fix wave requested, including the deferred policy comment correction; PR #9 held until scoped final re-review. Manual real-voice/mobile, reviewed audio/linguistics and broader backlog remain follow-up gates.
+- 2026-10-11: Final wave `df29733..7a6ae08` scoped re-review approved: load retries coalesced before redraw, orphaned load identity guards late publication, owner/resume recovery remains possible with hung old loads; policy change is comment-only. Controller 301 full tests, 7 load/lifecycle reproductions, analyzer and JS build pass, whitespace/worktree clean. PR #9 merged at `a4a5f33`. No important findings remain; one nonfunctional comparative-comment nit deferred with ruling.
+- 2026-10-11: Published merge brought into the isolated controller workspace without changing local main or worker branches. `frontend/` diff against `origin/main` empty; merged-tree 301 tests passed, analyzer clean, JS web build successful (`/tmp/opencode/fr-merged-*.log`). Final state prepared in docs PR #8. All five tasks complete; broader backlog remains queued.
 
 ## Deferred minor findings for final review
 
-- Task 1 `lesson_policy.dart` bool-subtype comment is false: Dart bool is not a subtype of int. The explicit guard is redundant but harmless; correct the comment/report at final cleanup. No behavior blocker.
+- Original Dart bool-subtype comment: corrected in `7a6ae08`, runtime guard unchanged; report's false rationale superseded without deleting prior evidence.
+- Final comment at `lesson_policy.dart:89` adds a misleading “unlike TypeScript” comparison (TypeScript has no `int` type and its boolean is not a numeric subtype either). Documentation-only, deferred under ruling 15; no behavior blocker.
