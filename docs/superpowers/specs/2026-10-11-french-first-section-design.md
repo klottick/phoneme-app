@@ -81,6 +81,10 @@ Expose read-only `itemIds`, `queue`, `position`, `round`, `attemptCount`,
 `sessionId`, `contentRevision`, `policy`, `phase`, `answered`, `lastCorrect`,
 `currentItemId`, `latestAnswers`, `unresolvedItemIds`, `correctCount`,
 `answeredItemCount`, `canComplete`.
+`answered` is a boolean: true only when the current exercise item was submitted
+in this round, false for an unsubmitted item or debrief. Historical membership
+in `latestAnswers` is not current-round submission. Serialize/validate that bool.
+All exposed collections, including unresolved item IDs, are unmodifiable.
 
 `void submit(bool correct)` records the current outcome and increments attempts
 once, leaving the item visible/answered. `void advance()` requires an answered
@@ -96,6 +100,12 @@ version/content/IDs, unknown or duplicate queued IDs, bad positions/types/counts
 unknown outcomes, inconsistent answered/phase/current outcome, and impossible
 first-pass coverage. All corruption throws `FormatException`, not partial
 restore. The saved policy is authoritative on resume, not a new default.
+First-pass queues must equal the authored ordered IDs and outcomes/counts must
+match the submitted prefix. Review states require full first-pass coverage,
+ordered mistake-only queues, and feasible round/attempt counts. Submitted
+outcomes and `lastCorrect` must agree with the most recent identifiable queued
+submission. At the start of a review round `lastCorrect` retains the previous
+round's last outcome, not the unsubmitted current item's old outcome.
 
 ### Persistence — `lesson_section_store.dart` and existing progress store
 
