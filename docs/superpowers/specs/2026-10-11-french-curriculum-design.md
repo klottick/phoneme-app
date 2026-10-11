@@ -9,6 +9,10 @@ The user selected FR-01 next, then chose **migrate now** rather than an unused
 additive catalogue. This written design is for user review; product implementation
 and worker dispatch wait for written-spec approval and a reviewed execution plan.
 
+Review record: user approved the core design committed at `62e6e98`. Planning
+adds the explicit spelling targetSound clarification below; it is presented with
+the execution plan/contracts for review before implementation.
+
 ## Selected architecture
 
 Move the live `/u/`–`/y/` pilot's exercise definitions into the new typed catalogue.
@@ -86,10 +90,13 @@ No new persistence serialization API is introduced in FR-01.
   kind listeningChoice, skill listening. Expected sound must occur exactly once
   among at least two distinct choices. `legacyItemId` is only the pilot's saved-ID
   compatibility alias, not an alternative catalogue identity.
-- `SpellingChoiceExercise`: `wordId`, ordered immutable `SpellingOption(id,text)`
+- `SpellingChoiceExercise`: `wordId`, explicit `targetSound`, ordered immutable `SpellingOption(id,text)`
   values, `correctOptionId`; kind spellingChoice, skill spelling. At least two
   distinct option IDs/texts; exactly one referenced correct option. No production
   spelling examples are authored in this ticket.
+  Planning clarification: the explicit target lets node/coverage validation know
+  which phoneme this task teaches without inferring it from orthography or every
+  incidental sound in the word. This field is included in the plan-review handoff.
 - `SentenceHuntExercise`: `sentenceId`, `targetSound`; kind sentenceHunt, skill
   listening. Answer locations come from contextual sentence annotations, not
   citation-word membership. No production sentences authored in this ticket.
@@ -246,7 +253,8 @@ Specific constraints:
   Read-aloud is allowed in optional articulation or assessment nodes but never
   implies a valid speaking score. Planned empty nodes skip payload checks only,
   not graph/identity checks; planned nodes with sections are rejected in FR-01.
-- Listening expectedSound belongs to the word's curated citation phonemes.
+- Listening expectedSound and spelling targetSound belong to the word's curated
+  citation phonemes.
   Sentence hunts require at least one matching contextual token and one non-target
   word token; punctuation alone is not a believable distractor.
 - Assessment listening/spelling content may not reuse a practice/game word ID or

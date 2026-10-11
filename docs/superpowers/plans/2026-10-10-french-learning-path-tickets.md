@@ -150,8 +150,10 @@ Run Flutter commands from `frontend/`. Test paths below are existing or planned 
 **Continuation:** User selected FR-01 after the pilot/repair batches and chose
 immediate migration over an unused additive catalogue. The proposed scope is
 [curriculum contracts plus live-pilot content migration](../specs/2026-10-11-french-curriculum-design.md).
-Written-spec review and the detailed execution plan are pending; no FR-01 product
-implementation or downstream feature completion is claimed. The design adds
+The user approved the written migration spec. The detailed
+[execution plan](2026-10-11-french-curriculum.md) and
+[contract revision](../specs/2026-10-10-french-learning-contracts.md) are now pending
+plan review; no FR-01 product implementation or downstream feature completion is claimed. The design adds
 `lesson_section.dart` as the compatibility-projection boundary while preserving
 all saved IDs and existing session/store/UI behavior.
 
