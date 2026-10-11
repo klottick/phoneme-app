@@ -1,0 +1,57 @@
+# Process ledger — first French discovery section
+
+Plan: `docs/superpowers/plans/2026-10-11-french-first-section.md`
+Spec: `docs/superpowers/specs/2026-10-11-french-first-section-design.md`
+Coordinator: current OpenCode session; workers: `ollama/qwen3.8:27b` only.
+Authorization: user requested plan, small local-Qwen tasks, PRs, controller review/merge/state ownership on 2026-10-11.
+
+## State
+
+| Task | State | Branch / workspace | Worker | PR / merge | Verification |
+|---|---|---|---|---|---|
+| Planning | ready for docs PR | `docs/french-first-section`, `wks_0f327fd42c4ce757` | controller | pending | scope/interface self-review complete |
+| 1 policy | queued | — | — | — | — |
+| 2 content/session | blocked: 1 | — | — | — | — |
+| 3 persistence | blocked: 2 | — | — | — | — |
+| 4 view | blocked: 2; serial after 3 | — | — | — | — |
+| 5 screen/routes | blocked: 3, 4 | — | — | — | — |
+| Final verification | blocked: 5 | — | controller | — | — |
+
+## Baselines and constraints
+
+- Inspected local source `4dff777`: 172 Flutter tests passed on 2026-10-11.
+- Published base is `origin/main` at `706744a`: 128 Flutter tests passed; analyzer reported no issues on 2026-10-11. Evidence: `/tmp/opencode/french-remote-baseline-tests.log`, `/tmp/opencode/french-remote-baseline-analyze.log`.
+- Existing local `main`/`feat/phoneme-word-match` include `af7e871`, `4dff777`, not yet on GitHub. Preserve and do not publish these as part of lesson PRs.
+- GitHub CLI authenticated; no open PRs at initial inspection.
+- Native Paseo worktrees explicitly use existing project `prj_b4a8c55c34b2481e` (`phoneme-app`).
+- No automatic unattended daemon promised: this ledger is the durable resume point for coordinating sessions.
+
+## Rulings and costs
+
+1. Ruling: execute the first `/u/`–`/y/` slice, not all 19 draft tickets at once — matches the recommended next step the user accepted; cost if wrong: later requested features remain queued.
+2. Ruling: ten existing curated examples, finite first pass then mistake-only review rounds — makes 80% an exact 8/10 and explanation timing deterministic; cost if wrong: retune section size/retry pacing, not rewrite evidence.
+3. Ruling: first-pass debrief is available below 80%; completion remains gated — avoids withholding explanations from struggling learners; cost if wrong: adjust phase/gating policy.
+4. Ruling: use labeled existing device French TTS for this practice-only slice and defer new recordings/generation — no approved recording source and user requested simplicity; cost if wrong: device voice limitations persist until reviewed assets land.
+5. Ruling: workers implement sequentially on local Qwen; controller performs independent spec/quality review and merge — user explicitly assigned review to controller; cost if wrong: no separate reviewer model on these tasks.
+6. Ruling: create and execute this scoped plan under the user's explicit create-plan-then-delegate authorization rather than repeat approval prompts — confirmed behavior is binding and remaining defaults are public; cost if wrong: user can request policy changes/rework.
+7. Ruling: base PRs on published `origin/main`, not the two unpublished local commits — avoid publishing other work without bundling approval; cost if wrong: remote pilot verification does not include the newer Sound Match until its separate publication.
+
+## Preflight dependency/interface scan
+
+| Task/pair | Check | Finding / decision |
+|---|---|---|
+| 1 | Tests vs policy contract/files | Integer rounding, validation and JSON all defined; 2 files only. |
+| 2 | Tests vs content/session contract/files | Ten IDs, state transitions, strict restore defined; no storage/UI. |
+| 3 | Tests vs store contract/files | Shared writer and compatible events; no new SQL or outbox event kinds. |
+| 4 | Tests vs view contract/files | Stateless callbacks; screen remains sole I/O owner. |
+| 5 | Tests vs screen/router contract/files | Pilot-only route preserves legacy recording flow; all dependencies merged first. |
+| 1 ↔ 2,5 | Policy production/consumption | Session snapshots store policy; new defaults cannot change resumed eligibility. |
+| 2 ↔ 3,4,5 | Content/session production/consumption | Exact fields/methods live in reachable spec; consumers cannot invent their own schema. |
+| 3 ↔ 5 | Store/provider production/consumption | Same typed facade enables fake failures/account switches in tests. |
+| 4 ↔ 5 | View callback production/consumption | No view-side persistence; screen controls heard/busy/error gating. |
+| 3 ↔ legacy progress | Shared `course_progress.dart` | Preserve `_update` serialization and unknown data; tests cover existing arcade/sync calls. |
+| 5 ↔ legacy routing | Shared `app_router.dart`/flow test | Modify only pilot branch; do not rewrite non-pilot screens or microphone tests. |
+
+## Execution log
+
+- 2026-10-11: Model resolved as `ollama/qwen3.8:27b`; isolated planning workspace created under the existing project. No implementation worker dispatched yet.
