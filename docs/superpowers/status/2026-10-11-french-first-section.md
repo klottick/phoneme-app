@@ -11,7 +11,7 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 |---|---|---|---|---|---|
 | Planning | merged | `docs/french-first-section`, `wks_0f327fd42c4ce757` | controller | [#1](https://github.com/klottick/phoneme-app/pull/1), `2ee916e` | docs-only scope/whitespace review; remote baseline 128 tests/analyzer clean |
 | 1 policy | merged | `feat/fr-section-policy`, `wks_30e17a2a110b4685` | `ses_ed7b28857ffekgx7UgLTvK1dUe` | [#2](https://github.com/klottick/phoneme-app/pull/2), head `382f530`, merge `7130cb9` | controller: 161 full tests pass, analyzer clean; invalid-value reproduction fixed |
-| 2 content/session | review fixes requested (round 1) | `feat/fr-section-session`, `wks_c449fb2828dcbebc` | `ses_ed7aabf1cffe8amV18675aLqw4` | [#4](https://github.com/klottick/phoneme-app/pull/4), `53f519b`, not merged | worker: 203 tests/analyzer pass; controller reproduced 7 accepted impossible snapshots |
+| 2 content/session | review fixes requested (round 2) | `feat/fr-section-session`, `wks_c449fb2828dcbebc` | `ses_ed7aabf1cffe8amV18675aLqw4` | [#4](https://github.com/klottick/phoneme-app/pull/4), `b08799c`, not merged | worker: 217 tests/analyzer pass; controller: original cases rejected, new null-lastCorrect regression found |
 | 3 persistence | blocked: 2 | — | — | — | — |
 | 4 view | blocked: 2; serial after 3 | — | — | — | — |
 | 5 screen/routes | blocked: 3, 4 | — | — | — | — |
@@ -62,6 +62,7 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 - 2026-10-11: Task 1 fix `382f530` re-reviewed: important findings addressed; spec compliance and task quality approved. Controller ran full Flutter tests (161 pass), analyzer (no issues), whitespace check, and invalid-value reproduction (all FormatException). Evidence: `/tmp/opencode/fr-policy-controller-tests.log`, `/tmp/opencode/fr-policy-controller-analyze.log`. PR #2 merged at `7130cb9`.
 - 2026-10-11: Task 2 dispatched on local Qwen, base `7130cb9`; new isolated workspace baseline 161 tests passed (`/tmp/opencode/fr-session-baseline-tests.log`). Only content/session and their tests are owned.
 - 2026-10-11: Task 2 PR #4 reviewed at `53f519b`; content approved, session changes required. Reproduction accepted contradictory outcomes, missing/future coverage, shortened queue, inflated counts and invalid review state. Fix round 1 requested; explicit answered-bool contract added before dependent work.
+- 2026-10-11: Task 2 fix round 1 `53f519b..b08799c` re-reviewed; original findings addressed. New regression: removed zero-attempt/null-lastCorrect equivalence permits losing the prior outcome at review start. Reproduced using updated bool-schema snapshots; narrow fix round 2 requested. PR #4 remains unmerged.
 
 ## Deferred minor findings for final review
 
