@@ -147,6 +147,16 @@ Run Flutter commands from `frontend/`. Test paths below are existing or planned 
 
 ### FR-01 — Author the curriculum and exercise contracts
 
+**Continuation:** User selected FR-01 after the pilot/repair batches and chose
+immediate migration over an unused additive catalogue. The proposed scope is
+[curriculum contracts plus live-pilot content migration](../specs/2026-10-11-french-curriculum-design.md).
+The user approved the written migration spec. The detailed
+[execution plan](2026-10-11-french-curriculum.md) and
+[contract revision](../specs/2026-10-10-french-learning-contracts.md) are now pending
+plan review; no FR-01 product implementation or downstream feature completion is claimed. The design adds
+`lesson_section.dart` as the compatibility-projection boundary while preserving
+all saved IDs and existing session/store/UI behavior.
+
 **Priority:** P0. **Owner:** curriculum/model agent. **Depends on:** FR-00.
 
 **Files:** Create `frontend/lib/src/core/course/course_curriculum.dart`, `course_exercise.dart`, `course_content_validator.dart`; modify `french_course.dart`; create `frontend/test/unit/course_content_test.dart`.
