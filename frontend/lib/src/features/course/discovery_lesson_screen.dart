@@ -282,8 +282,15 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     }
     Map<String, dynamic>? json;
     Object? failure;
+    bool corruptEntry = false;
     try {
       json = await store.loadLessonSection(widget.lessonId);
+    } on FormatException {
+      // An unusable entry — an unparseable checkpoint or processed metadata
+      // that does not match the stored checkpoint — follows the corrupt
+      // snapshot contract: start fresh with the notice, and write nothing
+      // until the learner saves a new step (which replaces the entry).
+      corruptEntry = true;
     } catch (error) {
       failure = error;
     }
@@ -300,6 +307,10 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
         _busy = false;
         _loadError = _loadErrorText;
       });
+      return;
+    }
+    if (corruptEntry) {
+      _publishFresh(section, _corruptText);
       return;
     }
     if (json == null) {

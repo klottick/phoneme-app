@@ -23,7 +23,12 @@ final lessonSectionStoreProvider = Provider<LessonSectionStore>((ref) {
 });
 
 /// Local-first course data. One serialized writer prevents concurrent game
-/// answers from overwriting one another. Legacy language-only data is untouched.
+/// answers from overwriting one another. Legacy language-only data is
+/// untouched. Public reads and outbox delivery are serialized on the same
+/// chain, so they expose only committed documents: the shared_preferences
+/// package updates its in-process cache before a platform write resolves,
+/// and an uncoordinated read would otherwise surface (and `sync()` could
+/// even upload) a write that is still in flight or already rejected.
 class CourseProgressStore implements LessonSectionStore {
   CourseProgressStore(this.courseId)
       : userId = courseBackend?.auth.currentUser?.id;
@@ -34,7 +39,30 @@ class CourseProgressStore implements LessonSectionStore {
   String get key => 'course.v1.$storageScope';
   static Future<void>? _syncing;
 
-  Future<Map<String, dynamic>> load() async {
+  /// Runs [task] serially with every other read or write.
+  ///
+  /// The caller's future rethrows [task]'s failure; the chain itself
+  /// continues. A reader queued on the chain waits out in-flight writers —
+  /// each failed write has repaired the in-process cache before it settles —
+  /// and no writer can run until a queued reader has finished. Writers never
+  /// await backend delivery, and readers never await writers beyond the
+  /// chain, so nothing in here can deadlock or stall on the network.
+  Future<T> _serialize<T>(FutureOr<T> Function() task) {
+    final Future<T> operation =
+        (_writes ?? Future<void>.value()).then<T>((_) => task());
+    final Future<void> tail =
+        operation.then<void>((_) {}, onError: (Object _) {});
+    _writes = tail;
+    tail.then<void>((_) {
+      if (identical(_writes, tail)) _writes = null;
+    });
+    return operation;
+  }
+
+  /// Reads the progress document without chain coordination. Writers use
+  /// this from inside the chain; public reads must go through [load], which
+  /// is serialized with the writers.
+  Future<Map<String, dynamic>> _read() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(key);
     if (raw != null) {
@@ -56,9 +84,16 @@ class CourseProgressStore implements LessonSectionStore {
     };
   }
 
+  /// Committed-only progress document: serialized on the writer chain so the
+  /// caller never observes an in-flight or later-rejected preferences
+  /// document.
+  Future<Map<String, dynamic>> load() {
+    return _serialize<Map<String, dynamic>>(_read);
+  }
+
   Future<void> _update(void Function(Map<String, dynamic>) change) {
-    final operation = (_writes ?? Future<void>.value()).then((_) async {
-      final data = await load();
+    return _serialize<void>(() async {
+      final data = await _read();
       final prefs = await SharedPreferences.getInstance();
       final String? lastCommitted = prefs.getString(key);
       change(data);
@@ -86,12 +121,6 @@ class CourseProgressStore implements LessonSectionStore {
         }
       }
     });
-    final tail = operation.catchError((Object _) {});
-    _writes = tail;
-    tail.then((_) {
-      if (identical(_writes, tail)) _writes = null;
-    });
-    return operation;
   }
 
   void _queue(Map<String, dynamic> data, Map<String, dynamic> event) {
@@ -109,7 +138,10 @@ class CourseProgressStore implements LessonSectionStore {
     });
   }
 
-  /// Retryable, idempotent cloud delivery. A failed request retains its outbox.
+  /// Retryable, idempotent cloud delivery. A failed request retains its
+  /// outbox. The outbox state is read only after any in-flight write has
+  /// committed or been repaired, so an in-flight optimistic event is never
+  /// delivered; backend delivery itself happens outside the writer chain.
   Future<bool> sync() async {
     final client = courseBackend;
     final user = client?.auth.currentUser;
@@ -159,7 +191,8 @@ class CourseProgressStore implements LessonSectionStore {
   void _applyAnswer(
       Map<String, dynamic> data, String sound, String skill, bool correct) {
     final evidence = data['evidence'] as Map;
-    final entry = Map<String, dynamic>.from(evidence['$skill:$sound'] as Map? ?? {});
+    final entry =
+        Map<String, dynamic>.from(evidence['$skill:$sound'] as Map? ?? {});
     final attempts = (entry['attempts'] as int? ?? 0) + 1;
     final hits = (entry['correct'] as int? ?? 0) + (correct ? 1 : 0);
     evidence['$skill:$sound'] = {
@@ -167,9 +200,8 @@ class CourseProgressStore implements LessonSectionStore {
       'skill': skill,
       'attempts': attempts,
       'correct': hits,
-      'due': DateTime.now()
-          .add(Duration(days: correct ? 1 : 0))
-          .toIso8601String(),
+      'due':
+          DateTime.now().add(Duration(days: correct ? 1 : 0)).toIso8601String(),
     };
   }
 
@@ -204,8 +236,8 @@ class CourseProgressStore implements LessonSectionStore {
   LessonSection _requireSection(String lessonId) {
     final section = sectionForLesson(lessonId);
     if (section == null) {
-      throw ArgumentError.value(
-          lessonId, 'lessonId', 'No discovery section is supported for this lesson.');
+      throw ArgumentError.value(lessonId, 'lessonId',
+          'No discovery section is supported for this lesson.');
     }
     return section;
   }
@@ -249,6 +281,63 @@ class CourseProgressStore implements LessonSectionStore {
     }
   }
 
+  /// Whether the entry's processed metadata is canonical for [stored]:
+  /// `processedSessionId` must be the checkpoint's own session and
+  /// `processedAttemptCount` exactly the checkpoint's attempt count (the
+  /// writers maintain this invariant, so any other value — mismatched,
+  /// missing, wrong-typed, negative, or inflated — is corrupt).
+  bool _canonicalMetadata(
+      LessonSectionSession stored, Map<String, dynamic> entry) {
+    final Object? sessionId = entry['processedSessionId'];
+    if (sessionId is! String || sessionId.isEmpty) {
+      return false;
+    }
+    if (sessionId != stored.sessionId) {
+      return false;
+    }
+    final Object? count = entry['processedAttemptCount'];
+    if (count is! int) {
+      return false; // Missing, wrong-type, or negative: all non-canonical.
+    }
+    return count == stored.attemptCount;
+  }
+
+  /// A stored entry is usable only when its checkpoint parses and its
+  /// processed metadata is canonical for that checkpoint. A corrupt entry is
+  /// treated as if no session were saved: writers apply the new-session
+  /// rules and the first valid write replaces the entry, preserving legacy
+  /// data and sibling entries. This is what keeps a corrupted counter from
+  /// ever swallowing a genuinely new answer as a "duplicate".
+  LessonSectionSession? _usableStored(
+      LessonSection section, Map<String, dynamic>? entry) {
+    final stored = _storedSection(section, entry);
+    if (stored == null || entry == null) {
+      return null;
+    }
+    if (!_canonicalMetadata(stored, entry)) {
+      return null;
+    }
+    return stored;
+  }
+
+  /// Reports an unusable stored entry with the same [FormatException]
+  /// contract as an unusable checkpoint; the screen starts a fresh session
+  /// with the recover-notice and the next valid save replaces the entry.
+  void _requireCanonicalEntry(
+      LessonSection section, Map<String, dynamic> entry) {
+    final Object? checkpoint = entry['checkpoint'];
+    if (checkpoint is Map) {
+      final stored = _parseSnapshot(
+          section, checkpoint.cast<String, dynamic>()); // May throw.
+      if (!_canonicalMetadata(stored, entry)) {
+        throw FormatException(
+            'The stored processed metadata does not match the saved '
+            'checkpoint (processedSessionId: ${entry['processedSessionId']}, '
+            'processedAttemptCount: ${entry['processedAttemptCount']}).');
+      }
+    }
+  }
+
   void _ensureCurrentOwner() {
     final user = courseBackend?.auth.currentUser;
     if (user == null) {
@@ -269,8 +358,9 @@ class CourseProgressStore implements LessonSectionStore {
   void _writeSection(Map<String, dynamic> data, String lessonId,
       Map<String, dynamic> checkpoint, String sessionId, int attemptCount) {
     final existing = data['sections'];
-    final Map<String, dynamic> sections =
-        existing is Map ? Map<String, dynamic>.from(existing) : <String, dynamic>{};
+    final Map<String, dynamic> sections = existing is Map
+        ? Map<String, dynamic>.from(existing)
+        : <String, dynamic>{};
     data['sections'] = sections;
     sections[lessonId] = {
       'checkpoint': checkpoint,
@@ -320,8 +410,7 @@ class CourseProgressStore implements LessonSectionStore {
     }
     final raw = checkpoint.cast<String, dynamic>();
     try {
-      if (_deepEquals(
-          (_parseSnapshot(section, raw)..advance()).toJson(),
+      if (_deepEquals((_parseSnapshot(section, raw)..advance()).toJson(),
           candidate.toJson())) {
         return true;
       }
@@ -345,9 +434,18 @@ class CourseProgressStore implements LessonSectionStore {
   @override
   Future<Map<String, dynamic>?> loadLessonSection(String lessonId) async {
     final data = await load();
-    final checkpoint = _sectionEntry(data, lessonId)?['checkpoint'];
+    final entry = _sectionEntry(data, lessonId);
+    final checkpoint = entry?['checkpoint'];
     if (checkpoint is! Map) {
       return null;
+    }
+    final section = sectionForLesson(lessonId);
+    if (section != null && entry != null) {
+      // An unusable entry — an unparseable checkpoint or non-canonical
+      // processed metadata — is reported with the same FormatException
+      // contract as an unusable snapshot; the caller starts a fresh session
+      // and the next valid save replaces the entry.
+      _requireCanonicalEntry(section, entry);
     }
     return checkpoint.cast<String, dynamic>();
   }
@@ -363,7 +461,7 @@ class CourseProgressStore implements LessonSectionStore {
     return _update((data) {
       _ensureCurrentOwner();
       final entry = _sectionEntry(data, lessonId);
-      final stored = _storedSection(section, entry);
+      final stored = _usableStored(section, entry);
       if (stored == null) {
         if (candidate.attemptCount != 0) {
           throw StateError(
@@ -378,24 +476,31 @@ class CourseProgressStore implements LessonSectionStore {
       }
       if (candidate.sessionId != stored.sessionId) {
         if (candidate.attemptCount != 0) {
-          throw StateError(
+          throw LessonSectionConflictException(
               'A new session starts at attempt zero; switching session IDs '
               'mid-answer is rejected.');
         }
         _writeSection(data, lessonId, frozen, candidate.sessionId, 0);
         return;
       }
-      if (!_reachesFrom(
-          section, entry, candidate,
-          reviewAllowed: true)) {
+      if (!_reachesFrom(section, entry, candidate, reviewAllowed: true)) {
+        if (candidate.attemptCount <= stored.attemptCount) {
+          // A valid snapshot from the stored session at or behind the
+          // stored state: either a stale same-owner instance, or an equal
+          // count it diverged at (another instance committed a different
+          // outcome for the same attempt and advanced). Both are reloadable
+          // conflicts, not fabrications.
+          throw LessonSectionConflictException(
+              'This snapshot is behind the stored session or a state it '
+              'diverged from at the same attempt count; it is a stale '
+              'same-owner instance, not a valid save.');
+        }
         throw StateError(
             'This snapshot is not a valid save from the stored session; '
             'unrecorded answers and changed outcomes are rejected.');
       }
-      final processed =
-          (entry?['processedAttemptCount'] as int?) ?? stored.attemptCount;
       _writeSection(
-          data, lessonId, frozen, stored.sessionId, processed);
+          data, lessonId, frozen, stored.sessionId, stored.attemptCount);
     });
   }
 
@@ -428,7 +533,7 @@ class CourseProgressStore implements LessonSectionStore {
     return _change((data) {
       _ensureCurrentOwner();
       final entry = _sectionEntry(data, lessonId);
-      final stored = _storedSection(section, entry);
+      final stored = _usableStored(section, entry);
       final Object? rawStored = entry?['checkpoint'];
       if (stored == null || rawStored is! Map) {
         // A session's first answer replays as exactly one submit on the
@@ -445,21 +550,23 @@ class CourseProgressStore implements LessonSectionStore {
               'A new session may only record its first answer on a fresh '
               'first pass.');
         }
-        _recordSectionAnswer(data, lessonId, frozen, candidate.sessionId,
-            1, sound, correct);
+        _recordSectionAnswer(
+            data, lessonId, frozen, candidate.sessionId, 1, sound, correct);
         return;
       }
       if (candidate.sessionId != stored.sessionId) {
-        throw StateError(
+        throw LessonSectionConflictException(
             'Refusing to record for a different session on a started lesson.');
       }
-      final processed =
-          (entry!['processedAttemptCount'] as int?) ?? stored.attemptCount;
+      // Counters are canonical for a usable entry: the checkpoint's session
+      // and its attempt count. A corrupt entry is unusable (above), so a new
+      // answer can never be swallowed as a duplicate of inflated metadata.
+      final processed = stored.attemptCount;
       if (candidate.attemptCount <= processed) {
         return; // Duplicate or older checkpoint: no-op, never a revert.
       }
       if (candidate.attemptCount != processed + 1) {
-        throw StateError(
+        throw LessonSectionConflictException(
             'Answer checkpoints must continue the session with no gaps.');
       }
       // The incoming checkpoint must be the stored state with exactly one
@@ -485,9 +592,14 @@ class CourseProgressStore implements LessonSectionStore {
     });
   }
 
-  void _recordSectionAnswer(Map<String, dynamic> data, String lessonId,
-      Map<String, dynamic> checkpoint, String sessionId, int attemptCount,
-      String sound, bool correct) {
+  void _recordSectionAnswer(
+      Map<String, dynamic> data,
+      String lessonId,
+      Map<String, dynamic> checkpoint,
+      String sessionId,
+      int attemptCount,
+      String sound,
+      bool correct) {
     _applyAnswer(data, sound, 'listening', correct);
     _queue(data, {
       'kind': 'answer',
@@ -496,8 +608,7 @@ class CourseProgressStore implements LessonSectionStore {
       'correct': correct,
       'activity': 'discovery-section'
     });
-    _writeSection(
-        data, lessonId, checkpoint, sessionId, attemptCount);
+    _writeSection(data, lessonId, checkpoint, sessionId, attemptCount);
   }
 
   @override
@@ -506,8 +617,7 @@ class CourseProgressStore implements LessonSectionStore {
     final section = _requireSection(lessonId);
     final candidate = _parseSnapshot(section, checkpoint);
     if (!candidate.canComplete) {
-      throw StateError(
-          'The section has not met its completion policy yet.');
+      throw StateError('The section has not met its completion policy yet.');
     }
     // Freeze the validated snapshot at call time; the mutable caller map and
     // any unknown raw payload keys are never persisted.
@@ -515,31 +625,40 @@ class CourseProgressStore implements LessonSectionStore {
     return _change((data) {
       _ensureCurrentOwner();
       final entry = _sectionEntry(data, lessonId);
-      final stored = _storedSection(section, entry);
+      final stored = _usableStored(section, entry);
       if (stored == null) {
         throw StateError(
             'Completing requires a saved session for this lesson.');
       }
       if (candidate.sessionId != stored.sessionId) {
-        throw StateError(
+        throw LessonSectionConflictException(
             'Refusing to complete a session that is not the stored one.');
       }
-      final processed =
-          (entry?['processedAttemptCount'] as int?) ?? stored.attemptCount;
-      if (candidate.attemptCount != processed) {
+      final processed = stored.attemptCount;
+      if (candidate.attemptCount > processed) {
         throw StateError(
             'Completing requires the last recorded state; unrecorded '
             'answers are rejected.');
       }
+      if (candidate.attemptCount < processed) {
+        throw LessonSectionConflictException(
+            'Completing requires the last recorded state; a checkpoint '
+            'behind the stored one is a stale instance, not a completion.');
+      }
       final storedState = _deepEquals(stored.toJson(), candidate.toJson());
       if (!storedState &&
           !_reachesFrom(section, entry, candidate, reviewAllowed: false)) {
-        throw StateError(
-            'This snapshot is not a valid completion state of the stored '
-            'session.');
+        // Reaching this check, the candidate is at the stored attempt count
+        // and is a valid state of the same session that the store has not
+        // accepted: a stale or divergent same-owner instance (for example
+        // one where a different outcome was committed for the last
+        // attempt). It is reloadable, not a fabrication.
+        throw LessonSectionConflictException(
+            'This snapshot does not match the stored session at the same '
+            'attempt count; it is a stale or divergent same-owner '
+            'instance, not a valid completion state.');
       }
-      _writeSection(
-          data, lessonId, frozen, stored.sessionId, processed);
+      _writeSection(data, lessonId, frozen, stored.sessionId, processed);
       final lessons = data['lessons'] as List;
       if (!lessons.contains(lessonId)) {
         lessons.add(lessonId);
