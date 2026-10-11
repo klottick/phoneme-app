@@ -13,8 +13,8 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 | 1 policy | merged | `feat/fr-section-policy`, `wks_30e17a2a110b4685` | `ses_ed7b28857ffekgx7UgLTvK1dUe` | [#2](https://github.com/klottick/phoneme-app/pull/2), head `382f530`, merge `7130cb9` | controller: 161 full tests pass, analyzer clean; invalid-value reproduction fixed |
 | 2 content/session | merged | `feat/fr-section-session`, `wks_c449fb2828dcbebc` | `ses_ed7aabf1cffe8amV18675aLqw4` | [#4](https://github.com/klottick/phoneme-app/pull/4), head `3a9bf82`, merge `77117b7` | controller: 219 full tests pass, analyzer clean, 8 invalid snapshots rejected |
 | 3 persistence | merged | `feat/fr-section-persistence`, `wks_bccf671bff3e1262` | `ses_ed78b449dffelAD0FF2yNlyWif` | [#6](https://github.com/klottick/phoneme-app/pull/6), head `87d80f7`, merge `deb9906` | controller: 247 full tests and 5 targeted regressions pass; analyzer clean |
-| 4 view | implementing | `feat/fr-section-view`, `wks_456f5abd3290f0d6` | `ses_ed7665014ffe67N7wHb8H1Bkle` | pending, base `deb9906` | controller baseline: 247 tests pass |
-| 5 screen/routes | blocked: 3, 4 | — | — | — | — |
+| 4 view | merged | `feat/fr-section-view`, `wks_456f5abd3290f0d6` | `ses_ed7665014ffe67N7wHb8H1Bkle` | [#7](https://github.com/klottick/phoneme-app/pull/7), head `93eeddb`, merge `14ec4c8` | controller: 265 full tests pass; analyzer clean |
+| 5 screen/routes | ready for dispatch | — | — | — | Dependencies 3–4 merged |
 | Final verification | blocked: 5 | — | controller | — | — |
 
 ## Baselines and constraints
@@ -38,6 +38,7 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 8. Ruling: serialized policy percentages must be `int` 1–100; reject doubles/nonfinite values with FormatException — actual JSON integer decoding is `int`, verified on the SDK, and the contract specifies integer percentages; cost if wrong: maps carrying `80.0` need upstream normalization. Unknown keys can be ignored; canonical serialization still emits one key.
 9. Ruling: `answered` is current-round/current-item boolean submission status, not a Set of historical answers; latestAnswers and answeredItemCount provide aggregate coverage — necessary for retry gating and the consuming store/view contracts; cost if wrong: unshipped session snapshots/tests require schema adjustment. All exposed collections are unmodifiable.
 10. Ruling: failed writes must restore same-process reads to last committed data, not merely leave physical disk unchanged — UI retries without restart and subsequent writers share the preferences cache; cost if wrong: a platform reload on failures, no success-path migration. Explicit fresh saves may recover unusable section state while preserving legacy data and valid sibling sections.
+11. Ruling: the view's `error`/`Retry saving` path is for persistence failures; playback failures use separate generic audio feedback and allow Listen again — avoids presenting a save action for a microphone-free playback error; cost if wrong: the screen's audio notification UI may need refinement. Never display raw exceptions that can contain the hidden word/answer.
 
 ## Preflight dependency/interface scan
 
@@ -69,6 +70,7 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 - 2026-10-11: Status rechecked at user request: Task 3 opened PR #6 at `96e698c`. Controller review changes required: answer recording omits submit replay and accepts historical-outcome/policy changes; mutable input can bypass validation; failed writes poison same-process cache; corrupt sections cannot recover. Five targeted regressions fail (`/tmp/opencode/fr-store-review-results.log`). Fix round 1 requested; no merge or duplicate implementation dispatched.
 - 2026-10-11: Task 3 fix `96e698c..87d80f7` reviewed: important findings addressed, spec compliance and quality approved. Controller verified 247 full Flutter tests and all 5 targeted regressions passed; analyzer and whitespace checks clean. PR #6 merged at `deb9906`. Evidence: `/tmp/opencode/fr-store-controller-tests.log`, `/tmp/opencode/fr-store-controller-repro.log`, `/tmp/opencode/fr-store-controller-analyze.log`.
 - 2026-10-11: Task 4 dispatched to local Qwen on base `deb9906` in workspace `wks_456f5abd3290f0d6`, worker `ses_ed7665014ffe67N7wHb8H1Bkle`. Only stateless view and widget tests owned. Baseline 247 full tests passed (`/tmp/opencode/fr-view-baseline-tests.log`). Screen/audio/store integration remains Task 5.
+- 2026-10-11: Task 4 PR #7 reviewed at `93eeddb`: spec compliance and quality approved. Controller full Flutter suite 265 tests passed, analyzer no issues, whitespace check clean. PR #7 merged at `14ec4c8`. Evidence: `/tmp/opencode/fr-view-controller-tests.log`, `/tmp/opencode/fr-view-controller-analyze.log`. Hiding Review mistakes with no unresolved items meets the contract; audio-failure/save-failure UI distinction carried into Task 5.
 
 ## Deferred minor findings for final review
 

@@ -162,6 +162,10 @@ requires fresh playback before answering; disposal stops audio.
 Submission shows correctness immediately while persistence is pending; Next and
 Finish stay disabled until save succeeds. Failed save exposes `Retry saving`
 using the same session/attempt, never records it twice, and never advances.
+The view's `error` and `Retry saving` action are for persistence failures.
+Playback failure uses separate generic feedback (for example, a snackbar),
+keeps `heard=false`, and allows a new Listen attempt. Do not display raw
+exceptions or diagnostic snapshot data: they may contain the hidden answer.
 Advance/review use a validated session clone and publish the new phase only after
 a successful save. Finish calls `completeLessonSection`, except `review=true`
 only saves and leaves existing completions unchanged. Only successful Finish
