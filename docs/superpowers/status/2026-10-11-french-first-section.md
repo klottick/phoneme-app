@@ -10,8 +10,8 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 | Task | State | Branch / workspace | Worker | PR / merge | Verification |
 |---|---|---|---|---|---|
 | Planning | merged | `docs/french-first-section`, `wks_0f327fd42c4ce757` | controller | [#1](https://github.com/klottick/phoneme-app/pull/1), `2ee916e` | docs-only scope/whitespace review; remote baseline 128 tests/analyzer clean |
-| 1 policy | review fixes requested (round 1) | `feat/fr-section-policy`, `wks_30e17a2a110b4685` | `ses_ed7b28857ffekgx7UgLTvK1dUe` | [#2](https://github.com/klottick/phoneme-app/pull/2), `b17e457`, not merged | worker: 29 policy tests/analyzer pass; controller reproduced infinity validation bug |
-| 2 content/session | blocked: 1 | — | — | — | — |
+| 1 policy | merged | `feat/fr-section-policy`, `wks_30e17a2a110b4685` | `ses_ed7b28857ffekgx7UgLTvK1dUe` | [#2](https://github.com/klottick/phoneme-app/pull/2), head `382f530`, merge `7130cb9` | controller: 161 full tests pass, analyzer clean; invalid-value reproduction fixed |
+| 2 content/session | implementing | `feat/fr-section-session`, `wks_c449fb2828dcbebc` | `ses_ed7aabf1cffe8amV18675aLqw4` | pending, base `7130cb9` | controller baseline: 161 tests pass |
 | 3 persistence | blocked: 2 | — | — | — | — |
 | 4 view | blocked: 2; serial after 3 | — | — | — | — |
 | 5 screen/routes | blocked: 3, 4 | — | — | — | — |
@@ -58,3 +58,9 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 - 2026-10-11: Model resolved as `ollama/qwen3.8:27b`; isolated planning workspace created under the existing project. No implementation worker dispatched yet.
 - 2026-10-11: Docs PR #1 reviewed and merged at `2ee916e`; worker Task 1 dispatched on `ollama/qwen3.8:27b`, session `ses_ed7b28857ffekgx7UgLTvK1dUe`, base `2ee916e`. Only policy/tests allowed; worker must create PR and may not merge.
 - 2026-10-11: Task 1 PR #2 reviewed at `b17e457`; scoped policy is sound except invalid infinity escapes as UnsupportedError and JSON-type justification is incorrect. Fix round 1 requested with stricter integer decoding, malformed-value/real JSON round-trip tests, and formatting. No merge yet.
+- 2026-10-11: Task 1 fix `382f530` re-reviewed: important findings addressed; spec compliance and task quality approved. Controller ran full Flutter tests (161 pass), analyzer (no issues), whitespace check, and invalid-value reproduction (all FormatException). Evidence: `/tmp/opencode/fr-policy-controller-tests.log`, `/tmp/opencode/fr-policy-controller-analyze.log`. PR #2 merged at `7130cb9`.
+- 2026-10-11: Task 2 dispatched on local Qwen, base `7130cb9`; new isolated workspace baseline 161 tests passed (`/tmp/opencode/fr-session-baseline-tests.log`). Only content/session and their tests are owned.
+
+## Deferred minor findings for final review
+
+- Task 1 `lesson_policy.dart` bool-subtype comment is false: Dart bool is not a subtype of int. The explicit guard is redundant but harmless; correct the comment/report at final cleanup. No behavior blocker.
