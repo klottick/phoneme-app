@@ -86,16 +86,26 @@ abstract class LessonSectionStore {
 /// attempt, or diverged from the stored one at the same attempt count where
 /// another instance of the same session committed a different outcome).
 ///
-/// All invalid and conflicting state is rejected without persisting anything,
-/// and the failure type says what retrying can achieve:
-/// - this typed conflict: the store's state moved ahead of the snapshot, so
-///   an explicit reload of the saved state and redoing the step can succeed;
-/// - a [FormatException] from malformed input (a checkpoint that is not a
-///   parseable snapshot, or an unusable stored entry): recovered by the fresh
-///   session's next valid save;
-/// - a plain [StateError] from fabricated answers, rewritten outcomes, an
-///   unrecorded ahead, or ownership/account rejection: resending the same
-///   input never succeeds.
+/// Every rejected or conflicting write is refused without persisting
+/// anything; the failure type says what kind of input was refused:
+/// - a malformed snapshot or metadata — a caller checkpoint that is not a
+///   parseable snapshot, or an unusable stored entry (corrupt checkpoint or
+///   processed metadata) encountered at load — fails with a [FormatException];
+/// - a validly captured snapshot that conflicts with the store's advanced
+///   state (a different or stale session, a diverged outcome at the same
+///   attempt count, a gap in the answer sequence) fails with this typed
+///   conflict; an explicit reload of the saved state, then redoing the step,
+///   can succeed;
+/// - any other rejected input or ownership/auth failure — fabricated answers,
+///   rewritten outcomes already committed, mismatched sound or correctness,
+///   a first answer that is not a fresh first pass, ownership/account
+///   rejection — fails with a plain [StateError]; resending the same input
+///   never succeeds.
+///
+/// Only a corrupt *stored* entry follows the corrupt-snapshot contract (a
+/// fresh session may start, and its next valid save replaces the entry);
+/// malformed caller-supplied input is simply rejected — fresh-save recovery
+/// does not apply to invalid input itself.
 class LessonSectionConflictException extends StateError {
   LessonSectionConflictException(super.message);
 }
