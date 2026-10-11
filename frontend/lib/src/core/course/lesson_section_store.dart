@@ -86,11 +86,16 @@ abstract class LessonSectionStore {
 /// attempt, or diverged from the stored one at the same attempt count where
 /// another instance of the same session committed a different outcome).
 ///
-/// This is distinct from invalid input — fabricated answers, changed
-/// outcomes, unparseable snapshots stay plain [StateError] — and from
-/// ownership/account rejection, which is also plain [StateError]. Screens may
-/// offer an explicit reload for a conflict, because re-loading and redoing
-/// the step can succeed; invalid input never will.
+/// All invalid and conflicting state is rejected without persisting anything,
+/// and the failure type says what retrying can achieve:
+/// - this typed conflict: the store's state moved ahead of the snapshot, so
+///   an explicit reload of the saved state and redoing the step can succeed;
+/// - a [FormatException] from malformed input (a checkpoint that is not a
+///   parseable snapshot, or an unusable stored entry): recovered by the fresh
+///   session's next valid save;
+/// - a plain [StateError] from fabricated answers, rewritten outcomes, an
+///   unrecorded ahead, or ownership/account rejection: resending the same
+///   input never succeeds.
 class LessonSectionConflictException extends StateError {
   LessonSectionConflictException(super.message);
 }

@@ -26,6 +26,10 @@ class DiscoverySectionView extends StatelessWidget {
     required this.heard,
     required this.busy,
     required this.error,
+    this.notice,
+    this.conflict,
+    this.onReload,
+    this.onPractiseAgain,
     required this.onListen,
     required this.onAnswer,
     required this.onNext,
@@ -39,6 +43,24 @@ class DiscoverySectionView extends StatelessWidget {
   final bool heard;
   final bool busy;
   final String? error;
+
+  /// Optional recovery notice rendered inside the same scrolling content as
+  /// the controls (so large accessibility text cannot overflow the screen),
+  /// for example after a corrupt saved state was replaced by a fresh attempt.
+  final String? notice;
+
+  /// Non-null when the store rejected a checkpoint as a typed stale-session
+  /// conflict ([LessonSectionConflictException]); blocks every progression
+  /// action and exposes the explicit `Reload saved progress` action. This is
+  /// distinct from [error], which is for transient save failures with a
+  /// `Retry saving` action instead.
+  final String? conflict;
+  final VoidCallback? onReload;
+
+  /// Optional debrief-only action that starts a fresh practice attempt
+  /// (explicit 'Practise again'). Null hides the control; non-null shows it
+  /// in the debrief whether or not unresolved words remain.
+  final VoidCallback? onPractiseAgain;
   final VoidCallback onListen;
   final ValueChanged<String> onAnswer;
   final VoidCallback onNext;
@@ -53,6 +75,20 @@ class DiscoverySectionView extends StatelessWidget {
     final List<Widget> children = session.phase == LessonSectionPhase.exercise
         ? _exerciseChildren(textTheme, divider)
         : _debriefChildren(textTheme, divider);
+    final String? notice = this.notice;
+    if (notice != null) {
+      // The notice shares the scrolling content with the controls so that
+      // large accessibility text cannot push the exercise off a small screen.
+      children.insert(0, Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        color: Colors.orange.shade100,
+        child: Text(
+          notice,
+          style: const TextStyle(color: Colors.black87),
+        ),
+      ));
+    }
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       child: Center(
@@ -85,16 +121,37 @@ class DiscoverySectionView extends StatelessWidget {
     ];
   }
 
+  List<Widget> _conflictChildren(TextTheme textTheme) {
+    return [
+      const SizedBox(height: 24),
+      Text(
+        conflict!,
+        style: _colored(textTheme.bodyMedium, Colors.orange.shade700),
+      ),
+      TextButton(
+        onPressed: busy || onReload == null ? null : onReload,
+        child: const Text('Reload saved progress'),
+      ),
+    ];
+  }
+
+  /// A typed stale-session conflict blocks progression just like a save
+  /// error, but its recovery is the explicit reload, not a retry.
+  bool _inConflict() => conflict != null;
+
   List<Widget> _exerciseChildren(TextTheme textTheme, Color divider) {
     final bool answered = session.answered;
-    final bool inError = error != null;
+    final bool inConflict = _inConflict();
+    final bool inError = error != null || inConflict;
     final bool canListen = !answered && !heard && !busy && !inError;
     final bool canAnswer = heard && !answered && !busy && !inError;
     final bool canNext = answered && !busy && !inError;
     final bool isLast = session.position == session.queue.length - 1;
     final bool correct = session.answered && session.lastCorrect == true;
     return [
-      Text(section.title, style: textTheme.titleLarge),
+      // Neutral title while the item is hidden: the word-bearing authored
+      // title belongs to the debrief, so it must not leak during practice.
+      Text('Listening practice', style: textTheme.titleLarge),
       const SizedBox(height: 6),
       Text(_progressLabel(), style: textTheme.bodyMedium),
       const SizedBox(height: 20),
@@ -147,15 +204,20 @@ class DiscoverySectionView extends StatelessWidget {
               color: correct ? Colors.green : Colors.red,
             ),
             const SizedBox(width: 8),
-            Text(
-              correct ? 'Correct' : 'Not yet',
-              style: _colored(
-                  textTheme.titleMedium, correct ? Colors.green : Colors.red),
+            // The label may wrap at large accessibility text instead of
+            // pushing the row past the viewport width.
+            Flexible(
+              child: Text(
+                correct ? 'Correct' : 'Not yet',
+                style: _colored(
+                    textTheme.titleMedium, correct ? Colors.green : Colors.red),
+              ),
             ),
           ],
         ),
       ],
-      if (inError) ..._errorChildren(textTheme),
+      if (error != null) ..._errorChildren(textTheme),
+      if (inConflict) ..._conflictChildren(textTheme),
       const SizedBox(height: 24),
       FilledButton(
         onPressed: canNext ? onNext : null,
@@ -165,14 +227,19 @@ class DiscoverySectionView extends StatelessWidget {
   }
 
   List<Widget> _debriefChildren(TextTheme textTheme, Color divider) {
-    final bool inError = error != null;
+    final bool inConflict = _inConflict();
+    final bool inError = error != null || inConflict;
     final bool canFinish = session.canComplete && !busy && !inError;
     final bool canReview = !busy && !inError;
     final int total = session.itemIds.length;
     final List<String> unresolvedWords =
         _sectionWordFor(session.unresolvedItemIds);
     return [
-      Text('Section debrief', style: textTheme.titleLarge),
+      // The word-bearing authored title is only revealed together with its
+      // explanation at the debrief.
+      Text(section.title, style: textTheme.titleLarge),
+      const SizedBox(height: 8),
+      Text('Section debrief', style: textTheme.bodyMedium),
       const SizedBox(height: 16),
       Text(section.explanation, style: textTheme.bodyLarge),
       const SizedBox(height: 16),
@@ -205,7 +272,8 @@ class DiscoverySectionView extends StatelessWidget {
           ],
         ),
       ],
-      if (inError) ..._errorChildren(textTheme),
+      if (error != null) ..._errorChildren(textTheme),
+      if (inConflict) ..._conflictChildren(textTheme),
       const SizedBox(height: 24),
       FilledButton(
         onPressed: canFinish ? onFinish : null,
@@ -216,6 +284,17 @@ class DiscoverySectionView extends StatelessWidget {
         OutlinedButton(
           onPressed: canReview ? onReview : null,
           child: const Text('Review mistakes'),
+        ),
+      ],
+      if (onPractiseAgain != null) ...[
+        const SizedBox(height: 10),
+        OutlinedButton(
+          // Explicit only: the screen persists the fresh zero-attempt
+          // identity before the exercise is exposed, so disable while that
+          // save (or any error state) is unresolved.
+          onPressed:
+              onPractiseAgain != null && !busy && !inError ? onPractiseAgain : null,
+          child: const Text('Practise again'),
         ),
       ],
     ];

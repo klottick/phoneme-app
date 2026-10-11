@@ -8,12 +8,14 @@ import 'package:go_router/go_router.dart';
 import 'package:linguist/src/app.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
 import 'package:linguist/src/core/course/course_progress.dart';
+import 'package:linguist/src/core/course/french_course.dart';
 import 'package:linguist/src/core/course/lesson_policy.dart';
 import 'package:linguist/src/core/course/lesson_section.dart';
 import 'package:linguist/src/core/course/lesson_section_session.dart';
 import 'package:linguist/src/core/course/lesson_section_store.dart';
 import 'package:linguist/src/features/course/course_lesson_screen.dart';
 import 'package:linguist/src/features/course/discovery_lesson_screen.dart';
+import 'package:linguist/src/features/course/discovery_section_view.dart';
 import 'package:linguist/src/routing/app_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
@@ -134,8 +136,21 @@ class FakeSectionStore implements LessonSectionStore {
     if (savedState == null) {
       expect(candidate.attemptCount, 0,
           reason: 'the first save must be the fresh session');
-    } else {
-      if (!same(savedState, candidate) && !reaches(savedState, candidate)) {
+    } else if (!same(savedState, candidate)) {
+      // Mirror the real store's decision order: a different session may
+      // only restart from zero attempts (a valid fresh start); a same
+      // session snapshot behind the stored one, or diverged from it at the
+      // stored attempt count, is a typed reloadable conflict.
+      if (candidate.sessionId != savedState.sessionId) {
+        if (candidate.attemptCount != 0) {
+          throw LessonSectionConflictException(
+              'switching session IDs mid-answer is rejected');
+        }
+      } else if (!reaches(savedState, candidate)) {
+        if (candidate.attemptCount <= savedState.attemptCount) {
+          throw LessonSectionConflictException(
+              'stale or diverged snapshot at a stored attempt count');
+        }
         throw StateError('save is not a valid transition from the stored '
             'session');
       }
@@ -179,14 +194,18 @@ class FakeSectionStore implements LessonSectionStore {
             'on a fresh first pass');
       }
     } else {
+      // Mirror the real store: a different stored session is a typed
+      // conflict (the screen may offer the explicit reload).
       if (candidate.sessionId != savedState.sessionId) {
-        throw StateError('refusing to answer for a different session');
+        throw LessonSectionConflictException(
+            'refusing to answer for a different session');
       }
       if (candidate.attemptCount <= processedAttempts) {
         return; // Duplicate or older checkpoint: no-op, never a revert.
       }
       if (candidate.attemptCount != savedState.attemptCount + 1) {
-        throw StateError('answer checkpoints must continue the session');
+        throw LessonSectionConflictException(
+            'answer checkpoints must continue the session');
       }
       final replay = clone(savedState)..submit(candidate.lastCorrect!);
       if (!same(replay, candidate)) {
@@ -216,13 +235,20 @@ class FakeSectionStore implements LessonSectionStore {
       throw StateError('the stored snapshot is not a valid session');
     }
     if (candidate.sessionId != savedState.sessionId) {
-      throw StateError('completing a different session is rejected');
+      throw LessonSectionConflictException(
+          'completing a different session is rejected');
     }
     if (candidate.attemptCount != savedState.attemptCount) {
-      throw StateError('unrecorded answers are rejected');
+      // Mirror the real store: unrecorded answers ahead are an invalid
+      // completion; a checkpoint behind the stored one is a typed conflict.
+      throw candidate.attemptCount > savedState.attemptCount
+          ? StateError('unrecorded answers are rejected')
+          : LessonSectionConflictException(
+              'a checkpoint behind the stored one is a stale instance');
     }
     if (!same(savedState, candidate) && !reaches(savedState, candidate)) {
-      throw StateError('snapshot is not a valid completion state');
+      throw LessonSectionConflictException(
+          'snapshot is not a valid completion state');
     }
     if (failComplete) throw StateError('complete failed');
     await completeGate?.future;
@@ -243,6 +269,24 @@ class RacingLoads extends FakeSectionStore {
     loadCalls++;
     if (loadCalls == 1) return Future.error(StateError('initial failure'));
     return loadCalls == 2 ? first.future : second.future;
+  }
+}
+
+/// A store whose answer save is held open and then settles as a typed
+/// conflict, so a conflict can complete while the screen is suspended.
+class HeldConflictStore extends FakeSectionStore {
+  final gate = Completer<void>();
+
+  @override
+  Future<void> recordLessonSectionAnswer(
+    String lessonId,
+    Map<String, dynamic> checkpoint, {
+    required String sound,
+    required bool correct,
+  }) async {
+    answerCalls++;
+    await gate.future;
+    throw LessonSectionConflictException('stale session conflict');
   }
 }
 
@@ -1141,6 +1185,466 @@ void main() {
     });
   });
 
+  group('stale session conflicts (typed conflict recovery)', () {
+    testWidgets('a conflicting answer offers Reload saved progress and '
+        'the reload recovers the stored state', (tester) async {
+      final audio = FakeAudio();
+      final store = FakeSectionStore();
+      await tester.pumpWidget(pumpLesson(tester, audio, store));
+      await tester.pumpAndSettle();
+      // A competing instance committed the same step first (different
+      // session identity), as in the stacked real-store regression.
+      final foreign = LessonSectionSession(
+          itemIds: FakeSectionStore.itemIds,
+          sessionId: 'other-screen-session')
+        ..submit(true);
+      store.stored = foreign.toJson();
+
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pumpAndSettle();
+      expect(find.text('Correct'), findsOneWidget,
+          reason: 'the local feedback stays while the state is stale');
+      expect(find.textContaining('matches the saved progress'), findsOneWidget,
+          reason: 'the typed conflict must be surfaced');
+      expect(find.text('Retry saving'), findsNothing,
+          reason: 'resending the same checkpoint can never succeed');
+      expect(
+          tester
+              .widget<FilledButton>(
+                  find.widgetWithText(FilledButton, 'Next word'))
+              .onPressed,
+          isNull,
+          reason: 'stale state must not advance');
+
+      await tester.tap(find.text('Reload saved progress'));
+      await tester.pumpAndSettle();
+      expect(find.text('Reload saved progress'), findsNothing);
+      expect(find.textContaining('matches the saved progress'), findsNothing);
+      expect(parseStoreSession(store)!.sessionId, 'other-screen-session',
+          reason: 'the reload discarded the stale draft, not the store');
+      expect(store.answerCalls, 1,
+          reason: 'the stale answer was attempted once and rejected once');
+      // Reload cancels the stale hearing: a fresh completed playback is
+      // required before the restored exercise can be answered again.
+      expect(audio.stops, greaterThanOrEqualTo(1));
+      await tester.tap(find.text('Next word'));
+      await tester.pumpAndSettle();
+      expect(find.text('Item 2 of 10'), findsOneWidget,
+          reason: 'the recovered state must be usable');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a stale same-session advance conflict recovers via the '
+        'explicit reload', (tester) async {
+      final store = FakeSectionStore();
+      final seed = LessonSectionSession(
+          itemIds: FakeSectionStore.itemIds, sessionId: 'shared')
+        ..submit(true);
+      store.stored = seed.toJson();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      expect(find.text('Correct'), findsOneWidget,
+          reason: 'both instances load the same stored state');
+      // The competing instance advances and answers the next item.
+      final competitor = store.parse(store.stored!)
+        ..advance()
+        ..submit(true);
+      store.stored = competitor.toJson();
+
+      await tester.tap(find.text('Next word'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('matches the saved progress'), findsOneWidget,
+          reason: 'the behind stored count is a typed conflict');
+      expect(find.text('Item 1 of 10'), findsOneWidget,
+          reason: 'the stale advance must not publish');
+      await tester.tap(find.text('Reload saved progress'));
+      await tester.pumpAndSettle();
+      expect(parseStoreSession(store)!.attemptCount, 2,
+          reason: 'the store rejection is untouched by the reload');
+      expect(find.text('Correct'), findsOneWidget);
+      expect(find.text('Item 2 of 10'), findsOneWidget,
+          reason: 'the recovered state must be usable');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a failing reload keeps Retry loading and recovers after',
+        (tester) async {
+      final store = FakeSectionStore();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      final foreign = LessonSectionSession(
+          itemIds: FakeSectionStore.itemIds,
+          sessionId: 'other-screen-session')
+        ..submit(true);
+      store.stored = foreign.toJson();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pumpAndSettle();
+      expect(find.text('Reload saved progress'), findsOneWidget);
+      store.failLoad = true;
+      await tester.tap(find.text('Reload saved progress'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('could not be loaded'), findsOneWidget);
+      expect(find.text('Retry loading'), findsOneWidget);
+      expect(find.text('Reload saved progress'), findsNothing);
+      store.failLoad = false;
+      await tester.tap(find.text('Retry loading'));
+      await tester.pumpAndSettle();
+      expect(parseStoreSession(store)!.sessionId, 'other-screen-session');
+      expect(find.text('Correct'), findsOneWidget,
+          reason: 'the retry load restored the stored committed state');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a second Reload tap before redraw cannot start a '
+        'competing load', (tester) async {
+      final store = FakeSectionStore();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      final foreign = LessonSectionSession(
+          itemIds: FakeSectionStore.itemIds,
+          sessionId: 'other-screen-session')
+        ..submit(true);
+      store.stored = foreign.toJson();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pumpAndSettle();
+      expect(find.text('Reload saved progress'), findsOneWidget);
+      store.loadGate = Completer<void>();
+      await tester.tap(find.text('Reload saved progress'));
+      await tester.tap(find.text('Reload saved progress')); // before redraw
+      await tester.pump();
+      store.loadGate!.complete();
+      await tester.pumpAndSettle();
+      expect(store.loadCalls, 2,
+          reason: 'initial load plus one coalesced reload');
+      expect(find.text('Correct'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('owner replacement discards a held stale conflict save '
+        'and the new owner stays untouched', (tester) async {
+      final storeA = HeldConflictStore();
+      final storeB = FakeSectionStore();
+      final seedB = LessonSectionSession(
+          itemIds: FakeSectionStore.itemIds, sessionId: 'owner-b')
+        ..submit(true);
+      storeB.stored = seedB.toJson();
+      final audio = FakeAudio();
+      Widget app(FakeSectionStore owner) => ProviderScope(
+          overrides: [
+            courseAudioProvider.overrideWithValue(audio),
+            lessonSectionStoreProvider.overrideWithValue(owner),
+          ],
+          child: const MaterialApp(
+              home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y')));
+      await tester.pumpWidget(app(storeA));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pump(); // the stale answer save is in flight, held
+      expect(storeA.answerCalls, 1);
+      // The owner switches while the save is pending; the replacement
+      // owner's state loads and the stale intent is dropped.
+      await tester.pumpWidget(app(storeB));
+      await tester.pumpAndSettle();
+      expect(find.text('Correct'), findsOneWidget,
+          reason: 'the replacement owner state must be loaded');
+      expect(storeA.gate.isCompleted, isFalse);
+      storeA.gate.complete(); // settles as a conflict, late, orphaned
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(parseStoreSession(storeB)!.sessionId, 'owner-b',
+          reason: 'the stale save must not transfer a checkpoint');
+      expect(parseStoreSession(storeB)!.attemptCount, 1);
+      expect(find.textContaining('matches the saved progress'), findsNothing,
+          reason: 'a conflict that lands after the owner switch '
+              'must not publish into the new owner UI');
+      expect(find.text('Reload saved progress'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a conflict completing while suspended settles on resume',
+        (tester) async {
+      final store = HeldConflictStore();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pump(); // save in flight, held
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.scheduleForcedFrame();
+      await tester.pump();
+      store.gate.complete(); // settles as a conflict while suspended
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.textContaining('matches the saved progress'), findsNothing,
+          reason: 'a suspended completion must not publish');
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('matches the saved progress'), findsOneWidget,
+          reason: 'resume must settle the stale conflict');
+      expect(find.text('Retry saving'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  group('repeat practice', () {
+    LessonSectionSession perfectSeed(String sessionId) {
+      final seed = LessonSectionSession(
+          itemIds: FakeSectionStore.itemIds, sessionId: sessionId);
+      for (var i = 0; i < 10; i++) {
+        seed.submit(true);
+        seed.advance();
+      }
+      return seed;
+    }
+
+    testWidgets('a completed review route offers Practise again, persists '
+        'the fresh zero-attempt identity first, then exposes the exercise',
+        (tester) async {
+      final audio = FakeAudio();
+      final store = FakeSectionStore()
+        ..stored = perfectSeed('perfect').toJson();
+      await tester.pumpWidget(
+          pumpLesson(tester, audio, store, review: true));
+      await tester.pumpAndSettle();
+      expect(find.text('Section debrief'), findsOneWidget,
+          reason: 'the historical debrief is restored');
+      expect(find.text('Practise again'), findsOneWidget,
+          reason: 'a mastered review entry must be practisable');
+      expect(find.text('Listen to the word'), findsNothing,
+          reason: 'until the explicit restart, no exercise is exposed');
+
+      await tester.tap(find.text('Practise again'));
+      await tester.pumpAndSettle();
+      final restarted = parseStoreSession(store)!;
+      expect(restarted.attemptCount, 0,
+          reason: 'the fresh zero-attempt identity was persisted first');
+      expect(restarted.sessionId, isNot('perfect'),
+          reason: 'a new session identity starts the repeat');
+      expect(find.text('Item 1 of 10'), findsOneWidget,
+          reason: 'only after the save settles is the exercise exposed');
+      expect(store.answerCalls, 0,
+          reason: 'no answer may land before the restart save');
+      expect(store.completedLesson, isNull,
+          reason: 'restarting does not itself complete the section');
+
+      // The recovered exercise is usable and records the new history.
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      expect(audio.spoken.last, 'tout',
+          reason: 'a fresh hearing for the first item');
+      await tester.tap(find.text('/u/'));
+      await tester.pumpAndSettle();
+      expect(find.text('Correct'), findsOneWidget);
+      expect(parseStoreSession(store)!.attemptCount, 1,
+          reason: 'the repeated practice records its own history');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a normal-route debrief with unresolved words offers '
+        'Practise again alongside review', (tester) async {
+      final store = FakeSectionStore();
+      final seed = LessonSectionSession(
+          itemIds: FakeSectionStore.itemIds, sessionId: 'seed');
+      for (var i = 0; i < 10; i++) {
+        seed.submit(i < 8);
+        seed.advance();
+      }
+      store.stored = seed.toJson();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      expect(find.text('Section debrief'), findsOneWidget);
+      expect(find.text('Review mistakes'), findsOneWidget);
+      expect(find.text('Finish section'), findsOneWidget);
+      expect(find.text('Practise again'), findsOneWidget,
+          reason: 'the restart is offered with unresolved words present');
+      // The unresolved-words debrief is the tallest variant: on the default
+      // 800x600 test surface the restart control sits below the fold, so
+      // scroll it into the scroller (as the accessibility regressions do)
+      // before interacting.
+      await tester.scrollUntilVisible(find.text('Practise again'), 100);
+      await tester.tap(find.text('Practise again'));
+      await tester.pumpAndSettle();
+      expect(parseStoreSession(store)!.attemptCount, 0,
+          reason: 'the restart persists before the exercise is exposed');
+      expect(find.text('Item 1 of 10'), findsOneWidget);
+      expect(find.text('Review mistakes'), findsNothing,
+          reason: 'the fresh first pass replaces the debrief');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a failed restart save keeps the debrief, retries the same '
+        'identity, and never exposes or records the exercise early',
+        (tester) async {
+      final seedJson = perfectSeed('perfect').toJson();
+      final store = FakeSectionStore()
+        ..stored = seedJson
+        ..failSave = true;
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Practise again'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('could not be saved'), findsOneWidget);
+      expect(store.stored, seedJson,
+          reason: 'a failed restart must not touch the saved state');
+      expect(find.text('Item 1 of 10'), findsNothing,
+          reason: 'the new exercise must not leak before its save lands');
+      expect(find.text('Practise again'), findsWidgets,
+          reason: 'the historical debrief stays');
+
+      store.failSave = false;
+      await tester.tap(find.text('Retry saving'));
+      await tester.tap(find.text('Retry saving')); // before redraw
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(store.saveCalls, 2,
+          reason: 'a double retry before redraw must be single-shot');
+      final restarted = parseStoreSession(store)!;
+      expect(restarted.attemptCount, 0);
+      expect(find.text('Item 1 of 10'), findsOneWidget,
+          reason: 'the settled restart exposes the exercise');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a double Practise again before redraw starts one save',
+        (tester) async {
+      final store = FakeSectionStore()
+        ..stored = perfectSeed('perfect').toJson()
+        ..saveGate = Completer<void>();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Practise again'));
+      await tester.tap(find.text('Practise again')); // before redraw
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(store.saveCalls, 1,
+          reason: 'a double tap must not start a second restart save');
+      store.saveGate!.complete();
+      await tester.pumpAndSettle();
+      expect(parseStoreSession(store)!.attemptCount, 0);
+      expect(find.text('Item 1 of 10'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a restart save completing while suspended settles '
+        'idempotently on resume', (tester) async {
+      final store = FakeSectionStore()
+        ..stored = perfectSeed('perfect').toJson()
+        ..saveGate = Completer<void>();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Practise again'));
+      await tester.pump(); // restart save in flight, held
+      expect(store.saveCalls, 1);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.scheduleForcedFrame();
+      await tester.pump();
+      store.saveGate!.complete(); // settles while suspended
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('Item 1 of 10'), findsNothing,
+          reason: 'a suspended settlement must not publish the exercise');
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(parseStoreSession(store)!.attemptCount, 0,
+          reason: 'the restart save landed exactly once in storage');
+      expect(find.text('Item 1 of 10'), findsOneWidget,
+          reason: 'resume settles the pending restart exercise');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a failed restart keeps its retry intent across '
+        'suspension', (tester) async {
+      final seedJson = perfectSeed('perfect').toJson();
+      final store = FakeSectionStore()
+        ..stored = seedJson
+        ..failSave = true;
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Practise again'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('could not be saved'), findsOneWidget);
+      await suspendResume(tester);
+      expect(store.stored, seedJson,
+          reason: 'suspension must not settle the failed restart');
+      expect(find.textContaining('could not be saved'), findsOneWidget,
+          reason: 'the failed save intent survives suspension');
+      store.failSave = false;
+      await tester.tap(find.text('Retry saving'));
+      await tester.pumpAndSettle();
+      expect(parseStoreSession(store)!.attemptCount, 0);
+      expect(find.text('Item 1 of 10'), findsOneWidget,
+          reason: 'the retry settles the restart exercise');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('owner replacement discards a held pending restart and '
+        'the new owner stays untouched', (tester) async {
+      final ownerA = FakeSectionStore()
+        ..stored = perfectSeed('perfect').toJson()
+        ..saveGate = Completer<void>();
+      final ownerB = FakeSectionStore();
+      final audio = FakeAudio();
+      Widget app(FakeSectionStore owner) => ProviderScope(
+          overrides: [
+            courseAudioProvider.overrideWithValue(audio),
+            lessonSectionStoreProvider.overrideWithValue(owner),
+          ],
+          child: const MaterialApp(
+              home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y')));
+      await tester.pumpWidget(app(ownerA));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Practise again'));
+      await tester.pump(); // restart save in flight, held
+      expect(ownerA.stored, perfectSeed('perfect').toJson(),
+          reason: 'nothing is written before the save settles');
+      await tester.pumpWidget(app(ownerB));
+      await tester.pumpAndSettle();
+      expect(ownerB.stored, isNull,
+          reason: 'the replacement owner must stay untouched');
+      ownerA.saveGate!.complete(); // the old save may land on its own data
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(parseStoreSession(ownerA)!.attemptCount, 0,
+          reason: 'the old owner keeps its reconciled restart');
+      expect(ownerB.stored, isNull,
+          reason: 'the stale restart save must not transfer a checkpoint');
+      expect(find.text('Item 1 of 10'), findsOneWidget,
+          reason: 'the screen shows the new owner state, not the pending '
+              'restart exercise');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('Practise again is disabled while a save is in flight',
+        (tester) async {
+      final seedJson = perfectSeed('perfect').toJson();
+      final store = FakeSectionStore()
+        ..stored = seedJson
+        ..saveGate = Completer<void>();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Practise again'));
+      await tester.pump(); // the busy state is now drawn
+      final button = tester
+          .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, 'Practise again'));
+      expect(button.onPressed, isNull,
+          reason: 'a pending restart must not be re-triggered');
+      store.saveGate!.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Item 1 of 10'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
   group('routing', () {
     testWidgets(
         'pilot route opens the discovery screen, non-pilot and '
@@ -1374,7 +1878,244 @@ void main() {
     });
   });
 
+  group('hidden listening content', () {
+    final section = frenchUySection;
+    final List<String> words = section.items.map((item) => item.word).toList();
+
+    void expectNoHiddenContent(WidgetTester tester) {
+      expect(find.text('Listening practice'), findsWidgets,
+          reason: 'the neutral title must be active outside the debrief');
+      final List<String> texts = tester
+          .widgetList<Text>(find.byType(Text))
+          .map((Text widget) => widget.data ?? '')
+          .toList();
+      for (final String word in words) {
+        expect(texts, isNot(contains(word)),
+            reason: 'word "$word" must stay hidden outside the debrief');
+      }
+      expect(texts, isNot(contains(section.title)),
+          reason: 'the word-bearing authored title must stay hidden '
+              'outside the debrief');
+    }
+
+    testWidgets('the active first item exposes no words before playback, '
+        'after playback, or after a wrong or correct submission',
+        (tester) async {
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), FakeSectionStore()));
+      await tester.pumpAndSettle();
+      expectNoHiddenContent(tester);
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      expectNoHiddenContent(tester);
+      // A wrong submission on /u/ (item 1 expects /u/): feedback only.
+      await tester.tap(find.text('/y/'));
+      await tester.pumpAndSettle();
+      expect(find.text('Not yet'), findsOneWidget);
+      expectNoHiddenContent(tester);
+      // Reload is not needed: advance to the correct-answer state instead.
+      // 'tu' expects /y/; a correct submission there must leak nothing.
+      await advance(tester, last: false);
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/y/'));
+      await tester.pumpAndSettle();
+      expect(find.text('Correct'), findsOneWidget);
+      expectNoHiddenContent(tester);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a restored exercise keeps the words hidden until the '
+        'debrief', (tester) async {
+      final store = FakeSectionStore();
+      final seed = LessonSectionSession(
+          itemIds: FakeSectionStore.itemIds, sessionId: 'seed');
+      seed.submit(true);
+      seed.advance();
+      seed.submit(false);
+      seed.advance();
+      store.stored = seed.toJson();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      expect(find.text('Item 3 of 10'), findsOneWidget);
+      expectNoHiddenContent(tester);
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      expectNoHiddenContent(tester);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('loading and load-error states keep the words hidden',
+        (tester) async {
+      final holder = FakeSectionStore()..loadGate = Completer<void>();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), holder));
+      await tester.pump(); // the load is still in flight
+      expect(find.text('Listening practice'), findsWidgets);
+      for (final String word in words) {
+        expect(find.text(word), findsNothing, reason: word);
+      }
+      expect(find.text(section.title), findsNothing);
+      holder.loadGate!.complete();
+      await tester.pumpAndSettle();
+
+      final failing = FakeSectionStore()..failLoad = true;
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), failing));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('could not be loaded'), findsOneWidget);
+      expect(find.text('Retry loading'), findsOneWidget);
+      for (final String word in words) {
+        expect(find.text(word), findsNothing, reason: word);
+      }
+      expect(find.text(section.title), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the debrief reveals the authored title and explanation',
+        (tester) async {
+      final store = FakeSectionStore();
+      final seed = LessonSectionSession(
+          itemIds: FakeSectionStore.itemIds, sessionId: 'seed');
+      for (var i = 0; i < 10; i++) {
+        seed.submit(true);
+        seed.advance();
+      }
+      store.stored = seed.toJson();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      expect(find.text('Section debrief'), findsOneWidget);
+      expect(
+          find.descendant(
+              of: find.byType(DiscoverySectionView),
+              matching: find.text(section.title)),
+          findsOneWidget,
+          reason: 'the word-bearing title is revealed in the debrief body');
+      expect(find.text(section.title), findsWidgets,
+          reason: 'the debrief app bar may carry the authored title too');
+      expect(find.text(section.explanation), findsOneWidget);
+      expect(find.text('Listening practice'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
   group('real store integration', () {
+    testWidgets(
+        'two stacked instances of the same lesson recover on return '
+        'through the explicit reload', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      addTearDown(() => SharedPreferences.setMockInitialValues({}));
+      final router = GoRouter(initialLocation: '/home', routes: [
+        GoRoute(
+            path: '/home',
+            pageBuilder: (_, __) => const NoTransitionPage(
+                child: Scaffold(body: Text('home')))),
+        GoRoute(
+            path: '/lesson',
+            pageBuilder: (_, __) => const NoTransitionPage(
+                child: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'))),
+      ]);
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(
+          overrides: [courseAudioProvider.overrideWithValue(FakeAudio())],
+          child: MaterialApp.router(routerConfig: router)));
+      await tester.pumpAndSettle();
+      router.push('/lesson');
+      await tester.pumpAndSettle();
+      router.push('/lesson');
+      await tester.pumpAndSettle();
+      // Both instances hold fresh identities; the top one commits first.
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pumpAndSettle();
+      expect(find.text('Correct'), findsOneWidget);
+      router.pop();
+      await tester.pumpAndSettle();
+      // The lower instance's save conflicts; the typed conflict must be
+      // recoverable in place, not a permanent Retry saving loop.
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pumpAndSettle();
+      expect(
+          find.textContaining('matches the saved progress'),
+          findsOneWidget,
+          reason: 'a stale same-owner instance must surface the conflict');
+      expect(find.text('Retry saving'), findsNothing);
+      await tester.tap(find.text('Reload saved progress'));
+      await tester.pumpAndSettle();
+      expect(find.text('Reload saved progress'), findsNothing);
+      expect(find.text('Retry saving'), findsNothing,
+          reason: 'the recovery must not strand in a retry loop');
+      expect(find.text('Correct'), findsOneWidget,
+          reason: 'the stored committed answer must be restored');
+      // The recovered instance is usable end to end.
+      await tester.tap(find.text('Next word'));
+      await tester.pumpAndSettle();
+      expect(find.text('Item 2 of 10'), findsOneWidget,
+          reason: 'the reload must leave a usable session');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets(
+        'a stale same-session advance on the real store recovers via the '
+        'explicit reload', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      addTearDown(() => SharedPreferences.setMockInitialValues({}));
+      final store = CourseProgressStore(frenchCourse.id);
+      final List<String> ids =
+          frenchUySection.items.map((item) => item.id).toList();
+      // Seed the committed state through the store's own contract: a fresh
+      // zero-attempt save, then the recorded answer and the competitor's
+      // answered advance on the same shared session.
+      final seed = LessonSectionSession(itemIds: ids, sessionId: 'shared');
+      await store.saveLessonSection('en-fr-u-y', seed.toJson());
+      seed.submit(true);
+      await store.recordLessonSectionAnswer(
+          'en-fr-u-y', seed.toJson(), sound: 'u', correct: true);
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), null));
+      await tester.pumpAndSettle();
+      expect(find.text('Correct'), findsOneWidget,
+          reason: 'the loaded stored state shows the committed answer');
+      // The other instance advances and answers the next item, following
+      // the store contract: save the advance, then record the answer.
+      final competitor = LessonSectionSession.fromJson(
+        seed.toJson(),
+        itemIds: ids,
+        contentRevision: frenchUySection.contentRevision,
+      )
+        ..advance();
+      await store.saveLessonSection('en-fr-u-y', competitor.toJson());
+      competitor.submit(true);
+      await store.recordLessonSectionAnswer(
+          'en-fr-u-y', competitor.toJson(), sound: 'y', correct: true);
+
+      await tester.tap(find.text('Next word'));
+      await tester.pumpAndSettle();
+      expect(
+          find.textContaining('matches the saved progress'),
+          findsOneWidget,
+          reason: 'behind the stored count is a typed conflict');
+      expect(find.textContaining('could not be saved'), findsNothing);
+      await tester.tap(find.text('Reload saved progress'));
+      await tester.pumpAndSettle();
+      expect(find.text('Correct'), findsOneWidget,
+          reason: 'the committed answer for the next item is restored');
+      final data = await store.load();
+      final sectionEntry =
+          ((data['sections'] as Map)['en-fr-u-y'] as Map)['checkpoint']
+              as Map<String, dynamic>;
+      final restored = LessonSectionSession.fromJson(
+          sectionEntry,
+          itemIds: ids,
+          contentRevision: frenchUySection.contentRevision);
+      expect(restored.attemptCount, 2,
+          reason: 'the store rejection and stored state are untouched');
+      await tester.tap(find.text('Next word'));
+      await tester.pumpAndSettle();
+      expect(find.text('Item 3 of 10'), findsOneWidget,
+          reason: 'the recovered real-store session must be usable');
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets(
         'failed answer save retries without duplicating and real '
         'completion lands on success', (tester) async {

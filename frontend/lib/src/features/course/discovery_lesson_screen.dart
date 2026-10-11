@@ -45,6 +45,28 @@ import 'discovery_section_view.dart';
 /// Listen attempt. Raw exceptions and snapshot details are never surfaced
 /// because they may contain the hidden answer.
 ///
+/// A save rejected with the store's typed [LessonSectionConflictException]
+/// is different from a transient failure: the store's stored state has moved
+/// ahead of this screen's session, so resending the checkpoint can never
+/// succeed. The screen then exposes an explicit `Reload saved progress`
+/// action (and drops the stale pending save intent). Tapping it — the only
+/// path — abandons the stale in-memory draft, stops any pending hearing or
+/// playback, and reconciles the stored checkpoint through the same
+/// single-shot load guards as `Retry loading`.
+///
+/// A debrief (normal or review route, with or without unresolved words)
+/// exposes `Practise again`: an explicit restart, never an automatic reset.
+/// It creates a fresh zero-attempt session identity and persists it through
+/// the captured owner before the exercise is exposed, so a failed restart
+/// keeps the historical debrief, stays retryable, and never leaks the new
+/// exercise or double-records. Completion history and evidence are retained
+/// by the store; review-mode Finish never emits a completion.
+///
+/// The app bar and exercise heading use the neutral 'Listening practice'
+/// title; the word-bearing authored title is revealed only at the debrief,
+/// keeping the hidden item out of the UI and semantics during the active
+/// listening puzzle, including loading and load-error states.
+///
 /// A successful write invalidates [courseProgressProvider] so the
 /// home/dashboard refresh on return. Only a successful Finish exits the
 /// screen; with no previous route it falls back to `/home`.
@@ -81,6 +103,9 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       'Your saved progress for this section could not be restored, so this '
       'attempt starts fresh. It will not overwrite the saved progress until '
       'you save a new step.';
+  static const String _conflictText =
+      'This copy no longer matches the saved progress for this section. Tap '
+      '"Reload saved progress" to load the saved state.';
   static const String _audioErrorText =
       'The French audio could not be played. Tap "Listen to the word" to try '
       'again.';
@@ -91,6 +116,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   String? _loadError;
   String? _corruptNotice;
   String? _saveError;
+  String? _conflictError;
   bool _heard = false;
   bool _busy = false;
 
@@ -276,6 +302,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
         _loadError = null;
         _corruptNotice = null;
         _saveError = null;
+        _conflictError = null;
         _heard = false;
         _busy = true;
       });
@@ -457,6 +484,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       setState(() {
         _busy = true;
         _saveError = null;
+        _conflictError = null;
       });
     }
     Object? failure;
@@ -474,16 +502,36 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     // retained pending action when `resumed` reopens foreground.
     if (generation != _generation || _suspended || !mounted) return;
     if (failure != null) {
+      if (failure is LessonSectionConflictException) {
+        // A typed conflict: the store's stored state moved ahead of this
+        // session, so resending the same checkpoint can never succeed. The
+        // stale in-memory draft is abandoned only by the explicit
+        // `Reload saved progress` action, which reconciles the stored
+        // checkpoint; drop the pending save intent so it is never re-sent.
+        _pendingAction = null;
+        _pendingOnSaved = null;
+        setState(() {
+          _busy = false;
+          _saveError = null;
+          _conflictError = _conflictText;
+        });
+        return;
+      }
       // Persistence only: the view's error/Retry path. The pending action is
       // retained so `Retry saving` (and resumed recovery) re-sends the very
       // same checkpoint — the store records it at most once.
       setState(() {
         _busy = false;
         _saveError = _saveErrorText;
+        _conflictError = null;
       });
       return;
     }
-    setState(() => _busy = false);
+    setState(() {
+      _busy = false;
+      _saveError = null;
+      _conflictError = null;
+    });
     // Refresh before the (possibly exiting) publish so navigating away and
     // disposing cannot skip the refresh.
     ref.invalidate(courseProgressProvider);
@@ -584,6 +632,57 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     unawaited(_startSave());
   }
 
+  /// Explicit `Reload saved progress` for a typed stale-session conflict:
+  /// the only path that abandons the stale in-memory draft, and it
+  /// reconciles the stored checkpoint under the existing single-shot load
+  /// guards (a double tap before redraw cannot start a competing load).
+  /// Cancellation of any pending hearing/playback is part of the reload;
+  /// the retained pending save intent is dropped so the stale checkpoint is
+  /// never re-submitted.
+  void _onReload() {
+    if (_suspended || _saveInFlight || _loadInFlight) return;
+    _pendingAction = null;
+    _pendingOnSaved = null;
+    _stopAudio();
+    _conflictError = null;
+    final LessonSectionStore? store = _store;
+    if (store == null) return;
+    unawaited(_load(store));
+  }
+
+  /// Explicit `Practise again` at the debrief: start a fresh zero-attempt
+  /// session identity and persist it (same owner, single-shot, retryable)
+  /// before the new exercise is exposed. The stored history keeps its
+  /// completion and evidence; the restart save replaces the section
+  /// snapshot. A failed restart keeps the historical debrief and the retry
+  /// UI — the new exercise is never shown before its identity is saved.
+  void _onPractiseAgain() {
+    final session = _session;
+    final section = _section;
+    if (session == null || section == null) return;
+    if (session.phase != LessonSectionPhase.debrief) return;
+    final LessonSectionSession fresh = LessonSectionSession(
+      itemIds: _itemIds,
+      sessionId: _freshSessionId(),
+      contentRevision: section.contentRevision,
+      policy: widget.policy,
+    );
+    final Map<String, dynamic> checkpoint = fresh.toJson();
+    _runSave(
+      (LessonSectionStore store) =>
+          store.saveLessonSection(widget.lessonId, checkpoint),
+      () {
+        if (mounted) {
+          setState(() {
+            _session = fresh;
+            // A fresh item requires a fresh completed playback.
+            _heard = false;
+          });
+        }
+      },
+    );
+  }
+
   void _onRetryLoad() {
     final LessonSectionStore? store = _store;
     // Single-shot: a double tap before the busy state redraws (and any tap
@@ -624,7 +723,18 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   @override
   Widget build(BuildContext context) {
     final section = _section;
-    final String title = section?.title ?? 'Discovery lesson';
+    if (section == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Discovery lesson')),
+        body: _body(),
+      );
+    }
+    // The word-bearing authored title (for example 'Tu or tout?') stays out
+    // of the app bar while the item is hidden; only the debrief reveals it.
+    final String title =
+        _session?.phase == LessonSectionPhase.debrief
+            ? section.title
+            : 'Listening practice';
     return Scaffold(
       appBar: AppBar(title: Text(title)),
       body: _body(),
@@ -661,35 +771,24 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     if (session == null) {
       return const Center(child: CircularProgressIndicator());
     }
-    final String? corruptNotice = _corruptNotice;
-    return Column(
-      children: [
-        if (corruptNotice != null)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            color: Colors.orange.shade100,
-            child: Text(
-              corruptNotice,
-              style: const TextStyle(color: Colors.black87),
-            ),
-          ),
-        Expanded(
-          child: DiscoverySectionView(
-            section: section,
-            session: session,
-            heard: _heard,
-            busy: _busy || _suspended,
-            error: _saveError,
-            onListen: _onListen,
-            onAnswer: _onAnswer,
-            onNext: _onNext,
-            onReview: _onReview,
-            onFinish: _onFinish,
-            onRetrySave: _onRetrySave,
-          ),
-        ),
-      ],
+    return DiscoverySectionView(
+      section: section,
+      session: session,
+      heard: _heard,
+      busy: _busy || _suspended,
+      error: _saveError,
+      conflict: _conflictError,
+      // The recovery notice lives inside the view's scrolling content, so a
+      // long notice at large accessibility text cannot overflow the screen.
+      notice: _corruptNotice,
+      onListen: _onListen,
+      onAnswer: _onAnswer,
+      onNext: _onNext,
+      onReview: _onReview,
+      onFinish: _onFinish,
+      onRetrySave: _onRetrySave,
+      onReload: _onReload,
+      onPractiseAgain: _onPractiseAgain,
     );
   }
 }
