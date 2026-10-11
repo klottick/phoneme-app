@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/lesson_policy.dart';
 
@@ -8,12 +10,17 @@ void main() {
     });
 
     test('accepts a configured threshold within 1-100', () {
-      expect(LessonPolicy(completionThresholdPercent: 1).completionThresholdPercent,
+      expect(
+          LessonPolicy(completionThresholdPercent: 1)
+              .completionThresholdPercent,
           1);
       expect(
-          LessonPolicy(completionThresholdPercent: 99).completionThresholdPercent,
+          LessonPolicy(completionThresholdPercent: 99)
+              .completionThresholdPercent,
           99);
-      expect(LessonPolicy(completionThresholdPercent: 100).completionThresholdPercent,
+      expect(
+          LessonPolicy(completionThresholdPercent: 100)
+              .completionThresholdPercent,
           100);
     });
 
@@ -43,7 +50,8 @@ void main() {
     });
 
     test('requires 6 of 8 at 75 percent', () {
-      expect(LessonPolicy(completionThresholdPercent: 75).requiredCorrect(8), 6);
+      expect(
+          LessonPolicy(completionThresholdPercent: 75).requiredCorrect(8), 6);
     });
 
     test('requires 10 of 10 at 100 percent', () {
@@ -52,7 +60,8 @@ void main() {
     });
 
     test('rounds up so 1 of 2 is required at 25 percent', () {
-      expect(LessonPolicy(completionThresholdPercent: 25).requiredCorrect(2), 1);
+      expect(
+          LessonPolicy(completionThresholdPercent: 25).requiredCorrect(2), 1);
     });
 
     test('rejects a zero item count with an ArgumentError', () {
@@ -66,17 +75,11 @@ void main() {
 
   group('isPassing', () {
     test('passes at the exact 80 percent boundary of 10 items', () {
-      expect(
-          LessonPolicy()
-              .isPassing(correct: 8, total: 10),
-          isTrue);
+      expect(LessonPolicy().isPassing(correct: 8, total: 10), isTrue);
     });
 
     test('fails one below the 80 percent boundary of 10 items', () {
-      expect(
-          LessonPolicy()
-              .isPassing(correct: 7, total: 10),
-          isFalse);
+      expect(LessonPolicy().isPassing(correct: 7, total: 10), isFalse);
     });
 
     test('passes at the exact 75 percent boundary of 8 items', () {
@@ -94,10 +97,7 @@ void main() {
     });
 
     test('zero correct answers is valid but never passing', () {
-      expect(
-          LessonPolicy()
-              .isPassing(correct: 0, total: 10),
-          isFalse);
+      expect(LessonPolicy().isPassing(correct: 0, total: 10), isFalse);
     });
 
     test('rejects a zero total with an ArgumentError', () {
@@ -123,8 +123,7 @@ void main() {
 
   group('serialization', () {
     test('toJson uses exactly completionThresholdPercent', () {
-      expect(LessonPolicy().toJson(),
-          const {'completionThresholdPercent': 80});
+      expect(LessonPolicy().toJson(), const {'completionThresholdPercent': 80});
       expect(LessonPolicy(completionThresholdPercent: 75).toJson(),
           const {'completionThresholdPercent': 75});
     });
@@ -136,11 +135,48 @@ void main() {
           75);
     });
 
-    test('fromJson accepts an integer-valued number from JSON decoding', () {
+    test('fromJson rejects a double percentage (80.0) with a FormatException',
+        () {
       expect(
-          LessonPolicy.fromJson(const {'completionThresholdPercent': 80.0})
-              .completionThresholdPercent,
-          80);
+          () =>
+              LessonPolicy.fromJson(const {'completionThresholdPercent': 80.0}),
+          throwsFormatException);
+    });
+
+    test('fromJson rejects infinities with a FormatException', () {
+      expect(
+          () => LessonPolicy.fromJson(
+              const {'completionThresholdPercent': double.infinity}),
+          throwsFormatException);
+      expect(
+          () => LessonPolicy.fromJson(
+              const {'completionThresholdPercent': double.negativeInfinity}),
+          throwsFormatException);
+    });
+
+    test('fromJson rejects NaN with a FormatException', () {
+      expect(
+          () => LessonPolicy.fromJson(
+              const {'completionThresholdPercent': double.nan}),
+          throwsFormatException);
+    });
+
+    test(
+        'fromJson rejects null, bool, list, and map values with a '
+        'FormatException', () {
+      const bad = <Object?>[
+        null,
+        true,
+        false,
+        <String>['80'],
+        <String, Object>{'percent': 80}
+      ];
+      for (final value in bad) {
+        expect(
+            () => LessonPolicy.fromJson({'completionThresholdPercent': value}),
+            throwsFormatException,
+            reason: 'must reject $value');
+      }
     });
 
     test('fromJson rejects a missing percentage with a FormatException', () {
@@ -149,28 +185,26 @@ void main() {
 
     test('fromJson rejects a string percentage with a FormatException', () {
       expect(
-          () => LessonPolicy.fromJson(
-              const {'completionThresholdPercent': '80'}),
+          () =>
+              LessonPolicy.fromJson(const {'completionThresholdPercent': '80'}),
           throwsFormatException);
     });
 
-    test('fromJson rejects a fractional percentage with a FormatException',
-        () {
+    test('fromJson rejects a fractional percentage with a FormatException', () {
       expect(
-          () => LessonPolicy.fromJson(
-              const {'completionThresholdPercent': 75.5}),
+          () =>
+              LessonPolicy.fromJson(const {'completionThresholdPercent': 75.5}),
           throwsFormatException);
     });
 
     test('fromJson rejects out-of-range percentages with a FormatException',
         () {
       expect(
-          () => LessonPolicy.fromJson(
-              const {'completionThresholdPercent': 0}),
+          () => LessonPolicy.fromJson(const {'completionThresholdPercent': 0}),
           throwsFormatException);
       expect(
-          () => LessonPolicy.fromJson(
-              const {'completionThresholdPercent': 101}),
+          () =>
+              LessonPolicy.fromJson(const {'completionThresholdPercent': 101}),
           throwsFormatException);
     });
 
@@ -178,6 +212,15 @@ void main() {
       final configured = LessonPolicy(completionThresholdPercent: 67);
       final restored = LessonPolicy.fromJson(configured.toJson());
       expect(restored.completionThresholdPercent, 67);
+      expect(restored.toJson(), configured.toJson());
+    });
+
+    test('restores from an actual JSON string round trip', () {
+      final configured = LessonPolicy(completionThresholdPercent: 85);
+      final decoded =
+          jsonDecode(jsonEncode(configured.toJson())) as Map<String, dynamic>;
+      final restored = LessonPolicy.fromJson(decoded);
+      expect(restored.completionThresholdPercent, 85);
       expect(restored.toJson(), configured.toJson());
     });
   });

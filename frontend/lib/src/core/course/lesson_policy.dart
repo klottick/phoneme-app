@@ -79,30 +79,27 @@ class LessonPolicy {
 
   /// Restores a policy from a map produced by [toJson].
   ///
-  /// The map must contain exactly one valid [completionThresholdPercent]:
-  /// a missing key, a wrong type, a fractional value, or an out-of-range
-  /// value throws a [FormatException]. Integer-valued numbers (such as the
-  /// doubles produced by JSON decoding) are accepted.
+  /// The `completionThresholdPercent` key must hold a strict Dart [int]
+  /// between 1 and 100. A missing key, a non-integer value (doubles such as
+  /// 80.0, NaN or infinities; [bool]; null; strings; lists; maps), or an
+  /// out-of-range integer throws a [FormatException]. Unknown extra keys are
+  /// ignored; only the canonical key is used.
   factory LessonPolicy.fromJson(Map<String, dynamic> json) {
     final Object? raw = json['completionThresholdPercent'];
-    int? percent;
-    if (raw is int) {
-      percent = raw;
-    } else if (raw is double && raw == raw.truncateToDouble()) {
-      percent = raw.toInt();
-    }
-    if (percent == null) {
+    // In Dart's type system bool is a subtype of int, so `is int` alone
+    // would accept true/false; reject it explicitly.
+    if (raw is bool || raw is! int) {
       throw FormatException(
-        'completionThresholdPercent must be an integer: $raw',
+        'completionThresholdPercent must be an integer in 1-100, found: $raw',
         json,
       );
     }
-    if (percent < 1 || percent > 100) {
+    if (raw < 1 || raw > 100) {
       throw FormatException(
-        'completionThresholdPercent must be between 1 and 100: $raw',
+        'completionThresholdPercent must be in 1-100, found: $raw',
         json,
       );
     }
-    return LessonPolicy._(percent);
+    return LessonPolicy._(raw);
   }
 }
