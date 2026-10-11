@@ -14,7 +14,7 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 | 2 content/session | merged | `feat/fr-section-session`, `wks_c449fb2828dcbebc` | `ses_ed7aabf1cffe8amV18675aLqw4` | [#4](https://github.com/klottick/phoneme-app/pull/4), head `3a9bf82`, merge `77117b7` | controller: 219 full tests pass, analyzer clean, 8 invalid snapshots rejected |
 | 3 persistence | merged | `feat/fr-section-persistence`, `wks_bccf671bff3e1262` | `ses_ed78b449dffelAD0FF2yNlyWif` | [#6](https://github.com/klottick/phoneme-app/pull/6), head `87d80f7`, merge `deb9906` | controller: 247 full tests and 5 targeted regressions pass; analyzer clean |
 | 4 view | merged | `feat/fr-section-view`, `wks_456f5abd3290f0d6` | `ses_ed7665014ffe67N7wHb8H1Bkle` | [#7](https://github.com/klottick/phoneme-app/pull/7), head `93eeddb`, merge `14ec4c8` | controller: 265 full tests pass; analyzer clean |
-| 5 screen/routes | ready for dispatch | — | — | — | Dependencies 3–4 merged |
+| 5 screen/routes | implementing | `feat/fr-discovery-screen`, `wks_3bfe435ea695759f` | `ses_ed7548eb3ffeXqyZ6xwxLH0Xw6` | pending, base `71970d1` | controller baseline: 265 tests pass |
 | Final verification | blocked: 5 | — | controller | — | — |
 
 ## Baselines and constraints
@@ -71,6 +71,7 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 - 2026-10-11: Task 3 fix `96e698c..87d80f7` reviewed: important findings addressed, spec compliance and quality approved. Controller verified 247 full Flutter tests and all 5 targeted regressions passed; analyzer and whitespace checks clean. PR #6 merged at `deb9906`. Evidence: `/tmp/opencode/fr-store-controller-tests.log`, `/tmp/opencode/fr-store-controller-repro.log`, `/tmp/opencode/fr-store-controller-analyze.log`.
 - 2026-10-11: Task 4 dispatched to local Qwen on base `deb9906` in workspace `wks_456f5abd3290f0d6`, worker `ses_ed7665014ffe67N7wHb8H1Bkle`. Only stateless view and widget tests owned. Baseline 247 full tests passed (`/tmp/opencode/fr-view-baseline-tests.log`). Screen/audio/store integration remains Task 5.
 - 2026-10-11: Task 4 PR #7 reviewed at `93eeddb`: spec compliance and quality approved. Controller full Flutter suite 265 tests passed, analyzer no issues, whitespace check clean. PR #7 merged at `14ec4c8`. Evidence: `/tmp/opencode/fr-view-controller-tests.log`, `/tmp/opencode/fr-view-controller-analyze.log`. Hiding Review mistakes with no unresolved items meets the contract; audio-failure/save-failure UI distinction carried into Task 5.
+- 2026-10-11: Docs/state PR #5 reviewed (docs-only, whitespace clean) and merged at `71970d1`. Task 5 dispatched to local Qwen on that base in workspace `wks_3bfe435ea695759f`, worker `ses_ed7548eb3ffeXqyZ6xwxLH0Xw6`. Controller baseline: 265 full Flutter tests passed (`/tmp/opencode/fr-screen-baseline-tests.log`). Owned screen/router/flow tests only; merged core/store/view and legacy recording/game files are off limits. Final integrated review/build remains pending.
 
 ## Deferred minor findings for final review
 
