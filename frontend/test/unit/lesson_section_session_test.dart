@@ -697,6 +697,39 @@ void main() {
       expectCorrupt(json);
     });
 
+    test('keeps lastCorrect null exactly when no outcome is recorded', () {
+      final fresh = baseJson();
+      expect(fresh['lastCorrect'], isNull);
+      expect(fresh['attemptCount'], 0);
+      // A fresh session with no outcomes and null lastCorrect restores.
+      LessonSectionSession.fromJson(fresh,
+          itemIds: itemIds, contentRevision: 1);
+      // A fresh session claiming a prior outcome is impossible.
+      expectCorrupt(baseJson()..['lastCorrect'] = true);
+      expectCorrupt(baseJson()..['lastCorrect'] = false);
+    });
+
+    test('rejects a review start that loses its retained lastCorrect', () {
+      const ids = ['a', 'b'];
+      final origin = LessonSectionSession(itemIds: ids, sessionId: 's');
+      origin.submit(true);
+      origin.advance();
+      origin.submit(false); // last outcome of round 1
+      origin.advance();
+      origin.reviewMistakes(); // round 2 start retains the prior outcome
+      expect(origin.lastCorrect, isFalse,
+          reason: 'the review round retains the previous round outcome');
+      expect(origin.latestAnswers, {'a': true, 'b': false});
+      // The valid review start with a retained outcome still restores.
+      LessonSectionSession.fromJson(origin.toJson(),
+          itemIds: ids, contentRevision: 1);
+      // Losing the retained outcome must fail atomically: null, and missing.
+      expectCorrupt(origin.toJson()..['lastCorrect'] = null, ids: ids);
+      final removed = <String, dynamic>{...origin.toJson()}
+        ..remove('lastCorrect');
+      expectCorrupt(removed, ids: ids);
+    });
+
     test('rejects a submitted current item that has no outcome', () {
       final json = Map<String, dynamic>.from(baseJson())
         ..['submittedThisRound'] = ['tout']

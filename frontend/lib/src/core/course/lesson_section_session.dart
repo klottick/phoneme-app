@@ -299,10 +299,14 @@ class LessonSectionSession {
             'answered must be false at the debrief, found: $answered.', json);
       }
     }
-    if (lastCorrect != null && latestAnswers.isEmpty) {
+    // lastCorrect must be present exactly once some outcome has been
+    // recorded: it retains the previous round's last outcome (and therefore
+    // must not be null for a review start), and is null before any submission.
+    if ((lastCorrect == null) != (latestAnswers.isEmpty)) {
       throw FormatException(
-          'lastCorrect must be null before any outcome is recorded, found: '
-          '$lastCorrect.',
+          'lastCorrect must be null exactly when no outcome is recorded, '
+          'found: $lastCorrect with ${latestAnswers.length} recorded '
+          'outcome(s).',
           json);
     }
 
