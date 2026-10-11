@@ -10,7 +10,7 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 | Task | State | Branch / workspace | Worker | PR / merge | Verification |
 |---|---|---|---|---|---|
 | Planning | merged | `docs/french-first-section`, `wks_0f327fd42c4ce757` | controller | [#1](https://github.com/klottick/phoneme-app/pull/1), `2ee916e` | docs-only scope/whitespace review; remote baseline 128 tests/analyzer clean |
-| 1 policy | implementing | `feat/fr-section-policy`, `wks_30e17a2a110b4685` | `ses_ed7b28857ffekgx7UgLTvK1dUe` | pending | worker red/green tests pending |
+| 1 policy | review fixes requested (round 1) | `feat/fr-section-policy`, `wks_30e17a2a110b4685` | `ses_ed7b28857ffekgx7UgLTvK1dUe` | [#2](https://github.com/klottick/phoneme-app/pull/2), `b17e457`, not merged | worker: 29 policy tests/analyzer pass; controller reproduced infinity validation bug |
 | 2 content/session | blocked: 1 | — | — | — | — |
 | 3 persistence | blocked: 2 | — | — | — | — |
 | 4 view | blocked: 2; serial after 3 | — | — | — | — |
@@ -35,6 +35,7 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 5. Ruling: workers implement sequentially on local Qwen; controller performs independent spec/quality review and merge — user explicitly assigned review to controller; cost if wrong: no separate reviewer model on these tasks.
 6. Ruling: create and execute this scoped plan under the user's explicit create-plan-then-delegate authorization rather than repeat approval prompts — confirmed behavior is binding and remaining defaults are public; cost if wrong: user can request policy changes/rework.
 7. Ruling: base PRs on published `origin/main`, not the two unpublished local commits — avoid publishing other work without bundling approval; cost if wrong: remote pilot verification does not include the newer Sound Match until its separate publication.
+8. Ruling: serialized policy percentages must be `int` 1–100; reject doubles/nonfinite values with FormatException — actual JSON integer decoding is `int`, verified on the SDK, and the contract specifies integer percentages; cost if wrong: maps carrying `80.0` need upstream normalization. Unknown keys can be ignored; canonical serialization still emits one key.
 
 ## Preflight dependency/interface scan
 
@@ -56,3 +57,4 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 
 - 2026-10-11: Model resolved as `ollama/qwen3.8:27b`; isolated planning workspace created under the existing project. No implementation worker dispatched yet.
 - 2026-10-11: Docs PR #1 reviewed and merged at `2ee916e`; worker Task 1 dispatched on `ollama/qwen3.8:27b`, session `ses_ed7b28857ffekgx7UgLTvK1dUe`, base `2ee916e`. Only policy/tests allowed; worker must create PR and may not merge.
+- 2026-10-11: Task 1 PR #2 reviewed at `b17e457`; scoped policy is sound except invalid infinity escapes as UnsupportedError and JSON-type justification is incorrect. Fix round 1 requested with stricter integer decoding, malformed-value/real JSON round-trip tests, and formatting. No merge yet.

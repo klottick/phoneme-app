@@ -58,6 +58,9 @@ total})` validates 0 <= correct <= total and total > 0. `Map<String, dynamic>
 toJson()` and `factory LessonPolicy.fromJson(Map<String, dynamic> json)` use
 exactly `completionThresholdPercent`; invalid serialized values throw
 `FormatException`. Constructor/method misuse throws `ArgumentError`.
+Serialized percentages must be Dart `int` values in 1–100; doubles (including
+`80.0`), NaN, and infinities are invalid. Unknown map keys may be ignored;
+canonical serialization emits only the percentage key.
 
 ### Content — `lesson_section.dart`
 
