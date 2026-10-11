@@ -6,19 +6,53 @@ abstract class CourseAudio {
   Future<void> stop();
 }
 
+/// French TTS adapter.
+///
+/// Each adapter instance tracks a monotonically increasing ownership token
+/// ([_current]). A new [speak] becomes the owner; [stop] invalidates the
+/// current one. Because the whole setup (availability, configuration, and the
+/// utterance) crosses many asynchronous platform-channel boundaries, [speak]
+/// re-checks ownership after every one of them. An abandoned request therefore
+/// never starts or continues setup/utterance, never stops a newer utterance,
+/// and never publishes a stale failure after it has been cancelled or
+/// superseded. Overlapping [speak] calls always converge on the newest one.
 class FrenchWordAudio implements CourseAudio {
   final FlutterTts _tts = FlutterTts();
+
+  /// Ownership token: each [speak] increments it to claim the request, and
+  /// [stop] increments it to invalidate the current setup and utterance.
+  int _current = 0;
+
   @override
   Future<void> speak(String word) async {
+    final mine = ++_current;
+
     if (await _tts.isLanguageAvailable('fr-FR') != true) {
+      if (mine != _current) return; // Abandoned: do not publish a stale failure.
       throw StateError(
           'Install a French voice in your device speech settings.');
     }
+    if (mine != _current) return; // Abandoned before running setup.
+
+    // Replace any utterance still in progress (owner only).
     await _tts.stop();
+    if (mine != _current) return;
+
     await _tts.setLanguage('fr-FR');
+    if (mine != _current) return;
+
     await _tts.setSpeechRate(0.4);
+    if (mine != _current) return;
+
     await _tts.awaitSpeakCompletion(true);
+    // Do not start an abandoned utterance even though completion is set.
+    if (mine != _current) return;
+
     final result = await _tts.speak(word).timeout(const Duration(seconds: 12));
+    // Superseded mid-utterance: do not act on the stale result (and therefore
+    // do not stop a newer utterance or report a false failure).
+    if (mine != _current) return;
+
     // With awaitSpeakCompletion enabled, web resolves with null on completion;
     // native implementations return 1. Explicit failure codes still fail, and
     // platform exceptions or missing completion still propagate above.
@@ -29,6 +63,9 @@ class FrenchWordAudio implements CourseAudio {
 
   @override
   Future<void> stop() async {
+    // Invalidate the current setup before touching the platform, so a queued
+    // setup cannot start speaking once it resumes.
+    _current++;
     await _tts.stop();
   }
 }
