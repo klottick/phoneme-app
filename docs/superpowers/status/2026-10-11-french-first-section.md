@@ -14,8 +14,8 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 | 2 content/session | merged | `feat/fr-section-session`, `wks_c449fb2828dcbebc` | `ses_ed7aabf1cffe8amV18675aLqw4` | [#4](https://github.com/klottick/phoneme-app/pull/4), head `3a9bf82`, merge `77117b7` | controller: 219 full tests pass, analyzer clean, 8 invalid snapshots rejected |
 | 3 persistence | merged | `feat/fr-section-persistence`, `wks_bccf671bff3e1262` | `ses_ed78b449dffelAD0FF2yNlyWif` | [#6](https://github.com/klottick/phoneme-app/pull/6), head `87d80f7`, merge `deb9906` | controller: 247 full tests and 5 targeted regressions pass; analyzer clean |
 | 4 view | merged | `feat/fr-section-view`, `wks_456f5abd3290f0d6` | `ses_ed7665014ffe67N7wHb8H1Bkle` | [#7](https://github.com/klottick/phoneme-app/pull/7), head `93eeddb`, merge `14ec4c8` | controller: 265 full tests pass; analyzer clean |
-| 5 screen/routes | review fixes requested (round 2) | `feat/fr-discovery-screen`, `wks_3bfe435ea695759f` | `ses_ed7548eb3ffeXqyZ6xwxLH0Xw6` | [#9](https://github.com/klottick/phoneme-app/pull/9), `bc6b8e7`, not merged | worker: 294 tests/analyzer/web build pass; controller: original 3 pass, 3 follow-up lifecycle cases fail |
-| Final verification | blocked: 5 | — | controller | — | — |
+| 5 screen/routes | scoped review approved; held for final fix | `feat/fr-discovery-screen`, `wks_3bfe435ea695759f` | `ses_ed7548eb3ffeXqyZ6xwxLH0Xw6` | [#9](https://github.com/klottick/phoneme-app/pull/9), `df29733`, not merged | controller: 298 tests + 6 lifecycle regressions pass; analyzer clean; JS build succeeds |
+| Final verification | final fix wave requested | same Task 5 workspace | controller + original Qwen worker | #9 held | reproduced duplicate-load retry overwrite; deferred comment cleanup |
 
 ## Baselines and constraints
 
@@ -41,6 +41,7 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 11. Ruling: the view's `error`/`Retry saving` path is for persistence failures; playback failures use separate generic audio feedback and allow Listen again — avoids presenting a save action for a microphone-free playback error; cost if wrong: the screen's audio notification UI may need refinement. Never display raw exceptions that can contain the hidden word/answer.
 12. Ruling: backgrounding invalidates audio, not recoverable save intent; preserve same-owner pending actions or reconcile committed state on resume — needed for retry-safe progress without stale callback effects; cost if wrong: an additional idempotent retry/load on resume, not lost answers or false unlocks.
 13. Ruling: only `resumed` reopens foreground recovery; `inactive` focus changes must not replay saves or settle suspended navigation — prevents duplicate callbacks and premature exits; cost if wrong: recovery waits for resumed rather than acting during transitional focus loss.
+14. Ruling: final cleanup may modify `lesson_policy.dart` only to correct its false comment alongside the screen load fix — closes the deferred minor without changing policy behavior; cost if wrong: PR #9 adds one documentation-only core-file edit.
 
 ## Preflight dependency/interface scan
 
@@ -76,6 +77,8 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 - 2026-10-11: Docs/state PR #5 reviewed (docs-only, whitespace clean) and merged at `71970d1`. Task 5 dispatched to local Qwen on that base in workspace `wks_3bfe435ea695759f`, worker `ses_ed7548eb3ffeXqyZ6xwxLH0Xw6`. Controller baseline: 265 full Flutter tests passed (`/tmp/opencode/fr-screen-baseline-tests.log`). Owned screen/router/flow tests only; merged core/store/view and legacy recording/game files are off limits. Final integrated review/build remains pending.
 - 2026-10-11: Task 5 PR #9 reviewed at `9db752f`: lifecycle changes required. Controller reproduced permanent spinner after backgrounded load, discarded failed-answer retry with Next falsely enabled, and missing audio stop on owner change (`/tmp/opencode/fr-screen-review-results.log`). Tests claiming delayed callbacks did not actually complete them. Fix round 1 requested with real completion gates and safe resume reconciliation. No merge.
 - 2026-10-11: Task 5 fix `9db752f..bc6b8e7` re-reviewed: original reproductions pass, but 3 follow-up cases fail (`/tmp/opencode/fr-screen-rereview-results.log`): held answer enables Next while suspended; inactive/resumed events duplicate one save to 3 calls; suspended Finish navigates on inactive before resumed. Fix round 2 requested for explicit suspension state, coalescing and single-exit guards. PR #9 remains unmerged.
+- 2026-10-11: Task 5 fix `bc6b8e7..df29733` scoped re-review approved. Controller: 298 full tests and all 6 lifecycle reproductions passed, analyzer clean, JavaScript web build succeeds, whitespace clean (`/tmp/opencode/fr-screen-controller-*-round2.log`). Existing TTS Wasm dry-run warnings remain nonblocking for JS.
+- 2026-10-11: Whole-pilot controller review `706744a..df29733` found one important unchanged load race: double Retry loading can publish a late result over an already answered session (`/tmp/opencode/fr-final-load-review-results.log`). Single final fix wave requested, including the deferred policy comment correction; PR #9 held until scoped final re-review. Manual real-voice/mobile, reviewed audio/linguistics and broader backlog remain follow-up gates.
 
 ## Deferred minor findings for final review
 
