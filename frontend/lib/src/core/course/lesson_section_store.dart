@@ -42,9 +42,11 @@ abstract class LessonSectionStore {
   /// stale attempt count are rejected.
   ///
   /// A valid snapshot captured from a state the store has already moved past
-  /// (a different session at nonzero attempts, or a checkpoint behind the
-  /// stored one) is rejected with [LessonSectionConflictException]; callers
-  /// may offer an explicit reload for that case.
+  /// (a different session at nonzero attempts, a checkpoint behind the stored
+  /// one, or a same-session state that diverged at the stored attempt count,
+  /// where another instance committed a different outcome) is rejected with
+  /// [LessonSectionConflictException]; callers may offer an explicit reload
+  /// for that case.
   Future<void> saveLessonSection(
       String lessonId, Map<String, dynamic> checkpoint);
 
@@ -70,17 +72,19 @@ abstract class LessonSectionStore {
   /// of it at the same attempt count; the existing lesson-completion event is
   /// queued at most once.
   ///
-  /// Completing a different session, or a checkpoint behind the stored one,
-  /// is rejected with [LessonSectionConflictException]; callers may offer an
-  /// explicit reload for that case.
+  /// Completing a different session, a checkpoint behind the stored one, or a
+  /// same-session debrief that diverged from the stored one at the same
+  /// attempt count, is rejected with [LessonSectionConflictException];
+  /// callers may offer an explicit reload for that case.
   Future<void> completeLessonSection(
       String lessonId, Map<String, dynamic> checkpoint);
 }
 
 /// A validly captured session snapshot conflicts with the store's already
-/// advanced state: a different session on a started lesson, or a checkpoint
-/// that cannot be the store's next write (behind, or ahead by more than one
-/// attempt).
+/// advanced state: a different session on a started lesson, a checkpoint
+/// that cannot be the store's next write (behind, ahead by more than one
+/// attempt, or diverged from the stored one at the same attempt count where
+/// another instance of the same session committed a different outcome).
 ///
 /// This is distinct from invalid input — fabricated answers, changed
 /// outcomes, unparseable snapshots stay plain [StateError] — and from

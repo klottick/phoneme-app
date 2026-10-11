@@ -191,7 +191,8 @@ class CourseProgressStore implements LessonSectionStore {
   void _applyAnswer(
       Map<String, dynamic> data, String sound, String skill, bool correct) {
     final evidence = data['evidence'] as Map;
-    final entry = Map<String, dynamic>.from(evidence['$skill:$sound'] as Map? ?? {});
+    final entry =
+        Map<String, dynamic>.from(evidence['$skill:$sound'] as Map? ?? {});
     final attempts = (entry['attempts'] as int? ?? 0) + 1;
     final hits = (entry['correct'] as int? ?? 0) + (correct ? 1 : 0);
     evidence['$skill:$sound'] = {
@@ -199,9 +200,8 @@ class CourseProgressStore implements LessonSectionStore {
       'skill': skill,
       'attempts': attempts,
       'correct': hits,
-      'due': DateTime.now()
-          .add(Duration(days: correct ? 1 : 0))
-          .toIso8601String(),
+      'due':
+          DateTime.now().add(Duration(days: correct ? 1 : 0)).toIso8601String(),
     };
   }
 
@@ -236,8 +236,8 @@ class CourseProgressStore implements LessonSectionStore {
   LessonSection _requireSection(String lessonId) {
     final section = sectionForLesson(lessonId);
     if (section == null) {
-      throw ArgumentError.value(
-          lessonId, 'lessonId', 'No discovery section is supported for this lesson.');
+      throw ArgumentError.value(lessonId, 'lessonId',
+          'No discovery section is supported for this lesson.');
     }
     return section;
   }
@@ -358,8 +358,9 @@ class CourseProgressStore implements LessonSectionStore {
   void _writeSection(Map<String, dynamic> data, String lessonId,
       Map<String, dynamic> checkpoint, String sessionId, int attemptCount) {
     final existing = data['sections'];
-    final Map<String, dynamic> sections =
-        existing is Map ? Map<String, dynamic>.from(existing) : <String, dynamic>{};
+    final Map<String, dynamic> sections = existing is Map
+        ? Map<String, dynamic>.from(existing)
+        : <String, dynamic>{};
     data['sections'] = sections;
     sections[lessonId] = {
       'checkpoint': checkpoint,
@@ -409,8 +410,7 @@ class CourseProgressStore implements LessonSectionStore {
     }
     final raw = checkpoint.cast<String, dynamic>();
     try {
-      if (_deepEquals(
-          (_parseSnapshot(section, raw)..advance()).toJson(),
+      if (_deepEquals((_parseSnapshot(section, raw)..advance()).toJson(),
           candidate.toJson())) {
         return true;
       }
@@ -483,15 +483,17 @@ class CourseProgressStore implements LessonSectionStore {
         _writeSection(data, lessonId, frozen, candidate.sessionId, 0);
         return;
       }
-      if (!_reachesFrom(
-          section, entry, candidate,
-          reviewAllowed: true)) {
-        if (candidate.attemptCount < stored.attemptCount) {
-          // A valid snapshot from a state the store has already passed: a
-          // stale same-owner instance, not a fabrication.
+      if (!_reachesFrom(section, entry, candidate, reviewAllowed: true)) {
+        if (candidate.attemptCount <= stored.attemptCount) {
+          // A valid snapshot from the stored session at or behind the
+          // stored state: either a stale same-owner instance, or an equal
+          // count it diverged at (another instance committed a different
+          // outcome for the same attempt and advanced). Both are reloadable
+          // conflicts, not fabrications.
           throw LessonSectionConflictException(
-              'This snapshot is behind the stored session; it is a stale '
-              'instance, not a valid save.');
+              'This snapshot is behind the stored session or a state it '
+              'diverged from at the same attempt count; it is a stale '
+              'same-owner instance, not a valid save.');
         }
         throw StateError(
             'This snapshot is not a valid save from the stored session; '
@@ -548,8 +550,8 @@ class CourseProgressStore implements LessonSectionStore {
               'A new session may only record its first answer on a fresh '
               'first pass.');
         }
-        _recordSectionAnswer(data, lessonId, frozen, candidate.sessionId,
-            1, sound, correct);
+        _recordSectionAnswer(
+            data, lessonId, frozen, candidate.sessionId, 1, sound, correct);
         return;
       }
       if (candidate.sessionId != stored.sessionId) {
@@ -590,9 +592,14 @@ class CourseProgressStore implements LessonSectionStore {
     });
   }
 
-  void _recordSectionAnswer(Map<String, dynamic> data, String lessonId,
-      Map<String, dynamic> checkpoint, String sessionId, int attemptCount,
-      String sound, bool correct) {
+  void _recordSectionAnswer(
+      Map<String, dynamic> data,
+      String lessonId,
+      Map<String, dynamic> checkpoint,
+      String sessionId,
+      int attemptCount,
+      String sound,
+      bool correct) {
     _applyAnswer(data, sound, 'listening', correct);
     _queue(data, {
       'kind': 'answer',
@@ -601,8 +608,7 @@ class CourseProgressStore implements LessonSectionStore {
       'correct': correct,
       'activity': 'discovery-section'
     });
-    _writeSection(
-        data, lessonId, checkpoint, sessionId, attemptCount);
+    _writeSection(data, lessonId, checkpoint, sessionId, attemptCount);
   }
 
   @override
@@ -611,8 +617,7 @@ class CourseProgressStore implements LessonSectionStore {
     final section = _requireSection(lessonId);
     final candidate = _parseSnapshot(section, checkpoint);
     if (!candidate.canComplete) {
-      throw StateError(
-          'The section has not met its completion policy yet.');
+      throw StateError('The section has not met its completion policy yet.');
     }
     // Freeze the validated snapshot at call time; the mutable caller map and
     // any unknown raw payload keys are never persisted.
@@ -643,12 +648,17 @@ class CourseProgressStore implements LessonSectionStore {
       final storedState = _deepEquals(stored.toJson(), candidate.toJson());
       if (!storedState &&
           !_reachesFrom(section, entry, candidate, reviewAllowed: false)) {
-        throw StateError(
-            'This snapshot is not a valid completion state of the stored '
-            'session.');
+        // Reaching this check, the candidate is at the stored attempt count
+        // and is a valid state of the same session that the store has not
+        // accepted: a stale or divergent same-owner instance (for example
+        // one where a different outcome was committed for the last
+        // attempt). It is reloadable, not a fabrication.
+        throw LessonSectionConflictException(
+            'This snapshot does not match the stored session at the same '
+            'attempt count; it is a stale or divergent same-owner '
+            'instance, not a valid completion state.');
       }
-      _writeSection(
-          data, lessonId, frozen, stored.sessionId, processed);
+      _writeSection(data, lessonId, frozen, stored.sessionId, processed);
       final lessons = data['lessons'] as List;
       if (!lessons.contains(lessonId)) {
         lessons.add(lessonId);

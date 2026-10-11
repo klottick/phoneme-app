@@ -67,10 +67,7 @@ void main() {
       'evidence': evidence,
       'scores': scores,
       if (unknown != null) 'unknownLegacy': unknown,
-      'sections': <String, dynamic>{
-        ...siblings,
-        lessonId: entry
-      }
+      'sections': <String, dynamic>{...siblings, lessonId: entry}
     });
     SharedPreferences.resetStatic();
   }
@@ -90,8 +87,8 @@ void main() {
       });
       final store = CourseProgressStore(frenchCourse.id);
       final answered = fresh('metadata')..submit(true);
-      await store.recordLessonSectionAnswer(
-          lessonId, answered.toJson(), sound: 'u', correct: true);
+      await store.recordLessonSectionAnswer(lessonId, answered.toJson(),
+          sound: 'u', correct: true);
       final data = await store.load();
       expect((data['evidence']['listening:u'] as Map)['attempts'], 1,
           reason: 'a new answer must be recorded, not acknowledged as an '
@@ -110,8 +107,8 @@ void main() {
       });
       final store = CourseProgressStore(frenchCourse.id);
       final answered = fresh('metadata2')..submit(true);
-      await store.recordLessonSectionAnswer(
-          lessonId, answered.toJson(), sound: 'u', correct: true);
+      await store.recordLessonSectionAnswer(lessonId, answered.toJson(),
+          sound: 'u', correct: true);
       final data = await store.load();
       expect((data['evidence']['listening:u'] as Map)['attempts'], 1);
       final entry = (data['sections'] as Map)[lessonId] as Map;
@@ -129,10 +126,10 @@ void main() {
       });
       final store = CourseProgressStore(frenchCourse.id);
       final answered = fresh('metadata-neg')..submit(true);
-      await store.recordLessonSectionAnswer(
-          lessonId, answered.toJson(), sound: 'u', correct: true);
-      expect(((await store.load())['evidence']['listening:u'] as Map)
-              ['attempts'],
+      await store.recordLessonSectionAnswer(lessonId, answered.toJson(),
+          sound: 'u', correct: true);
+      expect(
+          ((await store.load())['evidence']['listening:u'] as Map)['attempts'],
           1,
           reason: 'a negative counter must not masquerade as a gap '
               'rejection for a genuinely new answer');
@@ -157,8 +154,8 @@ void main() {
         });
         SharedPreferences.resetStatic();
         final answered = fresh('metadata-type')..submit(true);
-        await store.recordLessonSectionAnswer(
-            lessonId, answered.toJson(), sound: 'u', correct: true);
+        await store.recordLessonSectionAnswer(lessonId, answered.toJson(),
+            sound: 'u', correct: true);
         // The re-seed replaces the whole document, so each recovery records
         // its answer exactly once on a fresh committed state.
         final data = await store.load();
@@ -186,8 +183,8 @@ void main() {
         ..advance()
         ..submit(true);
       await expectLater(
-          store.recordLessonSectionAnswer(
-              lessonId, jumped.toJson(), sound: 'u', correct: true),
+          store.recordLessonSectionAnswer(lessonId, jumped.toJson(),
+              sound: 'u', correct: true),
           throwsStateError);
       final data = await store.load();
       expect((data['evidence'] as Map), isEmpty,
@@ -195,14 +192,15 @@ void main() {
       expect(prefs.data.containsKey('flutter.course.v1.${frenchCourse.id}'),
           isTrue,
           reason: 'existing data is preserved, not deleted');
-      final storedEntry =
-          (jsonDecode(prefs.data['flutter.course.v1.${frenchCourse.id}'] as String)
-                  as Map)['sections'] as Map;
+      final storedEntry = (jsonDecode(
+              prefs.data['flutter.course.v1.${frenchCourse.id}'] as String)
+          as Map)['sections'] as Map;
       expect((storedEntry[lessonId] as Map)['processedAttemptCount'], 100,
           reason: 'a rejected write must not mutate the entry');
     });
 
-    test('a fresh save repairs a corrupt entry and preserves legacy plus '
+    test(
+        'a fresh save repairs a corrupt entry and preserves legacy plus '
         'sibling entries', () async {
       final session = fresh('metadata-repair');
       seedEntry(
@@ -234,8 +232,8 @@ void main() {
       expect((data['scores'] as Map)['arcade'], 55);
       expect(data['unknownLegacy'], 'kept-unknown');
       final sections = data['sections'] as Map;
-      expect((sections[lessonId] as Map)['processedSessionId'],
-          'metadata-repair');
+      expect(
+          (sections[lessonId] as Map)['processedSessionId'], 'metadata-repair');
       expect(sections['other-lesson']['checkpoint'], 'kept-sibling');
     });
   });
@@ -249,30 +247,46 @@ void main() {
         'lessons': <String>[],
         'evidence': <String, dynamic>{},
         'scores': <String, dynamic>{},
-        'sections': {lessonId: {'checkpoint': 'not-a-snapshot'}}
+        'sections': {
+          lessonId: {'checkpoint': 'not-a-snapshot'}
+        }
       });
       SharedPreferences.resetStatic();
-      expect(await CourseProgressStore(frenchCourse.id)
-          .loadLessonSection(lessonId), isNull);
+      expect(
+          await CourseProgressStore(frenchCourse.id)
+              .loadLessonSection(lessonId),
+          isNull);
     });
 
-    for (final (String label, Map<String, dynamic> Function(LessonSectionSession s) entry) in [
-      ('an inflated attempt count',
-          (s) => {'processedSessionId': s.sessionId, 'processedAttemptCount': 100}),
-      ('a mismatched processed session id',
-          (s) => {'processedSessionId': 'someone-else', 'processedAttemptCount': 0}),
-      ('a wrong-typed attempt count',
-          (s) => {'processedSessionId': s.sessionId, 'processedAttemptCount': '0'}),
-      ('a negative attempt count',
-          (s) => {'processedSessionId': s.sessionId, 'processedAttemptCount': -1}),
+    for (final (
+          String label,
+          Map<String, dynamic> Function(LessonSectionSession s) entry
+        ) in [
+      (
+        'an inflated attempt count',
+        (s) => {'processedSessionId': s.sessionId, 'processedAttemptCount': 100}
+      ),
+      (
+        'a mismatched processed session id',
+        (s) =>
+            {'processedSessionId': 'someone-else', 'processedAttemptCount': 0}
+      ),
+      (
+        'a wrong-typed attempt count',
+        (s) => {'processedSessionId': s.sessionId, 'processedAttemptCount': '0'}
+      ),
+      (
+        'a negative attempt count',
+        (s) => {'processedSessionId': s.sessionId, 'processedAttemptCount': -1}
+      ),
       ('missing metadata', (s) => <String, dynamic>{}),
     ]) {
       test('throws FormatException for $label', () async {
         final s = fresh('contract-$label'.replaceAll(' ', '-'));
         seedEntry({'checkpoint': s.toJson(), ...entry(s)});
         final store = CourseProgressStore(frenchCourse.id);
-        await expectLater(store.loadLessonSection(lessonId),
-            throwsFormatException,
+        await expectLater(
+            store.loadLessonSection(lessonId), throwsFormatException,
             reason: 'an unusable entry surfaces the same FormatException '
                 'contract as an unusable checkpoint');
       });
@@ -291,6 +305,13 @@ void main() {
   });
 
   group('typed conflicts without weakening validation', () {
+    LessonSectionSession reparse(LessonSectionSession session) =>
+        LessonSectionSession.fromJson(
+          session.toJson(),
+          itemIds: frenchUySection.items.map((item) => item.id).toList(),
+          contentRevision: frenchUySection.contentRevision,
+        );
+
     test('LessonSectionConflictException stays a StateError', () {
       expect(LessonSectionConflictException('conflict'), isA<StateError>());
     });
@@ -300,12 +321,11 @@ void main() {
       final saved = fresh('sess-a');
       await store.saveLessonSection(lessonId, saved.toJson());
       final savedAnswered = fresh('sess-a')..submit(true);
-      await store.recordLessonSectionAnswer(
-          lessonId, savedAnswered.toJson(), sound: 'u', correct: true);
+      await store.recordLessonSectionAnswer(lessonId, savedAnswered.toJson(),
+          sound: 'u', correct: true);
 
       final other = fresh('sess-b')..submit(true);
-      await expectLater(
-          store.saveLessonSection(lessonId, other.toJson()),
+      await expectLater(store.saveLessonSection(lessonId, other.toJson()),
           throwsA(isA<LessonSectionConflictException>()));
       // Storage unchanged: the conflicting snapshot is rejected.
       expect(await store.loadLessonSection(lessonId),
@@ -318,16 +338,16 @@ void main() {
       final saved = fresh('sess-c');
       await store.saveLessonSection(lessonId, saved.toJson());
       final savedAnswered = fresh('sess-c')..submit(true);
-      await store.recordLessonSectionAnswer(
-          lessonId, savedAnswered.toJson(), sound: 'u', correct: true);
+      await store.recordLessonSectionAnswer(lessonId, savedAnswered.toJson(),
+          sound: 'u', correct: true);
 
       final other = fresh('sess-d')..submit(true);
       await expectLater(
-          store.recordLessonSectionAnswer(
-              lessonId, other.toJson(), sound: 'u', correct: true),
+          store.recordLessonSectionAnswer(lessonId, other.toJson(),
+              sound: 'u', correct: true),
           throwsA(isA<LessonSectionConflictException>()));
-      expect(((await store.load())['evidence']['listening:u'] as Map)
-              ['attempts'],
+      expect(
+          ((await store.load())['evidence']['listening:u'] as Map)['attempts'],
           1);
     });
 
@@ -337,8 +357,8 @@ void main() {
       final saved = fresh('sess-ahead');
       await store.saveLessonSection(lessonId, saved.toJson());
       final savedAnswered = fresh('sess-ahead')..submit(true);
-      await store.recordLessonSectionAnswer(
-          lessonId, savedAnswered.toJson(), sound: 'u', correct: true);
+      await store.recordLessonSectionAnswer(lessonId, savedAnswered.toJson(),
+          sound: 'u', correct: true);
 
       // A genuinely new continuation captured before the store advanced.
       final stale = fresh('sess-ahead')
@@ -348,11 +368,11 @@ void main() {
         ..advance()
         ..submit(true);
       await expectLater(
-          store.recordLessonSectionAnswer(
-              lessonId, stale.toJson(), sound: 'u', correct: true),
+          store.recordLessonSectionAnswer(lessonId, stale.toJson(),
+              sound: 'u', correct: true),
           throwsA(isA<LessonSectionConflictException>()));
-      expect(((await store.load())['evidence']['listening:u'] as Map)
-              ['attempts'],
+      expect(
+          ((await store.load())['evidence']['listening:u'] as Map)['attempts'],
           1,
           reason: 'the stale continuation must not be recorded');
     });
@@ -363,30 +383,95 @@ void main() {
       final saved = fresh('sess-stale');
       await store.saveLessonSection(lessonId, saved.toJson());
       final savedAnswered = fresh('sess-stale')..submit(true);
-      await store.recordLessonSectionAnswer(
-          lessonId, savedAnswered.toJson(), sound: 'u', correct: true);
+      await store.recordLessonSectionAnswer(lessonId, savedAnswered.toJson(),
+          sound: 'u', correct: true);
 
       // An instance that still sees the zero-attempt state saves it again.
       final stale = fresh('sess-stale').toJson();
-      await expectLater(
-          store.saveLessonSection(lessonId, stale),
+      await expectLater(store.saveLessonSection(lessonId, stale),
           throwsA(isA<LessonSectionConflictException>()));
       expect(await store.loadLessonSection(lessonId),
           equals(savedAnswered.toJson()));
     });
 
+    test(
+        'a same-owner divergent save at the same attempt count is a typed '
+        'conflict', () async {
+      final store = CourseProgressStore(frenchCourse.id);
+      final started = fresh('two-instances');
+      await store.saveLessonSection(lessonId, started.toJson());
+
+      // Two restored instances diverge: both answer item 1, differently.
+      final first = reparse(started)..submit(true);
+      final second = reparse(started)..submit(false);
+      await store.recordLessonSectionAnswer(lessonId, first.toJson(),
+          sound: 'u', correct: true);
+      // The required duplicate no-op keeps only the committed outcome.
+      await store.recordLessonSectionAnswer(lessonId, second.toJson(),
+          sound: 'u', correct: false);
+      expect(
+          ((await store.load())['evidence']['listening:u'] as Map)['attempts'],
+          1);
+
+      // Each advances its own valid state; the committed one wins.
+      first.advance();
+      await store.saveLessonSection(lessonId, first.toJson());
+      second.advance();
+      await expectLater(store.saveLessonSection(lessonId, second.toJson()),
+          throwsA(isA<LessonSectionConflictException>()),
+          reason: 'a valid equal-count divergent state must offer reload '
+              'through the typed conflict, not a plain StateError');
+      expect(await store.loadLessonSection(lessonId), equals(first.toJson()));
+      expect(
+          ((await store.load())['evidence']['listening:u'] as Map)['attempts'],
+          1,
+          reason: 'the divergent save is rejected; evidence stays committed');
+    });
+
+    test(
+        'a same-owner divergent completion at the same attempt count is a '
+        'typed conflict', () async {
+      String soundOf(String itemId) => frenchUySection.items
+          .firstWhere((item) => item.id == itemId)
+          .expectedSound;
+      final store = CourseProgressStore(frenchCourse.id);
+      var state = fresh('diverge-complete');
+      // Save a passing perfect pass through the store.
+      for (var i = 0; i < state.queue.length; i++) {
+        final answered = reparse(state)..submit(true);
+        await store.recordLessonSectionAnswer(lessonId, answered.toJson(),
+            sound: soundOf(answered.currentItemId!), correct: true);
+        state = reparse(answered)..advance();
+        await store.saveLessonSection(lessonId, state.toJson());
+      }
+      expect(((await store.load())['lessons'] as List).contains(lessonId),
+          isFalse);
+
+      // A divergent debrief of the same session at the same attempt count,
+      // still passing, but with a different outcome for one item.
+      final divergent = Map<String, dynamic>.from(state.toJson());
+      (divergent['latestAnswers'] as Map)['tout'] = false;
+      await expectLater(store.completeLessonSection(lessonId, divergent),
+          throwsA(isA<LessonSectionConflictException>()),
+          reason: 'a valid equal-count divergent completion must offer '
+              'reload through the typed conflict');
+      expect(
+          ((await store.load())['lessons'] as List).contains(lessonId), isFalse,
+          reason: 'the divergent completion is rejected; no completion is '
+              'recorded');
+    });
+
     test('ownership failures are not mislabeled as conflicts', () async {
       final guest = CourseProgressStore(frenchCourse.id);
       final guestAnswered = fresh('sess-guest')..submit(true);
-      final token =
-          '${base64Url.encode(utf8.encode('{"alg":"HS256"}'))}.'
-              '${base64Url.encode(utf8.encode(jsonEncode({
-                'sub': accountUserId,
-                'exp': DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600
-              })))}.signature';
-      final client = SupabaseClient('https://course.example.invalid',
-          'public-test-key',
-          httpClient: MockClient((request) async {
+      final token = '${base64Url.encode(utf8.encode('{"alg":"HS256"}'))}.'
+          '${base64Url.encode(utf8.encode(jsonEncode({
+            'sub': accountUserId,
+            'exp': DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600
+          })))}.signature';
+      final client =
+          SupabaseClient('https://course.example.invalid', 'public-test-key',
+              httpClient: MockClient((request) async {
         if (request.url.path.endsWith('/token')) {
           return http.Response(
               jsonEncode({
@@ -408,16 +493,17 @@ void main() {
         }
         return http.Response('offline', 503, request: request);
       }));
-      await client.auth.signInWithPassword(
-          email: 'test@example.invalid', password: 'test');
+      await client.auth
+          .signInWithPassword(email: 'test@example.invalid', password: 'test');
       courseBackend = client;
       addTearDown(() async {
         courseBackend = null;
         await client.dispose();
       });
 
-      await expectLater(guest.recordLessonSectionAnswer(
-              lessonId, guestAnswered.toJson(), sound: 'u', correct: true),
+      await expectLater(
+          guest.recordLessonSectionAnswer(lessonId, guestAnswered.toJson(),
+              sound: 'u', correct: true),
           throwsA((Object error) =>
               error is StateError && error is! LessonSectionConflictException));
     });

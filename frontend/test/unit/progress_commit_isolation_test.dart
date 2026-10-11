@@ -141,7 +141,8 @@ void main() {
   });
 
   group('committed-only section reads', () {
-    test('load waits out an in-flight write and returns the committed state '
+    test(
+        'load waits out an in-flight write and returns the committed state '
         'after a rejection', () async {
       final prefs = HeldWritePrefs();
       SharedPreferencesStorePlatform.instance = prefs;
@@ -157,7 +158,8 @@ void main() {
 
       prefs.beginHold();
       final pendingWrite = store.recordLessonSectionAnswer(
-          lessonId, session.toJson(), sound: 'u', correct: true);
+          lessonId, session.toJson(),
+          sound: 'u', correct: true);
       // Verify the actual held write entry before reading: the write is
       // genuinely in flight, not a timed race.
       await prefs.entered;
@@ -177,7 +179,8 @@ void main() {
       expect((data['evidence'] as Map), isEmpty);
     });
 
-    test('load waiting on an in-flight write returns the committed state '
+    test(
+        'load waiting on an in-flight write returns the committed state '
         'after a delayed success', () async {
       final prefs = HeldWritePrefs();
       SharedPreferencesStorePlatform.instance = prefs;
@@ -193,7 +196,8 @@ void main() {
 
       prefs.beginHold();
       final pendingWrite = store.recordLessonSectionAnswer(
-          lessonId, session.toJson(), sound: 'u', correct: true);
+          lessonId, session.toJson(),
+          sound: 'u', correct: true);
       await prefs.entered;
       expect(prefs.heldWrites, greaterThan(0));
 
@@ -208,7 +212,8 @@ void main() {
       expect((data['evidence']['listening:u'] as Map)['attempts'], 1);
     });
 
-    test('an in-flight write that throws still leaves readers on the '
+    test(
+        'an in-flight write that throws still leaves readers on the '
         'last committed state', () async {
       final prefs = HeldWritePrefs();
       SharedPreferencesStorePlatform.instance = prefs;
@@ -224,7 +229,8 @@ void main() {
 
       prefs.beginHold();
       final pendingWrite = store.recordLessonSectionAnswer(
-          lessonId, session.toJson(), sound: 'u', correct: true);
+          lessonId, session.toJson(),
+          sound: 'u', correct: true);
       await prefs.entered;
       expect(prefs.heldWrites, greaterThan(0));
 
@@ -239,7 +245,8 @@ void main() {
       expect((await store.load())['evidence'], isEmpty);
     });
 
-    test('a write queued by a second store is based on the first store\'s '
+    test(
+        'a write queued by a second store is based on the first store\'s '
         'repaired state', () async {
       final prefs = HeldWritePrefs();
       SharedPreferencesStorePlatform.instance = prefs;
@@ -256,7 +263,8 @@ void main() {
 
       prefs.beginHold();
       final writeA = storeA.recordLessonSectionAnswer(
-          lessonId, session.toJson(), sound: 'u', correct: true);
+          lessonId, session.toJson(),
+          sound: 'u', correct: true);
       await prefs.entered;
       expect(prefs.heldWrites, greaterThan(0));
 
@@ -271,19 +279,21 @@ void main() {
       expect((data['evidence'] as Map), isEmpty,
           reason: 'a queued writer must not resurrect the rejected '
               'optimistic answer of another instance');
-      expect((data['sections'][lessonId]['checkpoint'] as Map)['attemptCount'],
-          0);
+      expect(
+          (data['sections'][lessonId]['checkpoint'] as Map)['attemptCount'], 0);
     });
   });
 
   group('committed-only outbox delivery', () {
-    test('sync never uploads an in-flight outbox entry; retry yields one '
+    test(
+        'sync never uploads an in-flight outbox entry; retry yields one '
         'unique cloud event', () async {
       final uploadedIds = <String>[];
       final firstUpload = Completer<void>();
-      final client = signedInUploadClient(uploadedIds, firstUpload: firstUpload);
-      await client.auth.signInWithPassword(
-          email: 'test@example.invalid', password: 'test');
+      final client =
+          signedInUploadClient(uploadedIds, firstUpload: firstUpload);
+      await client.auth
+          .signInWithPassword(email: 'test@example.invalid', password: 'test');
       courseBackend = client;
       final prefs = HeldWritePrefs();
       SharedPreferencesStorePlatform.instance = prefs;
@@ -301,7 +311,8 @@ void main() {
 
       prefs.beginHold();
       final pendingAnswer = store.recordLessonSectionAnswer(
-          lessonId, session.toJson(), sound: 'u', correct: true);
+          lessonId, session.toJson(),
+          sound: 'u', correct: true);
       // Verify the actual held write entry before asserting sync discipline.
       await prefs.entered;
       expect(prefs.heldWrites, greaterThan(0));
@@ -344,8 +355,8 @@ void main() {
 
       // Retry the same answer: exactly one local attempt and exactly one
       // unique cloud event id.
-      await store.recordLessonSectionAnswer(
-          lessonId, session.toJson(), sound: 'u', correct: true);
+      await store.recordLessonSectionAnswer(lessonId, session.toJson(),
+          sound: 'u', correct: true);
       await store.sync();
       expect(uploadedIds, hasLength(1));
       expect(uploadedIds.toSet(), hasLength(1),
@@ -363,9 +374,9 @@ void main() {
             'sub': accountUserId,
             'exp': DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600
           })))}.signature';
-      final client = SupabaseClient('https://course.example.invalid',
-          'public-test-key',
-          httpClient: MockClient((request) async {
+      final client =
+          SupabaseClient('https://course.example.invalid', 'public-test-key',
+              httpClient: MockClient((request) async {
         if (request.url.path.endsWith('/token')) {
           return http.Response(
               jsonEncode({
@@ -389,8 +400,8 @@ void main() {
         await uploadGate.future;
         return http.Response('', 204, request: request);
       }));
-      await client.auth.signInWithPassword(
-          email: 'test@example.invalid', password: 'test');
+      await client.auth
+          .signInWithPassword(email: 'test@example.invalid', password: 'test');
       courseBackend = client;
       final prefs = HeldWritePrefs();
       SharedPreferencesStorePlatform.instance = prefs;
@@ -409,8 +420,8 @@ void main() {
       final session = freshSection('net-isolation');
       await store.saveLessonSection(lessonId, session.toJson());
       session.submit(true);
-      await store.recordLessonSectionAnswer(
-          lessonId, session.toJson(), sound: 'u', correct: true);
+      await store.recordLessonSectionAnswer(lessonId, session.toJson(),
+          sound: 'u', correct: true);
       final hangingSync = store.sync();
       await Future<void>.delayed(const Duration(milliseconds: 20));
       expect(uploads, greaterThan(0), reason: 'sync must have started');

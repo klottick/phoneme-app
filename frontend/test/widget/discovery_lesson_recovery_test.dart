@@ -146,8 +146,7 @@ void main() {
 
     expect(find.text('Correct'), findsNothing,
         reason: 'reopening must not restore an unrecorded answer');
-    expect(
-        find.textContaining('could not be saved'), findsNothing,
+    expect(find.textContaining('could not be saved'), findsNothing,
         reason: 'the failed write belongs to the disposed screen');
     expect(find.text('Retry saving'), findsNothing);
     expect(find.text('Item 1 of 10'), findsOneWidget,
@@ -171,7 +170,8 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('a corrupt stored entry loads through the corrupt recovery '
+  testWidgets(
+      'a corrupt stored entry loads through the corrupt recovery '
       'contract and the new session records cleanly', (tester) async {
     final session = LessonSectionSession(
         itemIds: frenchUySection.items.map((item) => item.id).toList(),
@@ -196,12 +196,10 @@ void main() {
       SharedPreferences.setMockInitialValues({});
     });
 
-    await tester.pumpWidget(
-        _pumpLessonRealStore(tester, support.FakeAudio()));
+    await tester.pumpWidget(_pumpLessonRealStore(tester, support.FakeAudio()));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('could not be restored'),
-        findsOneWidget,
+    expect(find.textContaining('could not be restored'), findsOneWidget,
         reason: 'an unusable entry must follow the corrupt snapshot '
             'contract (notice + fresh attempt)');
     expect(find.text('Item 1 of 10'), findsOneWidget);
