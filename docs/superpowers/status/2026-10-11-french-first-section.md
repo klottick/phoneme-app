@@ -7,6 +7,12 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 
 ## State
 
+**Later review/repair outcome:** the full pilot review reproduced eight gaps
+after this original delivery. All eight are now repaired; see the
+[repair outcome ledger](2026-10-11-french-pilot-repairs.md) for current verification,
+merged PRs, review corrections and remaining validation gates. The history below
+is preserved as the original delivery record.
+
 | Task | State | Branch / workspace | Worker | PR / merge | Verification |
 |---|---|---|---|---|---|
 | Planning | merged | `docs/french-first-section`, `wks_0f327fd42c4ce757` | controller | [#1](https://github.com/klottick/phoneme-app/pull/1), `2ee916e` | docs-only scope/whitespace review; remote baseline 128 tests/analyzer clean |
