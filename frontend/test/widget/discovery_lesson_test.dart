@@ -42,6 +42,19 @@ class FakeAudio implements CourseAudio {
   }
 }
 
+/// Audio whose playback future is held open by a [Completer] so that a late
+/// (real) completion can be delivered after disposal, suspension, or owner
+/// replacement; unlike [FakeAudio]'s `hold` it actually continues.
+class GateAudio extends FakeAudio {
+  final Completer<void> gate = Completer<void>();
+
+  @override
+  Future<void> speak(String word) {
+    spoken.add(word);
+    return gate.future;
+  }
+}
+
 /// Validates section writes the same way the merged store does, so the screen
 /// is tested against exact legal transitions, idempotent retries, and
 /// owner-scoped no-ops.
@@ -261,6 +274,16 @@ Widget pumpLesson(
 Future<void> advance(WidgetTester tester, {required bool last}) async {
   await tester.tap(find.text(last ? 'See section explanation' : 'Next word'));
   await tester.pumpAndSettle();
+}
+
+/// Suspends (forcing the one frame the engine would not schedule while
+/// suspended) and then resumes.
+Future<void> suspendResume(WidgetTester tester) async {
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+  tester.binding.scheduleForcedFrame();
+  await tester.pump();
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  await tester.pump();
 }
 
 void main() {
@@ -553,6 +576,42 @@ void main() {
           (store.stored!['policy'] as Map)['completionThresholdPercent'], 70);
       await tester.pumpWidget(const SizedBox());
     });
+
+    testWidgets(
+        'resume during initial load must not leave a permanent '
+        'spinner', (tester) async {
+      final store = FakeSectionStore()..loadGate = Completer<void>();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pump();
+      await suspendResume(tester);
+      store.loadGate!.complete();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('Item 1 of 10'), findsOneWidget,
+          reason: 'resume must re-drive the interrupted initial load');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets(
+        'an initial load that completes while suspended still '
+        'recovers on resume', (tester) async {
+      final store = FakeSectionStore()..loadGate = Completer<void>();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.scheduleForcedFrame();
+      await tester.pump();
+      store.loadGate!.complete(); // the load completes while suspended
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('Item 1 of 10'), findsNothing,
+          reason: 'a suspended load must not publish to the UI');
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.text('Item 1 of 10'), findsOneWidget,
+          reason: 'resume must re-drive the interrupted load');
+      await tester.pumpWidget(const SizedBox());
+    });
   });
 
   group('save failures and retries', () {
@@ -682,44 +741,165 @@ void main() {
   });
 
   group('lifecycle and owners', () {
-    testWidgets('delayed playback and save after dispose mutate nothing',
-        (tester) async {
-      final audio = FakeAudio(hold: true);
-      final store = FakeSectionStore();
+    testWidgets(
+        'a save held at dispose commits exactly once and never '
+        'touches the disposed screen', (tester) async {
+      final audio = GateAudio();
+      final store = FakeSectionStore()..answerGate = Completer<void>();
       await tester.pumpWidget(pumpLesson(tester, audio, store));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Listen to the word'));
       await tester.pump();
+      audio.gate.complete();
+      await tester.pumpAndSettle();
+      expect(choicesEnabled(tester), isTrue);
+      await tester.tap(find.text('/u/'));
+      await tester.pump(); // the answer save starts and is held by the gate
+      expect(store.answerCalls, 1);
+      await tester.pumpWidget(const SizedBox()); // dispose while it is held
+      store.answerGate!.complete(); // the save completes after disposal
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(tester.takeException(), isNull,
+          reason: 'a save completing after disposal must not throw or publish');
+      expect(store.answerCalls, 1,
+          reason: 'a disposed screen must not resend the save');
+      expect(store.processedAttempts, 1,
+          reason: 'the same-owner save lands exactly once in storage');
       await tester.pumpWidget(const SizedBox());
-      expect(tester.takeException(), isNull);
-      expect(audio.stops, greaterThanOrEqualTo(1));
-      expect(store.answerCalls, 0);
     });
 
     testWidgets(
-        'backgrounding invalidates hearing and blocks the '
-        'in-flight playback from unlocking choices', (tester) async {
-      final audio = FakeAudio();
+        'a playback held at dispose cannot unlock or record '
+        'anything afterwards', (tester) async {
+      final audio = GateAudio();
       final store = FakeSectionStore();
       await tester.pumpWidget(pumpLesson(tester, audio, store));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      await tester.pumpWidget(const SizedBox()); // dispose with playback held
+      audio.gate.complete(); // the real late completion
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(tester.takeException(), isNull,
+          reason: 'a playback completing after disposal must not throw');
+      expect(store.answerCalls, 0,
+          reason: 'a late playback must not record or enable answers');
+      expect(audio.stops, greaterThanOrEqualTo(1));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets(
+        'in-flight playback cannot unlock choices across '
+        'background/resume', (tester) async {
+      final audio = GateAudio();
+      final store = FakeSectionStore();
+      await tester.pumpWidget(pumpLesson(tester, audio, store));
       await tester.pumpAndSettle();
-      expect(choicesEnabled(tester), isTrue);
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump(); // playback in flight
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-      // Pausing disables frame scheduling; force one frame so the state
-      // change reaches the widget tree (the real engine stops frames too).
       tester.binding.scheduleForcedFrame();
       await tester.pump();
+      audio.gate.complete(); // playback completes while suspended
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
       expect(choicesEnabled(tester), isFalse,
-          reason: 'backgrounding invalidates the hearing');
+          reason: 'a suspended playback completion must not unlock choices');
+      expect(store.answerCalls, 0);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
       expect(choicesEnabled(tester), isFalse,
-          reason: 'fresh completed playback is required after resume');
+          reason: 'a fresh completed playback is required after resume');
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
-      expect(choicesEnabled(tester), isTrue);
+      expect(choicesEnabled(tester), isTrue,
+          reason: 'a fresh completed playback re-enables the choices');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('backgrounding must not abandon a failed answer retry',
+        (tester) async {
+      final store = FakeSectionStore()..failAnswer = true;
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pumpAndSettle();
+      expect(find.text('Retry saving'), findsOneWidget);
+      await suspendResume(tester);
+      store.failAnswer = false;
+      final FilledButton next = tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Next word'));
+      expect(next.onPressed, isNull,
+          reason: 'uncommitted answer must not advance after resume');
+      expect(find.text('Retry saving'), findsOneWidget,
+          reason: 'the failed save intent survives suspension');
+      await tester.tap(find.text('Retry saving'));
+      await tester.pumpAndSettle();
+      expect(store.processedAttempts, 1,
+          reason: 'the retry records the held answer exactly once');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets(
+        'a save completing while suspended settles exactly once '
+        'on resume', (tester) async {
+      final store = FakeSectionStore()..answerGate = Completer<void>();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pump(); // the answer save is in flight
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.scheduleForcedFrame();
+      await tester.pump();
+      store.answerGate!.complete(); // completes while suspended
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('Retry saving'), findsNothing,
+          reason: 'a suspended completion is neither success nor error UI');
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(store.processedAttempts, 1,
+          reason: 'resume must settle the save idempotently, exactly once');
+      expect(find.text('Correct'), findsOneWidget);
+      expect(find.text('Retry saving'), findsNothing,
+          reason: 'a settled save must not leave an error behind');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('replacing owner must stop old playback immediately',
+        (tester) async {
+      final audio = GateAudio();
+      final ownerA = FakeSectionStore();
+      final ownerB = FakeSectionStore();
+      Widget app(FakeSectionStore owner) => ProviderScope(
+              overrides: [
+                courseAudioProvider.overrideWithValue(audio),
+                lessonSectionStoreProvider.overrideWithValue(owner),
+              ],
+              child: const MaterialApp(
+                  home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y')));
+      await tester.pumpWidget(app(ownerA));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump(); // old-owner playback in flight
+      await tester.pumpWidget(app(ownerB));
+      await tester.pump();
+      expect(audio.stops, greaterThan(0),
+          reason: 'owner replacement must stop the old playback');
+      audio.gate.complete();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(choicesEnabled(tester), isFalse,
+          reason: 'old playback must not enable choices');
+      expect(find.text('Item 1 of 10'), findsOneWidget,
+          reason: 'the replacement owner state must be loaded');
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -851,6 +1031,39 @@ void main() {
           .widget<DiscoveryLessonScreen>(find.byType(DiscoveryLessonScreen));
       expect(screen.review, isTrue, reason: 'the review query is preserved');
       await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a held Finish does not navigate while suspended',
+        (tester) async {
+      final store = FakeSectionStore()..completeGate = Completer<void>();
+      final router = lessonRouter();
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(
+          overrides: [
+            courseAudioProvider.overrideWithValue(FakeAudio()),
+            lessonSectionStoreProvider.overrideWithValue(store),
+          ],
+          child: MaterialApp.router(
+              debugShowCheckedModeBanner: false, routerConfig: router)));
+      await tester.pumpAndSettle();
+      await playPerfectSection(tester);
+      await tester.tap(find.text('Finish section'));
+      await tester.pump(); // the completion save is in flight, held
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.scheduleForcedFrame();
+      await tester.pump();
+      store.completeGate!.complete(); // completes while suspended
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(router.routeInformationProvider.value.uri.path,
+          '/course-lesson/en-fr-u-y',
+          reason: 'a suspended completion must not navigate');
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(store.completedLesson, 'en-fr-u-y',
+          reason: 'resume must settle the pending completion');
+      expect(router.routeInformationProvider.value.uri.path, '/home',
+          reason: 'a settled completion exits to home');
     });
 
     testWidgets(
