@@ -59,10 +59,31 @@ class CourseProgressStore implements LessonSectionStore {
   Future<void> _update(void Function(Map<String, dynamic>) change) {
     final operation = (_writes ?? Future<void>.value()).then((_) async {
       final data = await load();
-      change(data);
       final prefs = await SharedPreferences.getInstance();
-      if (!await prefs.setString(key, jsonEncode(data))) {
-        throw StateError('Could not save progress');
+      final String? lastCommitted = prefs.getString(key);
+      change(data);
+      var committed = false;
+      try {
+        if (!await prefs.setString(key, jsonEncode(data))) {
+          throw StateError('Could not save progress');
+        }
+        committed = true;
+      } finally {
+        if (!committed) {
+          // The legacy preferences API records its in-process cache before
+          // the platform write resolves, so a rejected write would otherwise
+          // keep reading back as saved for the rest of this process. Restore
+          // the last committed state before releasing the serialized writer.
+          try {
+            final Future repair = lastCommitted == null
+                ? prefs.remove(key)
+                : prefs.setString(key, lastCommitted);
+            await repair;
+          } catch (_) {
+            // Even if the platform rejects the repair write, the cache
+            // itself was already restored to the last committed state.
+          }
+        }
       }
     });
     final tail = operation.catchError((Object _) {});
@@ -241,13 +262,18 @@ class CourseProgressStore implements LessonSectionStore {
     }
   }
 
+  /// Applies one section entry. The incoming `sections` value must already be
+  /// a map; a corrupt (non-map) value is replaced wholesale by the new entry,
+  /// a valid map is extended so that sibling entries survive. [checkpoint]
+  /// must be the frozen canonical snapshot from a validated session.
   void _writeSection(Map<String, dynamic> data, String lessonId,
       Map<String, dynamic> checkpoint, String sessionId, int attemptCount) {
-    final sections =
-        data.putIfAbsent('sections', () => <String, dynamic>{}) as Map;
+    final existing = data['sections'];
+    final Map<String, dynamic> sections =
+        existing is Map ? Map<String, dynamic>.from(existing) : <String, dynamic>{};
+    data['sections'] = sections;
     sections[lessonId] = {
-      'checkpoint': Map<String, dynamic>.from(
-          jsonDecode(jsonEncode(checkpoint)) as Map),
+      'checkpoint': checkpoint,
       'processedSessionId': sessionId,
       'processedAttemptCount': attemptCount,
     };
@@ -331,6 +357,9 @@ class CourseProgressStore implements LessonSectionStore {
       String lessonId, Map<String, dynamic> checkpoint) async {
     final section = _requireSection(lessonId);
     final candidate = _parseSnapshot(section, checkpoint);
+    // Freeze the validated snapshot at call time: the mutable caller map is
+    // never persisted, and unknown raw payload keys cannot be smuggled in.
+    final frozen = candidate.toJson();
     return _update((data) {
       _ensureCurrentOwner();
       final entry = _sectionEntry(data, lessonId);
@@ -341,7 +370,7 @@ class CourseProgressStore implements LessonSectionStore {
               'The first saved state of a section must be a fresh, '
               'zero-attempt session.');
         }
-        _writeSection(data, lessonId, checkpoint, candidate.sessionId, 0);
+        _writeSection(data, lessonId, frozen, candidate.sessionId, 0);
         return;
       }
       if (_deepEquals(stored.toJson(), candidate.toJson())) {
@@ -353,7 +382,7 @@ class CourseProgressStore implements LessonSectionStore {
               'A new session starts at attempt zero; switching session IDs '
               'mid-answer is rejected.');
         }
-        _writeSection(data, lessonId, checkpoint, candidate.sessionId, 0);
+        _writeSection(data, lessonId, frozen, candidate.sessionId, 0);
         return;
       }
       if (!_reachesFrom(
@@ -366,7 +395,7 @@ class CourseProgressStore implements LessonSectionStore {
       final processed =
           (entry?['processedAttemptCount'] as int?) ?? stored.attemptCount;
       _writeSection(
-          data, lessonId, checkpoint, stored.sessionId, processed);
+          data, lessonId, frozen, stored.sessionId, processed);
     });
   }
 
@@ -393,16 +422,30 @@ class CourseProgressStore implements LessonSectionStore {
       throw StateError(
           'The sound does not match the answered item of the checkpoint.');
     }
+    // Freeze the validated snapshot at call time: the mutable caller map is
+    // never persisted, and unknown raw payload keys cannot be smuggled in.
+    final frozen = candidate.toJson();
     return _change((data) {
       _ensureCurrentOwner();
       final entry = _sectionEntry(data, lessonId);
       final stored = _storedSection(section, entry);
-      if (stored == null) {
-        if (candidate.attemptCount != 1) {
+      final Object? rawStored = entry?['checkpoint'];
+      if (stored == null || rawStored is! Map) {
+        // A session's first answer replays as exactly one submit on the
+        // implicit fresh first pass carrying this session's own identity,
+        // policy, and round.
+        final implicit = LessonSectionSession(
+          itemIds: section.items.map((item) => item.id).toList(),
+          sessionId: candidate.sessionId,
+          contentRevision: section.contentRevision,
+          policy: candidate.policy,
+        )..submit(candidate.lastCorrect!);
+        if (!_deepEquals(implicit.toJson(), candidate.toJson())) {
           throw StateError(
-              'A new session records its first answer at attempt one.');
+              'A new session may only record its first answer on a fresh '
+              'first pass.');
         }
-        _recordSectionAnswer(data, lessonId, checkpoint, candidate.sessionId,
+        _recordSectionAnswer(data, lessonId, frozen, candidate.sessionId,
             1, sound, correct);
         return;
       }
@@ -411,7 +454,7 @@ class CourseProgressStore implements LessonSectionStore {
             'Refusing to record for a different session on a started lesson.');
       }
       final processed =
-          (entry?['processedAttemptCount'] as int?) ?? stored.attemptCount;
+          (entry!['processedAttemptCount'] as int?) ?? stored.attemptCount;
       if (candidate.attemptCount <= processed) {
         return; // Duplicate or older checkpoint: no-op, never a revert.
       }
@@ -419,7 +462,25 @@ class CourseProgressStore implements LessonSectionStore {
         throw StateError(
             'Answer checkpoints must continue the session with no gaps.');
       }
-      _recordSectionAnswer(data, lessonId, checkpoint, stored.sessionId,
+      // The incoming checkpoint must be the stored state with exactly one
+      // submit applied: this is what pins the previous outcomes, the policy,
+      // the queue/phase/round, and the answered item, not just the count.
+      LessonSectionSession replay;
+      try {
+        replay = _parseSnapshot(section, rawStored.cast<String, dynamic>())
+          ..submit(candidate.lastCorrect!);
+      } on StateError {
+        throw StateError(
+            'The stored session cannot accept another answer in its '
+            'current state.');
+      }
+      if (!_deepEquals(replay.toJson(), candidate.toJson())) {
+        throw StateError(
+            'This checkpoint is not the stored session with exactly one new '
+            'answer; rewritten outcomes, changed policy, position, queue, or '
+            'phase are rejected.');
+      }
+      _recordSectionAnswer(data, lessonId, frozen, stored.sessionId,
           candidate.attemptCount, sound, correct);
     });
   }
@@ -448,6 +509,9 @@ class CourseProgressStore implements LessonSectionStore {
       throw StateError(
           'The section has not met its completion policy yet.');
     }
+    // Freeze the validated snapshot at call time; the mutable caller map and
+    // any unknown raw payload keys are never persisted.
+    final frozen = candidate.toJson();
     return _change((data) {
       _ensureCurrentOwner();
       final entry = _sectionEntry(data, lessonId);
@@ -475,7 +539,7 @@ class CourseProgressStore implements LessonSectionStore {
             'session.');
       }
       _writeSection(
-          data, lessonId, checkpoint, stored.sessionId, processed);
+          data, lessonId, frozen, stored.sessionId, processed);
       final lessons = data['lessons'] as List;
       if (!lessons.contains(lessonId)) {
         lessons.add(lessonId);

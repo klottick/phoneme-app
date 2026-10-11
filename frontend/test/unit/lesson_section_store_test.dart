@@ -666,35 +666,186 @@ void main() {
     });
   });
 
-  group('persistence failures and wiring', () {
-    test('a failed preferences write rejects; a retry persists exactly once',
+  group('review regressions', () {
+    test('a next answer cannot rewrite past outcomes, policy, or position',
         () async {
       final store = progressStore();
-      final started = fresh(sessionId: 'retry');
+      final started = fresh(sessionId: 'attack');
+      await store.saveLessonSection(lessonId, started.toJson());
+      final wrong = cloneOf(started)..submit(false);
+      await store.recordLessonSectionAnswer(
+          lessonId, wrong.toJson(), sound: soundOf('tout'), correct: false);
+      final past = cloneOf(wrong)..advance();
+      await store.saveLessonSection(lessonId, past.toJson());
+
+      // The next answer flips the earlier wrong outcome to correct.
+      final rewritten = (cloneOf(past)..submit(true)).toJson();
+      (rewritten['latestAnswers'] as Map)['tout'] = true;
+      await expectLater(store.recordLessonSectionAnswer(
+              lessonId, rewritten, sound: soundOf('tu'), correct: true),
+          throwsStateError);
+
+      // The next answer lowers the saved completion policy.
+      final policyAttack = (cloneOf(past)..submit(true)).toJson();
+      policyAttack['policy'] =
+          LessonPolicy(completionThresholdPercent: 1).toJson();
+      await expectLater(store.recordLessonSectionAnswer(
+              lessonId, policyAttack, sound: soundOf('tu'), correct: true),
+          throwsStateError);
+
+      // An answer claiming a different item than the stored queue position
+      // offers the same attempt number.
+      final retargeted = (cloneOf(past)..submit(true)).toJson();
+      await expectLater(store.recordLessonSectionAnswer(
+              lessonId, retargeted, sound: soundOf('rouge'), correct: true),
+          throwsStateError);
+
+      final stored = await store.loadLessonSection(lessonId);
+      expect(stored, equals(past.toJson()));
+      expect((stored!['latestAnswers'] as Map)['tout'], isFalse);
+      expect((await store.load())['evidence'], isA<Map>().having(
+          (map) => map.containsKey('listening:y'), 'listening:y', isFalse));
+    });
+
+    test('a queued save persists the validated snapshot, not later mutations',
+        () async {
+      final store = progressStore();
+      final input = fresh(sessionId: 'frozen').toJson();
+      input['injected'] = 'raw-payload';
+      final pending = store.saveLessonSection(lessonId, input);
+      input['sessionId'] = 'mutated-after-validation';
+      await pending;
+      final stored = await store.loadLessonSection(lessonId);
+      expect(stored!['sessionId'], 'frozen');
+      expect(stored.containsKey('injected'), isFalse);
+    });
+
+    test('a failed write leaves same-process reads on the last committed state',
+        () async {
+      final store = progressStore();
+      final started = fresh(sessionId: 'failcache');
+      await store.saveLessonSection(lessonId, started.toJson());
       final answered = cloneOf(started)..submit(true);
       prefs.failWrites = true;
       await expectLater(store.recordLessonSectionAnswer(
               lessonId, answered.toJson(), sound: soundOf('tout'),
               correct: true),
           throwsStateError);
-      // Nothing was persisted by the failed write.
-      expect(
-          prefs.data.containsKey('flutter.course.v1.${frenchCourse.id}'),
-          isFalse);
 
-      // A fresh process sees the pre-failure store; the retry applies once.
-      SharedPreferences.resetStatic();
+      // The platform store holds only the pre-failure committed state.
+      final onDisk = jsonDecode(
+              prefs.data['flutter.course.v1.${frenchCourse.id}'] as String)
+          as Map;
+      expect(
+          (onDisk['sections'][lessonId]['checkpoint'] as Map)['sessionId'],
+          'failcache');
+
+      // Same-process reads must not surface the rejected answer either.
+      expect(await store.loadLessonSection(lessonId), equals(started.toJson()));
+
+      // A later successful legacy write must not commit the rejected state.
       prefs.failWrites = false;
+      await store.saveScore('arcade', 100);
+      final afterLegacy = jsonDecode(
+              prefs.data['flutter.course.v1.${frenchCourse.id}'] as String)
+          as Map;
+      expect((afterLegacy['scores'] as Map)['arcade'], 100);
+      expect((afterLegacy['evidence'] as Map).containsKey('listening:u'),
+          isFalse);
+      final checkpoint = (afterLegacy['sections'][lessonId]['checkpoint'] as Map);
+      expect(checkpoint['latestAnswers'], isEmpty);
+
+      // The retry now applies, exactly once.
+      await store.recordLessonSectionAnswer(lessonId, answered.toJson(),
+          sound: soundOf('tout'), correct: true);
       await store.recordLessonSectionAnswer(lessonId, answered.toJson(),
           sound: soundOf('tout'), correct: true);
       final data = await store.load();
-      expect(
-          (data['evidence'] as Map)['listening:u'],
-          isA<Map>()
-              .having((map) => map['attempts'], 'attempts', 1));
-      expect(await store.loadLessonSection(lessonId), equals(answered.toJson()));
-      expect(data['pending'], isNull); // guest: no outbox
+      expect((data['evidence']['listening:u'] as Map)['attempts'], 1);
+      expect(await store.loadLessonSection(lessonId),
+          equals(answered.toJson()));
+      expect((data['scores'] as Map)['arcade'], 100);
     });
+
+    test('a fresh save recovers a corrupt sections value and legacy data',
+        () async {
+      prefs.data['flutter.course.v1.${frenchCourse.id}'] = jsonEncode({
+        'lessons': ['en-fr-vowels'],
+        'evidence': {
+          'listening:i': {'sound': 'i', 'attempts': 3, 'correct': 2}
+        },
+        'scores': {'arcade': 55},
+        'sections': 'corrupt',
+        'unknown': 'retained'
+      });
+      final store = progressStore();
+      final started = fresh(sessionId: 'recover');
+      await store.saveLessonSection(lessonId, started.toJson());
+      final data = await store.load();
+      expect(data['lessons'], ['en-fr-vowels']);
+      expect((data['evidence'] as Map)['listening:i'], isA<Map>());
+      expect((data['scores'] as Map)['arcade'], 55);
+      expect(data['unknown'], 'retained');
+      expect(
+          (data['sections'] as Map)[lessonId]['processedSessionId'], 'recover');
+      expect(await store.loadLessonSection(lessonId), equals(started.toJson()));
+    });
+
+    test('a fresh save replaces a corrupt checkpoint while keeping siblings',
+        () async {
+      prefs.data['flutter.course.v1.${frenchCourse.id}'] = jsonEncode({
+        'lessons': <String>[],
+        'evidence': <String, dynamic>{},
+        'scores': <String, dynamic>{},
+        'unknown': 'retained',
+        'sections': {
+          lessonId: {'checkpoint': {'version': 2, 'sessionId': 'x'}},
+          'other-lesson': {
+            'checkpoint': 'kept-sibling',
+            'processedSessionId': 'x',
+            'processedAttemptCount': 0
+          }
+        }
+      });
+      final store = progressStore();
+      final started = fresh(sessionId: 'sibling');
+      await store.saveLessonSection(lessonId, started.toJson());
+      final sections = (await store.load())['sections'] as Map;
+      expect((sections[lessonId]['checkpoint'] as Map)['sessionId'], 'sibling');
+      expect(sections['other-lesson']['checkpoint'], 'kept-sibling');
+      expect((await store.load())['unknown'], 'retained');
+      expect(await store.loadLessonSection(lessonId),
+          equals(started.toJson()));
+    });
+
+    test('review answers replay from the saved review state only', () async {
+      final store = progressStore();
+      final outcomes =
+          [true, false, true, true, true, false, true, true, true, true];
+      final debrief = await runFirstPass(store, outcomes, sessionId: 'rev');
+      // A round-two answer replayed straight from the debrief (skipping the
+      // review save) is not the stored state's next answer.
+      final skipped = (cloneOf(debrief)..reviewMistakes()..submit(true)).toJson();
+      await expectLater(
+          store.recordLessonSectionAnswer(
+              lessonId, skipped, sound: soundOf('tu'), correct: true),
+          throwsStateError);
+      final saved = await store.loadLessonSection(lessonId);
+      expect(saved, equals(debrief.toJson()));
+
+      // The saved review state accepts exactly its own next answer.
+      final review = cloneOf(debrief)..reviewMistakes();
+      await store.saveLessonSection(lessonId, review.toJson());
+      final valid = cloneOf(review)..submit(true);
+      await store.recordLessonSectionAnswer(
+          lessonId, valid.toJson(), sound: soundOf('tu'), correct: true);
+      expect(await store.loadLessonSection(lessonId), equals(valid.toJson()));
+      expect((await store.load())['sections'][lessonId]['processedAttemptCount'],
+          11);
+    });
+  });
+
+  group('wiring', () {
 
     test('lessonSectionStoreProvider follows the signed-in account', () async {
       final client = await signedInClient();
