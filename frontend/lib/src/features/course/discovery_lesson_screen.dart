@@ -125,6 +125,16 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   /// pending action, or run a second exit.
   int _saveOp = 0;
 
+  /// A load call is awaiting its store read. A new retry (double tap before
+  /// the widget tree redraws) must not start a competing load whose late
+  /// result could publish over newer UI state.
+  bool _loadInFlight = false;
+
+  /// Identity of the load currently in flight (bumped when a load is
+  /// orphaned, e.g. by a resumed-window re-drive or owner replacement). An
+  /// orphaned load's late result cannot publish into newer UI state.
+  int _loadOp = 0;
+
   /// Identity counter for fresh session IDs kept within this generation.
   int _sessionCounter = 0;
 
@@ -208,6 +218,10 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     Future.microtask(() {
       if (expectedGeneration != _generation || !mounted) return;
       if (_session == null && _loadError == null) {
+        // Orphan whatever load the suspended window left (even if still
+        // hung) and re-drive: a load must never serialize the recovery
+        // behind an orphaned call forever.
+        if (_loadInFlight) _loadOp += 1;
         unawaited(_load(store));
       } else if (_pendingAction != null) {
         // Orphan whatever run the suspended window left in flight; its late
@@ -229,6 +243,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     _playbackGeneration += 1;
     _saveOp += 1; // orphan the old owner's in-flight run
     _saveInFlight = false;
+    _loadOp += 1; // orphan the old owner's in-flight load
+    _loadInFlight = false;
     _pendingAction = null;
     _pendingOnSaved = null;
     _stopAudio();
@@ -251,6 +267,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   Future<void> _load(LessonSectionStore store) async {
     final section = _section;
     if (section == null) return;
+    _loadInFlight = true;
+    final int op = _loadOp;
     final int generation = _generation;
     if (mounted) {
       setState(() {
@@ -269,6 +287,11 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     } catch (error) {
       failure = error;
     }
+    // Orphaned (a resumed re-drive or owner replacement superseded this
+    // load): its late result must not publish into newer UI state, and it
+    // must not clear the flag a newer load now owns.
+    if (op != _loadOp) return;
+    _loadInFlight = false;
     // Stale after suspension/owner replacement/disposal: a completed load
     // must not publish either; resumed recovery re-drives it if needed.
     if (generation != _generation || _suspended || !mounted) return;
@@ -538,9 +561,10 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
 
   void _onRetrySave() {
     if (_pendingAction == null) {
-      // Nothing pending: reload through the captured owner.
+      // Nothing pending: reload through the captured owner (coalesced with
+      // any load already in flight).
       final LessonSectionStore? store = _store;
-      if (store != null && !_suspended && !_saveInFlight) {
+      if (store != null && !_suspended && !_saveInFlight && !_loadInFlight) {
         unawaited(_load(store));
       }
       return;
@@ -551,7 +575,10 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
 
   void _onRetryLoad() {
     final LessonSectionStore? store = _store;
-    if (store == null) return;
+    // Single-shot: a double tap before the busy state redraws (and any tap
+    // while suspended) must not start a competing load whose late result
+    // could publish over newer UI state.
+    if (store == null || _suspended || _loadInFlight) return;
     unawaited(_load(store));
   }
 

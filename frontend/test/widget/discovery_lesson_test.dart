@@ -231,6 +231,21 @@ class FakeSectionStore implements LessonSectionStore {
   }
 }
 
+/// Like [FakeSectionStore], except the first load fails (showing the
+/// Retry UI) and each retry load is held on its own completer, so a
+/// duplicate retry can land late and out of order.
+class RacingLoads extends FakeSectionStore {
+  final first = Completer<Map<String, dynamic>?>();
+  final second = Completer<Map<String, dynamic>?>();
+
+  @override
+  Future<Map<String, dynamic>?> loadLessonSection(String lessonId) {
+    loadCalls++;
+    if (loadCalls == 1) return Future.error(StateError('initial failure'));
+    return loadCalls == 2 ? first.future : second.future;
+  }
+}
+
 class FailablePreferences extends InMemorySharedPreferencesStore {
   FailablePreferences() : super.withData(const {});
 
@@ -610,6 +625,56 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Item 1 of 10'), findsOneWidget,
           reason: 'resume must re-drive the interrupted load');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('double retry loading must not allow a late load to '
+        'erase feedback', (tester) async {
+      final store = RacingLoads();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      expect(find.text('Retry loading'), findsOneWidget);
+      await tester.tap(find.text('Retry loading'));
+      await tester.tap(find.text('Retry loading')); // before redraw
+      await tester.pump();
+      store.first.complete(null);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pumpAndSettle();
+      expect(find.text('Correct'), findsOneWidget);
+      store.second.complete(null);
+      await tester.pumpAndSettle();
+      expect(find.text('Correct'), findsOneWidget,
+          reason: 'a late duplicate load result must not replace an '
+              'answered session');
+      expect(store.loadCalls, 2,
+          reason: 'initial failure plus one coalesced retry');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('resumed recovery re-drives a hung load without waiting '
+        'on it', (tester) async {
+      final store = FakeSectionStore()..loadGate = Completer<void>();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pump(); // initial load in flight, still hung
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.scheduleForcedFrame();
+      await tester.pump();
+      // Resume while the pre-suspension load is still hung: recovery must
+      // orphan and re-drive the load, not serialize behind it forever.
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('Item 1 of 10'), findsNothing,
+          reason: 'the hung load has not settled yet in either generation');
+      store.loadGate!.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Item 1 of 10'), findsOneWidget,
+          reason: 'the re-driven load must still settle the UI');
+      expect(store.loadCalls, 2,
+          reason: 'one initial plus one recovery load, no duplicates');
       await tester.pumpWidget(const SizedBox());
     });
   });
@@ -1015,6 +1080,41 @@ void main() {
       expect(parseStoreSession(ownerA)!.sessionId, 'owner-a');
       expect(parseStoreSession(ownerA)!.attemptCount, 4,
           reason: 'stale UI writes must not extend the old owner session');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('owner replacement discards the old owner late load '
+        'result', (tester) async {
+      final ownerA = FakeSectionStore()..loadGate = Completer<void>();
+      final ownerB = FakeSectionStore();
+      final seedB = LessonSectionSession(
+          itemIds: FakeSectionStore.itemIds, sessionId: 'owner-b');
+      seedB.submit(true);
+      ownerB.stored = seedB.toJson();
+      final audio = FakeAudio();
+      Widget app(FakeSectionStore owner) => ProviderScope(
+          overrides: [
+            courseAudioProvider.overrideWithValue(audio),
+            lessonSectionStoreProvider.overrideWithValue(owner),
+          ],
+          child: const MaterialApp(
+              home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y')));
+      await tester.pumpWidget(app(ownerA));
+      await tester.pump(); // owner A's load is in flight, held
+      await tester.pumpWidget(app(ownerB));
+      await tester.pumpAndSettle();
+      expect(find.text('Item 1 of 10'), findsOneWidget,
+          reason: 'the replacement owner state must be loaded');
+      expect(find.text('Correct'), findsOneWidget,
+          reason: 'the replacement owner saved state must be restored');
+      ownerA.loadGate!.complete(); // the old owner load lands late
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('Correct'), findsOneWidget,
+          reason: 'the old owner late load result must not replace the '
+              'new owner session');
+      expect(ownerB.stored, isNotNull,
+          reason: 'the new owner state must remain intact');
       await tester.pumpWidget(const SizedBox());
     });
 
