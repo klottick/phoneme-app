@@ -86,8 +86,9 @@ class LessonPolicy {
   /// ignored; only the canonical key is used.
   factory LessonPolicy.fromJson(Map<String, dynamic> json) {
     final Object? raw = json['completionThresholdPercent'];
-    // In Dart's type system bool is a subtype of int, so `is int` alone
-    // would accept true/false; reject it explicitly.
+    // `raw is int` alone already rejects bool — unlike TypeScript, Dart's
+    // bool is NOT a subtype of int — so the explicit bool check is a
+    // redundant, intentional safeguard.
     if (raw is bool || raw is! int) {
       throw FormatException(
         'completionThresholdPercent must be an integer in 1-100, found: $raw',

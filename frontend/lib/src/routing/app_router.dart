@@ -3,9 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/providers/app_providers.dart';
+import '../core/course/lesson_section.dart';
 import '../features/arcade/arcade_screen.dart';
 import '../features/course/course_lesson_screen.dart';
 import '../features/course/course_progress_screen.dart';
+import '../features/course/discovery_lesson_screen.dart';
 import '../features/auth/login_screen.dart';
 import '../features/drills/drill_screen.dart';
 import '../features/home/home_screen.dart';
@@ -63,9 +65,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           builder: (_, __) => const ArcadeScreen(silent: true)),
       GoRoute(
           path: '/course-lesson/:id',
-          builder: (_, state) => CourseLessonScreen(
-              lessonId: state.pathParameters['id']!,
-              review: state.uri.queryParameters['review'] == 'true')),
+          builder: (_, state) {
+            final String lessonId = state.pathParameters['id']!;
+            final bool review = state.uri.queryParameters['review'] == 'true';
+            // Selective routing: only authored discovery sections use the new
+            // lifecycle-aware screen; every other lesson keeps the legacy
+            // screen and its behavior.
+            if (sectionForLesson(lessonId) != null) {
+              return DiscoveryLessonScreen(lessonId: lessonId, review: review);
+            }
+            return CourseLessonScreen(lessonId: lessonId, review: review);
+          }),
       GoRoute(
           path: '/course-progress',
           builder: (_, __) => const CourseProgressScreen()),
