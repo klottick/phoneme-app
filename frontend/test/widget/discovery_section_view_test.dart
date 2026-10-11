@@ -64,12 +64,14 @@ Future<void> _pump(
   bool heard = false,
   bool busy = false,
   String? error,
+  String? conflict,
   void Function()? onListen,
   void Function(String)? onAnswer,
   void Function()? onNext,
   void Function()? onReview,
   void Function()? onFinish,
   void Function()? onRetrySave,
+  void Function()? onReload,
 }) async {
   await tester.pumpWidget(MaterialApp(
     home: Scaffold(
@@ -79,12 +81,14 @@ Future<void> _pump(
         heard: heard,
         busy: busy,
         error: error,
+        conflict: conflict,
         onListen: onListen ?? () {},
         onAnswer: onAnswer ?? (String sound) {},
         onNext: onNext ?? () {},
         onReview: onReview ?? () {},
         onFinish: onFinish ?? () {},
         onRetrySave: onRetrySave ?? () {},
+        onReload: onReload ?? () {},
       ),
     ),
   ));
@@ -98,6 +102,7 @@ const Map<String, Type> _buttonTypes = {
   'Next word': FilledButton,
   'See section explanation': FilledButton,
   'Retry saving': TextButton,
+  'Reload saved progress': TextButton,
   'Finish section': FilledButton,
   'Review mistakes': OutlinedButton,
 };
@@ -132,7 +137,11 @@ void main() {
       final section = _makeSection();
       final session = _exerciseSession(position: 3);
       await _pump(tester, section: section, session: session, heard: true);
-      expect(find.text(section.title), findsOneWidget);
+      expect(find.text('Listening practice'), findsOneWidget,
+          reason: 'the active exercise uses the neutral title');
+      expect(find.text(section.title), findsNothing,
+          reason: 'the authored word title must not appear during the '
+              'active exercise');
       expect(find.text('Listen to the word'), findsOneWidget);
       expect(find.text('/u/'), findsOneWidget);
       expect(find.text('/y/'), findsOneWidget);
@@ -312,8 +321,12 @@ void main() {
       final section = _makeSection();
       final session = _debriefSession(correctCount: 8);
       var finishes = 0;
-      await _pump(tester, session: session, onFinish: () => finishes++);
+      await _pump(tester, section: section, session: session, onFinish: () => finishes++);
       expect(find.text(section.explanation), findsOneWidget);
+      expect(find.text('Section debrief'), findsOneWidget);
+      expect(find.text(section.title), findsOneWidget,
+          reason: 'the word-bearing authored title belongs to the debrief');
+      expect(find.text('Listening practice'), findsNothing);
       expect(find.text('You got 8 of 10 correct.'), findsOneWidget);
       expect(find.text('Passing needs 8 of 10 correct.'), findsOneWidget);
       expect(find.text('Correct'), findsNothing);
@@ -390,6 +403,71 @@ void main() {
       await tester.tap(find.text('Retry saving'));
       await tester.pump();
       expect(retries, 1);
+    });
+  });
+
+  group('stale session conflict', () {
+    testWidgets(
+        'a conflict blocks all progression and offers the explicit reload',
+        (tester) async {
+      var reloads = 0;
+      final session = _exerciseSession(position: 0);
+      await _pump(
+        tester,
+        session: session,
+        heard: true,
+        conflict: 'Out of date with the saved progress.',
+        onReload: () => reloads++,
+      );
+      expect(find.text('Out of date with the saved progress.'), findsOneWidget);
+      expect(find.text('Reload saved progress'), findsOneWidget);
+      expect(find.text('Retry saving'), findsNothing,
+          reason: 'a conflict is recovered by reload, not by retry');
+      expect(_enabled(tester, 'Listen to the word'), isFalse);
+      expect(_enabled(tester, '/u/'), isFalse);
+      expect(_enabled(tester, '/y/'), isFalse);
+      expect(_enabled(tester, 'Next word'), isFalse);
+      expect(_enabled(tester, 'Reload saved progress'), isTrue);
+      await tester.tap(find.text('Reload saved progress'));
+      await tester.pump();
+      expect(reloads, 1);
+    });
+
+    testWidgets('a debrief conflict blocks finish and review', (tester) async {
+      var finishes = 0;
+      var reviews = 0;
+      final session = _debriefSession(correctCount: 5);
+      await _pump(
+        tester,
+        session: session,
+        conflict: 'Reload needed.',
+        onFinish: () => finishes++,
+        onReview: () => reviews++,
+      );
+      expect(_enabled(tester, 'Finish section'), isFalse);
+      expect(_enabled(tester, 'Review mistakes'), isFalse);
+      expect(_enabled(tester, 'Reload saved progress'), isTrue);
+      await tester.tap(find.text('Finish section'));
+      await tester.tap(find.text('Review mistakes'));
+      await tester.pump();
+      expect(finishes, 0, reason: 'the stale debrief must not complete');
+      expect(reviews, 0);
+    });
+
+    testWidgets('the reload control is disabled while busy', (tester) async {
+      var reloads = 0;
+      final session = _exerciseSession(position: 0);
+      await _pump(
+          tester,
+          session: session,
+          heard: true,
+          busy: true,
+          conflict: 'Reload needed.',
+          onReload: () => reloads++);
+      expect(_enabled(tester, 'Reload saved progress'), isFalse);
+      await tester.tap(find.text('Reload saved progress'));
+      await tester.pump();
+      expect(reloads, 0);
     });
   });
 

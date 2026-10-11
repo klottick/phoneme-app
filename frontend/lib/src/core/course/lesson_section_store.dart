@@ -86,11 +86,26 @@ abstract class LessonSectionStore {
 /// attempt, or diverged from the stored one at the same attempt count where
 /// another instance of the same session committed a different outcome).
 ///
-/// This is distinct from invalid input — fabricated answers, changed
-/// outcomes, unparseable snapshots stay plain [StateError] — and from
-/// ownership/account rejection, which is also plain [StateError]. Screens may
-/// offer an explicit reload for a conflict, because re-loading and redoing
-/// the step can succeed; invalid input never will.
+/// Every rejected or conflicting write is refused without persisting
+/// anything; the failure type says what kind of input was refused:
+/// - a malformed snapshot or metadata — a caller checkpoint that is not a
+///   parseable snapshot, or an unusable stored entry (corrupt checkpoint or
+///   processed metadata) encountered at load — fails with a [FormatException];
+/// - a validly captured snapshot that conflicts with the store's advanced
+///   state (a different or stale session, a diverged outcome at the same
+///   attempt count, a gap in the answer sequence) fails with this typed
+///   conflict; an explicit reload of the saved state, then redoing the step,
+///   can succeed;
+/// - any other rejected input or ownership/auth failure — fabricated answers,
+///   rewritten outcomes already committed, mismatched sound or correctness,
+///   a first answer that is not a fresh first pass, ownership/account
+///   rejection — fails with a plain [StateError]; resending the same input
+///   never succeeds.
+///
+/// Only a corrupt *stored* entry follows the corrupt-snapshot contract (a
+/// fresh session may start, and its next valid save replaces the entry);
+/// malformed caller-supplied input is simply rejected — fresh-save recovery
+/// does not apply to invalid input itself.
 class LessonSectionConflictException extends StateError {
   LessonSectionConflictException(super.message);
 }

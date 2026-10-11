@@ -207,6 +207,9 @@ void main() {
     // The fresh attempt records and advances without a save failure.
     await _answerItem(tester, 'u');
     expect(find.text('Correct'), findsOneWidget);
+    // The recovery notice now shares the scrolling content with the controls
+    // (F6), so scroll the advance control into view before interacting.
+    await tester.scrollUntilVisible(find.text('Next word'), 200);
     await tester.tap(find.text('Next word'));
     await tester.pumpAndSettle();
     expect(find.textContaining('could not be saved'), findsNothing,
