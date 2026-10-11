@@ -17,8 +17,8 @@ void main() {
         policy: policy);
   }
 
-  void expectSameState(LessonSectionSession restored,
-      LessonSectionSession origin) {
+  void expectSameState(
+      LessonSectionSession restored, LessonSectionSession origin) {
     expect(restored.itemIds, origin.itemIds);
     expect(restored.queue, origin.queue);
     expect(restored.position, origin.position);
@@ -37,10 +37,42 @@ void main() {
     expect(restored.policy.toJson(), origin.policy.toJson());
   }
 
+  Map<String, dynamic> baseJson() {
+    return Map<String, dynamic>.from(newSection().toJson());
+  }
+
+  Map<String, dynamic> debriefJson({bool allCorrect = true}) {
+    final origin = newSection();
+    for (var i = 0; i < itemIds.length; i++) {
+      origin.submit(allCorrect);
+      origin.advance();
+    }
+    return Map<String, dynamic>.from(origin.toJson());
+  }
+
+  void expectCorrupt(Map<String, dynamic> json,
+      {int contentRevision = 1, List<String>? ids}) {
+    expect(
+        () => LessonSectionSession.fromJson(json,
+            itemIds: ids ?? itemIds, contentRevision: contentRevision),
+        throwsFormatException,
+        reason: json.toString());
+  }
+
   group('construction', () {
     test('starts a fresh exercise round with validated inputs', () {
-      expect(itemIds, ['tout', 'tu', 'rouge', 'rue', 'vous', 'lune', 'doux',
-          'jus', 'loup', 'mur']);
+      expect(itemIds, [
+        'tout',
+        'tu',
+        'rouge',
+        'rue',
+        'vous',
+        'lune',
+        'doux',
+        'jus',
+        'loup',
+        'mur'
+      ]);
       final session = newSection();
       expect(session.itemIds, itemIds);
       expect(session.queue, itemIds);
@@ -51,12 +83,14 @@ void main() {
       expect(session.contentRevision, 1);
       expect(session.phase, LessonSectionPhase.exercise);
       expect(session.policy.completionThresholdPercent, 80);
-      expect(session.answered, isEmpty);
+      expect(session.answered, isFalse,
+          reason: 'the fresh current item is not submitted this round');
       expect(session.answeredItemCount, 0);
       expect(session.lastCorrect, isNull);
       expect(session.currentItemId, 'tout');
       expect(session.correctCount, 0);
-      expect(session.unresolvedItemIds, isEmpty);
+      expect(session.unresolvedItemIds, isEmpty,
+          reason: 'no latest outcome is wrong yet');
       expect(session.latestAnswers, isEmpty);
       expect(session.canComplete, isFalse);
     });
@@ -73,8 +107,7 @@ void main() {
 
     test('rejects empty id lists, empty ids, and duplicate ids', () {
       expect(
-          () =>
-              LessonSectionSession(itemIds: const <String>[], sessionId: 's'),
+          () => LessonSectionSession(itemIds: const <String>[], sessionId: 's'),
           throwsArgumentError);
       expect(
           () => LessonSectionSession(itemIds: const ['a', ''], sessionId: 's'),
@@ -85,8 +118,7 @@ void main() {
     });
 
     test('rejects an empty session id and a nonpositive revision', () {
-      expect(
-          () => LessonSectionSession(itemIds: const ['a'], sessionId: ''),
+      expect(() => LessonSectionSession(itemIds: const ['a'], sessionId: ''),
           throwsArgumentError);
       expect(
           () => LessonSectionSession(
@@ -110,7 +142,9 @@ void main() {
       final session = newSection();
       session.submit(true);
       expect(session.attemptCount, 1);
-      expect(session.answered, {'tout'});
+      expect(session.answered, isTrue,
+          reason: 'the current item was just submitted this round');
+      expect(session.answeredItemCount, 1);
       expect(session.lastCorrect, isTrue);
       expect(session.phase, LessonSectionPhase.exercise);
       expect(() => session.submit(true), throwsStateError);
@@ -390,8 +424,44 @@ void main() {
         contentRevision: 9,
       );
       expect(restored.contentRevision, 9);
-      expect(restored.policy.toJson(),
-          const {'completionThresholdPercent': 63});
+      expect(
+          restored.policy.toJson(), const {'completionThresholdPercent': 63});
+      expect(restored.toJson(), origin.toJson());
+    });
+
+    test('round trips across multiple review rounds with mixed outcomes', () {
+      const ids = ['a', 'b', 'c'];
+      final origin = LessonSectionSession(itemIds: ids, sessionId: 's');
+      origin.submit(true); // a correct
+      origin.advance();
+      origin.submit(false); // b wrong
+      origin.advance();
+      origin.submit(false); // c wrong
+      origin.advance();
+      expect(origin.phase, LessonSectionPhase.debrief);
+      expect(origin.unresolvedItemIds, ['b', 'c']);
+      origin.reviewMistakes(); // round 2 queues [b, c]
+      origin.submit(true); // fix b
+      origin.advance();
+      expect(origin.unresolvedItemIds, ['c']);
+      origin.submit(false); // c still wrong
+      origin.advance();
+      expect(origin.phase, LessonSectionPhase.debrief);
+      expect(origin.attemptCount, 5);
+      expect(origin.correctCount, 2);
+
+      origin.reviewMistakes(); // round 3 queues [c]
+      expect(origin.round, 3);
+      expect(origin.queue, ['c']);
+      expect(origin.answered, isFalse,
+          reason: 'review start: c has a prior answer but none this round');
+
+      final restored = LessonSectionSession.fromJson(
+        jsonDecode(jsonEncode(origin.toJson())) as Map<String, dynamic>,
+        itemIds: ids,
+        contentRevision: 1,
+      );
+      expectSameState(restored, origin);
       expect(restored.toJson(), origin.toJson());
     });
 
@@ -399,26 +469,14 @@ void main() {
       final json = newSection().toJson();
       expect(json['version'], 1);
       expect(json['version'], isA<int>());
-      expect(
-          json.keys,
+      expect(json['answered'], isA<bool>());
+      expect(json.keys,
           containsAll(['sessionId', 'contentRevision', 'itemIds', 'queue']));
       expect(json['policy'], const {'completionThresholdPercent': 80});
     });
   });
 
   group('corrupt snapshot rejection (atomic FormatException)', () {
-    Map<String, dynamic> baseJson() {
-      return Map<String, dynamic>.from(newSection().toJson());
-    }
-
-    void expectCorrupt(Map<String, dynamic> json) {
-      expect(
-          () => LessonSectionSession.fromJson(
-              json, itemIds: itemIds, contentRevision: 1),
-          throwsFormatException,
-          reason: json.toString());
-    }
-
     test('rejects unknown, wrong-typed, and double versions', () {
       var json = baseJson()..['version'] = 2;
       expectCorrupt(json);
@@ -433,18 +491,18 @@ void main() {
     test('rejects a content revision mismatch or wrong type', () {
       var json = baseJson()..['contentRevision'] = 2;
       expect(
-          () => LessonSectionSession.fromJson(
-              json, itemIds: itemIds, contentRevision: 1),
+          () => LessonSectionSession.fromJson(json,
+              itemIds: itemIds, contentRevision: 1),
           throwsFormatException);
       json = baseJson()..['contentRevision'] = 3;
       expect(
-          () => LessonSectionSession.fromJson(
-              json, itemIds: itemIds, contentRevision: 3),
+          () => LessonSectionSession.fromJson(json,
+              itemIds: itemIds, contentRevision: 3),
           returnsNormally);
       json = baseJson()..['contentRevision'] = 1.0;
       expect(
-          () => LessonSectionSession.fromJson(
-              json, itemIds: itemIds, contentRevision: 1),
+          () => LessonSectionSession.fromJson(json,
+              itemIds: itemIds, contentRevision: 1),
           throwsFormatException);
     });
 
@@ -532,27 +590,29 @@ void main() {
       expectCorrupt(bad);
 
       // Debrief omitting a first-pass answer (impossible coverage).
-      final covered = itemIds.sublist(0, 9);
       bad = Map<String, dynamic>.from(base)
-        ..['answered'] = covered
+        ..['answered'] = false
         ..['latestAnswers'] =
             Map<String, dynamic>.from(base['latestAnswers'] as Map);
       (bad['latestAnswers'] as Map).remove('mur');
-      bad['answered'] = covered;
       expectCorrupt(bad);
     });
 
     test('rejects wrong-typed latest outcomes and unknown outcome IDs', () {
       var json = baseJson();
-      json['latestAnswers'] = {'tout': 1};
-      json['answered'] = ['tout'];
+      json['submittedThisRound'] = ['tout'];
+      json['answered'] = true;
+      json['lastCorrect'] = true;
+      json['latestAnswers'] = <String, dynamic>{};
       expectCorrupt(json);
       json = baseJson();
       json['latestAnswers'] = {'zulu': true};
       expectCorrupt(json);
       json = baseJson();
-      json['latestAnswers'] = {'tout': true};
-      json['answered'] = <String>[];
+      json['submittedThisRound'] = ['tout'];
+      json['answered'] = true;
+      json['lastCorrect'] = true;
+      json['latestAnswers'] = {'tout': 1};
       expectCorrupt(json);
     });
 
@@ -580,20 +640,186 @@ void main() {
     });
   });
 
+  group('answered is the current-round submission status (bool)', () {
+    test(
+        'false fresh, true after submit, false after advance, false at debrief',
+        () {
+      final session = newSection();
+      expect(session.answered, isFalse);
+      session.submit(true);
+      expect(session.answered, isTrue);
+      session.advance();
+      expect(session.position, 1);
+      expect(session.answered, isFalse,
+          reason: 'the next current item has not been submitted yet');
+      expect(session.answeredItemCount, 1,
+          reason: 'aggregate coverage is separate from the answered flag');
+    });
+
+    test(
+        'false at a review round start even though the item has a prior answer',
+        () {
+      final session = newSection();
+      for (var i = 0; i < itemIds.length; i++) {
+        session.submit(i != 2); // rouge wrong
+        session.advance();
+      }
+      session.reviewMistakes();
+      expect(session.round, 2);
+      expect(session.currentItemId, 'rouge');
+      expect(session.latestAnswers['rouge'], isFalse,
+          reason: 'a historical outcome exists for rouge');
+      expect(session.answered, isFalse,
+          reason: 'a previous answer is not a current-round submission');
+      session.submit(true);
+      expect(session.answered, isTrue);
+      expect(session.answeredItemCount, 10,
+          reason: 'coverage unchanged; the flag is per current item');
+    });
+
+    test('is a boolean field in the serialized snapshot', () {
+      final json = newSection().toJson();
+      expect(json['answered'], isA<bool>());
+      expect(json['answered'], isFalse);
+
+      final advanced = newSection();
+      advanced.submit(true);
+      expect(advanced.toJson()['answered'], isTrue);
+    });
+  });
+
+  group('reachability regression: impossible snapshots are rejected', () {
+    test('rejects lastCorrect that contradicts the submitted current outcome',
+        () {
+      final origin = newSection()..submit(false);
+      expect(origin.lastCorrect, isFalse);
+      final json = origin.toJson()..['lastCorrect'] = true;
+      expectCorrupt(json);
+    });
+
+    test('rejects a submitted current item that has no outcome', () {
+      final json = Map<String, dynamic>.from(baseJson())
+        ..['submittedThisRound'] = ['tout']
+        ..['answered'] = true
+        ..['latestAnswers'] = <String, dynamic>{};
+      expectCorrupt(json);
+    });
+
+    test('rejects a non-bool serialized answered flag', () {
+      expectCorrupt(baseJson()..['answered'] = ['tout']);
+      expectCorrupt(baseJson()..['answered'] = 1);
+      expectCorrupt(baseJson()..['answered'] = null);
+      expectCorrupt(baseJson()..remove('answered'));
+    });
+
+    test('rejects an answered flag inconsistent with the round state', () {
+      // Exercise, nothing submitted yet, but answered claims otherwise.
+      expectCorrupt(baseJson()..['answered'] = true);
+      // Exercise, current item already submitted, but answered denies it.
+      final submitted = (newSection()..submit(true)).toJson()
+        ..['answered'] = false;
+      expectCorrupt(submitted);
+      // Debrief never has a submitted current item.
+      final debrief = Map<String, dynamic>.from(debriefJson())
+        ..['answered'] = true;
+      expectCorrupt(debrief);
+    });
+
+    test('rejects a shortened or reordered first-pass queue', () {
+      expectCorrupt(baseJson()..['queue'] = itemIds.sublist(0, 1));
+      final swapped = [itemIds[1], ...itemIds];
+      expectCorrupt(baseJson()..['queue'] = swapped);
+    });
+
+    test('rejects first-pass outcomes for items that were not submitted', () {
+      final json = Map<String, dynamic>.from(baseJson())
+        ..['latestAnswers'] = <String, dynamic>{'tout': true, 'tu': true};
+      expectCorrupt(json);
+    });
+
+    test('rejects an inflated first-pass attempt count', () {
+      final json = (newSection()..submit(false)).toJson()
+        ..['attemptCount'] = 999;
+      expectCorrupt(json);
+    });
+
+    test('rejects a review queue that includes an already-correct item', () {
+      LessonSectionSession reviewState() {
+        final origin = LessonSectionSession(
+            itemIds: const ['a', 'b', 'c'], sessionId: 's');
+        origin.submit(true); // a correct
+        origin.advance();
+        origin.submit(false); // b wrong
+        origin.advance();
+        origin.submit(false); // c wrong
+        origin.advance();
+        origin.reviewMistakes(); // round 2, queue [b, c]
+        return origin;
+      }
+
+      final origin = reviewState();
+      expect(origin.queue, ['b', 'c']);
+      // 'a' was correct on the first pass, so it must not be re-queued.
+      final json = origin.toJson()..['queue'] = ['a'];
+      expectCorrupt(json, ids: const ['a', 'b', 'c']);
+    });
+
+    test('rejects a review state that lacks full first-pass coverage', () {
+      final origin =
+          LessonSectionSession(itemIds: const ['a', 'b', 'c'], sessionId: 's');
+      origin.submit(true);
+      origin.advance();
+      origin.submit(false);
+      origin.advance();
+      origin.submit(false);
+      origin.advance();
+      origin.reviewMistakes();
+      final json = origin.toJson()
+        ..['latestAnswers'] = <String, dynamic>{'b': false};
+      expectCorrupt(json, ids: const ['a', 'b', 'c']);
+    });
+
+    test('rejects infeasible review attempt counts (below or above bounds)',
+        () {
+      final origin =
+          LessonSectionSession(itemIds: const ['a', 'b', 'c'], sessionId: 's');
+      origin.submit(true);
+      origin.advance();
+      origin.submit(false);
+      origin.advance();
+      origin.submit(false);
+      origin.advance();
+      origin.reviewMistakes(); // round 2, 3 first-pass attempts so far
+      expect(origin.attemptCount, 3);
+
+      // n=3, round=2, queue=2, submitted=0 => min=max=3 for a review start.
+      expectCorrupt(origin.toJson()..['attemptCount'] = 2,
+          ids: const ['a', 'b', 'c']);
+      expectCorrupt(origin.toJson()..['attemptCount'] = 7,
+          ids: const ['a', 'b', 'c']);
+    });
+  });
+
   group('unmodifiable session views', () {
     test('callers cannot mutate the queued or recorded state', () {
       final session = newSection();
-      session.submit(true);
+      session.submit(false); // keep 'tout' unresolved
       expect(() => session.queue.removeAt(0), throwsUnsupportedError);
       expect(() => session.itemIds.add('x'), throwsUnsupportedError);
+      expect(() => session.latestAnswers['tu'] = true, throwsUnsupportedError);
       expect(
-          () => session.answered.remove('tout'), throwsUnsupportedError);
-      expect(() => session.latestAnswers['tu'] = true,
-          throwsUnsupportedError);
-      expect(() => session.latestAnswers.remove('tout'),
-          throwsUnsupportedError);
-      expect(session.latestAnswers, {'tout': true});
+          () => session.latestAnswers.remove('tout'), throwsUnsupportedError);
+      expect(session.latestAnswers, {'tout': false});
       expect(session.queue, itemIds);
+
+      // unresolvedItemIds is an unmodifiable copy: element replacement,
+      // insertion, and removal must all be rejected.
+      final unresolved = session.unresolvedItemIds;
+      expect(unresolved, ['tout']);
+      expect(() => unresolved[0] = 'zulu', throwsUnsupportedError);
+      expect(() => unresolved.insert(0, 'zulu'), throwsUnsupportedError);
+      expect(() => unresolved.removeAt(0), throwsUnsupportedError);
+      expect(session.unresolvedItemIds, ['tout']);
     });
   });
 }

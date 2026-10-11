@@ -30,8 +30,7 @@ void main() {
         'and item IDs equal to the word texts', () {
       expect(frenchUySection.items.map((i) => i.word).toList(), expectedWords);
       expect(frenchUySection.items.map((i) => i.id).toList(), expectedWords);
-      expect(
-          frenchUySection.items.map((i) => i.expectedSound).toList(),
+      expect(frenchUySection.items.map((i) => i.expectedSound).toList(),
           expectedSounds);
     });
 
@@ -53,8 +52,8 @@ void main() {
 
     test('exposes collection views that callers cannot mutate', () {
       expect(
-          () => frenchUySection.items
-              .add(const LessonSectionItem(id: 'x', word: 'x', expectedSound: 'u')),
+          () => frenchUySection.items.add(
+              const LessonSectionItem(id: 'x', word: 'x', expectedSound: 'u')),
           throwsUnsupportedError);
       expect(() => frenchUySection.sounds.removeAt(0), throwsUnsupportedError);
     });

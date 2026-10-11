@@ -73,8 +73,8 @@ class LessonSection {
 LessonSection _buildFrenchUySection() {
   final CourseLesson lesson = frenchLessons.firstWhere(
     (CourseLesson candidate) => candidate.id == 'en-fr-u-y',
-    orElse: () =>
-        throw StateError('The pilot lesson en-fr-u-y is missing from the course.'),
+    orElse: () => throw StateError(
+        'The pilot lesson en-fr-u-y is missing from the course.'),
   );
   const List<LessonSectionItem> items = <LessonSectionItem>[
     LessonSectionItem(id: 'tout', word: 'tout', expectedSound: 'u'),
@@ -113,5 +113,4 @@ final Map<String, LessonSection> _sectionsByLesson = <String, LessonSection>{
 /// Only the pilot lesson `en-fr-u-y` has a section; every non-pilot lesson
 /// (including other course lessons and unknown IDs) maps to null, so existing
 /// lesson behavior is unchanged.
-LessonSection? sectionForLesson(String lessonId) =>
-    _sectionsByLesson[lessonId];
+LessonSection? sectionForLesson(String lessonId) => _sectionsByLesson[lessonId];
