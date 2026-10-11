@@ -873,6 +873,53 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    testWidgets('a held answer must stay non-advanceable while suspended',
+        (tester) async {
+      final store = FakeSectionStore()..answerGate = Completer<void>();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.scheduleForcedFrame();
+      await tester.pump();
+      expect(
+          tester.widget<FilledButton>(
+                  find.widgetWithText(FilledButton, 'Next word'))
+              .onPressed,
+          isNull,
+          reason: 'pending persistence must not masquerade as committed '
+              'while suspended');
+      store.answerGate!.complete();
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('inactive focus changes must not duplicate an in-flight '
+        'save', (tester) async {
+      final store = FakeSectionStore()..answerGate = Completer<void>();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pump();
+      expect(store.answerCalls, 1);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(store.answerCalls, 1,
+          reason: 'no suspension occurred; do not re-run pending action');
+      store.answerGate!.complete();
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('replacing owner must stop old playback immediately',
         (tester) async {
       final audio = GateAudio();
@@ -1064,6 +1111,102 @@ void main() {
           reason: 'resume must settle the pending completion');
       expect(router.routeInformationProvider.value.uri.path, '/home',
           reason: 'a settled completion exits to home');
+    });
+
+    testWidgets('inactive after suspension must not navigate before '
+        'resumed', (tester) async {
+      final store = FakeSectionStore()..completeGate = Completer<void>();
+      final router = lessonRouter();
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(overrides: [
+        courseAudioProvider.overrideWithValue(FakeAudio()),
+        lessonSectionStoreProvider.overrideWithValue(store),
+      ], child: MaterialApp.router(
+          debugShowCheckedModeBanner: false, routerConfig: router)));
+      await tester.pumpAndSettle();
+      await playPerfectSection(tester);
+      await tester.tap(find.text('Finish section'));
+      await tester.pump(); // the completion save is in flight, held
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.scheduleForcedFrame();
+      await tester.pump();
+      store.completeGate!.complete(); // completes while suspended
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.scheduleForcedFrame();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(router.routeInformationProvider.value.uri.path,
+          '/course-lesson/en-fr-u-y',
+          reason: 'inactive is not recovery; navigation waits for resumed');
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(router.routeInformationProvider.value.uri.path, '/home',
+          reason: 'resumed settles the completion exactly once');
+    });
+
+    testWidgets('a double Finish before redraw settles once and pops '
+        'exactly one route', (tester) async {
+      final store = FakeSectionStore()..completeGate = Completer<void>();
+      final router = GoRouter(
+          initialLocation: '/home',
+          routes: [
+            GoRoute(
+                path: '/home',
+                pageBuilder: (_, __) => const NoTransitionPage(
+                    child: _HomeStub())),
+            GoRoute(
+                path: '/course-list',
+                pageBuilder: (_, __) => const NoTransitionPage(
+                    child: Scaffold(
+                        body: Center(child: Text('course list'))))),
+            GoRoute(
+                path: '/course-lesson/:id',
+                pageBuilder: (_, state) {
+              final String id = state.pathParameters['id']!;
+              return NoTransitionPage(
+                  child: sectionForLesson(id) != null
+                      ? DiscoveryLessonScreen(lessonId: id)
+                      : CourseLessonScreen(lessonId: id));
+            }),
+          ]);
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(overrides: [
+        courseAudioProvider.overrideWithValue(FakeAudio()),
+        lessonSectionStoreProvider.overrideWithValue(store),
+      ], child: MaterialApp.router(
+          debugShowCheckedModeBanner: false, routerConfig: router)));
+      await tester.pumpAndSettle();
+      // Multi-entry stack: home -> course list -> lesson, so a double pop has
+      // a different, observable landing screen than a single pop. `push`
+      // appends unambiguously. (With go_router defaults the provider URI
+      // intentionally reports only the declarative base after a push, so the
+      // stack is asserted through the visible pages, not the provider value.)
+      router.push('/course-list');
+      await tester.pumpAndSettle();
+      expect(find.text('course list'), findsOneWidget);
+      router.push('/course-lesson/en-fr-u-y');
+      await tester.pumpAndSettle();
+      expect(find.byType(DiscoveryLessonScreen), findsOneWidget);
+      expect(router.canPop(), isTrue, reason: 'the lesson sits on a stack');
+      await playPerfectSection(tester);
+      await tester.tap(find.text('Finish section'));
+      // Double invocation before the busy state is drawn: no frame is pumped
+      // between the taps, so both observe the still-enabled button and only
+      // the screen's own single-shot guard may block the second one.
+      await tester.tap(find.text('Finish section'));
+      await tester.pump(); // first save starts (held); the second is refused
+      store.completeGate!.complete();
+      await tester.pumpAndSettle();
+      expect(store.completeCalls, 1,
+          reason: 'a double tap must not start a second completion');
+      expect(store.completedLesson, 'en-fr-u-y');
+      // One settled Finish pops exactly one route, landing on the course
+      // list; a double pop would drop the stack to home instead.
+      expect(find.byType(DiscoveryLessonScreen), findsNothing);
+      expect(find.text('course list'), findsOneWidget,
+          reason: 'one settled Finish pops exactly one route (no double pop)');
+      expect(find.byType(_HomeStub), findsNothing);
     });
 
     testWidgets(

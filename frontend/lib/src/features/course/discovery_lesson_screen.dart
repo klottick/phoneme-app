@@ -28,10 +28,16 @@ import 'discovery_section_view.dart';
 /// hearing is lost (a fresh completed playback is required) and in-flight
 /// completions that land while suspended are discarded, but the same-owner
 /// learnable save intent — the pending action/checkpoint and any save error —
-/// is preserved. On foreground it is reconciled idempotently against the
-/// captured owner, and an interrupted load is re-driven, so no permanent
-/// spinner and no lost answer. Disposal still invalidates every delayed
-/// callback.
+/// is preserved and the controls stay disabled until it settles. Explicit
+/// suspension tracking drives recovery: only a `resumed` event reopens
+/// foreground recovery (re-drives an interrupted load, or re-runs the pending
+/// save idempotently, coalesced so one action publishes/exits exactly once);
+/// `inactive` focus changes neither replay pending work nor settle suspended
+/// navigation, and a `resumed` without a prior suspension does nothing.
+/// Save runs are single-shot per identity: handlers ignore double taps before
+/// a redraw, an orphaned run's late completion cannot settle the UI, clear a
+/// newer pending action, or run a second exit. Disposal invalidates every
+/// delayed callback.
 ///
 /// `view.error` is for persistence failures only: a failed save exposes
 /// `Retry saving` (same session, same attempt, never recorded twice). Audio
@@ -92,14 +98,32 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   /// disposal) and when the app suspends: in-flight save/playback
   /// completions that land in those windows are stale and must not publish
   /// or exit. For a same-owner suspension the retained pending action is
-  /// re-run idempotently on foreground; for an owner replacement it is
-  /// dropped (it stays reconciled in the old owner's storage).
+  /// re-run idempotently when `resumed` reopens recovery; for an owner
+  /// replacement it is dropped (it stays reconciled in the old owner's
+  /// storage).
   int _generation = 0;
 
   /// Bumped whenever an in-flight playback must stop counting: suspension,
   /// owner replacement, disposal. A late completion then never unlocks the
   /// choices on a screen that no longer owns that playback.
   int _playbackGeneration = 0;
+
+  /// True while paused/hidden/detached; cleared only by a `resumed` event.
+  /// Controls stay disabled while set (pending persistence must not
+  /// masquerade as committed), nothing may settle or navigate while set, and
+  /// neither `inactive` focus changes nor repeated `resumed` events without
+  /// a prior suspension replay work.
+  bool _suspended = false;
+
+  /// A save run is awaiting its store call. A new invocation (double tap
+  /// before the widget tree redraws) must not start a second run.
+  bool _saveInFlight = false;
+
+  /// Identity of the save run currently in flight (bumped when a run is
+  /// orphaned, e.g. by a resumed-window re-drive or owner replacement). An
+  /// orphaned run's late completion cannot settle the UI, clear a newer
+  /// pending action, or run a second exit.
+  int _saveOp = 0;
 
   /// Identity counter for fresh session IDs kept within this generation.
   int _sessionCounter = 0;
@@ -139,19 +163,24 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       case AppLifecycleState.detached:
         _onSuspend();
       case AppLifecycleState.inactive:
+        // A focus/transition change is neither suspension nor recovery: it
+        // must not replay pending work, settle a save, or navigate.
+        break;
       case AppLifecycleState.resumed:
         _onForeground();
     }
   }
 
-  /// Suspension invalidates playback, not the learner's recoverable save
-  /// intent: the pending action/checkpoint and any save error stay in place
-  /// and are reconciled (idempotent retry) on foreground. In-flight
-  /// completions that land while suspended are discarded by the generation
-  /// guard — they must not publish, unlock choices, or exit.
+  /// Suspension invalidates playback and freezes the screen, but not the
+  /// learner's recoverable save intent: the pending action/checkpoint and
+  /// any save error stay in place and are reconciled only when `resumed`
+  /// reopens foreground recovery. In-flight completions that land while
+  /// suspended are stale (generation guard) — they must not publish, unlock
+  /// controls, or exit.
   void _onSuspend() {
     _generation += 1;
     _playbackGeneration += 1;
+    _suspended = true;
     _stopAudio();
     if (mounted) {
       setState(() {
@@ -161,19 +190,30 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     }
   }
 
-  /// On foreground, resume interrupted same-owner work against the captured
-  /// owner: re-drive a load that suspension invalidated (no permanent
-  /// spinner), or settle a pending save intent idempotently.
+  /// Only a `resumed` event after a suspension reopens recovery. Re-drive a
+  /// load that suspension invalidated (no permanent spinner), or settle the
+  /// pending same-owner save idempotently — coalesced with the run the
+  /// suspended window left behind so one action publishes/exits exactly
+  /// once. A `resumed` without a prior suspension does nothing.
   void _onForeground() {
+    if (!_suspended) return;
     final LessonSectionStore? store = _store;
     if (store == null || !mounted) return;
+    _suspended = false;
+    // The suspended flag was gating (disabling) the controls; clearing it
+    // must schedule a rebuild of its own or the view stays frozen after
+    // resume even when there is no pending work to re-drive.
+    setState(() {});
     final int expectedGeneration = _generation;
     Future.microtask(() {
       if (expectedGeneration != _generation || !mounted) return;
       if (_session == null && _loadError == null) {
         unawaited(_load(store));
       } else if (_pendingAction != null) {
-        unawaited(_executeSave());
+        // Orphan whatever run the suspended window left in flight; its late
+        // completion must not settle the UI or run an exit alongside this one.
+        if (_saveInFlight) _saveOp += 1;
+        unawaited(_startSave());
       }
     });
   }
@@ -181,12 +221,14 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   void _onStoreReplaced(LessonSectionStore? previous, LessonSectionStore next) {
     if (identical(previous, next)) return;
     // The owner changed: stop the old owner's audio immediately, invalidate
-    // the departed generation's playback and publications, and drop its
-    // pending save intent — it stays reconciled in the old owner's storage
-    // and must never be re-sent by the replacement screen. Then load the
-    // replacement owner's state.
+    // the departed generation's playback and publications, orphan its
+    // in-flight save run, and drop its pending save intent — it stays
+    // reconciled in the old owner's storage and must never be re-sent by the
+    // replacement screen. Then load the replacement owner's state.
     _generation += 1;
     _playbackGeneration += 1;
+    _saveOp += 1; // orphan the old owner's in-flight run
+    _saveInFlight = false;
     _pendingAction = null;
     _pendingOnSaved = null;
     _stopAudio();
@@ -227,7 +269,9 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     } catch (error) {
       failure = error;
     }
-    if (generation != _generation || !mounted) return;
+    // Stale after suspension/owner replacement/disposal: a completed load
+    // must not publish either; resumed recovery re-drives it if needed.
+    if (generation != _generation || _suspended || !mounted) return;
     if (failure != null) {
       setState(() {
         _busy = false;
@@ -293,6 +337,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   // ---------------------------------------------------------------- playback
 
   Future<void> _onListen() async {
+    if (_suspended) return;
     final session = _session;
     if (session == null || session.answered) return;
     if (_busy || _loadError != null || _saveError != null) return;
@@ -357,16 +402,22 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     Future<void> Function(LessonSectionStore store) action,
     FutureOr<void> Function()? onSaved,
   ) {
+    // Single-shot: nothing while suspended, and no second run for the same
+    // identity — a double tap before the widget tree redraws must not start
+    // a duplicate save (duplicate completion, duplicate exit, ...).
+    if (_suspended || _saveInFlight) return;
     _pendingAction = action;
     _pendingOnSaved = onSaved;
-    unawaited(_executeSave());
+    unawaited(_startSave());
   }
 
-  Future<void> _executeSave() async {
+  Future<void> _startSave() async {
     final action = _pendingAction;
     final onSaved = _pendingOnSaved;
     final LessonSectionStore? owner = _store;
     if (action == null || owner == null || _session == null) return;
+    _saveInFlight = true;
+    final int op = _saveOp;
     final int generation = _generation;
     if (mounted) {
       setState(() {
@@ -380,14 +431,18 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     } catch (error) {
       failure = error;
     }
-    // Stale after suspension/owner replacement/disposal: publish nothing,
-    // clear nothing, navigate nowhere. Same-owner suspension re-runs this
-    // action idempotently on foreground (`_onForeground`).
-    if (generation != _generation || !mounted) return;
+    // Orphaned (a resumed re-drive or owner replacement superseded this run):
+    // it must not settle the UI, clear a newer pending action, or exit.
+    if (op != _saveOp) return;
+    _saveInFlight = false;
+    // Stale after suspension/owner replacement/disposal: settle nothing —
+    // publish nothing, navigate nowhere. Same-owner recovery re-runs the
+    // retained pending action when `resumed` reopens foreground.
+    if (generation != _generation || _suspended || !mounted) return;
     if (failure != null) {
       // Persistence only: the view's error/Retry path. The pending action is
-      // retained so `Retry saving` (and the foreground reconcile) re-sends
-      // the very same checkpoint — the store records it at most once.
+      // retained so `Retry saving` (and resumed recovery) re-sends the very
+      // same checkpoint — the store records it at most once.
       setState(() {
         _busy = false;
         _saveError = _saveErrorText;
@@ -404,7 +459,6 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     _pendingOnSaved = null;
     if (onSaved != null) {
       await onSaved();
-      if (generation != _generation || !mounted) return;
     }
   }
 
@@ -486,10 +540,13 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     if (_pendingAction == null) {
       // Nothing pending: reload through the captured owner.
       final LessonSectionStore? store = _store;
-      if (store != null) unawaited(_load(store));
+      if (store != null && !_suspended && !_saveInFlight) {
+        unawaited(_load(store));
+      }
       return;
     }
-    unawaited(_executeSave());
+    if (_suspended || _saveInFlight) return;
+    unawaited(_startSave());
   }
 
   void _onRetryLoad() {
@@ -584,7 +641,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
             section: section,
             session: session,
             heard: _heard,
-            busy: _busy,
+            busy: _busy || _suspended,
             error: _saveError,
             onListen: _onListen,
             onAnswer: _onAnswer,
