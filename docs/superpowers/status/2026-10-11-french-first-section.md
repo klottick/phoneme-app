@@ -12,8 +12,8 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 | Planning | merged | `docs/french-first-section`, `wks_0f327fd42c4ce757` | controller | [#1](https://github.com/klottick/phoneme-app/pull/1), `2ee916e` | docs-only scope/whitespace review; remote baseline 128 tests/analyzer clean |
 | 1 policy | merged | `feat/fr-section-policy`, `wks_30e17a2a110b4685` | `ses_ed7b28857ffekgx7UgLTvK1dUe` | [#2](https://github.com/klottick/phoneme-app/pull/2), head `382f530`, merge `7130cb9` | controller: 161 full tests pass, analyzer clean; invalid-value reproduction fixed |
 | 2 content/session | merged | `feat/fr-section-session`, `wks_c449fb2828dcbebc` | `ses_ed7aabf1cffe8amV18675aLqw4` | [#4](https://github.com/klottick/phoneme-app/pull/4), head `3a9bf82`, merge `77117b7` | controller: 219 full tests pass, analyzer clean, 8 invalid snapshots rejected |
-| 3 persistence | ready for dispatch | — | — | — | Task 2 contracts reviewed and merged |
-| 4 view | blocked: 2; serial after 3 | — | — | — | — |
+| 3 persistence | implementing | `feat/fr-section-persistence`, `wks_bccf671bff3e1262` | `ses_ed78b449dffelAD0FF2yNlyWif` | pending, base `62d9300` | controller baseline: 219 tests pass |
+| 4 view | queued; serial after 3 | — | — | — | Task 2 contracts merged |
 | 5 screen/routes | blocked: 3, 4 | — | — | — | — |
 | Final verification | blocked: 5 | — | controller | — | — |
 
@@ -64,6 +64,7 @@ Authorization: user requested plan, small local-Qwen tasks, PRs, controller revi
 - 2026-10-11: Task 2 PR #4 reviewed at `53f519b`; content approved, session changes required. Reproduction accepted contradictory outcomes, missing/future coverage, shortened queue, inflated counts and invalid review state. Fix round 1 requested; explicit answered-bool contract added before dependent work.
 - 2026-10-11: Task 2 fix round 1 `53f519b..b08799c` re-reviewed; original findings addressed. New regression: removed zero-attempt/null-lastCorrect equivalence permits losing the prior outcome at review start. Reproduced using updated bool-schema snapshots; narrow fix round 2 requested. PR #4 remains unmerged.
 - 2026-10-11: Task 2 fix round 2 `b08799c..3a9bf82` re-reviewed: lastCorrect equivalence restored with regression tests; spec compliance and quality approved. Controller full suite 219 tests passed, analyzer clean, whitespace clean, all 8 malformed reproductions rejected. PR #4 merged at `77117b7`. Evidence: `/tmp/opencode/fr-session-controller-tests.log`, `/tmp/opencode/fr-session-controller-analyze.log`. Initial concurrent verification hit an SDK engine-stamp HTTP 404 before tests began; standalone rerun passed.
+- 2026-10-11: State/contracts docs PR #3 reviewed (docs-only, whitespace clean) and merged at `62d9300`. Task 3 dispatched to local Qwen in existing project workspace `wks_bccf671bff3e1262`, base `62d9300`, worker `ses_ed78b449dffelAD0FF2yNlyWif`. Controller prepared dependencies and verified baseline 219 tests passed (`/tmp/opencode/fr-persistence-baseline-tests.log`). Reminder in brief: compare checkpoints to legal stored-session transitions, not only attempt counts; stale owners must be rejected inside queued writes.
 
 ## Deferred minor findings for final review
 
