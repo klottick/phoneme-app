@@ -237,14 +237,28 @@ void main() {
   });
 
   group('baseline behavior', () {
-    test('valid baseline is structurally valid with no readiness issues yet',
+    test(
+        'valid baseline is structurally valid with exactly the baseline readiness',
         () {
       final report = _validate(listeningFixture());
       expect(report.errors, isEmpty);
       expect(report.isStructurallyValid, isTrue);
-      // Task 2 scope is structural only; readiness reporting and subtype
-      // payload checks land in the follow-up task on this same API.
-      expect(report.readinessIssues, isEmpty);
+      // Readiness now reports the planned y discovery slot and the word
+      // reference that lacks a reviewed recording.
+      expect(
+        [
+          for (final diagnostic in report.readinessIssues)
+            (
+              diagnostic.code,
+              diagnostic.recordId,
+              diagnostic.use,
+            ),
+        ],
+        [
+          ('plannedPhoneme', 'y', ContentPurpose.practice),
+          ('missingReviewedAudio', 'fr-word-tout', ContentPurpose.assessment),
+        ],
+      );
     });
 
     test('exposed report collections are immutable', () {
@@ -300,6 +314,7 @@ void main() {
       expected: [
         ('duplicateId', 'test-u', null),
         ('missingReference', 'test-section', null),
+        ('invalidCoverage', 'u', null),
       ],
     );
     _expectRule(
@@ -324,6 +339,10 @@ void main() {
       ),
       expected: [
         ('duplicateId', 's-1', null),
+        ('missingReference', 's-1', null),
+        ('invalidSentenceTokens', 's-1', null),
+        ('missingReference', 's-1', null),
+        ('invalidSentenceTokens', 's-1', null),
       ],
     );
     _expectRule(
@@ -331,6 +350,7 @@ void main() {
       build: () => listeningFixture(audioReferences: [_audio(), _audio()]),
       expected: [
         ('duplicateId', 'fr-word-tout', null),
+        ('missingReference', 'test-u', null),
       ],
     );
   });
@@ -417,6 +437,7 @@ void main() {
       ),
       expected: [
         ('missingReference', 'test-section', null),
+        ('invalidCoverage', 'u', null),
       ],
     );
     _expectRule(
@@ -469,6 +490,7 @@ void main() {
       ),
       expected: [
         ('cyclicPrerequisite', 'opt-b', null),
+        ('invalidCoverage', 'u', null),
       ],
     );
   });
@@ -536,6 +558,9 @@ void main() {
       ),
       expected: [
         ('backwardStage', 'hear-main', null),
+        ('invalidExercisePlacement', 'e-spell', null),
+        ('invalidTargets', 'e-spell', null),
+        ('invalidCoverage', 'u', null),
       ],
     );
   });
@@ -560,6 +585,8 @@ void main() {
       ),
       expected: [
         ('invalidNodeKind', 'assess-early', null),
+        ('invalidExercisePlacement', 'e-1', null),
+        ('invalidCoverage', 'u', null),
       ],
     );
     _expectRule(
@@ -578,6 +605,7 @@ void main() {
       ),
       expected: [
         ('invalidNodeKind', 'review-main', null),
+        ('invalidCoverage', 'u', null),
       ],
     );
     _expectRule(
@@ -596,6 +624,7 @@ void main() {
       ),
       expected: [
         ('invalidNodeKind', 'game-main', null),
+        ('invalidCoverage', 'u', null),
       ],
     );
     _expectRule(
@@ -614,6 +643,7 @@ void main() {
       ),
       expected: [
         ('invalidNodeKind', 'articulation-main', null),
+        ('invalidCoverage', 'u', null),
       ],
     );
   });
@@ -647,6 +677,8 @@ void main() {
       expected: [
         ('ownershipMismatch', 'owned-b', null),
         ('ownershipMismatch', 'owner-a', null),
+        ('invalidTargets', 'ex-b', null),
+        ('invalidCoverage', 'u', null),
       ],
     );
     _expectRule(
@@ -684,6 +716,8 @@ void main() {
         ('ownershipMismatch', 'e-1', null),
         ('ownershipMismatch', 's-1', null),
         ('ownershipMismatch', 's-2', null),
+        ('invalidTargets', 'e-2', null),
+        ('invalidCoverage', 'u', null),
       ],
     );
   });
@@ -724,6 +758,7 @@ void main() {
       expected: [
         ('ownershipMismatch', 'extra-u', null),
         ('unownedRecord', 'extra-u', null),
+        ('invalidTargets', 'extra-u', null),
       ],
     );
   });
@@ -761,6 +796,7 @@ void main() {
       ),
       expected: [
         ('poolSizeMismatch', 'test-section', null),
+        ('invalidTargets', 'test-v', null),
       ],
     );
   });
@@ -769,6 +805,9 @@ void main() {
     _expectRule(
       label: 'two distinct listening exercises share an alias in one section',
       build: () => listeningFixture(
+        nodes: [
+          _node(targetSounds: const ['u', 'y']),
+        ],
         sections: [
           _section(
               exerciseIds: const ['test-u', 'test-v'], requiredItemCount: 2),
@@ -796,7 +835,22 @@ void main() {
       label: 'the same alias across different sections stays clean',
       build: () => listeningFixture(
         nodes: [
-          _node(id: 'n-cross', sectionIds: const ['s-a', 's-b'])
+          _node(
+              id: 'n-cross',
+              sectionIds: const ['s-a', 's-b'],
+              targetSounds: const ['u', 'y']),
+        ],
+        phonemeCoverage: [
+          PhonemeCoverage(
+            sound: 'u',
+            discoveryStatus: ContentStatus.authored,
+            practiceExerciseIds: const ['e-a'],
+          ),
+          PhonemeCoverage(
+            sound: 'y',
+            discoveryStatus: ContentStatus.authored,
+            practiceExerciseIds: const ['e-b'],
+          ),
         ],
         sections: [
           _section(id: 's-a', nodeId: 'n-cross', exerciseIds: const ['e-a']),
@@ -835,9 +889,15 @@ void main() {
     _expectRule(
       label: 'planned node without sections stays clean',
       build: () => listeningFixture(
-        nodes: [_node(status: ContentStatus.planned, sectionIds: const [])],
+        nodes: [
+          _node(
+              status: ContentStatus.planned,
+              sectionIds: const [],
+              targetSounds: const [])
+        ],
         sections: const [],
         exercises: const [],
+        phonemeCoverage: const [],
       ),
       expected: const [],
     );
@@ -847,9 +907,10 @@ void main() {
     _expectRule(
       label: 'authored lesson with zero sections',
       build: () => listeningFixture(
-        nodes: [_node(sectionIds: const [])],
+        nodes: [_node(sectionIds: const [], targetSounds: const [])],
         sections: const [],
         exercises: const [],
+        phonemeCoverage: const [],
       ),
       expected: [
         ('missingSection', 'test-listen', null),
@@ -869,6 +930,7 @@ void main() {
         ],
         sections: const [],
         exercises: const [],
+        phonemeCoverage: const [],
       ),
       expected: [
         ('missingSection', 'assess-empty', null),
@@ -894,13 +956,26 @@ void main() {
           ('duplicateId', 'fr-word-tout', null),
           ('missingSection', 'test-listen', null),
           ('cyclicPrerequisite', 'test-listen', null),
+          ('invalidCoverage', 'u', null),
         ],
       );
       expect(report.isStructurallyValid, isFalse);
-      // Structural errors never carry a use; readiness reporting is follow-up.
+      // Structural errors never carry a use.
       expect(
           report.errors.every((diagnostic) => diagnostic.use == null), isTrue);
-      expect(report.readinessIssues, isEmpty);
+      // Readiness phases: planned y slot, then the duplicated word reference
+      // copies each lacking a reviewed recording.
+      expect(
+        [
+          for (final diagnostic in report.readinessIssues)
+            (diagnostic.code, diagnostic.recordId, diagnostic.use),
+        ],
+        [
+          ('plannedPhoneme', 'y', ContentPurpose.practice),
+          ('missingReviewedAudio', 'fr-word-tout', ContentPurpose.assessment),
+          ('missingReviewedAudio', 'fr-word-tout', ContentPurpose.assessment),
+        ],
+      );
     });
 
     test('repeated validation gives an identical diagnostic sequence', () {

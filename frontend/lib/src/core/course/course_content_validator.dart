@@ -1,18 +1,19 @@
-/// Structural catalogue validation for the FR-01 curriculum graph.
+/// Structural catalogue validation and honest resource-readiness reporting
+/// for the FR-01 curriculum graph.
 ///
 /// Pure Dart: imports only [course_exercise.dart] and [course_curriculum.dart],
 /// never French content, providers, storage, widgets or plugins.
 ///
-/// This phase covers the structural namespace, identity, graph, ownership and
-/// pool rules of the approved design. The sentence and coverage phases and all
-/// readiness reporting are a follow-up on this same public API and
-/// intentionally emit no diagnostics yet; the resource inputs of
-/// [validateCourseContent] remain part of the frozen revision 1 signature.
+/// Covers the structural namespace, identity, graph, ownership and pool rules,
+/// the exercise/sentence payload rules, the coverage rules, and the readiness
+/// phases — all on the frozen revision 1 [validateCourseContent] signature.
 ///
-/// Reports are deterministic: structural namespaces (nodes, sections,
-/// exercises, sentences, audio references), then nodes, sections and exercises
-/// each in authored order; absent or ambiguous records are reported without
-/// arbitrary selection, and unrelated independent issues are retained.
+/// Reports are deterministic: structural phases run in contract order —
+/// namespaces (nodes, sections, exercises, sentences, audio references), then
+/// nodes, sections, exercises, sentences and coverage, each in authored order —
+/// then readiness nodes, coverage, exercises/sentences and audio references.
+/// Absent or ambiguous records are reported without arbitrary selection, and
+/// unrelated independent issues are retained.
 library;
 
 import 'course_exercise.dart';
@@ -49,7 +50,7 @@ final class CourseContentDiagnostic {
   final ContentPurpose? use;
 }
 
-/// The outcome of validating one curriculum: structural errors plus follow-up
+/// The outcome of validating one curriculum: structural errors plus honest
 /// readiness issues, both immutable and deterministic.
 final class CourseValidationReport {
   CourseValidationReport({
@@ -61,35 +62,53 @@ final class CourseValidationReport {
   /// Structural errors; `use` is always `null` on these.
   final List<CourseContentDiagnostic> errors;
 
-  /// Honest incomplete-resource issues; empty until the readiness phase.
+  /// Honest incomplete-resource issues; each identifies its affected use.
   final List<CourseContentDiagnostic> readinessIssues;
 
   /// True while the catalogue is structurally usable.
   bool get isStructurallyValid => errors.isEmpty;
 }
 
-/// Deterministic structural validation of one [curriculum].
+/// Deterministic validation of one [curriculum]: structural errors in
+/// contract phase order, then readiness issues in contract phase order.
 ///
-/// The citation, exposure and audio resource inputs are part of the frozen
-/// revision 1 signature; the follow-up payload/readiness phases consume them,
-/// and this phase intentionally reads no relationship from them.
+/// [citationPhonemes] validates word exercises only; sentence targets use
+/// their own reviewed contextual annotations, never a citation guess.
+/// [exposedWordIds] is unioned with the practice word-exercise IDs so caller
+/// omission cannot convert authored practice words into held-out content.
+/// [audioResources] are injected declarations, never device or file probes;
+/// keys that match no reference are ignored rather than manufactured.
 CourseValidationReport validateCourseContent(
   CourseCurriculum curriculum, {
   required Map<String, List<String>> citationPhonemes,
   required Set<String> exposedWordIds,
   required Map<String, AudioResourceStatus> audioResources,
 }) {
-  // Structural phases in contract order: namespaces, then nodes, sections and
-  // exercises in authored order. The sentence and coverage phases emit no
-  // structural diagnostics in this phase, and readiness issues arrive with
-  // the follow-up phase.
+  final inventory = _coverageSoundInventory(curriculum);
+  // Structural phases in contract order: namespaces, nodes, sections,
+  // exercises, sentences and coverage, each in authored order.
   final List<CourseContentDiagnostic> errors = [
     ..._findDuplicateIdErrors(curriculum),
-    ..._findNodeErrors(curriculum),
+    ..._findNodeErrors(curriculum, inventory),
     ..._findSectionErrors(curriculum),
     ..._findExerciseErrors(curriculum),
+    ..._findExercisePayloadErrors(
+        curriculum, inventory, citationPhonemes, exposedWordIds),
+    ..._findSentenceErrors(curriculum),
+    ..._findCoverageErrors(curriculum),
   ];
-  return CourseValidationReport(errors: errors, readinessIssues: const []);
+  // Readiness phases in contract order: nodes, coverage, exercises/sentences
+  // and audio references, each in authored order.
+  final List<CourseContentDiagnostic> readinessIssues = [
+    ..._findNodeReadinessIssues(curriculum),
+    ..._findCoverageReadinessIssues(curriculum),
+    ..._findExerciseReadinessIssues(curriculum, audioResources),
+    ..._findReferenceReadinessIssues(curriculum, audioResources),
+  ];
+  return CourseValidationReport(
+    errors: errors,
+    readinessIssues: readinessIssues,
+  );
 }
 
 String _nonblank(String value, String name) {
@@ -105,6 +124,19 @@ CourseContentDiagnostic _diagnostic(
   String message,
 ) =>
     CourseContentDiagnostic(code: code, recordId: recordId, message: message);
+
+CourseContentDiagnostic _readinessDiagnostic(
+  String code,
+  String recordId,
+  String message,
+  ContentPurpose use,
+) =>
+    CourseContentDiagnostic(
+      code: code,
+      recordId: recordId,
+      message: message,
+      use: use,
+    );
 
 /// Values that occur more than once, in first-appearance authored order.
 List<String> _repeatedInOrder(List<String> values) {
@@ -184,8 +216,12 @@ List<CourseContentDiagnostic> _findDuplicateIdErrors(
   return errors;
 }
 
-/// Node-level rules, authored order, with the prerequisite cycle pass last.
-List<CourseContentDiagnostic> _findNodeErrors(CourseCurriculum curriculum) {
+/// Node-level rules, authored order: membership, references, kinds, payload
+/// targets, then the prerequisite cycle pass last.
+List<CourseContentDiagnostic> _findNodeErrors(
+  CourseCurriculum curriculum,
+  Set<String> inventory,
+) {
   final errors = <CourseContentDiagnostic>[];
   for (final node in curriculum.nodes) {
     for (final id in _repeatedInOrder(node.prerequisiteIds)) {
@@ -268,6 +304,32 @@ List<CourseContentDiagnostic> _findNodeErrors(CourseCurriculum curriculum) {
           'backwardStage',
           node.id,
           "main node '${node.id}' (${node.stage.name}) depends on later main node '$id' (${prerequisite.stage.name})",
+        ));
+      }
+    }
+    // Target label rules: duplicate labels, empty labels, and labels absent
+    // from the declared coverage inventory.
+    for (final label in _repeatedInOrder(node.targetSounds)) {
+      errors.add(_diagnostic(
+        'invalidTargets',
+        node.id,
+        "node '${node.id}' lists target sound '$label' more than once",
+      ));
+    }
+    if (node.targetSounds.any((label) => label.trim().isEmpty)) {
+      errors.add(_diagnostic(
+        'invalidTargets',
+        node.id,
+        "node '${node.id}' declares an empty target sound label",
+      ));
+    }
+    for (final label in _distinctInOrder(node.targetSounds)) {
+      if (label.trim().isEmpty) continue; // Already reported as an empty label.
+      if (!inventory.contains(label)) {
+        errors.add(_diagnostic(
+          'invalidTargets',
+          node.id,
+          "node '${node.id}' targets undeclared sound '$label' absent from the coverage inventory",
         ));
       }
     }
@@ -475,4 +537,734 @@ List<CourseContentDiagnostic> _findExerciseErrors(
     }
   }
   return errors;
+}
+
+/// A Unicode-letter word contains at least one letter; punctuation alone does
+/// not form a believable distractor.
+final RegExp _unicodeLetterPattern = RegExp(r'\p{L}', unicode: true);
+
+/// A whitespace gap character; token gaps may contain whitespace only.
+final RegExp _whitespaceGapPattern = RegExp(r'\s', unicode: true);
+
+/// The stage a purpose-practice exercise of each kind belongs to. Read-aloud
+/// carries no stage rule in this revision; its node-kind rule is separate.
+const Map<ExerciseKind, CourseStage> _practiceStageByKind = {
+  ExerciseKind.listeningChoice: CourseStage.hear,
+  ExerciseKind.sentenceHunt: CourseStage.find,
+  ExerciseKind.spellingChoice: CourseStage.spell,
+};
+
+/// Read-aloud is allowed in optional articulation or assessment nodes only.
+const Set<CourseNodeKind> _readAloudAllowedNodeKinds = {
+  CourseNodeKind.articulation,
+  CourseNodeKind.assessment,
+};
+
+/// The declared coverage sound inventory for target membership checks.
+Set<String> _coverageSoundInventory(CourseCurriculum curriculum) {
+  final inventory = <String>{};
+  for (final coverage in curriculum.phonemeCoverage) {
+    inventory.add(coverage.sound);
+  }
+  return inventory;
+}
+
+/// Exercise payload rules, authored exercise order. Checks requiring an owner
+/// node are skipped when section or node lookup is absent or ambiguous; that
+/// absence is already reported, and independent issues are retained.
+List<CourseContentDiagnostic> _findExercisePayloadErrors(
+  CourseCurriculum curriculum,
+  Set<String> inventory,
+  Map<String, List<String>> citationPhonemes,
+  Set<String> exposedWordIds,
+) {
+  final errors = <CourseContentDiagnostic>[];
+  final practiceAudioRefIds = <String>{
+    for (final exercise in curriculum.exercises)
+      if (exercise.purpose == ContentPurpose.practice) exercise.audioRefId,
+  };
+  final effectiveExposedWordIds = <String>{...exposedWordIds};
+  for (final exercise in curriculum.exercises) {
+    if (exercise.purpose != ContentPurpose.practice) continue;
+    final wordId = _wordIdOf(exercise);
+    if (wordId != null) {
+      effectiveExposedWordIds.add(wordId);
+    }
+  }
+
+  for (final exercise in curriculum.exercises) {
+    final section = curriculum.sectionById(exercise.sectionId);
+    final node = section == null ? null : curriculum.nodeById(section.nodeId);
+    if (node != null) {
+      errors.addAll(_findPlacementErrors(exercise, node));
+      errors.addAll(_findExerciseTargetErrors(exercise, node, inventory));
+    }
+    if (exercise is ListeningChoiceExercise) {
+      errors.addAll(_findListeningChoiceErrors(exercise, inventory));
+      errors.addAll(_findWordErrors(
+        exercise,
+        wordId: exercise.wordId,
+        targetSound: exercise.expectedSound,
+        citationPhonemes: citationPhonemes,
+      ));
+      final reference = curriculum.audioReferenceById(exercise.audioRefId);
+      errors.addAll(_findReferenceErrors(exercise, reference,
+          (ref) => ref.spokenText != exercise.wordId ? 'word' : null));
+    } else if (exercise is SpellingChoiceExercise) {
+      errors.addAll(_findSpellingOptionErrors(exercise));
+      errors.addAll(_findWordErrors(
+        exercise,
+        wordId: exercise.wordId,
+        targetSound: exercise.targetSound,
+        citationPhonemes: citationPhonemes,
+      ));
+      final reference = curriculum.audioReferenceById(exercise.audioRefId);
+      errors.addAll(_findReferenceErrors(exercise, reference,
+          (ref) => ref.spokenText != exercise.wordId ? 'word' : null));
+    } else if (exercise is SentenceHuntExercise) {
+      final reference = curriculum.audioReferenceById(exercise.audioRefId);
+      errors.addAll(_findReferenceErrors(exercise, reference, null));
+      final sentence = curriculum.sentenceById(exercise.sentenceId);
+      if (sentence == null) {
+        errors.add(_diagnostic(
+          'missingReference',
+          exercise.id,
+          "exercise '${exercise.id}' references absent or duplicated sentence ID '${exercise.sentenceId}'",
+        ));
+      } else {
+        errors.addAll(_findSentenceTargetErrors(exercise, sentence));
+        if (exercise.audioRefId != sentence.audioRefId) {
+          errors.add(_diagnostic(
+            'sentenceAudioMismatch',
+            exercise.id,
+            "hunt '${exercise.id}' uses audio '${exercise.audioRefId}' while sentence '${sentence.id}' declares '${sentence.audioRefId}'",
+          ));
+        }
+      }
+    } else if (exercise is ReadAloudExercise) {
+      final reference = curriculum.audioReferenceById(exercise.audioRefId);
+      errors.addAll(_findReferenceErrors(
+          exercise,
+          reference,
+          (ref) =>
+              ref.spokenText != exercise.promptText ? 'promptText' : null));
+    }
+    if (exercise.purpose == ContentPurpose.assessment) {
+      final wordId = _wordIdOf(exercise);
+      if (wordId != null && effectiveExposedWordIds.contains(wordId)) {
+        errors.add(_diagnostic(
+          'exposedAssessmentWord',
+          exercise.id,
+          "assessment '${exercise.id}' reuses exposed word '$wordId'",
+        ));
+      }
+      if (practiceAudioRefIds.contains(exercise.audioRefId)) {
+        errors.add(_diagnostic(
+          'exposedAssessmentAudio',
+          exercise.id,
+          "assessment '${exercise.id}' reuses audio reference '${exercise.audioRefId}' referenced by practice",
+        ));
+      }
+    }
+  }
+  return errors;
+}
+
+/// Placement: purpose versus node kind, assessment stage fit, practice stage
+/// per kind, and read-aloud node-kind allowance. Each violated condition is
+/// reported independently in deterministic order.
+List<CourseContentDiagnostic> _findPlacementErrors(
+  CourseExercise exercise,
+  CourseNode node,
+) {
+  final errors = <CourseContentDiagnostic>[];
+  final expectedPurpose = node.kind == CourseNodeKind.assessment
+      ? ContentPurpose.assessment
+      : ContentPurpose.practice;
+  if (exercise.purpose != expectedPurpose) {
+    errors.add(_diagnostic(
+      'invalidExercisePlacement',
+      exercise.id,
+      "exercise '${exercise.id}' has purpose ${exercise.purpose.name} in ${node.kind.name} node '${node.id}' where ${expectedPurpose.name} belongs",
+    ));
+  }
+  if (exercise.purpose == ContentPurpose.assessment &&
+      node.kind == CourseNodeKind.assessment &&
+      node.stage != CourseStage.assess) {
+    errors.add(_diagnostic(
+      'invalidExercisePlacement',
+      exercise.id,
+      "assessment exercise '${exercise.id}' sits in ${node.kind.name} node '${node.id}' on stage ${node.stage.name} instead of assess",
+    ));
+  }
+  final practiceStage = _practiceStageByKind[exercise.kind];
+  if (exercise.purpose == ContentPurpose.practice &&
+      practiceStage != null &&
+      node.stage != practiceStage) {
+    errors.add(_diagnostic(
+      'invalidExercisePlacement',
+      exercise.id,
+      "practice ${exercise.kind.name} exercise '${exercise.id}' belongs to stage $practiceStage but node '${node.id}' is ${node.stage.name}",
+    ));
+  }
+  if (exercise is ReadAloudExercise &&
+      !_readAloudAllowedNodeKinds.contains(node.kind)) {
+    errors.add(_diagnostic(
+      'invalidExercisePlacement',
+      exercise.id,
+      "read-aloud exercise '${exercise.id}' is not allowed in ${node.kind.name} node '${node.id}' in this revision",
+    ));
+  }
+  return errors;
+}
+
+/// Each teaching target must be declared in the coverage inventory and
+/// contained in the owner node's targets; read-aloud targets must be
+/// nonempty.
+List<CourseContentDiagnostic> _findExerciseTargetErrors(
+  CourseExercise exercise,
+  CourseNode node,
+  Set<String> inventory,
+) {
+  final errors = <CourseContentDiagnostic>[];
+  void checkTarget(String sound) {
+    if (!inventory.contains(sound)) {
+      errors.add(_diagnostic(
+        'invalidTargets',
+        exercise.id,
+        "exercise '${exercise.id}' targets undeclared sound '$sound' absent from the coverage inventory",
+      ));
+    }
+    if (!node.targetSounds.contains(sound)) {
+      errors.add(_diagnostic(
+        'invalidTargets',
+        exercise.id,
+        "exercise '${exercise.id}' targets '$sound' outside node '${node.id}' targets ${node.targetSounds.join(', ')}",
+      ));
+    }
+  }
+
+  if (exercise is ReadAloudExercise) {
+    if (exercise.targetSounds.isEmpty) {
+      errors.add(_diagnostic(
+        'invalidTargets',
+        exercise.id,
+        "read-aloud exercise '${exercise.id}' declares no target sounds",
+      ));
+    }
+    for (final sound in _distinctInOrder(exercise.targetSounds)) {
+      checkTarget(sound);
+    }
+  } else if (exercise is ListeningChoiceExercise) {
+    checkTarget(exercise.expectedSound);
+  } else if (exercise is SpellingChoiceExercise) {
+    checkTarget(exercise.targetSound);
+  } else if (exercise is SentenceHuntExercise) {
+    checkTarget(exercise.targetSound);
+  }
+  return errors;
+}
+
+/// At least two distinct choices, no duplicate labels, the expected sound
+/// exactly once, and every choice within the declared inventory.
+List<CourseContentDiagnostic> _findListeningChoiceErrors(
+  ListeningChoiceExercise exercise,
+  Set<String> inventory,
+) {
+  final errors = <CourseContentDiagnostic>[];
+  if (_distinctInOrder(exercise.choices).length < 2) {
+    errors.add(_diagnostic(
+      'invalidListeningChoices',
+      exercise.id,
+      "listening exercise '${exercise.id}' offers fewer than two distinct choices",
+    ));
+  }
+  for (final label in _repeatedInOrder(exercise.choices)) {
+    errors.add(_diagnostic(
+      'invalidListeningChoices',
+      exercise.id,
+      "listening exercise '${exercise.id}' repeats choice label '$label'",
+    ));
+  }
+  final expectedCount = exercise.choices
+      .where((choice) => choice == exercise.expectedSound)
+      .length;
+  if (expectedCount != 1) {
+    errors.add(_diagnostic(
+      'invalidListeningChoices',
+      exercise.id,
+      "listening exercise '${exercise.id}' expected sound '${exercise.expectedSound}' occurs $expectedCount times in its choices",
+    ));
+  }
+  for (final choice in _distinctInOrder(exercise.choices)) {
+    if (!inventory.contains(choice)) {
+      errors.add(_diagnostic(
+        'invalidListeningChoices',
+        exercise.id,
+        "listening exercise '${exercise.id}' offers undeclared choice '$choice' absent from the coverage inventory",
+      ));
+    }
+  }
+  return errors;
+}
+
+/// At least two options, distinct option IDs and texts, and exactly one
+/// referenced correct option.
+List<CourseContentDiagnostic> _findSpellingOptionErrors(
+  SpellingChoiceExercise exercise,
+) {
+  final errors = <CourseContentDiagnostic>[];
+  final optionIds = [for (final option in exercise.options) option.id];
+  final optionTexts = [for (final option in exercise.options) option.text];
+  if (exercise.options.length < 2) {
+    errors.add(_diagnostic(
+      'invalidSpellingOptions',
+      exercise.id,
+      "spelling exercise '${exercise.id}' offers fewer than two options",
+    ));
+  }
+  for (final id in _repeatedInOrder(optionIds)) {
+    errors.add(_diagnostic(
+      'invalidSpellingOptions',
+      exercise.id,
+      "spelling exercise '${exercise.id}' repeats option ID '$id'",
+    ));
+  }
+  for (final text in _repeatedInOrder(optionTexts)) {
+    errors.add(_diagnostic(
+      'invalidSpellingOptions',
+      exercise.id,
+      "spelling exercise '${exercise.id}' repeats option text '$text'",
+    ));
+  }
+  if (!_distinctInOrder(optionIds).contains(exercise.correctOptionId)) {
+    errors.add(_diagnostic(
+      'invalidSpellingOptions',
+      exercise.id,
+      "spelling exercise '${exercise.id}' correct option ID '${exercise.correctOptionId}' references no option",
+    ));
+  }
+  return errors;
+}
+
+/// The word ID of a word exercise, or null for sentence and read-aloud.
+String? _wordIdOf(CourseExercise exercise) {
+  if (exercise is ListeningChoiceExercise) return exercise.wordId;
+  if (exercise is SpellingChoiceExercise) return exercise.wordId;
+  return null;
+}
+
+/// Word-exercise rules: the word must be curated, and the explicit target
+/// must occur among that word's curated citation phonemes. Sentence targets
+/// never use this path; they rely on their own contextual annotations.
+List<CourseContentDiagnostic> _findWordErrors(
+  CourseExercise exercise, {
+  required String wordId,
+  required String targetSound,
+  required Map<String, List<String>> citationPhonemes,
+}) {
+  final errors = <CourseContentDiagnostic>[];
+  final curated = citationPhonemes[wordId];
+  if (curated == null) {
+    errors.add(_diagnostic(
+      'unknownWord',
+      exercise.id,
+      "word exercise '${exercise.id}' uses word '$wordId' absent from the curated citation phonemes",
+    ));
+    return errors;
+  }
+  if (!curated.contains(targetSound)) {
+    errors.add(_diagnostic(
+      'citationTargetMismatch',
+      exercise.id,
+      "word exercise '${exercise.id}' target '$targetSound' is not among curated phonemes for word '$wordId'",
+    ));
+  }
+  return errors;
+}
+
+/// Audio-reference rules for one exercise: absent or ambiguous reference,
+/// mismatched declared kind, and spoken-text disagreement.
+List<CourseContentDiagnostic> _findReferenceErrors(
+  CourseExercise exercise,
+  CourseAudioReference? reference,
+  String? Function(CourseAudioReference reference)? mismatchOf,
+) {
+  final errors = <CourseContentDiagnostic>[];
+  if (reference == null) {
+    errors.add(_diagnostic(
+      'missingReference',
+      exercise.id,
+      "exercise '${exercise.id}' references absent or duplicated audio ID '${exercise.audioRefId}'",
+    ));
+    return errors;
+  }
+  final expectedKind = switch (exercise.kind) {
+    ExerciseKind.listeningChoice ||
+    ExerciseKind.spellingChoice =>
+      AudioReferenceKind.word,
+    ExerciseKind.sentenceHunt => AudioReferenceKind.sentence,
+    ExerciseKind.readAloud => AudioReferenceKind.paragraph,
+  };
+  if (reference.kind != expectedKind) {
+    errors.add(_diagnostic(
+      'invalidAudioKind',
+      exercise.id,
+      "exercise '${exercise.id}' (${exercise.kind.name}) references ${reference.kind.name}-kind audio '${reference.id}' instead of $expectedKind",
+    ));
+  }
+  final mismatch = mismatchOf != null ? mismatchOf(reference) : null;
+  if (mismatch != null) {
+    errors.add(_diagnostic(
+      'audioTextMismatch',
+      exercise.id,
+      "exercise '${exercise.id}' ${mismatch == 'promptText' ? 'prompt' : 'word'} disagrees with spokenText '${reference.spokenText}' of audio '${reference.id}'",
+    ));
+  }
+  return errors;
+}
+
+/// Hunt answer-key rules from the referenced sentence's reviewed
+/// contextual annotations: at least one token carrying the target sound and
+/// at least one non-target word token; punctuation alone is not a
+/// distractor.
+List<CourseContentDiagnostic> _findSentenceTargetErrors(
+  SentenceHuntExercise exercise,
+  CourseSentence sentence,
+) {
+  final errors = <CourseContentDiagnostic>[];
+  final tokens = sentence.tokens;
+  final targetTokens = [
+    for (final token in tokens)
+      if (token.phonemes.contains(exercise.targetSound)) token,
+  ];
+  if (targetTokens.isEmpty) {
+    errors.add(_diagnostic(
+      'invalidSentenceTargets',
+      exercise.id,
+      "hunt '${exercise.id}' has no token in sentence '${sentence.id}' annotated with target sound '${exercise.targetSound}'",
+    ));
+  }
+  final hasWordDistractor = tokens.any((token) =>
+      !token.phonemes.contains(exercise.targetSound) &&
+      _unicodeLetterPattern.hasMatch(token.text));
+  if (!hasWordDistractor) {
+    errors.add(_diagnostic(
+      'invalidSentenceTargets',
+      exercise.id,
+      "hunt '${exercise.id}' has no non-target word distractor in sentence '${sentence.id}'; punctuation alone is not believable",
+    ));
+  }
+  return errors;
+}
+
+/// Sentence records, authored order: audio reference resolution, kind and
+/// spoken-text agreement, then token integrity and exact ordered text
+/// coverage permitting whitespace gaps only.
+List<CourseContentDiagnostic> _findSentenceErrors(CourseCurriculum curriculum) {
+  final errors = <CourseContentDiagnostic>[];
+  for (final sentence in curriculum.sentences) {
+    final reference = curriculum.audioReferenceById(sentence.audioRefId);
+    if (reference == null) {
+      errors.add(_diagnostic(
+        'missingReference',
+        sentence.id,
+        "sentence '${sentence.id}' references absent or duplicated audio ID '${sentence.audioRefId}'",
+      ));
+    } else {
+      if (reference.kind != AudioReferenceKind.sentence) {
+        errors.add(_diagnostic(
+          'invalidAudioKind',
+          sentence.id,
+          "sentence '${sentence.id}' references ${reference.kind.name}-kind audio '${reference.id}' instead of sentence",
+        ));
+      }
+      if (reference.spokenText != sentence.text) {
+        errors.add(_diagnostic(
+          'audioTextMismatch',
+          sentence.id,
+          "sentence '${sentence.id}' text '${sentence.text}' disagrees with spokenText '${reference.spokenText}' of audio '${reference.id}'",
+        ));
+      }
+    }
+    if (sentence.tokens.isEmpty) {
+      errors.add(_diagnostic(
+        'invalidSentenceTokens',
+        sentence.id,
+        "sentence '${sentence.id}' declares no tokens",
+      ));
+      continue;
+    }
+    final tokenIds = [for (final token in sentence.tokens) token.id];
+    for (final id in _repeatedInOrder(tokenIds)) {
+      errors.add(_diagnostic(
+        'invalidSentenceTokens',
+        sentence.id,
+        "sentence '${sentence.id}' repeats token ID '$id'",
+      ));
+    }
+    for (final token in sentence.tokens) {
+      if (_repeatedInOrder(token.phonemes).isNotEmpty) {
+        errors.add(_diagnostic(
+          'invalidSentenceTokens',
+          sentence.id,
+          "sentence '${sentence.id}' token '${token.id}' repeats phoneme labels within its annotations",
+        ));
+      }
+    }
+    if (!_tokensHaveOnlyWhitespaceGaps(sentence)) {
+      errors.add(_diagnostic(
+        'invalidSentenceTokens',
+        sentence.id,
+        "sentence '${sentence.id}' tokens do not exactly cover its text in order with whitespace-only gaps",
+      ));
+    }
+  }
+  return errors;
+}
+
+/// Exact ordered token coverage: each token appears at its position in the
+/// text and the gaps before, between and after tokens are whitespace only.
+bool _tokensHaveOnlyWhitespaceGaps(CourseSentence sentence) {
+  final text = sentence.text;
+  var index = 0;
+  while (index < text.length && _whitespaceGapPattern.hasMatch(text[index])) {
+    index++;
+  }
+  for (final token in sentence.tokens) {
+    if (!text.startsWith(token.text, index)) return false;
+    index += token.text.length;
+    while (index < text.length && _whitespaceGapPattern.hasMatch(text[index])) {
+      index++;
+    }
+  }
+  return index == text.length;
+}
+
+/// Coverage rules, authored coverage order: unique sound labels, empty
+/// authored or populated planned coverage, and references limited to
+/// distinct practice exercises that actually teach the sound.
+List<CourseContentDiagnostic> _findCoverageErrors(CourseCurriculum curriculum) {
+  final errors = <CourseContentDiagnostic>[];
+  final sounds = [
+    for (final coverage in curriculum.phonemeCoverage) coverage.sound
+  ];
+  for (final sound in _repeatedInOrder(sounds)) {
+    errors.add(_diagnostic(
+      'invalidCoverage',
+      sound,
+      "sound '$sound' is declared in the coverage more than once",
+    ));
+  }
+  for (final coverage in curriculum.phonemeCoverage) {
+    if (coverage.discoveryStatus == ContentStatus.authored &&
+        coverage.practiceExerciseIds.isEmpty) {
+      errors.add(_diagnostic(
+        'invalidCoverage',
+        coverage.sound,
+        "authored coverage for sound '${coverage.sound}' references no practice exercises",
+      ));
+    }
+    if (coverage.discoveryStatus == ContentStatus.planned &&
+        coverage.practiceExerciseIds.isNotEmpty) {
+      errors.add(_diagnostic(
+        'invalidCoverage',
+        coverage.sound,
+        "planned coverage for sound '${coverage.sound}' lists practice exercises",
+      ));
+    }
+    for (final id in _repeatedInOrder(coverage.practiceExerciseIds)) {
+      errors.add(_diagnostic(
+        'invalidCoverage',
+        coverage.sound,
+        "coverage for sound '${coverage.sound}' references exercise '$id' more than once",
+      ));
+    }
+    for (final id in _distinctInOrder(coverage.practiceExerciseIds)) {
+      final exercise = curriculum.exerciseById(id);
+      if (exercise == null) {
+        errors.add(_diagnostic(
+          'invalidCoverage',
+          coverage.sound,
+          "coverage for sound '${coverage.sound}' references absent or duplicated exercise '$id'",
+        ));
+      } else if (exercise.purpose != ContentPurpose.practice) {
+        errors.add(_diagnostic(
+          'invalidCoverage',
+          coverage.sound,
+          "coverage for sound '${coverage.sound}' references ${exercise.purpose.name} exercise '$id' instead of practice",
+        ));
+      } else if (!_exerciseTeaches(exercise, coverage.sound)) {
+        errors.add(_diagnostic(
+          'invalidCoverage',
+          coverage.sound,
+          "coverage for sound '${coverage.sound}' references exercise '$id' whose teaching target is not '${coverage.sound}'",
+        ));
+      }
+    }
+  }
+  return errors;
+}
+
+/// Whether an exercise teaches [sound]: the explicit teaching target equals
+/// the sound. Incidental phonemes in the practiced word never establish
+/// coverage, and spelling is never inferred.
+bool _exerciseTeaches(CourseExercise exercise, String sound) {
+  if (exercise is ListeningChoiceExercise) {
+    return exercise.expectedSound == sound;
+  }
+  if (exercise is SpellingChoiceExercise) {
+    return exercise.targetSound == sound;
+  }
+  if (exercise is SentenceHuntExercise) {
+    return exercise.targetSound == sound;
+  }
+  if (exercise is ReadAloudExercise) {
+    return exercise.targetSounds.contains(sound);
+  }
+  return false;
+}
+
+/// Planned nodes are readiness blockers, never structural failures: a
+/// planned assess node blocks assessment use, any other planned slot blocks
+/// practice use.
+List<CourseContentDiagnostic> _findNodeReadinessIssues(
+  CourseCurriculum curriculum,
+) {
+  final issues = <CourseContentDiagnostic>[];
+  for (final node in curriculum.nodes) {
+    if (node.status != ContentStatus.planned) continue;
+    final use = node.kind == CourseNodeKind.assessment
+        ? ContentPurpose.assessment
+        : ContentPurpose.practice;
+    issues.add(_readinessDiagnostic(
+      'plannedNode',
+      node.id,
+      "node '${node.id}' is still a planned payload slot",
+      use,
+    ));
+  }
+  return issues;
+}
+
+/// Planned discovery coverage blocks practice readiness for that sound.
+List<CourseContentDiagnostic> _findCoverageReadinessIssues(
+  CourseCurriculum curriculum,
+) {
+  final issues = <CourseContentDiagnostic>[];
+  for (final coverage in curriculum.phonemeCoverage) {
+    if (coverage.discoveryStatus != ContentStatus.planned) continue;
+    issues.add(_readinessDiagnostic(
+      'plannedPhoneme',
+      coverage.sound,
+      "sound '${coverage.sound}' discovery content is still planned",
+      ContentPurpose.practice,
+    ));
+  }
+  return issues;
+}
+
+/// Exercise-level readiness, authored order: pending review keeps the
+/// exercise's purpose; assessed content requires reviewed exercise (and,
+/// for hunts, reviewed sentence); a declared practice resource must exist;
+/// read-aloud never carries a validated speaking evaluator in FR-01.
+List<CourseContentDiagnostic> _findExerciseReadinessIssues(
+  CourseCurriculum curriculum,
+  Map<String, AudioResourceStatus> audioResources,
+) {
+  final issues = <CourseContentDiagnostic>[];
+  for (final exercise in curriculum.exercises) {
+    final sentence = exercise is SentenceHuntExercise
+        ? curriculum.sentenceById(exercise.sentenceId)
+        : null;
+    if (exercise.reviewState == ContentReviewState.pending ||
+        (sentence != null &&
+            sentence.reviewState == ContentReviewState.pending)) {
+      issues.add(_readinessDiagnostic(
+        'pendingContentReview',
+        exercise.id,
+        sentence != null
+            ? "exercise '${exercise.id}' or its sentence '${sentence.id}' is pending content review"
+            : "exercise '${exercise.id}' is pending content review",
+        exercise.purpose,
+      ));
+    }
+    if (exercise.purpose == ContentPurpose.assessment &&
+        (exercise.reviewState != ContentReviewState.reviewed ||
+            (sentence != null &&
+                sentence.reviewState != ContentReviewState.reviewed))) {
+      issues.add(_readinessDiagnostic(
+        'unreviewedAssessmentContent',
+        exercise.id,
+        sentence != null
+            ? "assessed exercise '${exercise.id}' and/or sentence '${sentence.id}' lacks a reviewed answer key"
+            : "assessed exercise '${exercise.id}' lacks a reviewed answer key",
+        ContentPurpose.assessment,
+      ));
+    }
+    if (exercise.purpose == ContentPurpose.practice) {
+      final status = audioResources[exercise.audioRefId];
+      if (status == null || status == AudioResourceStatus.missing) {
+        issues.add(_readinessDiagnostic(
+          'missingPracticeAudio',
+          exercise.id,
+          "practice exercise '${exercise.id}' has no declared usable audio resource for '${exercise.audioRefId}'",
+          ContentPurpose.practice,
+        ));
+      }
+    }
+    if (exercise is ReadAloudExercise) {
+      issues.add(_readinessDiagnostic(
+        'speakingUnassessed',
+        exercise.id,
+        "read-aloud exercise '${exercise.id}' has no validated speaking evaluator in FR-01",
+        ContentPurpose.assessment,
+      ));
+    }
+  }
+  return issues;
+}
+
+/// Audio-reference readiness, authored reference order. Every declared word
+/// reference needs a reviewed recording for assessed use; sentence and
+/// paragraph resources need one only when assessment references them.
+/// Unknown map keys never manufacture or repair a reference.
+List<CourseContentDiagnostic> _findReferenceReadinessIssues(
+  CourseCurriculum curriculum,
+  Map<String, AudioResourceStatus> audioResources,
+) {
+  final issues = <CourseContentDiagnostic>[];
+  final assessedReferenceIds = _assessedReferenceIds(curriculum);
+  for (final reference in curriculum.audioReferences) {
+    final status = audioResources[reference.id];
+    final needsReviewedRecording = reference.kind == AudioReferenceKind.word ||
+        assessedReferenceIds.contains(reference.id);
+    if (needsReviewedRecording &&
+        status != AudioResourceStatus.reviewedRecording) {
+      issues.add(_readinessDiagnostic(
+        'missingReviewedAudio',
+        reference.id,
+        "audio reference '${reference.id}' has no declared reviewed recording",
+        ContentPurpose.assessment,
+      ));
+    }
+  }
+  return issues;
+}
+
+/// References reachable from assessed exercises, directly or through the
+/// assessments' reviewed sentences.
+Set<String> _assessedReferenceIds(CourseCurriculum curriculum) {
+  final ids = <String>{};
+  for (final exercise in curriculum.exercises) {
+    if (exercise.purpose != ContentPurpose.assessment) continue;
+    ids.add(exercise.audioRefId);
+    if (exercise is SentenceHuntExercise) {
+      final sentence = curriculum.sentenceById(exercise.sentenceId);
+      if (sentence != null) {
+        ids.add(sentence.audioRefId);
+      }
+    }
+  }
+  return ids;
 }
