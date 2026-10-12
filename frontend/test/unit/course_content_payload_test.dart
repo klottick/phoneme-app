@@ -1172,6 +1172,58 @@ void main() {
         reason: 'two distinct tout tokens both match target u',
       );
     });
+    test('a 20000-token stream stays valid with no recursion depth limit', () {
+      const depth = 20000;
+      final text = List.filled(depth, 'tu').join(' ');
+      final report = _v(
+        _curriculum(
+          sentences: [
+            sentenceFixture(
+              id: 'long',
+              text: text,
+              audioRefId: 'a-sent',
+              tokens: [
+                for (var i = 0; i < depth; i++)
+                  SentenceToken(id: 't$i', text: 'tu', phonemes: ['t', 'y']),
+              ],
+            ),
+          ],
+          audioReferences: [_sentenceRef(id: 'a-sent', spokenText: text)],
+        ),
+      );
+      expect(
+        _errors(report),
+        isEmpty,
+        reason: 'exact long coverage is valid and iterative',
+      );
+    });
+    test('a malformed 20000-token stream reports one issue without exceptions',
+        () {
+      const depth = 20000;
+      final text = List.filled(depth, 'tu').join(' ');
+      final report = _v(
+        _curriculum(
+          sentences: [
+            sentenceFixture(
+              id: 'long',
+              text: text,
+              audioRefId: 'a-sent',
+              tokens: [
+                for (var i = 0; i < depth - 1; i++)
+                  SentenceToken(id: 't$i', text: 'tu', phonemes: ['t', 'y']),
+                SentenceToken(id: 't-last', text: 'tz', phonemes: ['t', 's']),
+              ],
+            ),
+          ],
+          audioReferences: [_sentenceRef(id: 'a-sent', spokenText: text)],
+        ),
+      );
+      expect(
+        _errors(report),
+        [('invalidSentenceTokens', 'long')],
+        reason: 'deep failure unwinds iteratively',
+      );
+    });
     test('a token carrying its leading whitespace is preserved verbatim', () {
       final report = _v(
         _curriculum(

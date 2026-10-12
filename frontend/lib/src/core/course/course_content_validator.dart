@@ -1051,36 +1051,39 @@ List<CourseContentDiagnostic> _findSentenceErrors(CourseCurriculum curriculum) {
   return errors;
 }
 
-/// Exact ordered token coverage: the authored token texts, concatenated in
-/// order with whitespace-only gaps, must reproduce the sentence text
-/// exactly. Token text is matched verbatim — never trimmed or normalized —
-/// so a token may itself carry whitespace, while gaps must be whitespace.
-bool _tokensCoverText(CourseSentence sentence) =>
-    _coverSentenceText(sentence.text, sentence.tokens, 0, 0);
-
-bool _coverSentenceText(
-  String text,
-  List<SentenceToken> tokens,
-  int position,
-  int index,
-) {
-  if (position == tokens.length) {
-    return _remainderIsWhitespaceOnly(text, index);
-  }
-  final word = tokens[position].text;
-  if (word.isEmpty) return false;
-  var start = index;
-  while (true) {
-    if (text.startsWith(word, start) &&
-        _coverSentenceText(text, tokens, position + 1, start + word.length)) {
-      return true;
+/// Exact ordered token coverage: the authored token texts, joined by
+/// whitespace-only gaps, must reproduce the sentence text exactly. Token
+/// text is matched verbatim — never trimmed or normalized — so a token may
+/// itself carry whitespace, while text outside the tokens may only be
+/// whitespace. A nonblank token's first nonblank character must land
+/// directly after its (whitespace-only) gap, so for a given gap the start
+/// position is unique and the check needs no backtracking: matching stays
+/// iterative and cost is linear for any authored token length.
+bool _tokensCoverText(CourseSentence sentence) {
+  final text = sentence.text;
+  var index = 0;
+  for (final token in sentence.tokens) {
+    final word = token.text;
+    if (word.trim().isEmpty) return false;
+    var gapEnd = index;
+    while (
+        gapEnd < text.length && _whitespaceGapPattern.hasMatch(text[gapEnd])) {
+      gapEnd++;
     }
-    // Uncovered text before the next token may only be whitespace.
-    if (start == text.length || !_whitespaceGapPattern.hasMatch(text[start])) {
-      return false;
+    var leading = 0;
+    while (leading < word.length &&
+        _whitespaceGapPattern.hasMatch(word[leading])) {
+      leading++;
     }
-    start++;
+    // The token's leading whitespace must be its own, so its first nonblank
+    // character lands right after the gap; more token whitespace than the
+    // gap provides can never fit.
+    final start = gapEnd - leading;
+    if (start < index) return false;
+    if (!text.startsWith(word, start)) return false;
+    index = start + word.length;
   }
+  return _remainderIsWhitespaceOnly(text, index);
 }
 
 bool _remainderIsWhitespaceOnly(String text, int index) {
