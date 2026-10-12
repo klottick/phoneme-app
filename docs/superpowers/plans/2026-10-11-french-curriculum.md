@@ -10,6 +10,11 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-11-french-curriculum-design.md` (user approved). Exact signatures: `docs/superpowers/specs/2026-10-10-french-learning-contracts.md` revision 1.
 
+**Execution complete (2026-10-12):** All four tasks and the final review wave are
+merged. Completion tracking, verification, rulings and remaining gates are in the
+[FR-01 outcome record](../status/2026-10-12-french-curriculum.md); the checklists
+below preserve the approved worker handoff.
+
 ## Global Constraints
 
 - Migrate the live content source now; there must not be two independently authored pilot item lists in the completed batch.
