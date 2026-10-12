@@ -94,6 +94,42 @@ CourseCurriculum listeningFixture({
       phonemeCoverage: phonemeCoverage ?? _defaultCoverage(),
     );
 
+/// Canonical contextual sentence `tout tu tout.` with four distinct token IDs
+/// and annotations `[t,u]`, `[t,y]`, `[t,u]`, `[]`. Punctuation is a token;
+/// the two `tout` words keep distinct token IDs.
+CourseSentence sentenceFixture({
+  String id = 'test-sentence',
+  String text = 'tout tu tout.',
+  String audioRefId = 'fr-sentence-test',
+  List<SentenceToken>? tokens,
+  ContentReviewState reviewState = ContentReviewState.existingCurated,
+}) =>
+    CourseSentence(
+      id: id,
+      text: text,
+      audioRefId: audioRefId,
+      tokens: tokens ??
+          [
+            SentenceToken(id: 't-tout-1', text: 'tout', phonemes: ['t', 'u']),
+            SentenceToken(id: 't-tu', text: 'tu', phonemes: ['t', 'y']),
+            SentenceToken(id: 't-tout-2', text: 'tout', phonemes: ['t', 'u']),
+            SentenceToken(id: 't-dot', text: '.', phonemes: []),
+          ],
+      reviewState: reviewState,
+    );
+
+/// Sentence-kind audio reference whose spoken text equals the canonical
+/// sentence text.
+CourseAudioReference sentenceAudioFixture({
+  String id = 'fr-sentence-test',
+  String spokenText = 'tout tu tout.',
+}) =>
+    CourseAudioReference(
+      id: id,
+      kind: AudioReferenceKind.sentence,
+      spokenText: spokenText,
+    );
+
 /// Citation phonemes: `tout:[t,u]`, `tu:[t,y]`, synthetic `new-u:[n,u]`.
 const Map<String, List<String>> fixtureCitations = {
   'tout': ['t', 'u'],
