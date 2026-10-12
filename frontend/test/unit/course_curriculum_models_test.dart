@@ -209,8 +209,7 @@ void main() {
       expect(exercise.options.length, 2);
       expect(exercise.options[0].text, 'eau');
       expect(
-          () => exercise.options
-              .add(SpellingOption(id: 'opt-3', text: 'zz')),
+          () => exercise.options.add(SpellingOption(id: 'opt-3', text: 'zz')),
           throwsUnsupportedError);
     });
 
@@ -250,8 +249,10 @@ void main() {
     });
 
     test('catalogue exercises detach from a mutable input list', () {
-      final exercises = [_listeningExercise(id: 'ex-1'),
-        _listeningExercise(id: 'ex-2')];
+      final exercises = [
+        _listeningExercise(id: 'ex-1'),
+        _listeningExercise(id: 'ex-2')
+      ];
       final catalogue = _catalogue(exercises: exercises);
       exercises.clear();
       expect(catalogue.exercises.length, 2);
@@ -283,8 +284,191 @@ void main() {
       expect(catalogue.audioReferences.length, 2);
       expect(catalogue.audioReferences.first.id, 'audio-1');
       expect(
-          () => catalogue.audioReferences
-              .add(_audioReference(id: 'audio-3')),
+          () => catalogue.audioReferences.add(_audioReference(id: 'audio-3')),
+          throwsUnsupportedError);
+    });
+
+    test('read aloud target sounds detach from a mutable input list', () {
+      final List<String> inputTargetSounds = ['o', 'u'];
+      final exercise = _readAloudExercise(targetSounds: inputTargetSounds);
+      inputTargetSounds
+        ..clear()
+        ..add('i');
+      expect(exercise.targetSounds, ['o', 'u']);
+      expect(() => exercise.targetSounds.add('i'), throwsUnsupportedError);
+    });
+
+    test('sentence tokens detach, including nested phonemes', () {
+      final List<String> inputPhonemes = ['y'];
+      final token =
+          SentenceToken(id: 'tok-1', text: 'Tu', phonemes: inputPhonemes);
+      final List<SentenceToken> inputTokens = [token];
+      final sentence = _sentence(tokens: inputTokens);
+      inputPhonemes
+        ..clear()
+        ..add('z');
+      inputTokens
+        ..clear()
+        ..add(SentenceToken(id: 'tok-2', text: 'zz', phonemes: ['z']));
+      expect(sentence.tokens, [token]);
+      expect(sentence.tokens.first.phonemes, ['y']);
+      expect(
+          () => sentence.tokens
+              .add(SentenceToken(id: 'tok-2', text: 'zz', phonemes: ['z'])),
+          throwsUnsupportedError);
+      expect(() => sentence.tokens.first.phonemes.add('z'),
+          throwsUnsupportedError);
+    });
+
+    test('node section ids detach from a mutable input list', () {
+      final List<String> inputSectionIds = ['sec-1'];
+      final node = _node(sectionIds: inputSectionIds);
+      inputSectionIds
+        ..clear()
+        ..add('sec-2');
+      expect(node.sectionIds, ['sec-1']);
+      expect(() => node.sectionIds.add('sec-2'), throwsUnsupportedError);
+    });
+
+    test('node target sounds detach from a mutable input list', () {
+      final List<String> inputTargetSounds = ['u', 'y'];
+      final node = _node(targetSounds: inputTargetSounds);
+      inputTargetSounds
+        ..clear()
+        ..add('i');
+      expect(node.targetSounds, ['u', 'y']);
+      expect(() => node.targetSounds.add('i'), throwsUnsupportedError);
+    });
+
+    test('section exercise ids detach from a mutable input list', () {
+      final List<String> inputExerciseIds = ['ex-1', 'ex-2'];
+      final section = _section(exerciseIds: inputExerciseIds);
+      inputExerciseIds
+        ..clear()
+        ..add('ex-3');
+      expect(section.exerciseIds, ['ex-1', 'ex-2']);
+      expect(() => section.exerciseIds.add('ex-3'), throwsUnsupportedError);
+    });
+
+    test('phoneme coverage practice ids detach from a mutable input list', () {
+      final List<String> inputPracticeExerciseIds = ['ex-u-1'];
+      final coverage = PhonemeCoverage(
+        sound: 'u',
+        discoveryStatus: ContentStatus.authored,
+        practiceExerciseIds: inputPracticeExerciseIds,
+      );
+      inputPracticeExerciseIds
+        ..clear()
+        ..add('ex-u-2');
+      expect(coverage.practiceExerciseIds, ['ex-u-1']);
+      expect(() => coverage.practiceExerciseIds.add('ex-u-2'),
+          throwsUnsupportedError);
+    });
+
+    test('catalogue nodes detach from a mutable input list', () {
+      final node1 = _node(id: 'node-1');
+      final node2 = _node(id: 'node-2');
+      final List<CourseNode> inputNodes = [node1, node2];
+      final catalogue = _catalogue(nodes: inputNodes);
+      inputNodes
+        ..clear()
+        ..add(_node(id: 'node-3'));
+      expect(catalogue.nodes, [node1, node2]);
+      expect(() => catalogue.nodes.add(_node(id: 'node-4')),
+          throwsUnsupportedError);
+    });
+
+    test('catalogue phoneme coverage detaches from a mutable input list', () {
+      final List<PhonemeCoverage> inputCoverage = [
+        _coverage(sound: 'u'),
+        _coverage(sound: 'y'),
+      ];
+      final catalogue = _catalogue(phonemeCoverage: inputCoverage);
+      inputCoverage
+        ..clear()
+        ..add(_coverage(sound: 'i'));
+      expect(catalogue.phonemeCoverage.length, 2);
+      expect(catalogue.phonemeCoverage.first.sound, 'u');
+      expect(() => catalogue.phonemeCoverage.add(_coverage(sound: 'o')),
+          throwsUnsupportedError);
+    });
+
+    test('catalogue deep nesting detaches options, tokens and phonemes', () {
+      final option1 = SpellingOption(id: 'opt-1', text: 'eau');
+      final List<SpellingOption> inputOptions = [option1];
+      final exercise = SpellingChoiceExercise(
+        id: 'ex-1',
+        sectionId: 'sec-1',
+        audioRefId: 'fr-word-bateau',
+        purpose: ContentPurpose.practice,
+        reviewState: ContentReviewState.pending,
+        wordId: 'bateau',
+        targetSound: 'o',
+        options: inputOptions,
+        correctOptionId: 'opt-1',
+      );
+      final List<String> inputPhonemes = ['y'];
+      final token =
+          SentenceToken(id: 'tok-1', text: 'Tu', phonemes: inputPhonemes);
+      final List<SentenceToken> inputTokens = [token];
+      final sentence = CourseSentence(
+        id: 'sent-1',
+        text: 'Tu as un jouet.',
+        audioRefId: 'fr-word-tout',
+        tokens: inputTokens,
+        reviewState: ContentReviewState.existingCurated,
+      );
+      final List<CourseExercise> inputExercises = [exercise];
+      final section1 = _section(id: 'sec-1', exerciseIds: ['ex-1']);
+      final List<CourseSection> inputSections = [section1];
+      final node1 = _node(id: 'node-1', sectionIds: ['sec-1']);
+      final List<CourseNode> inputNodes = [node1];
+      final catalogue = CourseCurriculum(
+        courseId: 'deep-course',
+        revision: 1,
+        nodes: inputNodes,
+        sections: inputSections,
+        exercises: inputExercises,
+        sentences: [sentence],
+        audioReferences: [_audioReference(id: 'fr-word-tout')],
+        phonemeCoverage: [],
+      );
+      // Mutate every level of the source tree afterward.
+      inputPhonemes
+        ..clear()
+        ..add('z');
+      inputTokens
+        ..clear()
+        ..add(SentenceToken(id: 'tok-2', text: 'zz', phonemes: ['z']));
+      inputOptions
+        ..clear()
+        ..add(SpellingOption(id: 'opt-2', text: 'zz'));
+      inputExercises.clear();
+      inputSections.clear();
+      inputNodes
+        ..clear()
+        ..add(_node(id: 'node-2', targetSounds: ['i']));
+      // The exposed nested tree is unchanged.
+      expect(catalogue.exercises, [same(exercise)]);
+      expect(catalogue.sections, [section1]);
+      expect(catalogue.nodes, [node1]);
+      final SpellingChoiceExercise exposedExercise =
+          catalogue.exercises.first as SpellingChoiceExercise;
+      expect(exposedExercise.options, [option1]);
+      expect(catalogue.sentences.first.tokens, [token]);
+      expect(catalogue.sentences.first.tokens.first.phonemes, ['y']);
+      // Exposed mutation is rejected at every nesting level.
+      expect(
+          () => exposedExercise.options
+              .add(SpellingOption(id: 'opt-2', text: 'zz')),
+          throwsUnsupportedError);
+      expect(() => catalogue.nodes.first.sectionIds.add('sec-2'),
+          throwsUnsupportedError);
+      expect(
+          () => catalogue.sentences.first.tokens
+              .add(SentenceToken(id: 'tok-2', text: 'zz', phonemes: ['z'])),
+          throwsUnsupportedError);
+      expect(() => catalogue.sentences.first.tokens.first.phonemes.add('z'),
           throwsUnsupportedError);
     });
   });
@@ -358,6 +542,7 @@ CourseCurriculum _catalogue({
   List<CourseExercise>? exercises,
   List<CourseSentence>? sentences,
   List<CourseAudioReference>? audioReferences,
+  List<PhonemeCoverage>? phonemeCoverage,
 }) {
   return CourseCurriculum(
     courseId: 'test-course',
@@ -367,7 +552,19 @@ CourseCurriculum _catalogue({
     exercises: exercises ?? [_listeningExercise()],
     sentences: sentences ?? [_sentence()],
     audioReferences: audioReferences ?? [_audioReference()],
-    phonemeCoverage: [],
+    phonemeCoverage: phonemeCoverage ?? [],
+  );
+}
+
+PhonemeCoverage _coverage({
+  String sound = 'u',
+  List<String> practiceExerciseIds = const ['ex-u-1'],
+}) {
+  return PhonemeCoverage(
+    sound: sound,
+    discoveryStatus:
+        sound == 'u' ? ContentStatus.authored : ContentStatus.planned,
+    practiceExerciseIds: practiceExerciseIds,
   );
 }
 
@@ -387,10 +584,11 @@ CourseSentence _sentence({
     id: id,
     text: 'Tu as un jouet.',
     audioRefId: 'fr-word-tout',
-    tokens: tokens ?? [
-      SentenceToken(id: 'tok-1', text: 'Tu', phonemes: ['y']),
-      SentenceToken(id: 'tok-2', text: 'jouet', phonemes: ['z', 'u']),
-    ],
+    tokens: tokens ??
+        [
+          SentenceToken(id: 'tok-1', text: 'Tu', phonemes: ['y']),
+          SentenceToken(id: 'tok-2', text: 'jouet', phonemes: ['z', 'u']),
+        ],
     reviewState: ContentReviewState.existingCurated,
   );
 }
@@ -419,6 +617,7 @@ CourseSection _section({
   String explanation = 'Test explanation.',
   int contentRevision = 1,
   int requiredItemCount = 1,
+  List<String>? exerciseIds,
 }) {
   return CourseSection(
     id: id,
@@ -426,7 +625,7 @@ CourseSection _section({
     title: 'Test section',
     explanation: explanation,
     contentRevision: contentRevision,
-    exerciseIds: ['test-u'],
+    exerciseIds: exerciseIds ?? ['test-u'],
     requiredItemCount: requiredItemCount,
   );
 }
@@ -458,10 +657,11 @@ SpellingChoiceExercise _spellingExercise({List<SpellingOption>? options}) {
     reviewState: ContentReviewState.pending,
     wordId: 'bateau',
     targetSound: 'o',
-    options: options ?? [
-      SpellingOption(id: 'opt-1', text: 'eau'),
-      SpellingOption(id: 'opt-2', text: 'eauu'),
-    ],
+    options: options ??
+        [
+          SpellingOption(id: 'opt-1', text: 'eau'),
+          SpellingOption(id: 'opt-2', text: 'eauu'),
+        ],
     correctOptionId: 'opt-2',
   );
 }

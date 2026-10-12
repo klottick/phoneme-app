@@ -36,7 +36,7 @@ int _positive(int value, String name) {
 }
 
 /// One authored or planned catalogue node, in authored order.
-class CourseNode {
+final class CourseNode {
   CourseNode({
     required String id,
     required String title,
@@ -75,7 +75,7 @@ class CourseNode {
 }
 
 /// One authored section owning its ordered exercises.
-class CourseSection {
+final class CourseSection {
   CourseSection({
     required String id,
     required String nodeId,
@@ -90,8 +90,7 @@ class CourseSection {
         explanation = _nonblank(explanation, 'explanation'),
         contentRevision = _positive(contentRevision, 'contentRevision'),
         exerciseIds = List.unmodifiable(exerciseIds),
-        requiredItemCount =
-            _positive(requiredItemCount, 'requiredItemCount');
+        requiredItemCount = _positive(requiredItemCount, 'requiredItemCount');
 
   final String id;
 
@@ -113,7 +112,7 @@ class CourseSection {
 }
 
 /// Catalogue coverage for one phoneme; not a learner score.
-class PhonemeCoverage {
+final class PhonemeCoverage {
   PhonemeCoverage({
     required String sound,
     required this.discoveryStatus,
@@ -133,7 +132,7 @@ class PhonemeCoverage {
 }
 
 /// The immutable authored curriculum and its ordered record collections.
-class CourseCurriculum {
+final class CourseCurriculum {
   CourseCurriculum({
     required String courseId,
     required int revision,

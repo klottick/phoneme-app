@@ -70,7 +70,7 @@ sealed class CourseExercise {
 }
 
 /// Choose the target sound of a word from ordered phoneme labels.
-class ListeningChoiceExercise extends CourseExercise {
+final class ListeningChoiceExercise extends CourseExercise {
   ListeningChoiceExercise({
     required super.id,
     required super.sectionId,
@@ -106,7 +106,7 @@ class ListeningChoiceExercise extends CourseExercise {
 }
 
 /// One spelling option value.
-class SpellingOption {
+final class SpellingOption {
   SpellingOption({required String id, required String text})
       : id = _nonblank(id, 'id'),
         text = _nonblank(text, 'text');
@@ -116,7 +116,7 @@ class SpellingOption {
 }
 
 /// Choose the option with the spelling of the word's explicit target sound.
-class SpellingChoiceExercise extends CourseExercise {
+final class SpellingChoiceExercise extends CourseExercise {
   SpellingChoiceExercise({
     required super.id,
     required super.sectionId,
@@ -151,7 +151,7 @@ class SpellingChoiceExercise extends CourseExercise {
 }
 
 /// Locate a target sound inside a contextual sentence.
-class SentenceHuntExercise extends CourseExercise {
+final class SentenceHuntExercise extends CourseExercise {
   SentenceHuntExercise({
     required super.id,
     required super.sectionId,
@@ -176,7 +176,7 @@ class SentenceHuntExercise extends CourseExercise {
 }
 
 /// Read-aloud prompt contract; not a correctness key or validated grader.
-class ReadAloudExercise extends CourseExercise {
+final class ReadAloudExercise extends CourseExercise {
   ReadAloudExercise({
     required super.id,
     required super.sectionId,
@@ -201,7 +201,7 @@ class ReadAloudExercise extends CourseExercise {
 }
 
 /// One authored token within a sentence.
-class SentenceToken {
+final class SentenceToken {
   SentenceToken({
     required String id,
     required String text,
@@ -218,7 +218,7 @@ class SentenceToken {
 }
 
 /// One accepted contextual pronunciation, ordered under its audio reference.
-class CourseSentence {
+final class CourseSentence {
   CourseSentence({
     required String id,
     required String text,
@@ -242,7 +242,7 @@ class CourseSentence {
 }
 
 /// A stable audio content identity; does not declare recording existence.
-class CourseAudioReference {
+final class CourseAudioReference {
   CourseAudioReference({
     required String id,
     required this.kind,
