@@ -1,0 +1,554 @@
+{
+  "provenance": {
+    "baseline": "a500651785ff1fae34f36698f2f945051317b44a",
+    "source": "frontend/lib/src/core/course/french_course.dart and the version-1 session format at the baseline commit, authored before any FR-01 Task 4 migration. Values are copied literals, not generated from a post-migration catalogue or a store writer.",
+    "note": "Five named literal version-1 old-ID checkpoints, the frozen legacy word/lesson parity snapshot, and the literal seed fields for the real-store screen-migration tests. These act as the save-compatibility oracle and must pass both before and after the production migration."
+  },
+  "checkpoints": {
+    "fresh": {
+      "version": 1,
+      "sessionId": "legacy-fresh",
+      "contentRevision": 1,
+      "itemIds": [
+        "tout",
+        "tu",
+        "rouge",
+        "rue",
+        "vous",
+        "lune",
+        "doux",
+        "jus",
+        "loup",
+        "mur"
+      ],
+      "queue": [
+        "tout",
+        "tu",
+        "rouge",
+        "rue",
+        "vous",
+        "lune",
+        "doux",
+        "jus",
+        "loup",
+        "mur"
+      ],
+      "position": 0,
+      "round": 1,
+      "attemptCount": 0,
+      "phase": "exercise",
+      "submittedThisRound": [],
+      "lastCorrect": null,
+      "answered": false,
+      "latestAnswers": {},
+      "policy": {
+        "completionThresholdPercent": 80
+      }
+    },
+    "answered": {
+      "version": 1,
+      "sessionId": "legacy-answered",
+      "contentRevision": 1,
+      "itemIds": [
+        "tout",
+        "tu",
+        "rouge",
+        "rue",
+        "vous",
+        "lune",
+        "doux",
+        "jus",
+        "loup",
+        "mur"
+      ],
+      "queue": [
+        "tout",
+        "tu",
+        "rouge",
+        "rue",
+        "vous",
+        "lune",
+        "doux",
+        "jus",
+        "loup",
+        "mur"
+      ],
+      "position": 0,
+      "round": 1,
+      "attemptCount": 1,
+      "phase": "exercise",
+      "submittedThisRound": [
+        "tout"
+      ],
+      "lastCorrect": true,
+      "answered": true,
+      "latestAnswers": {
+        "tout": true
+      },
+      "policy": {
+        "completionThresholdPercent": 80
+      }
+    },
+    "debrief": {
+      "version": 1,
+      "sessionId": "legacy-debrief",
+      "contentRevision": 1,
+      "itemIds": [
+        "tout",
+        "tu",
+        "rouge",
+        "rue",
+        "vous",
+        "lune",
+        "doux",
+        "jus",
+        "loup",
+        "mur"
+      ],
+      "queue": [
+        "tout",
+        "tu",
+        "rouge",
+        "rue",
+        "vous",
+        "lune",
+        "doux",
+        "jus",
+        "loup",
+        "mur"
+      ],
+      "position": 10,
+      "round": 1,
+      "attemptCount": 10,
+      "phase": "debrief",
+      "submittedThisRound": [
+        "tout",
+        "tu",
+        "rouge",
+        "rue",
+        "vous",
+        "lune",
+        "doux",
+        "jus",
+        "loup",
+        "mur"
+      ],
+      "lastCorrect": true,
+      "answered": false,
+      "latestAnswers": {
+        "tout": true,
+        "tu": false,
+        "rouge": true,
+        "rue": true,
+        "vous": true,
+        "lune": true,
+        "doux": true,
+        "jus": true,
+        "loup": true,
+        "mur": true
+      },
+      "policy": {
+        "completionThresholdPercent": 80
+      }
+    },
+    "review": {
+      "version": 1,
+      "sessionId": "legacy-review",
+      "contentRevision": 1,
+      "itemIds": [
+        "tout",
+        "tu",
+        "rouge",
+        "rue",
+        "vous",
+        "lune",
+        "doux",
+        "jus",
+        "loup",
+        "mur"
+      ],
+      "queue": [
+        "tu"
+      ],
+      "position": 0,
+      "round": 2,
+      "attemptCount": 10,
+      "phase": "exercise",
+      "submittedThisRound": [],
+      "lastCorrect": true,
+      "answered": false,
+      "latestAnswers": {
+        "tout": true,
+        "tu": false,
+        "rouge": true,
+        "rue": true,
+        "vous": true,
+        "lune": true,
+        "doux": true,
+        "jus": true,
+        "loup": true,
+        "mur": true
+      },
+      "policy": {
+        "completionThresholdPercent": 80
+      }
+    },
+    "custom-policy": {
+      "version": 1,
+      "sessionId": "legacy-custom-policy",
+      "contentRevision": 1,
+      "itemIds": [
+        "tout",
+        "tu",
+        "rouge",
+        "rue",
+        "vous",
+        "lune",
+        "doux",
+        "jus",
+        "loup",
+        "mur"
+      ],
+      "queue": [
+        "tout",
+        "tu",
+        "rouge",
+        "rue",
+        "vous",
+        "lune",
+        "doux",
+        "jus",
+        "loup",
+        "mur"
+      ],
+      "position": 10,
+      "round": 1,
+      "attemptCount": 10,
+      "phase": "debrief",
+      "submittedThisRound": [
+        "tout",
+        "tu",
+        "rouge",
+        "rue",
+        "vous",
+        "lune",
+        "doux",
+        "jus",
+        "loup",
+        "mur"
+      ],
+      "lastCorrect": true,
+      "answered": false,
+      "latestAnswers": {
+        "tout": true,
+        "tu": false,
+        "rouge": true,
+        "rue": true,
+        "vous": true,
+        "lune": true,
+        "doux": true,
+        "jus": true,
+        "loup": true,
+        "mur": true
+      },
+      "policy": {
+        "completionThresholdPercent": 100
+      }
+    }
+  },
+  "seed": {
+    "preferencesKey": "course.v1.en-fr",
+    "legacyFieldKey": "legacyBadge",
+    "lessons": [
+      "en-fr-vowels"
+    ],
+    "scores": {
+      "arcade": 55
+    },
+    "siblingSection": {
+      "checkpoint": {
+        "note": "opaque legacy sibling section entry; the migrated store preserves it untouched"
+      },
+      "processedSessionId": "sibling-legacy",
+      "processedAttemptCount": 2
+    },
+    "sentinelPending": {
+      "kind": "answer",
+      "sound": "i",
+      "skill": "listening",
+      "correct": true,
+      "activity": "lesson",
+      "id": "sentinel-pending-1",
+      "user_id": "legacy-user",
+      "course_id": "en-fr"
+    },
+    "evidence": {
+      "fresh": {},
+      "answered": {
+        "listening:u": {
+          "sound": "u",
+          "skill": "listening",
+          "attempts": 1,
+          "correct": 1
+        }
+      },
+      "debrief": {
+        "listening:u": {
+          "sound": "u",
+          "skill": "listening",
+          "attempts": 5,
+          "correct": 5
+        },
+        "listening:y": {
+          "sound": "y",
+          "skill": "listening",
+          "attempts": 5,
+          "correct": 4
+        }
+      },
+      "review": {
+        "listening:u": {
+          "sound": "u",
+          "skill": "listening",
+          "attempts": 5,
+          "correct": 5
+        },
+        "listening:y": {
+          "sound": "y",
+          "skill": "listening",
+          "attempts": 5,
+          "correct": 4
+        }
+      },
+      "custom-policy": {
+        "listening:u": {
+          "sound": "u",
+          "skill": "listening",
+          "attempts": 5,
+          "correct": 5
+        },
+        "listening:y": {
+          "sound": "y",
+          "skill": "listening",
+          "attempts": 5,
+          "correct": 4
+        }
+      }
+    }
+  },
+  "parity": {
+    "course": {
+      "id": "en-fr",
+      "sourceLanguage": "en",
+      "targetLanguage": "fr",
+      "title": "French for English speakers"
+    },
+    "words": [
+      {
+        "text": "tout",
+        "meaning": "all",
+        "ipa": "tu",
+        "sounds": ["t", "u"],
+        "hint": "ou"
+      },
+      {
+        "text": "rouge",
+        "meaning": "red",
+        "ipa": "ʁuʒ",
+        "sounds": ["ʁ", "u", "ʒ"],
+        "hint": "ou"
+      },
+      {
+        "text": "vous",
+        "meaning": "you",
+        "ipa": "vu",
+        "sounds": ["v", "u"],
+        "hint": "ou"
+      },
+      {
+        "text": "doux",
+        "meaning": "soft",
+        "ipa": "du",
+        "sounds": ["d", "u"],
+        "hint": "ou"
+      },
+      {
+        "text": "loup",
+        "meaning": "wolf",
+        "ipa": "lu",
+        "sounds": ["l", "u"],
+        "hint": "ou"
+      },
+      {
+        "text": "soupe",
+        "meaning": "soup",
+        "ipa": "sup",
+        "sounds": ["s", "u", "p"],
+        "hint": "ou"
+      },
+      {
+        "text": "tu",
+        "meaning": "you",
+        "ipa": "ty",
+        "sounds": ["t", "y"],
+        "hint": "u"
+      },
+      {
+        "text": "rue",
+        "meaning": "street",
+        "ipa": "ʁy",
+        "sounds": ["ʁ", "y"],
+        "hint": "u"
+      },
+      {
+        "text": "lune",
+        "meaning": "moon",
+        "ipa": "lyn",
+        "sounds": ["l", "y", "n"],
+        "hint": "u"
+      },
+      {
+        "text": "jus",
+        "meaning": "juice",
+        "ipa": "ʒy",
+        "sounds": ["ʒ", "y"],
+        "hint": "u"
+      },
+      {
+        "text": "mur",
+        "meaning": "wall",
+        "ipa": "myʁ",
+        "sounds": ["m", "y", "ʁ"],
+        "hint": "u"
+      },
+      {
+        "text": "plume",
+        "meaning": "feather",
+        "ipa": "plym",
+        "sounds": ["p", "l", "y", "m"],
+        "hint": "u"
+      },
+      {
+        "text": "lit",
+        "meaning": "bed",
+        "ipa": "li",
+        "sounds": ["l", "i"],
+        "hint": "i"
+      },
+      {
+        "text": "si",
+        "meaning": "if",
+        "ipa": "si",
+        "sounds": ["s", "i"],
+        "hint": "i"
+      },
+      {
+        "text": "vite",
+        "meaning": "quickly",
+        "ipa": "vit",
+        "sounds": ["v", "i", "t"],
+        "hint": "i"
+      },
+      {
+        "text": "île",
+        "meaning": "island",
+        "ipa": "il",
+        "sounds": ["i", "l"],
+        "hint": "î"
+      },
+      {
+        "text": "beau",
+        "meaning": "beautiful",
+        "ipa": "bo",
+        "sounds": ["b", "o"],
+        "hint": "eau"
+      },
+      {
+        "text": "mot",
+        "meaning": "word",
+        "ipa": "mo",
+        "sounds": ["m", "o"],
+        "hint": "o"
+      },
+      {
+        "text": "eau",
+        "meaning": "water",
+        "ipa": "o",
+        "sounds": ["o"],
+        "hint": "eau"
+      },
+      {
+        "text": "dos",
+        "meaning": "back",
+        "ipa": "do",
+        "sounds": ["d", "o"],
+        "hint": "o"
+      },
+      {
+        "text": "bon",
+        "meaning": "good",
+        "ipa": "bɔ̃",
+        "sounds": ["b", "ɔ̃"],
+        "hint": "on"
+      },
+      {
+        "text": "nom",
+        "meaning": "name",
+        "ipa": "nɔ̃",
+        "sounds": ["n", "ɔ̃"],
+        "hint": "om"
+      },
+      {
+        "text": "banc",
+        "meaning": "bench",
+        "ipa": "bɑ̃",
+        "sounds": ["b", "ɑ̃"],
+        "hint": "an"
+      },
+      {
+        "text": "sans",
+        "meaning": "without",
+        "ipa": "sɑ̃",
+        "sounds": ["s", "ɑ̃"],
+        "hint": "an"
+      }
+    ],
+    "lessons": [
+      {
+        "id": "en-fr-vowels",
+        "title": "Keep French vowels steady",
+        "explanation": "English vowels often glide. In French, hold one steady mouth position. Compare lit /i/ and beau /o/: avoid adding an English-style “y” or “w” at the end. English comparisons are starting points, not exact equivalents.",
+        "sounds": ["i", "o"],
+        "words": ["lit", "beau", "vite", "mot"]
+      },
+      {
+        "id": "en-fr-u-y",
+        "title": "Tu or tout?",
+        "explanation": "French /u/ in tout is close to the vowel in English “food”, but keep it steady. For /y/ in tu, hold your tongue as for /i/ and round your lips. English has no direct equivalent of /y/. French “ou” and “u” represent different sounds.",
+        "sounds": ["u", "y"],
+        "words": ["tout", "tu", "rouge", "rue", "vous", "lune"]
+      },
+      {
+        "id": "en-fr-nasal",
+        "title": "Let vowels resonate",
+        "explanation": "Compare beau /bo/, bon /bɔ̃/ and banc /bɑ̃/. For nasal vowels, air passes through the nose as well as the mouth. Do not add an English /n/ at the end. The tilde marks a nasal vowel; these are different vowel sounds, not just different spellings.",
+        "sounds": ["o", "ɔ̃", "ɑ̃"],
+        "words": ["beau", "bon", "banc", "nom", "sans"]
+      },
+      {
+        "id": "en-fr-r",
+        "title": "Meet the French R",
+        "explanation": "French /ʁ/ is made near the back of the mouth, unlike most English R sounds. Listen to rue and rouge; keep your tongue tip relaxed. French R varies by speaker—aim for comfortable, clear speech rather than forcing a harsh sound.",
+        "sounds": ["ʁ", "u", "y"],
+        "words": ["rue", "rouge", "mur"]
+      },
+      {
+        "id": "en-fr-mix",
+        "title": "Mix your new sounds",
+        "explanation": "Listen first, then identify the vowel. Keep /u/ and /y/ distinct, hold vowels steady, and let nasal vowels resonate. Say the words and compare your recording with the reference.",
+        "sounds": ["u", "y", "i", "o", "ɔ̃", "ɑ̃"],
+        "words": ["tout", "tu", "lit", "beau", "bon", "banc"]
+      }
+    ]
+  }
+}
