@@ -1,3 +1,5 @@
+import 'course_curriculum.dart';
+import 'course_exercise.dart';
 import 'french_course.dart';
 
 /// A single listen-and-discriminate item of a discovery section.
@@ -68,40 +70,215 @@ class LessonSection {
 
   /// The sound choices to discriminate (for example `['u', 'y']`).
   final List<String> sounds;
+
+  /// Projects one authored lesson of [curriculum] into the stable
+  /// [LessonSection] shape used at runtime.
+  ///
+  /// The lesson must be an authored hear-stage lesson that owns exactly one
+  /// section of practice listening choices. Item identity, word, teaching
+  /// target, shared ordered choices, title, explanation and content revision
+  /// are all read from the catalogue — the saved item ID is the exercise's
+  /// legacy alias, never its namespaced catalogue ID. Missing or ambiguous
+  /// records (including repeated section or exercise listings, which never
+  /// collapse), non-hear stages, non-practice purposes, unsupported kinds,
+  /// ownership disagreements, count mismatches, missing or duplicated
+  /// aliases, disagreeing choices, blank choice labels, fewer than two
+  /// distinct choices, or an expected sound that is not exactly one of the
+  /// shared choices throw [StateError]; there is no partial projection or
+  /// fallback to any other content.
+  factory LessonSection.fromCurriculum(
+    CourseCurriculum curriculum, {
+    required String lessonId,
+  }) {
+    final CourseNode? node = curriculum.nodeById(lessonId);
+    if (node == null) {
+      throw StateError('No unique lesson node is declared for "$lessonId"; the '
+          'projection requires exactly one authored lesson.');
+    }
+    if (node.kind != CourseNodeKind.lesson) {
+      throw StateError(
+          'Node "$lessonId" has kind ${node.kind.name}, which cannot '
+          'project a practice listening section.');
+    }
+    if (node.status != ContentStatus.authored) {
+      throw StateError(
+          'Node "$lessonId" is ${node.status.name} content; only authored '
+          'lessons project a practicing section.');
+    }
+    if (node.stage != CourseStage.hear) {
+      throw StateError(
+          'Node "$lessonId" is ${node.stage.name} content; only hear-stage '
+          'lessons project a practice listening section.');
+    }
+    final Set<String> listedSectionIds = <String>{};
+    final List<CourseSection> owned = <CourseSection>[];
+    for (final String sectionId in node.sectionIds) {
+      if (!listedSectionIds.add(sectionId)) {
+        throw StateError(
+            'Node "$lessonId" lists section "$sectionId" more than once; '
+            'a repeated listing is an ambiguous shape, not a membership to '
+            'silently collapse.');
+      }
+      final CourseSection? section = curriculum.sectionById(sectionId);
+      if (section == null) {
+        throw StateError('Node "$lessonId" lists the absent section '
+            '"$sectionId".');
+      }
+      if (section.nodeId != node.id) {
+        throw StateError(
+            'Section "${section.id}" declares owner node "${section.nodeId}", '
+            'not node "${node.id}".');
+      }
+      owned.add(section);
+    }
+    if (owned.length != 1) {
+      throw StateError(
+          'Node "$lessonId" owns ${owned.length} sections; the projection '
+          'supports exactly one.');
+    }
+    final CourseSection section = owned.single;
+
+    final Set<String> listedExerciseIds = <String>{};
+    final List<ListeningChoiceExercise> listening = <ListeningChoiceExercise>[];
+    for (final String exerciseId in section.exerciseIds) {
+      if (!listedExerciseIds.add(exerciseId)) {
+        throw StateError(
+            'Section "${section.id}" lists exercise "$exerciseId" more '
+            'than once; a repeated listing is an ambiguous shape, not a '
+            'membership to silently collapse.');
+      }
+      final CourseExercise? exercise = curriculum.exerciseById(exerciseId);
+      if (exercise == null) {
+        throw StateError('Section "${section.id}" lists the absent exercise '
+            '"$exerciseId".');
+      }
+      if (exercise.sectionId != section.id) {
+        throw StateError('Exercise "${exercise.id}" declares owner section '
+            '"${exercise.sectionId}", not section "${section.id}".');
+      }
+      final ListeningChoiceExercise item;
+      if (exercise is! ListeningChoiceExercise) {
+        throw StateError(
+            'Exercise "${exercise.id}" is a ${exercise.kind.name}, which '
+            'the pilot projection does not support.');
+      }
+      item = exercise;
+      if (item.purpose != ContentPurpose.practice) {
+        throw StateError(
+            'Exercise "${item.id}" has purpose ${item.purpose.name}; only '
+            'practice items project into a live practice section.');
+      }
+      listening.add(item);
+    }
+    if (listening.isEmpty) {
+      throw StateError(
+          'Section "${section.id}" declares no listening records to '
+          'project.');
+    }
+    if (section.requiredItemCount != listening.length) {
+      throw StateError(
+          'Section "${section.id}" requires ${section.requiredItemCount} '
+          'items but declares ${listening.length}.');
+    }
+    final Set<String> aliases = <String>{};
+    for (final exercise in listening) {
+      final String? alias = exercise.legacyItemId;
+      if (alias == null) {
+        throw StateError(
+            'Exercise "${exercise.id}" has no legacy item ID alias; the '
+            'saved session identity requires it.');
+      }
+      if (!aliases.add(alias)) {
+        throw StateError('Legacy item ID "$alias" is declared by more than one '
+            'exercise in section "${section.id}".');
+      }
+    }
+    final List<String> choices = listening.first.choices;
+    for (final exercise in listening) {
+      if (!_sameOrder(exercise.choices, choices)) {
+        throw StateError(
+            'Exercises in section "${section.id}" must share one ordered '
+            'choice list; "${exercise.id}" declares '
+            '${exercise.choices.join(' / ')} but the section choices are '
+            '${choices.join(' / ')}.');
+      }
+    }
+    // Supported practice-listening shape: at least two distinct nonblank
+    // labels with exactly one expected choice. Anything else is an
+    // unambiguous-key violation and must not project.
+    if (choices.any((String label) => label.trim().isEmpty)) {
+      throw StateError(
+          'Section "${section.id}" uses a blank choice label; supported '
+          'listening shapes need distinct nonblank labels.');
+    }
+    if (choices.toSet().length < 2) {
+      throw StateError(
+          'Section "${section.id}" offers ${choices.length} choice '
+          'labels but fewer than two distinct ones; supported shapes '
+          'need at least two distinct choices.');
+    }
+    for (final exercise in listening) {
+      final int expectedCount = exercise.choices
+          .where((String label) => label == exercise.expectedSound)
+          .length;
+      if (expectedCount != 1) {
+        throw StateError('Exercise "${exercise.id}" expects sound '
+            '${exercise.expectedSound}, which occurs $expectedCount '
+            'times in its choices '
+            '${exercise.choices.join(' / ')}; the expected sound must '
+            'be exactly one of the shared choices.');
+      }
+    }
+    return LessonSection(
+      lessonId: node.id,
+      title: section.title,
+      explanation: section.explanation,
+      contentRevision: section.contentRevision,
+      items: [
+        for (final exercise in listening)
+          LessonSectionItem(
+            id: exercise.legacyItemId!,
+            word: exercise.wordId,
+            expectedSound: exercise.expectedSound,
+          ),
+      ],
+      sounds: List.of(choices),
+    );
+  }
+}
+
+bool _sameOrder(List<String> a, List<String> b) {
+  if (a.length != b.length) {
+    return false;
+  }
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 LessonSection _buildFrenchUySection() {
-  final CourseLesson lesson = frenchLessons.firstWhere(
-    (CourseLesson candidate) => candidate.id == 'en-fr-u-y',
-    orElse: () => throw StateError(
-        'The pilot lesson en-fr-u-y is missing from the course.'),
-  );
-  const List<LessonSectionItem> items = <LessonSectionItem>[
-    LessonSectionItem(id: 'tout', word: 'tout', expectedSound: 'u'),
-    LessonSectionItem(id: 'tu', word: 'tu', expectedSound: 'y'),
-    LessonSectionItem(id: 'rouge', word: 'rouge', expectedSound: 'u'),
-    LessonSectionItem(id: 'rue', word: 'rue', expectedSound: 'y'),
-    LessonSectionItem(id: 'vous', word: 'vous', expectedSound: 'u'),
-    LessonSectionItem(id: 'lune', word: 'lune', expectedSound: 'y'),
-    LessonSectionItem(id: 'doux', word: 'doux', expectedSound: 'u'),
-    LessonSectionItem(id: 'jus', word: 'jus', expectedSound: 'y'),
-    LessonSectionItem(id: 'loup', word: 'loup', expectedSound: 'u'),
-    LessonSectionItem(id: 'mur', word: 'mur', expectedSound: 'y'),
-  ];
-  return LessonSection(
-    lessonId: lesson.id,
-    title: lesson.title,
-    explanation: lesson.explanation,
-    contentRevision: 1,
-    items: items,
-    sounds: const ['u', 'y'],
+  // The catalogue is the sole author of the pilot content: publish only a
+  // structurally valid projection, never a fallback to other literals.
+  if (!frenchCurriculumValidation.isStructurallyValid) {
+    throw StateError(
+        'The French curriculum is structurally invalid; refusing to '
+        'publish the pilot projection.');
+  }
+  return LessonSection.fromCurriculum(
+    frenchCurriculum,
+    lessonId: 'en-fr-u-y',
   );
 }
 
-/// The authored pilot section for /u/ versus /y/.
+/// The authored pilot section for /u/ versus /y/, projected from
+/// [frenchCurriculum].
 ///
-/// Reuses the existing `en-fr-u-y` lesson title, explanation, and the curated
-/// French words from [frenchWords]; only the ten pilot words are in scope.
+/// Reuses the existing `en-fr-u-y` lesson title, explanation, and the
+/// curated French words from [frenchWords]; only the ten pilot words are in
+/// scope and their saved item IDs keep the legacy word identity.
 final LessonSection frenchUySection = _buildFrenchUySection();
 
 final Map<String, LessonSection> _sectionsByLesson = <String, LessonSection>{
