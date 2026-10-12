@@ -52,6 +52,12 @@ CourseCurriculum _synthetic({
   CourseStage stage = CourseStage.hear,
   List<String>? nodeSectionIds,
   List<String>? sectionExerciseIds,
+  String? crossListingNodeId,
+  bool extraUnlistedSection = false,
+  bool crossListingSection = false,
+  bool extraUnlistedExercise = false,
+  bool unrelatedBranch = false,
+  bool shareAliasAcrossSections = false,
 }) {
   final List<CourseExercise> exercises = spelling
       ? [
@@ -83,7 +89,47 @@ CourseCurriculum _synthetic({
               choices: e.choices ?? choices,
               legacyItemId: e.alias,
             ),
+          // Deliberate selected-branch violations (each flag breaks exactly
+          // one ownership direction) or valid extra records (unrelated branch).
+          if (extraUnlistedSection)
+            ListeningChoiceExercise(
+              id: 'syn-orphan',
+              sectionId: 'syn-unlisted-section',
+              audioRefId: 'fr-word-orphan',
+              purpose: ContentPurpose.practice,
+              reviewState: ContentReviewState.existingCurated,
+              wordId: 'orphan',
+              expectedSound: 'u',
+              choices: const ['u', 'y'],
+              legacyItemId: 'old-orphan',
+            ),
+          if (extraUnlistedExercise)
+            ListeningChoiceExercise(
+              id: 'syn-unclaimed',
+              sectionId: sectionId,
+              audioRefId: 'fr-word-unclaimed',
+              purpose: ContentPurpose.practice,
+              reviewState: ContentReviewState.existingCurated,
+              wordId: 'unclaimed',
+              expectedSound: 'u',
+              choices: const ['u', 'y'],
+              legacyItemId: 'old-unclaimed',
+            ),
+          if (unrelatedBranch)
+            ListeningChoiceExercise(
+              id: 'syn-other',
+              sectionId: 'syn-other-section',
+              audioRefId: 'fr-word-otter',
+              purpose: ContentPurpose.practice,
+              reviewState: ContentReviewState.existingCurated,
+              wordId: 'otter',
+              expectedSound: 'u',
+              choices: const ['y', 'u'],
+              legacyItemId: shareAliasAcrossSections ? 'old-b' : 'old-otter',
+            ),
         ];
+  final List<String> sectionExercises =
+      sectionExerciseIds ?? [for (final e in entries) e.id];
   final List<CourseSection> sections = [
     CourseSection(
       id: sectionId,
@@ -91,9 +137,7 @@ CourseCurriculum _synthetic({
       title: title,
       explanation: explanation,
       contentRevision: revision,
-      exerciseIds: spelling
-          ? const ['syn-spell']
-          : (sectionExerciseIds ?? [for (final e in entries) e.id]),
+      exerciseIds: spelling ? const ['syn-spell'] : sectionExercises,
       requiredItemCount: spelling
           ? 1
           : (requiredItemCount == 0 ? entries.length : requiredItemCount),
@@ -106,6 +150,36 @@ CourseCurriculum _synthetic({
         explanation: 'A second section the node also lists.',
         contentRevision: revision,
         exerciseIds: const <String>[],
+        requiredItemCount: 1,
+      ),
+    if (extraUnlistedSection)
+      CourseSection(
+        id: 'syn-unlisted-section',
+        nodeId: nodeId,
+        title: 'Synthetic unlisted section',
+        explanation: 'A section the lesson never lists.',
+        contentRevision: revision,
+        exerciseIds: const ['syn-orphan'],
+        requiredItemCount: 1,
+      ),
+    if (crossListingSection)
+      CourseSection(
+        id: 'syn-cross-section',
+        nodeId: 'syn-cross-owner',
+        title: 'Synthetic cross-listing section',
+        explanation: 'Another section that also lists the selected exercise.',
+        contentRevision: revision,
+        exerciseIds: [sectionExercises.first],
+        requiredItemCount: 1,
+      ),
+    if (unrelatedBranch)
+      CourseSection(
+        id: 'syn-other-section',
+        nodeId: 'syn-other-lesson',
+        title: 'Synthetic other lesson section',
+        explanation: 'A fully valid other lesson branch.',
+        contentRevision: revision,
+        exerciseIds: const ['syn-other'],
         requiredItemCount: 1,
       ),
   ];
@@ -121,6 +195,42 @@ CourseCurriculum _synthetic({
         prerequisiteIds: const <String>[],
         sectionIds: nodeSectionIds ??
             (twoSections ? [sectionId, 'syn-second'] : [sectionId]),
+        targetSounds: const <String>['u', 'y'],
+      ),
+    if (crossListingNodeId != null)
+      CourseNode(
+        id: crossListingNodeId,
+        title: 'Synthetic cross-listing node',
+        kind: CourseNodeKind.lesson,
+        stage: CourseStage.hear,
+        status: ContentStatus.authored,
+        optional: false,
+        prerequisiteIds: const <String>[],
+        sectionIds: [sectionId],
+        targetSounds: const <String>['u', 'y'],
+      ),
+    if (crossListingSection)
+      CourseNode(
+        id: 'syn-cross-owner',
+        title: 'Synthetic cross-listing owner',
+        kind: CourseNodeKind.lesson,
+        stage: CourseStage.hear,
+        status: ContentStatus.authored,
+        optional: false,
+        prerequisiteIds: const <String>[],
+        sectionIds: const ['syn-cross-section'],
+        targetSounds: const <String>['u', 'y'],
+      ),
+    if (unrelatedBranch)
+      CourseNode(
+        id: 'syn-other-lesson',
+        title: 'Synthetic other lesson',
+        kind: CourseNodeKind.lesson,
+        stage: CourseStage.hear,
+        status: ContentStatus.authored,
+        optional: false,
+        prerequisiteIds: const <String>[],
+        sectionIds: const ['syn-other-section'],
         targetSounds: const <String>['u', 'y'],
       ),
   ];
@@ -143,6 +253,24 @@ CourseCurriculum _synthetic({
           id: 'fr-word-alpha',
           kind: AudioReferenceKind.word,
           spokenText: 'alpha',
+        ),
+      if (extraUnlistedSection)
+        CourseAudioReference(
+          id: 'fr-word-orphan',
+          kind: AudioReferenceKind.word,
+          spokenText: 'orphan',
+        ),
+      if (extraUnlistedExercise)
+        CourseAudioReference(
+          id: 'fr-word-unclaimed',
+          kind: AudioReferenceKind.word,
+          spokenText: 'unclaimed',
+        ),
+      if (unrelatedBranch)
+        CourseAudioReference(
+          id: 'fr-word-otter',
+          kind: AudioReferenceKind.word,
+          spokenText: 'otter',
         ),
     ],
     phonemeCoverage: [
@@ -496,6 +624,51 @@ void main() {
     });
   });
 
+  group('selected-branch guards stay scoped to the selected branch', () {
+    test('a valid unrelated branch cannot block the selected branch', () {
+      final LessonSection section = LessonSection.fromCurriculum(
+        _synthetic(
+          entries: [
+            _Entry(id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
+          ],
+          unrelatedBranch: true,
+        ),
+        lessonId: 'syn-listen',
+      );
+      expect(section.lessonId, 'syn-listen');
+      expect(section.sounds, ['y', 'u']);
+      expect(
+        _items(section),
+        [
+          (id: 'old-b', word: 'beta', expectedSound: 'u'),
+        ],
+        reason: 'the unrelated branch is neither included in, nor able to '
+            'block, the selected branch projection',
+      );
+    });
+
+    test('alias reuse across different sections remains allowed', () {
+      final LessonSection section = LessonSection.fromCurriculum(
+        _synthetic(
+          entries: [
+            _Entry(id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
+          ],
+          unrelatedBranch: true,
+          shareAliasAcrossSections: true,
+        ),
+        lessonId: 'syn-listen',
+      );
+      expect(
+        _items(section),
+        [
+          (id: 'old-b', word: 'beta', expectedSound: 'u'),
+        ],
+        reason: 'alias distinctness holds within the selected section only; '
+            'other sections may reuse the same alias per the spec',
+      );
+    });
+  });
+
   group('projection failure is explicit and never partial', () {
     void expectUnsupported(Object? Function() action) {
       expect(action, throwsA(isA<StateError>()));
@@ -595,6 +768,23 @@ void main() {
           ));
     });
 
+    test(
+        'a repeated non-expected choice evades the distinct-count guard and '
+        'must not project', () {
+      // The expected sound occurs exactly once and the pair of distinct
+      // labels is two, so only a full distinctness check can reject this.
+      expectUnsupported(() => LessonSection.fromCurriculum(
+            _synthetic(
+              entries: [
+                _Entry(
+                    id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
+              ],
+              choices: const ['u', 'y', 'y'],
+            ),
+            lessonId: 'syn-listen',
+          ));
+    });
+
     test('a repeated expected choice is not the supported unambiguous key', () {
       expectUnsupported(() => LessonSection.fromCurriculum(
             _synthetic(
@@ -668,6 +858,66 @@ void main() {
               _Entry(
                   id: 'syn-alpha', word: 'alpha', sound: 'y', alias: 'old-a'),
             ]),
+            lessonId: 'syn-listen',
+          ));
+    });
+
+    test(
+        'another node listing the selected section is ambiguous and cannot '
+        'disappear into a partial projection', () {
+      expectUnsupported(() => LessonSection.fromCurriculum(
+            _synthetic(
+              entries: [
+                _Entry(
+                    id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
+              ],
+              crossListingNodeId: 'syn-other-node',
+            ),
+            lessonId: 'syn-listen',
+          ));
+    });
+
+    test(
+        'an unlisted section claiming the selected lesson is ambiguous and '
+        'cannot disappear into a partial projection', () {
+      expectUnsupported(() => LessonSection.fromCurriculum(
+            _synthetic(
+              entries: [
+                _Entry(
+                    id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
+              ],
+              extraUnlistedSection: true,
+            ),
+            lessonId: 'syn-listen',
+          ));
+    });
+
+    test(
+        'another section listing a selected exercise is ambiguous and cannot '
+        'disappear into a partial projection', () {
+      expectUnsupported(() => LessonSection.fromCurriculum(
+            _synthetic(
+              entries: [
+                _Entry(
+                    id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
+              ],
+              crossListingSection: true,
+            ),
+            lessonId: 'syn-listen',
+          ));
+    });
+
+    test(
+        'an unlisted exercise claiming the selected section is ambiguous and '
+        'cannot disappear into a partial projection', () {
+      expectUnsupported(() => LessonSection.fromCurriculum(
+            _synthetic(
+              entries: [
+                _Entry(
+                    id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
+              ],
+              extraUnlistedExercise: true,
+            ),
             lessonId: 'syn-listen',
           ));
     });

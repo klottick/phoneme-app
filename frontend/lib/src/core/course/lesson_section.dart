@@ -80,12 +80,16 @@ class LessonSection {
   /// are all read from the catalogue — the saved item ID is the exercise's
   /// legacy alias, never its namespaced catalogue ID. Missing or ambiguous
   /// records (including repeated section or exercise listings, which never
-  /// collapse), non-hear stages, non-practice purposes, unsupported kinds,
-  /// ownership disagreements, count mismatches, missing or duplicated
-  /// aliases, disagreeing choices, blank choice labels, fewer than two
-  /// distinct choices, or an expected sound that is not exactly one of the
-  /// shared choices throw [StateError]; there is no partial projection or
-  /// fallback to any other content.
+  /// collapse), selected-branch reverse-ownership disagreements (a section
+  /// claimed by a second node, an unlisted section claiming the selected
+  /// lesson, an exercise listed by a second section, or an unlisted
+  /// exercise claiming the selected section), non-hear stages, non-practice
+  /// purposes, unsupported kinds, count mismatches, missing or duplicated
+  /// aliases, disagreeing choices, blank or duplicated choice labels, fewer
+  /// than two distinct choices, or an expected sound that is not exactly
+  /// one of the shared choices throw [StateError]; there is no partial
+  /// projection or fallback to any other content. Only the selected branch
+  /// is examined; unrelated catalogue branches are never touched.
   factory LessonSection.fromCurriculum(
     CourseCurriculum curriculum, {
     required String lessonId,
@@ -137,6 +141,48 @@ class LessonSection {
           'supports exactly one.');
     }
     final CourseSection section = owned.single;
+
+    // Reverse ownership on the selected branch, in both directions: each
+    // selected record is owned by exactly this branch, and nothing else may
+    // claim or list it. Only the selected branch is examined; unrelated
+    // catalogue branches stay out of scope for this projection helper.
+    for (final CourseNode other in curriculum.nodes) {
+      if (other.id != node.id && other.sectionIds.contains(section.id)) {
+        throw StateError(
+            'Section "${section.id}" is listed by node "${other.id}" as '
+            'well as node "${node.id}"; the selected section has exactly '
+            'one listing parent.');
+      }
+    }
+    for (final CourseSection candidate in curriculum.sections) {
+      if (candidate.nodeId != node.id ||
+          node.sectionIds.contains(candidate.id)) {
+        continue;
+      }
+      throw StateError(
+          'Section "${candidate.id}" declares owner node "${node.id}" but '
+          'the node never lists it; a selected-branch record cannot be '
+          'silently dropped from the projection.');
+    }
+    for (final String exerciseId in section.exerciseIds) {
+      for (final CourseSection other in curriculum.sections) {
+        if (other.id != section.id && other.exerciseIds.contains(exerciseId)) {
+          throw StateError(
+              'Exercise "$exerciseId" is listed by section "${other.id}" '
+              'as well as section "${section.id}"; the selected exercise '
+              'has exactly one listing section.');
+        }
+      }
+    }
+    for (final CourseExercise candidate in curriculum.exercises) {
+      if (candidate.sectionId != section.id ||
+          section.exerciseIds.contains(candidate.id)) {
+        continue;
+      }
+      throw StateError('Exercise "${candidate.id}" declares owner section '
+          '"${section.id}" but the section never lists it; a selected-'
+          'branch record cannot be silently dropped from the projection.');
+    }
 
     final Set<String> listedExerciseIds = <String>{};
     final List<ListeningChoiceExercise> listening = <ListeningChoiceExercise>[];
@@ -211,11 +257,11 @@ class LessonSection {
           'Section "${section.id}" uses a blank choice label; supported '
           'listening shapes need distinct nonblank labels.');
     }
-    if (choices.toSet().length < 2) {
-      throw StateError(
-          'Section "${section.id}" offers ${choices.length} choice '
-          'labels but fewer than two distinct ones; supported shapes '
-          'need at least two distinct choices.');
+    if (choices.toSet().length != choices.length || choices.length < 2) {
+      throw StateError('Section "${section.id}" uses the choice labels '
+          '${choices.join(' / ')}; supported listening shapes need at '
+          'least two distinct labels with no duplicates, including '
+          'duplicated non-expected distractors.');
     }
     for (final exercise in listening) {
       final int expectedCount = exercise.choices
