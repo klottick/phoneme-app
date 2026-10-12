@@ -1172,8 +1172,8 @@ void main() {
         reason: 'two distinct tout tokens both match target u',
       );
     });
-    test('a 20000-token stream stays valid with no recursion depth limit', () {
-      const depth = 20000;
+    test('a 100000-token stream stays valid with no recursion depth limit', () {
+      const depth = 100000;
       final text = List.filled(depth, 'tu').join(' ');
       final report = _v(
         _curriculum(
@@ -1197,9 +1197,9 @@ void main() {
         reason: 'exact long coverage is valid and iterative',
       );
     });
-    test('a malformed 20000-token stream reports one issue without exceptions',
+    test('a malformed 100000-token stream reports one issue without exceptions',
         () {
-      const depth = 20000;
+      const depth = 100000;
       final text = List.filled(depth, 'tu').join(' ');
       final report = _v(
         _curriculum(
