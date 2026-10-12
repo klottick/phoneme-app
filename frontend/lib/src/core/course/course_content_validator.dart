@@ -86,14 +86,17 @@ CourseValidationReport validateCourseContent(
 }) {
   final inventory = _coverageSoundInventory(curriculum);
   // Structural phases in contract order: namespaces, nodes, sections,
-  // exercises, sentences and coverage, each in authored order.
+  // exercises, sentences and coverage, each in authored order. Exercise
+  // records emit per-record ownership then payload diagnostics so later
+  // records cannot precede earlier payloads; section-keyed link checks
+  // follow in authored section order.
   final List<CourseContentDiagnostic> errors = [
     ..._findDuplicateIdErrors(curriculum),
     ..._findNodeErrors(curriculum, inventory),
     ..._findSectionErrors(curriculum),
-    ..._findExerciseErrors(curriculum),
-    ..._findExercisePayloadErrors(
+    ..._findExerciseRecordErrors(
         curriculum, inventory, citationPhonemes, exposedWordIds),
+    ..._findExerciseSectionLinkErrors(curriculum),
     ..._findSentenceErrors(curriculum),
     ..._findCoverageErrors(curriculum),
   ];
@@ -465,10 +468,15 @@ List<CourseContentDiagnostic> _findSectionErrors(CourseCurriculum curriculum) {
   return errors;
 }
 
-/// Exercise-level rules, authored order, then reverse ownership, unowned
-/// exercises and per-section legacy alias duplicates.
-List<CourseContentDiagnostic> _findExerciseErrors(
+/// Exercise records, authored order. Each exercise emits its ownership
+/// diagnostics (owner absence, claim mismatch, unowned record) and then its
+/// payload diagnostics, as one unit: independent issues on a later exercise
+/// can therefore never precede an earlier exercise's payload diagnostics.
+List<CourseContentDiagnostic> _findExerciseRecordErrors(
   CourseCurriculum curriculum,
+  Set<String> inventory,
+  Map<String, List<String>> citationPhonemes,
+  Set<String> exposedWordIds,
 ) {
   final errors = <CourseContentDiagnostic>[];
   final listedByAnySection = <String>{};
@@ -477,108 +485,6 @@ List<CourseContentDiagnostic> _findExerciseErrors(
       listedByAnySection.add(id);
     }
   }
-  for (final exercise in curriculum.exercises) {
-    final owner = curriculum.sectionById(exercise.sectionId);
-    if (owner == null) {
-      errors.add(_diagnostic(
-        'missingReference',
-        exercise.id,
-        "exercise '${exercise.id}' declares absent or duplicated owner section ID '${exercise.sectionId}'",
-      ));
-    } else if (!owner.exerciseIds.contains(exercise.id)) {
-      errors.add(_diagnostic(
-        'ownershipMismatch',
-        exercise.id,
-        "exercise '${exercise.id}' claims owner section '${owner.id}' whose exercises do not include '${exercise.id}'",
-      ));
-    }
-  }
-  // Exact owner both directions: a listed exercise must claim back its lister.
-  for (final section in curriculum.sections) {
-    for (final id in _distinctInOrder(section.exerciseIds)) {
-      final exercise = curriculum.exerciseById(id);
-      if (exercise != null && exercise.sectionId != section.id) {
-        errors.add(_diagnostic(
-          'ownershipMismatch',
-          section.id,
-          "section '${section.id}' lists exercise '$id' which declares a different owner",
-        ));
-      }
-    }
-  }
-  for (final exercise in curriculum.exercises) {
-    if (!listedByAnySection.contains(exercise.id)) {
-      errors.add(_diagnostic(
-        'unownedRecord',
-        exercise.id,
-        "exercise '${exercise.id}' is in the catalogue but appears in no section's exercises",
-      ));
-    }
-  }
-  // Distinct listening exercises in one section must not share a legacy
-  // compatibility alias; the same alias across sections stays allowed.
-  for (final section in curriculum.sections) {
-    final firstOwners = <String, String>{};
-    for (final id in _distinctInOrder(section.exerciseIds)) {
-      final exercise = curriculum.exerciseById(id);
-      if (exercise is! ListeningChoiceExercise) continue;
-      final legacyItemId = exercise.legacyItemId;
-      if (legacyItemId == null) continue;
-      final firstOwner = firstOwners[legacyItemId];
-      if (firstOwner == null) {
-        firstOwners[legacyItemId] = id;
-      } else {
-        errors.add(_diagnostic(
-          'duplicateLegacyItemId',
-          section.id,
-          "section '${section.id}' declares legacy item ID '$legacyItemId' for distinct exercises '$firstOwner' and '$id'",
-        ));
-      }
-    }
-  }
-  return errors;
-}
-
-/// A Unicode-letter word contains at least one letter; punctuation alone does
-/// not form a believable distractor.
-final RegExp _unicodeLetterPattern = RegExp(r'\p{L}', unicode: true);
-
-/// A whitespace gap character; token gaps may contain whitespace only.
-final RegExp _whitespaceGapPattern = RegExp(r'\s', unicode: true);
-
-/// The stage a purpose-practice exercise of each kind belongs to. Read-aloud
-/// carries no stage rule in this revision; its node-kind rule is separate.
-const Map<ExerciseKind, CourseStage> _practiceStageByKind = {
-  ExerciseKind.listeningChoice: CourseStage.hear,
-  ExerciseKind.sentenceHunt: CourseStage.find,
-  ExerciseKind.spellingChoice: CourseStage.spell,
-};
-
-/// Read-aloud is allowed in optional articulation or assessment nodes only.
-const Set<CourseNodeKind> _readAloudAllowedNodeKinds = {
-  CourseNodeKind.articulation,
-  CourseNodeKind.assessment,
-};
-
-/// The declared coverage sound inventory for target membership checks.
-Set<String> _coverageSoundInventory(CourseCurriculum curriculum) {
-  final inventory = <String>{};
-  for (final coverage in curriculum.phonemeCoverage) {
-    inventory.add(coverage.sound);
-  }
-  return inventory;
-}
-
-/// Exercise payload rules, authored exercise order. Checks requiring an owner
-/// node are skipped when section or node lookup is absent or ambiguous; that
-/// absence is already reported, and independent issues are retained.
-List<CourseContentDiagnostic> _findExercisePayloadErrors(
-  CourseCurriculum curriculum,
-  Set<String> inventory,
-  Map<String, List<String>> citationPhonemes,
-  Set<String> exposedWordIds,
-) {
-  final errors = <CourseContentDiagnostic>[];
   final practiceAudioRefIds = <String>{
     for (final exercise in curriculum.exercises)
       if (exercise.purpose == ContentPurpose.practice) exercise.audioRefId,
@@ -593,11 +499,38 @@ List<CourseContentDiagnostic> _findExercisePayloadErrors(
   }
 
   for (final exercise in curriculum.exercises) {
-    final section = curriculum.sectionById(exercise.sectionId);
-    final node = section == null ? null : curriculum.nodeById(section.nodeId);
+    // Ownership for this record: absence, then claim, then listing.
+    final owner = curriculum.sectionById(exercise.sectionId);
+    if (owner == null) {
+      errors.add(_diagnostic(
+        'missingReference',
+        exercise.id,
+        "exercise '${exercise.id}' declares absent or duplicated owner section ID '${exercise.sectionId}'",
+      ));
+    } else if (!owner.exerciseIds.contains(exercise.id)) {
+      errors.add(_diagnostic(
+        'ownershipMismatch',
+        exercise.id,
+        "exercise '${exercise.id}' claims owner section '${owner.id}' whose exercises do not include '${exercise.id}'",
+      ));
+    }
+    if (!listedByAnySection.contains(exercise.id)) {
+      errors.add(_diagnostic(
+        'unownedRecord',
+        exercise.id,
+        "exercise '${exercise.id}' is in the catalogue but appears in no section's exercises",
+      ));
+    }
+    // Payload for this record. Node-dependent checks are skipped when the
+    // owner chain is absent or ambiguous (already reported above); intrinsic
+    // target checks never need the owner.
+    final node = owner == null ? null : curriculum.nodeById(owner.nodeId);
     if (node != null) {
       errors.addAll(_findPlacementErrors(exercise, node));
-      errors.addAll(_findExerciseTargetErrors(exercise, node, inventory));
+    }
+    errors.addAll(_findIntrinsicTargetErrors(exercise, inventory));
+    if (node != null) {
+      errors.addAll(_findNodeTargetContainmentErrors(exercise, node));
     }
     if (exercise is ListeningChoiceExercise) {
       errors.addAll(_findListeningChoiceErrors(exercise, inventory));
@@ -670,6 +603,76 @@ List<CourseContentDiagnostic> _findExercisePayloadErrors(
   return errors;
 }
 
+/// Section-keyed link checks after all exercise records, authored section
+/// order: listed exercises must claim back their lister, and distinct
+/// listening exercises in one section must not share a legacy alias (the
+/// same alias across sections stays allowed).
+List<CourseContentDiagnostic> _findExerciseSectionLinkErrors(
+  CourseCurriculum curriculum,
+) {
+  final errors = <CourseContentDiagnostic>[];
+  for (final section in curriculum.sections) {
+    for (final id in _distinctInOrder(section.exerciseIds)) {
+      final exercise = curriculum.exerciseById(id);
+      if (exercise != null && exercise.sectionId != section.id) {
+        errors.add(_diagnostic(
+          'ownershipMismatch',
+          section.id,
+          "section '${section.id}' lists exercise '$id' which declares a different owner",
+        ));
+      }
+    }
+    final firstOwners = <String, String>{};
+    for (final id in _distinctInOrder(section.exerciseIds)) {
+      final exercise = curriculum.exerciseById(id);
+      if (exercise is! ListeningChoiceExercise) continue;
+      final legacyItemId = exercise.legacyItemId;
+      if (legacyItemId == null) continue;
+      final firstOwner = firstOwners[legacyItemId];
+      if (firstOwner == null) {
+        firstOwners[legacyItemId] = id;
+      } else {
+        errors.add(_diagnostic(
+          'duplicateLegacyItemId',
+          section.id,
+          "section '${section.id}' declares legacy item ID '$legacyItemId' for distinct exercises '$firstOwner' and '$id'",
+        ));
+      }
+    }
+  }
+  return errors;
+}
+
+/// A Unicode-letter word contains at least one letter; punctuation alone does
+/// not form a believable distractor.
+final RegExp _unicodeLetterPattern = RegExp(r'\p{L}', unicode: true);
+
+/// A whitespace gap character; token gaps may contain whitespace only.
+final RegExp _whitespaceGapPattern = RegExp(r'\s', unicode: true);
+
+/// The stage a purpose-practice exercise of each kind belongs to. Read-aloud
+/// carries no stage rule in this revision; its node-kind rule is separate.
+const Map<ExerciseKind, CourseStage> _practiceStageByKind = {
+  ExerciseKind.listeningChoice: CourseStage.hear,
+  ExerciseKind.sentenceHunt: CourseStage.find,
+  ExerciseKind.spellingChoice: CourseStage.spell,
+};
+
+/// Read-aloud is allowed in optional articulation or assessment nodes only.
+const Set<CourseNodeKind> _readAloudAllowedNodeKinds = {
+  CourseNodeKind.articulation,
+  CourseNodeKind.assessment,
+};
+
+/// The declared coverage sound inventory for target membership checks.
+Set<String> _coverageSoundInventory(CourseCurriculum curriculum) {
+  final inventory = <String>{};
+  for (final coverage in curriculum.phonemeCoverage) {
+    inventory.add(coverage.sound);
+  }
+  return inventory;
+}
+
 /// Placement: purpose versus node kind, assessment stage fit, practice stage
 /// per kind, and read-aloud node-kind allowance. Each violated condition is
 /// reported independently in deterministic order.
@@ -718,32 +721,24 @@ List<CourseContentDiagnostic> _findPlacementErrors(
   return errors;
 }
 
-/// Each teaching target must be declared in the coverage inventory and
-/// contained in the owner node's targets; read-aloud targets must be
-/// nonempty.
-List<CourseContentDiagnostic> _findExerciseTargetErrors(
+/// The teaching target sounds of an exercise, in authored order.
+List<String> _teachingTargets(CourseExercise exercise) {
+  if (exercise is ReadAloudExercise) return exercise.targetSounds;
+  if (exercise is ListeningChoiceExercise) return [exercise.expectedSound];
+  if (exercise is SpellingChoiceExercise) return [exercise.targetSound];
+  if (exercise is SentenceHuntExercise) return [exercise.targetSound];
+  return const [];
+}
+
+/// Target defects that no owner is needed to see: read-aloud targets must be
+/// nonempty with distinct labels, and every teaching target must be declared
+/// in the coverage inventory. These report even when the owner chain is
+/// absent or ambiguous.
+List<CourseContentDiagnostic> _findIntrinsicTargetErrors(
   CourseExercise exercise,
-  CourseNode node,
   Set<String> inventory,
 ) {
   final errors = <CourseContentDiagnostic>[];
-  void checkTarget(String sound) {
-    if (!inventory.contains(sound)) {
-      errors.add(_diagnostic(
-        'invalidTargets',
-        exercise.id,
-        "exercise '${exercise.id}' targets undeclared sound '$sound' absent from the coverage inventory",
-      ));
-    }
-    if (!node.targetSounds.contains(sound)) {
-      errors.add(_diagnostic(
-        'invalidTargets',
-        exercise.id,
-        "exercise '${exercise.id}' targets '$sound' outside node '${node.id}' targets ${node.targetSounds.join(', ')}",
-      ));
-    }
-  }
-
   if (exercise is ReadAloudExercise) {
     if (exercise.targetSounds.isEmpty) {
       errors.add(_diagnostic(
@@ -752,15 +747,41 @@ List<CourseContentDiagnostic> _findExerciseTargetErrors(
         "read-aloud exercise '${exercise.id}' declares no target sounds",
       ));
     }
-    for (final sound in _distinctInOrder(exercise.targetSounds)) {
-      checkTarget(sound);
+    for (final label in _repeatedInOrder(exercise.targetSounds)) {
+      errors.add(_diagnostic(
+        'invalidTargets',
+        exercise.id,
+        "read-aloud exercise '${exercise.id}' lists target sound '$label' more than once",
+      ));
     }
-  } else if (exercise is ListeningChoiceExercise) {
-    checkTarget(exercise.expectedSound);
-  } else if (exercise is SpellingChoiceExercise) {
-    checkTarget(exercise.targetSound);
-  } else if (exercise is SentenceHuntExercise) {
-    checkTarget(exercise.targetSound);
+  }
+  for (final sound in _distinctInOrder(_teachingTargets(exercise))) {
+    if (!inventory.contains(sound)) {
+      errors.add(_diagnostic(
+        'invalidTargets',
+        exercise.id,
+        "exercise '${exercise.id}' targets undeclared sound '$sound' absent from the coverage inventory",
+      ));
+    }
+  }
+  return errors;
+}
+
+/// Every teaching target must be contained in the owner node's targets; this
+/// needs a resolvable owner, so it runs only when the owner chain resolves.
+List<CourseContentDiagnostic> _findNodeTargetContainmentErrors(
+  CourseExercise exercise,
+  CourseNode node,
+) {
+  final errors = <CourseContentDiagnostic>[];
+  for (final sound in _distinctInOrder(_teachingTargets(exercise))) {
+    if (!node.targetSounds.contains(sound)) {
+      errors.add(_diagnostic(
+        'invalidTargets',
+        exercise.id,
+        "exercise '${exercise.id}' targets '$sound' outside node '${node.id}' targets ${node.targetSounds.join(', ')}",
+      ));
+    }
   }
   return errors;
 }
@@ -1011,8 +1032,15 @@ List<CourseContentDiagnostic> _findSentenceErrors(CourseCurriculum curriculum) {
           "sentence '${sentence.id}' token '${token.id}' repeats phoneme labels within its annotations",
         ));
       }
+      if (token.phonemes.any((label) => label.trim().isEmpty)) {
+        errors.add(_diagnostic(
+          'invalidSentenceTokens',
+          sentence.id,
+          "sentence '${sentence.id}' token '${token.id}' declares a blank phoneme label; blank labels are not contextual annotations",
+        ));
+      }
     }
-    if (!_tokensHaveOnlyWhitespaceGaps(sentence)) {
+    if (!_tokensCoverText(sentence)) {
       errors.add(_diagnostic(
         'invalidSentenceTokens',
         sentence.id,
@@ -1023,22 +1051,43 @@ List<CourseContentDiagnostic> _findSentenceErrors(CourseCurriculum curriculum) {
   return errors;
 }
 
-/// Exact ordered token coverage: each token appears at its position in the
-/// text and the gaps before, between and after tokens are whitespace only.
-bool _tokensHaveOnlyWhitespaceGaps(CourseSentence sentence) {
-  final text = sentence.text;
-  var index = 0;
-  while (index < text.length && _whitespaceGapPattern.hasMatch(text[index])) {
-    index++;
+/// Exact ordered token coverage: the authored token texts, concatenated in
+/// order with whitespace-only gaps, must reproduce the sentence text
+/// exactly. Token text is matched verbatim — never trimmed or normalized —
+/// so a token may itself carry whitespace, while gaps must be whitespace.
+bool _tokensCoverText(CourseSentence sentence) =>
+    _coverSentenceText(sentence.text, sentence.tokens, 0, 0);
+
+bool _coverSentenceText(
+  String text,
+  List<SentenceToken> tokens,
+  int position,
+  int index,
+) {
+  if (position == tokens.length) {
+    return _remainderIsWhitespaceOnly(text, index);
   }
-  for (final token in sentence.tokens) {
-    if (!text.startsWith(token.text, index)) return false;
-    index += token.text.length;
-    while (index < text.length && _whitespaceGapPattern.hasMatch(text[index])) {
-      index++;
+  final word = tokens[position].text;
+  if (word.isEmpty) return false;
+  var start = index;
+  while (true) {
+    if (text.startsWith(word, start) &&
+        _coverSentenceText(text, tokens, position + 1, start + word.length)) {
+      return true;
     }
+    // Uncovered text before the next token may only be whitespace.
+    if (start == text.length || !_whitespaceGapPattern.hasMatch(text[start])) {
+      return false;
+    }
+    start++;
   }
-  return index == text.length;
+}
+
+bool _remainderIsWhitespaceOnly(String text, int index) {
+  for (var i = index; i < text.length; i++) {
+    if (!_whitespaceGapPattern.hasMatch(text[i])) return false;
+  }
+  return true;
 }
 
 /// Coverage rules, authored coverage order: unique sound labels, empty

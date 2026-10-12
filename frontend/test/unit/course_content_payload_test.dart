@@ -584,6 +584,65 @@ void main() {
         ('invalidTargets', 'e-1'),
       ],
     );
+    _expectRule(
+      label:
+          'read-aloud undeclared target is reported despite a dangling owner',
+      build: () => _curriculum(
+        exercises: [
+          _readAloud(sectionId: 'ghost-section', targetSounds: const ['i'])
+        ],
+        audioReferences: [_paragraphRef()],
+        phonemeCoverage: [
+          _cov('u',
+              status: ContentStatus.planned, practiceExerciseIds: const []),
+        ],
+      ),
+      expectedErrors: [
+        ('missingReference', 'e-1'),
+        ('unownedRecord', 'e-1'),
+        ('invalidTargets', 'e-1'),
+      ],
+    );
+    _expectRule(
+      label: 'read-aloud empty targets are reported despite a dangling owner',
+      build: () => _curriculum(
+        exercises: [
+          _readAloud(sectionId: 'ghost-section', targetSounds: const [])
+        ],
+        audioReferences: [_paragraphRef()],
+        phonemeCoverage: [
+          _cov('u',
+              status: ContentStatus.planned, practiceExerciseIds: const []),
+        ],
+      ),
+      expectedErrors: [
+        ('missingReference', 'e-1'),
+        ('unownedRecord', 'e-1'),
+        ('invalidTargets', 'e-1'),
+      ],
+    );
+    _expectRule(
+      label: 'repeated read-aloud target labels are invalid even when declared',
+      build: () => _curriculum(
+        nodes: [
+          _node(
+              kind: CourseNodeKind.articulation,
+              optional: true,
+              targetSounds: const ['u'])
+        ],
+        sections: [_section()],
+        exercises: [
+          _readAloud(targetSounds: const ['u', 'u'])
+        ],
+        audioReferences: [_paragraphRef()],
+        phonemeCoverage: [
+          _cov('u', practiceExerciseIds: const ['e-1']),
+        ],
+      ),
+      expectedErrors: [
+        ('invalidTargets', 'e-1'),
+      ],
+    );
   });
 
   group('invalidListeningChoices', () {
@@ -1111,6 +1170,105 @@ void main() {
         _errors(report),
         isEmpty,
         reason: 'two distinct tout tokens both match target u',
+      );
+    });
+    test('a token carrying its leading whitespace is preserved verbatim', () {
+      final report = _v(
+        _curriculum(
+          sentences: [
+            sentenceFixture(
+              id: 's-x',
+              text: 'tout tu',
+              audioRefId: 'a-sent',
+              tokens: [
+                SentenceToken(id: 't-1', text: 'tout', phonemes: ['t', 'u']),
+                SentenceToken(id: 't-2', text: ' tu', phonemes: ['t', 'y']),
+              ],
+            ),
+          ],
+          audioReferences: [_sentenceRef(id: 'a-sent', spokenText: 'tout tu')],
+        ),
+      );
+      expect(
+        _errors(report),
+        isEmpty,
+        reason: 'token text is matched exactly; no gap normalization',
+      );
+    });
+    test('whitespace-only gaps stay acceptable around verbatim tokens', () {
+      final report = _v(
+        _curriculum(
+          sentences: [
+            sentenceFixture(
+              id: 's-x',
+              text: ' tout  tu.',
+              audioRefId: 'a-sent',
+              tokens: [
+                SentenceToken(id: 't-1', text: 'tout', phonemes: ['t', 'u']),
+                SentenceToken(id: 't-2', text: 'tu', phonemes: ['t', 'y']),
+                SentenceToken(id: 't-3', text: '.', phonemes: []),
+              ],
+            ),
+          ],
+          audioReferences: [
+            _sentenceRef(id: 'a-sent', spokenText: ' tout  tu.')
+          ],
+        ),
+      );
+      expect(
+        _errors(report),
+        isEmpty,
+        reason: 'whitespace gaps only; nonblank token text exact',
+      );
+    });
+    test('blank phoneme labels are not contextual annotations', () {
+      final report = _v(
+        _curriculum(
+          sentences: [
+            sentenceFixture(
+              id: 's-x',
+              text: 'tout.',
+              audioRefId: 'a-sent',
+              tokens: [
+                SentenceToken(id: 't-1', text: 'tout', phonemes: ['t', ' ']),
+                SentenceToken(id: 't-2', text: '.', phonemes: []),
+              ],
+            ),
+          ],
+          audioReferences: [_sentenceRef(id: 'a-sent', spokenText: 'tout.')],
+        ),
+      );
+      expect(
+        _errors(report),
+        [('invalidSentenceTokens', 's-x')],
+        reason: 'empty annotation lists stay valid; blank labels do not',
+      );
+    });
+    test(
+        'non-inventory consonants and empty punctuation annotations stay valid',
+        () {
+      final report = _v(
+        _curriculum(
+          sentences: [
+            sentenceFixture(
+              id: 's-x',
+              text: 'tout.',
+              audioRefId: 'a-sent',
+              tokens: [
+                SentenceToken(
+                    id: 't-1', text: 'tout', phonemes: ['t', 'u', 'k']),
+                SentenceToken(id: 't-2', text: '.', phonemes: []),
+              ],
+            ),
+          ],
+          audioReferences: [_sentenceRef(id: 'a-sent', spokenText: 'tout.')],
+        ),
+      );
+      expect(
+        _errors(report),
+        isEmpty,
+        reason: 'contextual annotations are never constrained to the '
+            'teaching inventory, and no pronunciation is inferred',
       );
     });
   });
@@ -1647,5 +1805,41 @@ void main() {
         ('exposedAssessmentAudio', 'e-a'),
       ],
     );
+  });
+
+  group('authored record order', () {
+    test('later exercise ownership cannot precede earlier exercise payloads',
+        () {
+      CourseCurriculum fixture() => _curriculum(
+            nodes: [
+              _node(sectionIds: const ['s-1'])
+            ],
+            sections: [_section()],
+            exercises: [
+              _listening(id: 'e-1', choices: const ['u']),
+              _listening(
+                  id: 'e-2', sectionId: 'ghost-section', audioRefId: 'a-2'),
+            ],
+            audioReferences: [_wordRef(), _wordRef(id: 'a-2')],
+            phonemeCoverage: [
+              _cov('u', practiceExerciseIds: const ['e-1']),
+              _cov('y',
+                  status: ContentStatus.planned, practiceExerciseIds: const []),
+            ],
+          );
+      final report = _v(fixture());
+      expect(
+        [for (final d in report.errors) d.recordId],
+        containsAllInOrder(['e-1', 'e-2']),
+        reason: 'exercise records keep authored order across ownership and '
+            'payload diagnostics',
+      );
+      final again = _v(fixture());
+      expect(
+        [for (final d in again.errors) (d.code, d.recordId, d.use)],
+        [for (final d in report.errors) (d.code, d.recordId, d.use)],
+        reason: 'repeat fingerprint: identical diagnostic sequence',
+      );
+    });
   });
 }

@@ -714,9 +714,9 @@ void main() {
       ),
       expected: [
         ('ownershipMismatch', 'e-1', null),
+        ('invalidTargets', 'e-2', null),
         ('ownershipMismatch', 's-1', null),
         ('ownershipMismatch', 's-2', null),
-        ('invalidTargets', 'e-2', null),
         ('invalidCoverage', 'u', null),
       ],
     );
