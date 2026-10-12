@@ -150,31 +150,49 @@ Run Flutter commands from `frontend/`. Test paths below are existing or planned 
 **Continuation:** User selected FR-01 after the pilot/repair batches and chose
 immediate migration over an unused additive catalogue. The proposed scope is
 [curriculum contracts plus live-pilot content migration](../specs/2026-10-11-french-curriculum-design.md).
-The user approved the written migration spec. The detailed
-[execution plan](2026-10-11-french-curriculum.md) and
-[contract revision](../specs/2026-10-10-french-learning-contracts.md) are now pending
-plan review; no FR-01 product implementation or downstream feature completion is claimed. The design adds
-`lesson_section.dart` as the compatibility-projection boundary while preserving
-all saved IDs and existing session/store/UI behavior.
+The user approved the written migration spec,
+[execution plan](2026-10-11-french-curriculum.md), and
+[contract revision 1](../specs/2026-10-10-french-learning-contracts.md).
+**Scoped FR-01 is implemented and merged**; see the
+[outcome and verification record](../status/2026-10-12-french-curriculum.md).
+The live pilot uses the validated catalogue through `lesson_section.dart`, with
+unchanged saved IDs/session/store/UI behavior. Independent final verification:
+614 tests, analyzer clean, JavaScript build, 2,546 controller cases and literal
+old-save compatibility. No FR-02+ feature completion is implied.
 
 **Priority:** P0. **Owner:** curriculum/model agent. **Depends on:** FR-00.
 
-**Files:** Create `frontend/lib/src/core/course/course_curriculum.dart`, `course_exercise.dart`, `course_content_validator.dart`; modify `french_course.dart`; create `frontend/test/unit/course_content_test.dart`.
+**Files:** Three pure model/validator modules, `french_course.dart`, and the
+`lesson_section.dart` projection; model/graph/payload/readiness/content/projection
+tests and literal real-store/screen migration oracle. Exact ownership is in the
+approved scoped execution plan.
 
 **Consumes/produces:** Approved IDs and contracts; immutable `CourseNode`, `CourseSection`, `CourseExercise`, `ExerciseKind`, `SkillDimension`, `CourseSentence`, and `SentenceToken` models, plus a validated course catalogue. Content records use stable IDs, section membership, audio references, targets, distractors, section-debrief explanation/articulation references, and curriculum revision.
 
-- [ ] Sequence discrimination before spelling, with review/game/articulation branches and assessment nodes.
-- [ ] Author the `/u/`–`/y/` vertical slice with enough distinct examples for the approved session policy; separate practice from held-out exam items.
-- [ ] Validate prerequisite references, cycles, duplicate IDs, missing audio references, ambiguous answer keys, and undersized pools.
-- [ ] Preserve citation-word membership for games; sentence tokens own contextual target annotations and accepted variants.
+- [x] Sequence discrimination before spelling, with planned review/game/articulation branches and assessment nodes (no new routes).
+- [x] Migrate ten existing `/u/`–`/y/` practice examples; validate practice/assessment separation without inventing exam content.
+- [x] Validate references, cycles, duplicate IDs/membership, ownership, keys, exact pools and resource readiness.
+- [x] Preserve citation membership; freeze contextual sentence/token contracts without authoring unreviewed production sentences.
 
-**Acceptance:** No phoneme inference from spelling; every exercise has a reviewed answer/explanation; missing assets are reported by validation, not hidden until play. Every proposed pilot phoneme is either covered or visibly not yet authored. Existing word/game content continues working.
+**Scoped acceptance met:** No phoneme inference from spelling; existing-curated
+practice metadata preserved, reviewed assessment keys/recordings remain explicit
+gates. `u`/`y` discovery authored; the other five proposed sounds planned. Legacy
+words/games and saved progress remain compatible. Production structural errors
+are empty, with 35 honest readiness issues, including 24 missing reviewed word
+recordings. TTS availability declarations do not imply exam or device readiness.
 
-**Verify:** `flutter test test/unit/course_content_test.dart test/unit/sound_match_content_test.dart test/unit/course_arcade_test.dart`.
+**Verify:** Full `flutter test`, `flutter analyze`, JavaScript web build, the
+model/graph/payload/readiness/content/projection suites and
+`test/widget/course_curriculum_migration_test.dart`. Existing published game tests
+remain green; unpublished `sound_match_content_test.dart` was not bundled.
 
 ### FR-02 — Produce and linguistically review French reference audio
 
 **Priority:** P0. **Owner:** audio/content worker + qualified French reviewer. **Depends on:** FR-00, FR-01 identifiers; D5.
+
+**Readiness after FR-01:** Stable word/reference IDs are available. This ticket is
+not implemented; recording source/rights, French review and its scoped design
+remain required. No recording production or playback is authorized by FR-01.
 
 **Files:** Create `frontend/assets/audio/fr/`, `frontend/assets/audio/fr/manifest.json`, `docs/french-reference-audio.md`, and `frontend/test/unit/french_audio_manifest_test.dart`. Do not edit `pubspec.yaml`; hand asset registration to FR-03.
 
