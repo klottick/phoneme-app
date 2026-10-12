@@ -74,23 +74,25 @@ class LessonSection {
   /// Projects one authored lesson of [curriculum] into the stable
   /// [LessonSection] shape used at runtime.
   ///
-  /// The lesson must own exactly one authored section of practice listening
-  /// choices. Item identity, word, teaching target, shared ordered choices,
-  /// title, explanation and content revision are all read from the catalogue
-  /// — the saved item ID is the exercise's legacy alias, never its
-  /// namespaced catalogue ID. Missing or ambiguous records, unsupported
-  /// kinds, ownership disagreements, count mismatches, missing or duplicated
-  /// aliases, disagreeing choices, or an expected sound outside the choices
-  /// throw [StateError]; there is no partial projection or fallback to any
-  /// other content.
+  /// The lesson must be an authored hear-stage lesson that owns exactly one
+  /// section of practice listening choices. Item identity, word, teaching
+  /// target, shared ordered choices, title, explanation and content revision
+  /// are all read from the catalogue — the saved item ID is the exercise's
+  /// legacy alias, never its namespaced catalogue ID. Missing or ambiguous
+  /// records (including repeated section or exercise listings, which never
+  /// collapse), non-hear stages, non-practice purposes, unsupported kinds,
+  /// ownership disagreements, count mismatches, missing or duplicated
+  /// aliases, disagreeing choices, blank choice labels, fewer than two
+  /// distinct choices, or an expected sound that is not exactly one of the
+  /// shared choices throw [StateError]; there is no partial projection or
+  /// fallback to any other content.
   factory LessonSection.fromCurriculum(
     CourseCurriculum curriculum, {
     required String lessonId,
   }) {
     final CourseNode? node = curriculum.nodeById(lessonId);
     if (node == null) {
-      throw StateError(
-          'No unique lesson node is declared for "$lessonId"; the '
+      throw StateError('No unique lesson node is declared for "$lessonId"; the '
           'projection requires exactly one authored lesson.');
     }
     if (node.kind != CourseNodeKind.lesson) {
@@ -103,14 +105,23 @@ class LessonSection {
           'Node "$lessonId" is ${node.status.name} content; only authored '
           'lessons project a practicing section.');
     }
+    if (node.stage != CourseStage.hear) {
+      throw StateError(
+          'Node "$lessonId" is ${node.stage.name} content; only hear-stage '
+          'lessons project a practice listening section.');
+    }
     final Set<String> listedSectionIds = <String>{};
     final List<CourseSection> owned = <CourseSection>[];
     for (final String sectionId in node.sectionIds) {
-      if (!listedSectionIds.add(sectionId)) continue; // Ambiguous listing already rejected.
+      if (!listedSectionIds.add(sectionId)) {
+        throw StateError(
+            'Node "$lessonId" lists section "$sectionId" more than once; '
+            'a repeated listing is an ambiguous shape, not a membership to '
+            'silently collapse.');
+      }
       final CourseSection? section = curriculum.sectionById(sectionId);
       if (section == null) {
-        throw StateError(
-            'Node "$lessonId" lists an absent or duplicated section '
+        throw StateError('Node "$lessonId" lists the absent section '
             '"$sectionId".');
       }
       if (section.nodeId != node.id) {
@@ -128,21 +139,21 @@ class LessonSection {
     final CourseSection section = owned.single;
 
     final Set<String> listedExerciseIds = <String>{};
-    final List<ListeningChoiceExercise> listening =
-        <ListeningChoiceExercise>[];
+    final List<ListeningChoiceExercise> listening = <ListeningChoiceExercise>[];
     for (final String exerciseId in section.exerciseIds) {
       if (!listedExerciseIds.add(exerciseId)) {
-        continue; // Ambiguous listing already rejected.
+        throw StateError(
+            'Section "${section.id}" lists exercise "$exerciseId" more '
+            'than once; a repeated listing is an ambiguous shape, not a '
+            'membership to silently collapse.');
       }
       final CourseExercise? exercise = curriculum.exerciseById(exerciseId);
       if (exercise == null) {
-        throw StateError(
-            'Section "${section.id}" lists absent or duplicated exercise '
+        throw StateError('Section "${section.id}" lists the absent exercise '
             '"$exerciseId".');
       }
       if (exercise.sectionId != section.id) {
-        throw StateError(
-            'Exercise "${exercise.id}" declares owner section '
+        throw StateError('Exercise "${exercise.id}" declares owner section '
             '"${exercise.sectionId}", not section "${section.id}".');
       }
       final ListeningChoiceExercise item;
@@ -152,6 +163,11 @@ class LessonSection {
             'the pilot projection does not support.');
       }
       item = exercise;
+      if (item.purpose != ContentPurpose.practice) {
+        throw StateError(
+            'Exercise "${item.id}" has purpose ${item.purpose.name}; only '
+            'practice items project into a live practice section.');
+      }
       listening.add(item);
     }
     if (listening.isEmpty) {
@@ -173,8 +189,7 @@ class LessonSection {
             'saved session identity requires it.');
       }
       if (!aliases.add(alias)) {
-        throw StateError(
-            'Legacy item ID "$alias" is declared by more than one '
+        throw StateError('Legacy item ID "$alias" is declared by more than one '
             'exercise in section "${section.id}".');
       }
     }
@@ -187,11 +202,31 @@ class LessonSection {
             '${exercise.choices.join(' / ')} but the section choices are '
             '${choices.join(' / ')}.');
       }
-      if (!exercise.choices.contains(exercise.expectedSound)) {
-        throw StateError(
-            'Exercise "${exercise.id}" expects sound '
-            '${exercise.expectedSound} outside its choices '
-            '${exercise.choices.join(' / ')}.');
+    }
+    // Supported practice-listening shape: at least two distinct nonblank
+    // labels with exactly one expected choice. Anything else is an
+    // unambiguous-key violation and must not project.
+    if (choices.any((String label) => label.trim().isEmpty)) {
+      throw StateError(
+          'Section "${section.id}" uses a blank choice label; supported '
+          'listening shapes need distinct nonblank labels.');
+    }
+    if (choices.toSet().length < 2) {
+      throw StateError(
+          'Section "${section.id}" offers ${choices.length} choice '
+          'labels but fewer than two distinct ones; supported shapes '
+          'need at least two distinct choices.');
+    }
+    for (final exercise in listening) {
+      final int expectedCount = exercise.choices
+          .where((String label) => label == exercise.expectedSound)
+          .length;
+      if (expectedCount != 1) {
+        throw StateError('Exercise "${exercise.id}" expects sound '
+            '${exercise.expectedSound}, which occurs $expectedCount '
+            'times in its choices '
+            '${exercise.choices.join(' / ')}; the expected sound must '
+            'be exactly one of the shared choices.');
       }
     }
     return LessonSection(

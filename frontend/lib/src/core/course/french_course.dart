@@ -140,7 +140,15 @@ const List<String> _frenchPilotExpectedSounds = [
 ];
 
 /// The declared coverage inventory in the approved order: u, y, i, o, ɔ̃, ɑ̃, ʁ.
-const List<String> _frenchCoverageSounds = ['u', 'y', 'i', 'o', 'ɔ̃', 'ɑ̃', 'ʁ'];
+const List<String> _frenchCoverageSounds = [
+  'u',
+  'y',
+  'i',
+  'o',
+  'ɔ̃',
+  'ɑ̃',
+  'ʁ'
+];
 
 CourseLesson _pilotLesson() => frenchLessons.firstWhere(
       (CourseLesson lesson) => lesson.id == 'en-fr-u-y',
@@ -171,7 +179,8 @@ final List<CourseSection> _frenchSections = [
     explanation: _pilotLesson().explanation,
     contentRevision: 1,
     exerciseIds: [
-      for (final String word in _frenchPilotWordIds) 'en-fr-u-y-listening-$word',
+      for (final String word in _frenchPilotWordIds)
+        'en-fr-u-y-listening-$word',
     ],
     requiredItemCount: _frenchPilotWordIds.length,
   ),
@@ -311,8 +320,7 @@ final CourseCurriculum frenchCurriculum = CourseCurriculum(
 );
 
 Map<String, List<String>> _frenchCitationPhonemes() {
-  final Map<String, List<String>> citationPhonemes =
-      <String, List<String>>{};
+  final Map<String, List<String>> citationPhonemes = <String, List<String>>{};
   for (final CourseWord word in frenchWords) {
     citationPhonemes[word.text] = List.unmodifiable(word.sounds);
   }
@@ -341,8 +349,7 @@ final Map<String, AudioResourceStatus> frenchAudioResources = Map.unmodifiable({
 
 /// Synchronous structural and readiness validation of the authored
 /// catalogue, computed before the pilot bridge projects it.
-final CourseValidationReport frenchCurriculumValidation =
-    validateCourseContent(
+final CourseValidationReport frenchCurriculumValidation = validateCourseContent(
   frenchCurriculum,
   citationPhonemes: frenchCitationPhonemes,
   exposedWordIds: frenchExposedWordIds,

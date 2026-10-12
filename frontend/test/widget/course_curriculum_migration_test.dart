@@ -16,8 +16,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:linguist/src/core/course/backend.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
 import 'package:linguist/src/core/course/course_progress.dart';
+import 'package:linguist/src/core/course/lesson_policy.dart';
 import 'package:linguist/src/core/course/lesson_section.dart';
 import 'package:linguist/src/core/course/lesson_section_session.dart';
 import 'package:linguist/src/features/course/discovery_lesson_screen.dart';
@@ -50,8 +52,7 @@ const List<String> _legacyItemIds = [
   'mur',
 ];
 
-Map<String, dynamic> _fixture() =>
-    jsonDecode(
+Map<String, dynamic> _fixture() => jsonDecode(
       File('test/fixtures/course_curriculum_legacy_sessions.json')
           .readAsStringSync(),
     ) as Map<String, dynamic>;
@@ -104,8 +105,7 @@ void _expectHistorySurvives(
   } else {
     expect(lessons, (seed['lessons'] as List).cast<String>());
   }
-  expect(doc['scores'], seed['scores'],
-      reason: 'legacy scores are preserved');
+  expect(doc['scores'], seed['scores'], reason: 'legacy scores are preserved');
   expect(doc[seed['legacyFieldKey'] as String], 'sentinel-legacy-badge',
       reason: 'the unknown legacy field survives');
   expect(doc['pending'], [seed['sentinelPending']],
@@ -136,19 +136,30 @@ void _expectLegacyCheckpoint(
   expect(entry['processedAttemptCount'], processedAttemptCount);
 }
 
-Widget _app(CourseAudio audio, CourseProgressStore store) {
+Widget _app(
+  CourseAudio audio,
+  CourseProgressStore store, {
+  bool review = false,
+  LessonPolicy? policy,
+}) {
   return ProviderScope(
     overrides: [
       courseAudioProvider.overrideWithValue(audio),
       lessonSectionStoreProvider.overrideWithValue(store),
     ],
-    child: const MaterialApp(home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y')),
+    child: MaterialApp(
+        home: DiscoveryLessonScreen(
+      lessonId: 'en-fr-u-y',
+      review: review,
+      policy: policy,
+    )),
   );
 }
 
 void main() {
   group('literal checkpoint parsing oracle (old IDs, version 1)', () {
-    test('all five checkpoints restore through the current parser with '
+    test(
+        'all five checkpoints restore through the current parser with '
         'exact expected state', () {
       final Map<String, dynamic> fixture = _fixture();
       final Map<String, dynamic> checkpoints =
@@ -242,9 +253,7 @@ void main() {
           session.toJson()['submittedThisRound'],
           exp['submitted'] == 'none'
               ? const <String>[]
-              : (exp['submitted'] == 'all'
-                  ? _legacyItemIds
-                  : const ['tout']),
+              : (exp['submitted'] == 'all' ? _legacyItemIds : const ['tout']),
         );
         expect(session.lastCorrect, exp['lastCorrect']);
         expect(session.answered, exp['answered']);
@@ -266,7 +275,8 @@ void main() {
   });
 
   group('real store and screen against the frozen old-ID seeds', () {
-    testWidgets('fresh: exact load writes nothing; answer then advances '
+    testWidgets(
+        'fresh: exact load writes nothing; answer then advances '
         'with one recording, and a reopened screen resumes', (tester) async {
       final String raw = _seedDocument('fresh');
       SharedPreferences.setMockInitialValues({_prefsKey(): raw});
@@ -302,9 +312,8 @@ void main() {
       expect(find.text('Item 2 of 10'), findsOneWidget);
       expect(prefs.getString(_prefsKey()) != null, isTrue);
       expect(
-          (_document(prefs)['evidence']
-                      ['listening:u'] as Map<String, dynamic>)
-                  ['attempts'],
+          (_document(prefs)['evidence']['listening:u']
+              as Map<String, dynamic>)['attempts'],
           1,
           reason: 'advancing does not record a second time');
       _expectLegacyCheckpoint(prefs, name: 'fresh', processedAttemptCount: 1);
@@ -317,7 +326,8 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('answered: exact load writes nothing; Next advances the '
+    testWidgets(
+        'answered: exact load writes nothing; Next advances the '
         'saved item without re-recording', (tester) async {
       final String raw = _seedDocument('answered');
       SharedPreferences.setMockInitialValues({_prefsKey(): raw});
@@ -329,7 +339,9 @@ void main() {
       expect(find.text('Item 1 of 10'), findsOneWidget);
       expect(find.text('Correct'), findsOneWidget,
           reason: 'the restored submitted answer shows its saved outcome');
-      expect(tester.widget<FilledButton>(
+      expect(
+          tester
+              .widget<FilledButton>(
                   find.widgetWithText(FilledButton, 'Next word'))
               .onPressed,
           isNotNull);
@@ -346,7 +358,8 @@ void main() {
           reason: 'the advance reuses the stored outcome, no new recording');
       expect(evidence['listening:u']['correct'], 1);
       _expectHistorySurvives(prefs, completed: false);
-      _expectLegacyCheckpoint(prefs, name: 'answered', processedAttemptCount: 1);
+      _expectLegacyCheckpoint(prefs,
+          name: 'answered', processedAttemptCount: 1);
 
       await tester.pumpWidget(const SizedBox());
       await tester.pumpWidget(_app(FakeAudio(), store));
@@ -356,7 +369,8 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('debrief: Finish completes exactly once and history '
+    testWidgets(
+        'debrief: Finish completes exactly once and history '
         'survives', (tester) async {
       final String raw = _seedDocument('debrief');
       SharedPreferences.setMockInitialValues({_prefsKey(): raw});
@@ -380,9 +394,10 @@ void main() {
           ['en-fr-vowels', 'en-fr-u-y'],
           reason: 'completion is recorded once alongside the historical '
               'lesson');
-      expect((doc['lessons'] as List)
-                  .where((Object? id) => id == 'en-fr-u-y')
-                  .length,
+      expect(
+          (doc['lessons'] as List)
+              .where((Object? id) => id == 'en-fr-u-y')
+              .length,
           1);
       final Map<String, dynamic> evidence =
           doc['evidence'] as Map<String, dynamic>;
@@ -392,13 +407,14 @@ void main() {
       expect(evidence['listening:y']['attempts'], 5);
       expect(evidence['listening:y']['correct'], 4);
       _expectHistorySurvives(prefs, completed: true);
-      _expectLegacyCheckpoint(prefs, name: 'debrief', processedAttemptCount: 10);
+      _expectLegacyCheckpoint(prefs,
+          name: 'debrief', processedAttemptCount: 10);
 
       // A second Finish must not add a second completion.
       final int completionsBefore =
           doc['lessons'].where((Object? id) => id == 'en-fr-u-y').length;
-      final FilledButton finish =
-          tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Finish section'));
+      final FilledButton finish = tester.widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Finish section'));
       if (finish.onPressed != null) {
         await tester.tap(find.text('Finish section'));
         await tester.pumpAndSettle();
@@ -411,7 +427,8 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('review: Item 1 of 1 with a closed hearing gate, then one '
+    testWidgets(
+        'review: Item 1 of 1 with a closed hearing gate, then one '
         'correction recorded once', (tester) async {
       final String raw = _seedDocument('review');
       SharedPreferences.setMockInitialValues({_prefsKey(): raw});
@@ -465,9 +482,8 @@ void main() {
       doc = _document(prefs);
       expect((doc['lessons'] as List).cast<String>(), ['en-fr-vowels'],
           reason: 'this flow continues the session, it does not complete');
-      final Map<String, dynamic> checkpoint =
-          (doc['sections']['en-fr-u-y'] as Map<String, dynamic>)['checkpoint']
-              as Map<String, dynamic>;
+      final Map<String, dynamic> checkpoint = (doc['sections']['en-fr-u-y']
+          as Map<String, dynamic>)['checkpoint'] as Map<String, dynamic>;
       expect(checkpoint['phase'], 'debrief');
       expect(checkpoint['round'], 2);
       expect(checkpoint['itemIds'], _legacyItemIds);
@@ -529,13 +545,242 @@ void main() {
       expect((doc['lessons'] as List).cast<String>(),
           ['en-fr-vowels', 'en-fr-u-y']);
       expect(
-          (doc['lessons'] as List).where((Object? id) => id == 'en-fr-u-y').length,
+          (doc['lessons'] as List)
+              .where((Object? id) => id == 'en-fr-u-y')
+              .length,
           1);
       expect(evidence['listening:u']['attempts'], 5);
       expect(evidence['listening:u']['correct'], 5);
       _expectHistorySurvives(prefs, completed: true);
-      _expectLegacyCheckpoint(
-          prefs, name: 'custom-policy', processedAttemptCount: 11);
+      _expectLegacyCheckpoint(prefs,
+          name: 'custom-policy', processedAttemptCount: 11);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets(
+        'review: debrief Finish with review=true saves the state, '
+        'never completes, and the reopened continued state persists',
+        (tester) async {
+      courseBackend = null; // Guest-only oracle: no upload can happen.
+      final String raw = _seedDocument('review');
+      SharedPreferences.setMockInitialValues({_prefsKey(): raw});
+      final FakeAudio audio = FakeAudio();
+      final CourseProgressStore store = CourseProgressStore('en-fr');
+      await tester.pumpWidget(_app(audio, store, review: true));
+      await tester.pumpAndSettle();
+
+      // The continued review state restores: round, single-mistake queue,
+      // and the closed fresh-hearing gate (no completed playback yet).
+      expect(find.textContaining('Review round 2'), findsOneWidget);
+      expect(find.textContaining('item 1 of 1'), findsOneWidget,
+          reason: 'the review queue carries only the legacy mistake');
+      expect(
+          tester
+              .widget<TextButton>(find.widgetWithText(TextButton, '/u/'))
+              .onPressed,
+          isNull,
+          reason: 'the hearing gate stays closed until a fresh playback');
+      expect(
+          tester
+              .widget<TextButton>(find.widgetWithText(TextButton, '/y/'))
+              .onPressed,
+          isNull);
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(_prefsKey()), raw,
+          reason: 'the initial load must write nothing');
+
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      expect(audio.spoken.last, 'tu',
+          reason: 'the round item keeps its legacy word');
+      await tester.tap(find.text('/y/'));
+      await tester.pumpAndSettle();
+      expect(find.text('Correct'), findsOneWidget);
+      Map<String, dynamic> evidence =
+          _document(prefs)['evidence'] as Map<String, dynamic>;
+      expect(evidence['listening:y']['attempts'], 6,
+          reason: 'the review correction records against /y/ exactly once');
+      expect(evidence['listening:y']['correct'], 5);
+      _expectHistorySurvives(prefs, completed: false);
+
+      await tester.tap(find.text('See section explanation'));
+      await tester.pumpAndSettle();
+      expect(find.text('Section debrief'), findsOneWidget);
+      expect(find.text('You got 10 of 10 correct.'), findsOneWidget);
+      expect(find.text('Passing needs 8 of 10 correct.'), findsOneWidget,
+          reason: 'the saved 80% policy is authoritative on resume');
+
+      await tester.tap(find.text('Finish section'));
+      await tester.pumpAndSettle();
+
+      final Map<String, dynamic> doc = _document(prefs);
+      expect((doc['lessons'] as List).cast<String>(), ['en-fr-vowels'],
+          reason: 'review-mode Finish saves the state but never adds a '
+              'completion');
+      expect(
+          (doc['lessons'] as List)
+              .where((Object? id) => id == 'en-fr-u-y')
+              .length,
+          0,
+          reason: 'no completion is recorded in review mode, not even once');
+      evidence = doc['evidence'] as Map<String, dynamic>;
+      expect(evidence['listening:u']['attempts'], 5,
+          reason: 'the /u/ aggregate is untouched');
+      expect(evidence['listening:u']['correct'], 5);
+      expect(evidence['listening:y']['attempts'], 6,
+          reason: 'Finishing does not record a second time');
+      expect(evidence['listening:y']['correct'], 5);
+      _expectHistorySurvives(prefs, completed: false);
+      final Map<String, dynamic> entry =
+          doc['sections']['en-fr-u-y'] as Map<String, dynamic>;
+      final Map<String, dynamic> checkpoint =
+          entry['checkpoint'] as Map<String, dynamic>;
+      expect(checkpoint['phase'], 'debrief',
+          reason: 'the debrief state is the saved checkpoint after Finish');
+      expect(checkpoint['round'], 2,
+          reason: 'the review round number persists in the state');
+      expect(checkpoint['queue'], ['tu'],
+          reason: 'the continued review queue persists in the state');
+      expect(
+          (checkpoint['policy']
+              as Map<String, dynamic>)['completionThresholdPercent'],
+          80,
+          reason: 'the saved policy survives the review Finish');
+      expect(checkpoint['itemIds'], _legacyItemIds,
+          reason: 'new saves keep the ten legacy old IDs');
+      expect(entry['processedSessionId'], 'legacy-review');
+      expect(entry['processedAttemptCount'], 11,
+          reason: 'the review correction is the only recorded attempt');
+
+      // Reopen the continued saved state: phase, round, queue and policy
+      // persist, and the load writes nothing.
+      final String afterFinish = prefs.getString(_prefsKey())!;
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(_app(FakeAudio(), store, review: true));
+      await tester.pumpAndSettle();
+      expect(find.text('Section debrief'), findsOneWidget,
+          reason: 'the reopened screen restores the saved debrief phase');
+      expect(find.text('You got 10 of 10 correct.'), findsOneWidget);
+      expect(find.text('Passing needs 8 of 10 correct.'), findsOneWidget,
+          reason: 'the saved policy and completion gate persist on resume');
+      expect(
+          tester
+              .widget<FilledButton>(
+                  find.widgetWithText(FilledButton, 'Finish section'))
+              .onPressed,
+          isNotNull,
+          reason: 'the completion gate recomputes from the persisted state');
+      expect(prefs.getString(_prefsKey()), afterFinish,
+          reason: 'reopening the continued review state writes nothing');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets(
+        'custom policy: an explicitly supplied 80% widget policy '
+        'must not override the saved 100%; review-mode Finish keeps '
+        'exactly-once and the continued state persists', (tester) async {
+      courseBackend = null; // Guest-only oracle: no upload can happen.
+      final String raw = _seedDocument('custom-policy');
+      SharedPreferences.setMockInitialValues({_prefsKey(): raw});
+      final FakeAudio audio = FakeAudio();
+      final CourseProgressStore store = CourseProgressStore('en-fr');
+      await tester.pumpWidget(_app(audio, store,
+          review: true, policy: LessonPolicy(completionThresholdPercent: 80)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Section debrief'), findsOneWidget);
+      expect(find.text('You got 9 of 10 correct.'), findsOneWidget);
+      expect(find.text('Passing needs 10 of 10 correct.'), findsOneWidget,
+          reason: 'the saved 100% policy, not the explicitly supplied 80%, '
+              'is authoritative on resume');
+      expect(
+          tester
+              .widget<FilledButton>(
+                  find.widgetWithText(FilledButton, 'Finish section'))
+              .onPressed,
+          isNull,
+          reason: '9 of 10 cannot finish under the saved 100% threshold, '
+              'even with an explicit 80% supplied');
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(_prefsKey()), raw,
+          reason: 'the initial load must write nothing');
+
+      await tester.tap(find.text('Review mistakes'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Review round 2'), findsOneWidget);
+      expect(find.textContaining('item 1 of 1'), findsOneWidget);
+      expect(
+          tester
+              .widget<TextButton>(find.widgetWithText(TextButton, '/u/'))
+              .onPressed,
+          isNull,
+          reason: 'the hearing gate is closed until a fresh playback');
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      expect(audio.spoken.last, 'tu',
+          reason: 'the corrected item is the legacy /y/ word');
+      await tester.tap(find.text('/y/'));
+      await tester.pumpAndSettle();
+      expect(find.text('Correct'), findsOneWidget);
+      Map<String, dynamic> evidence =
+          _document(prefs)['evidence'] as Map<String, dynamic>;
+      expect(evidence['listening:y']['attempts'], 6,
+          reason: 'the correction records exactly once');
+      expect(evidence['listening:y']['correct'], 5);
+
+      await tester.tap(find.text('See section explanation'));
+      await tester.pumpAndSettle();
+      expect(find.text('You got 10 of 10 correct.'), findsOneWidget);
+      expect(find.text('Passing needs 10 of 10 correct.'), findsOneWidget,
+          reason: 'the saved 100% policy kept the debrief failing at 9 of 10');
+
+      await tester.tap(find.text('Finish section'));
+      await tester.pumpAndSettle();
+
+      final Map<String, dynamic> doc = _document(prefs);
+      expect((doc['lessons'] as List).cast<String>(), ['en-fr-vowels'],
+          reason: 'review-mode Finish saves the state but never adds a '
+              'completion');
+      expect(
+          (doc['lessons'] as List)
+              .where((Object? id) => id == 'en-fr-u-y')
+              .length,
+          0);
+      evidence = doc['evidence'] as Map<String, dynamic>;
+      expect(evidence['listening:u']['attempts'], 5);
+      expect(evidence['listening:u']['correct'], 5);
+      expect(evidence['listening:y']['attempts'], 6);
+      expect(evidence['listening:y']['correct'], 5);
+      _expectHistorySurvives(prefs, completed: false);
+      final Map<String, dynamic> entry =
+          doc['sections']['en-fr-u-y'] as Map<String, dynamic>;
+      final Map<String, dynamic> checkpoint =
+          entry['checkpoint'] as Map<String, dynamic>;
+      expect(checkpoint['phase'], 'debrief');
+      expect(checkpoint['round'], 2);
+      expect(
+          (checkpoint['policy']
+              as Map<String, dynamic>)['completionThresholdPercent'],
+          100,
+          reason: 'the saved policy remains 100 after the review Finish, '
+              'never the explicitly supplied 80');
+      expect(entry['processedAttemptCount'], 11);
+      final String afterFinish = prefs.getString(_prefsKey())!;
+
+      // Reopen with the same explicit 80% supplied: the saved 100% still
+      // wins, and the continued custom state (queue/phase/policy) persists.
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(_app(FakeAudio(), store,
+          review: true, policy: LessonPolicy(completionThresholdPercent: 80)));
+      await tester.pumpAndSettle();
+      expect(find.text('Section debrief'), findsOneWidget,
+          reason: 'the reopened screen restores the saved debrief phase');
+      expect(find.text('You got 10 of 10 correct.'), findsOneWidget);
+      expect(find.text('Passing needs 10 of 10 correct.'), findsOneWidget,
+          reason: 'resume keeps the saved 100% policy over the explicit 80%');
+      expect(prefs.getString(_prefsKey()), afterFinish,
+          reason: 'reopening the continued custom policy state writes '
+              'nothing');
       await tester.pumpWidget(const SizedBox());
     });
   });

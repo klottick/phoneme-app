@@ -8,6 +8,7 @@
 library;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:linguist/src/core/course/course_content_validator.dart';
 import 'package:linguist/src/core/course/course_exercise.dart';
 import 'package:linguist/src/core/course/course_curriculum.dart';
 import 'package:linguist/src/core/course/french_course.dart';
@@ -47,6 +48,10 @@ CourseCurriculum _synthetic({
   bool twoSections = false,
   int requiredItemCount = 0,
   bool spelling = false,
+  ContentPurpose purpose = ContentPurpose.practice,
+  CourseStage stage = CourseStage.hear,
+  List<String>? nodeSectionIds,
+  List<String>? sectionExerciseIds,
 }) {
   final List<CourseExercise> exercises = spelling
       ? [
@@ -54,7 +59,7 @@ CourseCurriculum _synthetic({
             id: 'syn-spell',
             sectionId: sectionId,
             audioRefId: 'fr-word-alpha',
-            purpose: ContentPurpose.practice,
+            purpose: purpose,
             reviewState: ContentReviewState.existingCurated,
             wordId: 'alpha',
             targetSound: 'y',
@@ -71,7 +76,7 @@ CourseCurriculum _synthetic({
               id: e.id,
               sectionId: e.sectionId ?? sectionId,
               audioRefId: 'fr-word-${e.word}',
-              purpose: ContentPurpose.practice,
+              purpose: purpose,
               reviewState: ContentReviewState.existingCurated,
               wordId: e.word,
               expectedSound: e.sound,
@@ -88,9 +93,10 @@ CourseCurriculum _synthetic({
       contentRevision: revision,
       exerciseIds: spelling
           ? const ['syn-spell']
-          : [for (final e in entries) e.id],
-      requiredItemCount:
-          spelling ? 1 : (requiredItemCount == 0 ? entries.length : requiredItemCount),
+          : (sectionExerciseIds ?? [for (final e in entries) e.id]),
+      requiredItemCount: spelling
+          ? 1
+          : (requiredItemCount == 0 ? entries.length : requiredItemCount),
     ),
     if (twoSections)
       CourseSection(
@@ -109,11 +115,12 @@ CourseCurriculum _synthetic({
         id: id,
         title: title,
         kind: CourseNodeKind.lesson,
-        stage: CourseStage.hear,
+        stage: stage,
         status: ContentStatus.authored,
         optional: false,
         prerequisiteIds: const <String>[],
-        sectionIds: twoSections ? [sectionId, 'syn-second'] : [sectionId],
+        sectionIds: nodeSectionIds ??
+            (twoSections ? [sectionId, 'syn-second'] : [sectionId]),
         targetSounds: const <String>['u', 'y'],
       ),
   ];
@@ -139,16 +146,23 @@ CourseCurriculum _synthetic({
         ),
     ],
     phonemeCoverage: [
-      PhonemeCoverage(
-        sound: 'y',
-        discoveryStatus: ContentStatus.authored,
-        practiceExerciseIds: const [],
-      ),
-      PhonemeCoverage(
-        sound: 'u',
-        discoveryStatus: ContentStatus.authored,
-        practiceExerciseIds: const [],
-      ),
+      // Coverage follows the actual practice exercises so the positive
+      // baseline stays structurally valid: each teaching sound references
+      // exactly the distinct practice exercises that teach it.
+      for (final String sound in ['u', 'y'])
+        PhonemeCoverage(
+          sound: sound,
+          discoveryStatus: ContentStatus.authored,
+          practiceExerciseIds: [
+            for (final CourseExercise exercise in exercises)
+              if (exercise is ListeningChoiceExercise &&
+                  exercise.expectedSound == sound)
+                exercise.id
+              else if (exercise is SpellingChoiceExercise &&
+                  exercise.targetSound == sound)
+                exercise.id,
+          ],
+        ),
     ],
   );
 }
@@ -162,17 +176,14 @@ List<({String id, String word, String expectedSound})> _items(
         LessonSection section) =>
     [
       for (final item in section.items)
-        (
-          id: item.id,
-          word: item.word,
-          expectedSound: item.expectedSound
-        )
+        (id: item.id, word: item.word, expectedSound: item.expectedSound)
     ];
 
 void main() {
   group('fromCurriculum derives the projection from the injected catalogue',
       () {
-    test('item order, words, targets, metadata and revision come from the '
+    test(
+        'item order, words, targets, metadata and revision come from the '
         'catalogue', () {
       final LessonSection section = LessonSection.fromCurriculum(
         _validTwoItems(),
@@ -196,8 +207,7 @@ void main() {
       );
     });
 
-    test('changing the injected item order changes the projection order',
-        () {
+    test('changing the injected item order changes the projection order', () {
       final LessonSection section = LessonSection.fromCurriculum(
         _synthetic(entries: [
           _Entry(id: 'syn-alpha', word: 'alpha', sound: 'y', alias: 'old-a'),
@@ -214,9 +224,13 @@ void main() {
       );
     });
 
-    test('mutation of caller lists after construction cannot affect the '
-        'projection', () {
-      final List<ListeningChoiceExercise> list = [
+    test(
+        'the retained caller lists used to build the injected catalogue '
+        'cannot affect the projection once constructed, and the projected '
+        'item/sound lists reject mutation', () {
+      // These mutable lists are the actual caller inputs the injected
+      // catalogue is constructed from — not stand-ins built afterward.
+      final List<ListeningChoiceExercise> retainedExercises = [
         ListeningChoiceExercise(
           id: 'syn-beta',
           sectionId: 'syn-section',
@@ -240,14 +254,71 @@ void main() {
           legacyItemId: 'old-a',
         ),
       ];
-      final LessonSection section = LessonSection.fromCurriculum(
-        _synthetic(entries: [
-          _Entry(id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
-          _Entry(id: 'syn-alpha', word: 'alpha', sound: 'y', alias: 'old-a'),
-        ]),
-        lessonId: 'syn-listen',
+      final List<String> retainedSectionExerciseIds = [
+        'syn-beta',
+        'syn-alpha',
+      ];
+      final List<String> retainedNodeSectionIds = ['syn-section'];
+      final CourseSection syntheticSection = CourseSection(
+        id: 'syn-section',
+        nodeId: 'syn-listen',
+        title: 'Synthetic listen',
+        explanation: 'Synthetic section-end explanation.',
+        contentRevision: 7,
+        exerciseIds: retainedSectionExerciseIds,
+        requiredItemCount: retainedSectionExerciseIds.length,
       );
-      list.add(ListeningChoiceExercise(
+      final CourseNode syntheticNode = CourseNode(
+        id: 'syn-listen',
+        title: 'Synthetic listen',
+        kind: CourseNodeKind.lesson,
+        stage: CourseStage.hear,
+        status: ContentStatus.authored,
+        optional: false,
+        prerequisiteIds: const <String>[],
+        sectionIds: retainedNodeSectionIds,
+        targetSounds: const <String>['u', 'y'],
+      );
+      final CourseCurriculum catalogue = CourseCurriculum(
+        courseId: 'syn-course',
+        revision: 1,
+        nodes: [syntheticNode],
+        sections: [syntheticSection],
+        exercises: retainedExercises,
+        sentences: const <CourseSentence>[],
+        audioReferences: [
+          CourseAudioReference(
+            id: 'fr-word-beta',
+            kind: AudioReferenceKind.word,
+            spokenText: 'beta',
+          ),
+          CourseAudioReference(
+            id: 'fr-word-alpha',
+            kind: AudioReferenceKind.word,
+            spokenText: 'alpha',
+          ),
+        ],
+        phonemeCoverage: [
+          PhonemeCoverage(
+            sound: 'u',
+            discoveryStatus: ContentStatus.authored,
+            practiceExerciseIds: const ['syn-beta'],
+          ),
+          PhonemeCoverage(
+            sound: 'y',
+            discoveryStatus: ContentStatus.authored,
+            practiceExerciseIds: const ['syn-alpha'],
+          ),
+        ],
+      );
+      final LessonSection section =
+          LessonSection.fromCurriculum(catalogue, lessonId: 'syn-listen');
+      final List<({String id, String word, String expectedSound})> itemsBefore =
+          _items(section);
+      final List<String> soundsBefore = List.of(section.sounds);
+
+      // Mutate every retained caller list the catalogue was built from.
+      retainedExercises.add(ListeningChoiceExercise(
         id: 'syn-ghost',
         sectionId: 'syn-section',
         audioRefId: 'fr-word-ghost',
@@ -258,11 +329,82 @@ void main() {
         choices: const ['y', 'u'],
         legacyItemId: 'old-ghost',
       ));
-      list.removeAt(0);
-      expect(_items(section), [
-        (id: 'old-b', word: 'beta', expectedSound: 'u'),
-        (id: 'old-a', word: 'alpha', expectedSound: 'y'),
-      ], reason: 'the projection is detached from caller state');
+      retainedSectionExerciseIds.add('syn-ghost');
+      retainedNodeSectionIds.add('syn-second');
+      retainedExercises.removeAt(0);
+      retainedSectionExerciseIds.removeLast();
+      retainedNodeSectionIds.removeLast();
+
+      expect(_items(section), itemsBefore,
+          reason: 'the projection is detached from every retained caller '
+              'list: adding, dropping and reordering the inputs after '
+              'construction cannot change it');
+      expect(section.sounds, soundsBefore,
+          reason: 'the shared choice list is copied, not retained');
+      expect(
+          () => section.items.add(
+                const LessonSectionItem(
+                    id: 'ghost', word: 'ghost', expectedSound: 'u'),
+              ),
+          throwsA(isA<UnsupportedError>()),
+          reason: 'the projected item list rejects mutation');
+      expect(
+          () => section.sounds.add('ghost'), throwsA(isA<UnsupportedError>()),
+          reason: 'the projected sound list rejects mutation');
+      expect(section.sounds.toSet(), {'u', 'y'});
+    });
+  });
+
+  group('the positive synthetic baseline is structurally valid', () {
+    test(
+        'the generic validator accepts the injected baseline with synthetic '
+        'citation and audio inputs', () {
+      final CourseValidationReport reviewed = validateCourseContent(
+        _validTwoItems(),
+        citationPhonemes: const {
+          'beta': ['u'],
+          'alpha': ['y']
+        },
+        exposedWordIds: const {'beta', 'alpha'},
+        audioResources: const {
+          'fr-word-beta': AudioResourceStatus.reviewedRecording,
+          'fr-word-alpha': AudioResourceStatus.reviewedRecording,
+        },
+      );
+      expect(reviewed.errors, isEmpty,
+          reason: '_validTwoItems is a structurally valid injected catalogue, '
+              'not just a projection-shaped one');
+      expect(reviewed.isStructurallyValid, isTrue);
+      expect(reviewed.readinessIssues, isEmpty,
+          reason: 'reviewed recordings plus curated citations leave the '
+              'baseline fully ready');
+
+      // The French production catalogue shape (practice-TTS recordings) must
+      // stay structurally valid too, with only the honest readiness issue.
+      final CourseValidationReport practiceTts = validateCourseContent(
+        _validTwoItems(),
+        citationPhonemes: const {
+          'beta': ['u'],
+          'alpha': ['y']
+        },
+        exposedWordIds: const {'beta', 'alpha'},
+        audioResources: const {
+          'fr-word-beta': AudioResourceStatus.practiceTts,
+          'fr-word-alpha': AudioResourceStatus.practiceTts,
+        },
+      );
+      expect(practiceTts.isStructurallyValid, isTrue,
+          reason: 'declared practice-TTS resources are readiness, not '
+              'structure');
+      expect(
+          practiceTts.readinessIssues
+              .map((CourseContentDiagnostic issue) => issue.code)
+              .toSet(),
+          {'missingReviewedAudio'},
+          reason: 'word references without reviewed recordings report the '
+              'honest readiness issue');
+      expect(practiceTts.readinessIssues.length, 2,
+          reason: 'one honest issue per declared word reference');
     });
   });
 
@@ -293,10 +435,10 @@ void main() {
       );
     });
 
-    test('sectionForLesson returns the cached pilot instance and null for '
+    test(
+        'sectionForLesson returns the cached pilot instance and null for '
         'every other lesson id', () {
-      expect(identical(sectionForLesson('en-fr-u-y'), frenchUySection),
-          isTrue,
+      expect(identical(sectionForLesson('en-fr-u-y'), frenchUySection), isTrue,
           reason: 'the same cached instance is returned');
       for (final String other in [
         'en-fr-vowels',
@@ -316,8 +458,7 @@ void main() {
       expect(sectionForLesson(''), isNull);
     });
 
-    test('the production projection equals the catalogue-derived section',
-        () {
+    test('the production projection equals the catalogue-derived section', () {
       final LessonSection projected = LessonSection.fromCurriculum(
         frenchCurriculum,
         lessonId: 'en-fr-u-y',
@@ -331,8 +472,7 @@ void main() {
       // Saved identity stays legacy: words come from the existing
       // vocabulary and the item ID keeps the legacy alias.
       for (final item in projected.items) {
-        expect(frenchWords.any((word) => word.text == item.word),
-            isTrue,
+        expect(frenchWords.any((word) => word.text == item.word), isTrue,
             reason: 'projected words must be existing curated words');
         for (final word in frenchWords) {
           if (item.word == word.text && item.id != word.text) {
@@ -349,7 +489,10 @@ void main() {
           LessonSectionItem(id: 'x', word: 'x', expectedSound: 'u');
       expect(a, b);
       expect(a.hashCode, b.hashCode);
-      expect(a, isNot(const LessonSectionItem(id: 'y', word: 'y', expectedSound: 'u')));
+      expect(
+          a,
+          isNot(
+              const LessonSectionItem(id: 'y', word: 'y', expectedSound: 'u')));
     });
   });
 
@@ -359,19 +502,123 @@ void main() {
     }
 
     test('missing node', () {
-      expectUnsupported(
-          () => LessonSection.fromCurriculum(_validTwoItems(), lessonId: 'ghost'));
+      expectUnsupported(() =>
+          LessonSection.fromCurriculum(_validTwoItems(), lessonId: 'ghost'));
     });
 
     test('duplicated (ambiguous) node id', () {
-      expectUnsupported(
-          () => LessonSection.fromCurriculum(
-                _synthetic(
-                    entries: const [],
-                    nodeIds: const ['syn-listen', 'syn-listen'],
-                    requiredItemCount: 1),
-                lessonId: 'syn-listen',
-              ));
+      expectUnsupported(() => LessonSection.fromCurriculum(
+            _synthetic(
+                entries: const [],
+                nodeIds: const ['syn-listen', 'syn-listen'],
+                requiredItemCount: 1),
+            lessonId: 'syn-listen',
+          ));
+    });
+
+    test(
+        'a duplicated section listing is ambiguous and cannot silently '
+        'collapse', () {
+      // Required count equals the distinct section count, so the count check
+      // cannot hide the duplicate: only an explicit ambiguity rejection can.
+      expectUnsupported(() => LessonSection.fromCurriculum(
+            _synthetic(
+              entries: [
+                _Entry(
+                    id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
+              ],
+              nodeSectionIds: const ['syn-section', 'syn-section'],
+              requiredItemCount: 1,
+            ),
+            lessonId: 'syn-listen',
+          ));
+    });
+
+    test(
+        'a duplicated exercise listing is ambiguous and cannot silently '
+        'collapse', () {
+      // Required count equals the distinct exercise count, so the count
+      // check cannot hide the duplicate; distinctness must be rejected.
+      expectUnsupported(() => LessonSection.fromCurriculum(
+            _synthetic(
+              entries: [
+                _Entry(
+                    id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
+              ],
+              sectionExerciseIds: const ['syn-beta', 'syn-beta'],
+              requiredItemCount: 1,
+            ),
+            lessonId: 'syn-listen',
+          ));
+    });
+
+    test(
+        'an assessment-purpose item cannot project into a live practice '
+        'section', () {
+      expectUnsupported(() => LessonSection.fromCurriculum(
+            _synthetic(
+              entries: [
+                _Entry(
+                    id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
+              ],
+              purpose: ContentPurpose.assessment,
+            ),
+            lessonId: 'syn-listen',
+          ));
+    });
+
+    test(
+        'a non-hear lesson stage cannot project a practice listening '
+        'section', () {
+      expectUnsupported(() => LessonSection.fromCurriculum(
+            _synthetic(
+              entries: [
+                _Entry(
+                    id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
+              ],
+              stage: CourseStage.find,
+            ),
+            lessonId: 'syn-listen',
+          ));
+    });
+
+    test('a single choice label is not the supported unambiguous key', () {
+      expectUnsupported(() => LessonSection.fromCurriculum(
+            _synthetic(
+              entries: [
+                _Entry(
+                    id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
+              ],
+              choices: const ['u'],
+            ),
+            lessonId: 'syn-listen',
+          ));
+    });
+
+    test('a repeated expected choice is not the supported unambiguous key', () {
+      expectUnsupported(() => LessonSection.fromCurriculum(
+            _synthetic(
+              entries: [
+                _Entry(
+                    id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
+              ],
+              choices: const ['u', 'u'],
+            ),
+            lessonId: 'syn-listen',
+          ));
+    });
+
+    test('blank choice labels cannot project', () {
+      expectUnsupported(() => LessonSection.fromCurriculum(
+            _synthetic(
+              entries: [
+                _Entry(
+                    id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
+              ],
+              choices: const ['u', ' '],
+            ),
+            lessonId: 'syn-listen',
+          ));
     });
 
     test('a non-lesson node cannot project', () {
@@ -398,50 +645,54 @@ void main() {
         audioReferences: base.audioReferences,
         phonemeCoverage: base.phonemeCoverage,
       );
-      expectUnsupported(() =>
-          LessonSection.fromCurriculum(broken, lessonId: 'syn-listen'));
+      expectUnsupported(
+          () => LessonSection.fromCurriculum(broken, lessonId: 'syn-listen'));
     });
 
     test('unsupported exercise kind', () {
-      expectUnsupported(
-          () => LessonSection.fromCurriculum(
-                _synthetic(entries: const [], spelling: true),
-                lessonId: 'syn-listen',
-              ));
+      expectUnsupported(() => LessonSection.fromCurriculum(
+            _synthetic(entries: const [], spelling: true),
+            lessonId: 'syn-listen',
+          ));
     });
 
     test('exercise with the wrong owning section', () {
-      expectUnsupported(
-          () => LessonSection.fromCurriculum(
-                _synthetic(entries: [
-                  _Entry(id: 'syn-beta', word: 'beta', sound: 'u',
-                      alias: 'old-b', sectionId: 'other-section'),
-                  _Entry(
-                      id: 'syn-alpha', word: 'alpha', sound: 'y', alias: 'old-a'),
-                ]),
-                lessonId: 'syn-listen',
-              ));
+      expectUnsupported(() => LessonSection.fromCurriculum(
+            _synthetic(entries: [
+              _Entry(
+                  id: 'syn-beta',
+                  word: 'beta',
+                  sound: 'u',
+                  alias: 'old-b',
+                  sectionId: 'other-section'),
+              _Entry(
+                  id: 'syn-alpha', word: 'alpha', sound: 'y', alias: 'old-a'),
+            ]),
+            lessonId: 'syn-listen',
+          ));
     });
 
     test('a node owning two sections has no single projection', () {
-      expectUnsupported(
-          () => LessonSection.fromCurriculum(
-                _synthetic(
-                  entries: [
-                    _Entry(id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
-                    _Entry(id: 'syn-alpha', word: 'alpha', sound: 'y', alias: 'old-a'),
-                  ],
-                  twoSections: true,
-                ),
-                lessonId: 'syn-listen',
-              ));
+      expectUnsupported(() => LessonSection.fromCurriculum(
+            _synthetic(
+              entries: [
+                _Entry(
+                    id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
+                _Entry(
+                    id: 'syn-alpha', word: 'alpha', sound: 'y', alias: 'old-a'),
+              ],
+              twoSections: true,
+            ),
+            lessonId: 'syn-listen',
+          ));
     });
 
     test('required-count mismatch', () {
       expectUnsupported(() => LessonSection.fromCurriculum(
             _synthetic(
               entries: [
-                _Entry(id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
+                _Entry(
+                    id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
               ],
               requiredItemCount: 2,
             ),
@@ -450,18 +701,18 @@ void main() {
     });
 
     test('a node with no projectable records', () {
-      expectUnsupported(
-          () => LessonSection.fromCurriculum(
-                _synthetic(entries: const [], requiredItemCount: 1),
-                lessonId: 'syn-listen',
-              ));
+      expectUnsupported(() => LessonSection.fromCurriculum(
+            _synthetic(entries: const [], requiredItemCount: 1),
+            lessonId: 'syn-listen',
+          ));
     });
 
     test('missing legacy alias', () {
       expectUnsupported(() => LessonSection.fromCurriculum(
             _synthetic(entries: [
               _Entry(id: 'syn-beta', word: 'beta', sound: 'u', alias: null),
-              _Entry(id: 'syn-alpha', word: 'alpha', sound: 'y', alias: 'old-a'),
+              _Entry(
+                  id: 'syn-alpha', word: 'alpha', sound: 'y', alias: 'old-a'),
             ]),
             lessonId: 'syn-listen',
           ));
@@ -481,8 +732,12 @@ void main() {
       expectUnsupported(() => LessonSection.fromCurriculum(
             _synthetic(entries: [
               _Entry(id: 'syn-beta', word: 'beta', sound: 'u', alias: 'old-b'),
-              _Entry(id: 'syn-alpha', word: 'alpha', sound: 'y',
-                  alias: 'old-a', choices: const ['u', 'y']),
+              _Entry(
+                  id: 'syn-alpha',
+                  word: 'alpha',
+                  sound: 'y',
+                  alias: 'old-a',
+                  choices: const ['u', 'y']),
             ]),
             lessonId: 'syn-listen',
           ));
@@ -492,7 +747,8 @@ void main() {
       expectUnsupported(() => LessonSection.fromCurriculum(
             _synthetic(entries: [
               _Entry(id: 'syn-beta', word: 'beta', sound: 'o', alias: 'old-b'),
-              _Entry(id: 'syn-alpha', word: 'alpha', sound: 'y', alias: 'old-a'),
+              _Entry(
+                  id: 'syn-alpha', word: 'alpha', sound: 'y', alias: 'old-a'),
             ]),
             lessonId: 'syn-listen',
           ));

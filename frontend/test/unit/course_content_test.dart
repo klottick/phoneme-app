@@ -34,8 +34,7 @@ const List<(String, String)> _pilotWords = [
 const List<String> _coverageOrder = ['u', 'y', 'i', 'o', 'ɔ̃', 'ɑ̃', 'ʁ'];
 
 /// The frozen literal baseline fixture (provenance a500651).
-Map<String, dynamic> _fixture() =>
-    jsonDecode(
+Map<String, dynamic> _fixture() => jsonDecode(
       File('test/fixtures/course_curriculum_legacy_sessions.json')
           .readAsStringSync(),
     ) as Map<String, dynamic>;
@@ -51,7 +50,8 @@ void main() {
       expect(frenchCurriculum.revision, 1);
     });
 
-    test('exactly ten practice listening exercises with exact ids, '
+    test(
+        'exactly ten practice listening exercises with exact ids, '
         'aliases, words, targets and choices', () {
       final List<CourseExercise> exercises = frenchCurriculum.exercises;
       expect(exercises.length, 10);
@@ -123,7 +123,8 @@ void main() {
       expect(frenchCourse.title, course['title']);
     });
 
-    test('all twenty-four legacy words keep exact text, meaning, IPA, '
+    test(
+        'all twenty-four legacy words keep exact text, meaning, IPA, '
         'membership and hints in order', () {
       final List<dynamic> words = _fixture()['parity']['words'] as List;
       expect(frenchWords.length, words.length);
@@ -140,7 +141,8 @@ void main() {
       expect(wordByText('lit').contains('i'), isTrue);
     });
 
-    test('all five legacy lessons keep exact ids, titles, explanations, '
+    test(
+        'all five legacy lessons keep exact ids, titles, explanations, '
         'sounds and words in order', () {
       final List<dynamic> lessons = _fixture()['parity']['lessons'] as List;
       expect(frenchLessons.length, lessons.length);
@@ -151,15 +153,15 @@ void main() {
         expect(frenchLessons[i].explanation, lesson['explanation']);
         expect(
             frenchLessons[i].sounds, (lesson['sounds'] as List).cast<String>());
-        expect(frenchLessons[i].words, (lesson['words'] as List).cast<String>());
+        expect(
+            frenchLessons[i].words, (lesson['words'] as List).cast<String>());
       }
     });
   });
 
   group('seven-phoneme coverage statuses', () {
     test('coverage order, statuses and practice lists are exact', () {
-      final List<PhonemeCoverage> coverage =
-          frenchCurriculum.phonemeCoverage;
+      final List<PhonemeCoverage> coverage = frenchCurriculum.phonemeCoverage;
       expect([for (final c in coverage) c.sound], _coverageOrder);
       expect(
         [for (final c in coverage) c.discoveryStatus],
@@ -195,8 +197,7 @@ void main() {
       // A word containing /ʁ/ (rouge, rue, mur) never establishes an
       // authored /ʁ/ discrimination exercise.
       expect(coverage.last.sound, 'ʁ');
-      expect(
-          coverage.last.practiceExerciseIds, isEmpty,
+      expect(coverage.last.practiceExerciseIds, isEmpty,
           reason: 'a word containing /ʁ/ does not establish an authored '
               '/ʁ/ discrimination exercise');
     });
@@ -219,14 +220,14 @@ void main() {
       }
     });
 
-    test('citation phonemes, exposed word ids and audio resources match '
+    test(
+        'citation phonemes, exposed word ids and audio resources match '
         'the legacy vocabulary exactly', () {
       expect(frenchCitationPhonemes.length, frenchWords.length);
       for (final word in frenchWords) {
         expect(frenchCitationPhonemes[word.text], word.sounds);
       }
-      expect(frenchExposedWordIds,
-          {for (final word in frenchWords) word.text});
+      expect(frenchExposedWordIds, {for (final word in frenchWords) word.text});
       expect(frenchAudioResources.length, frenchWords.length);
       for (final word in frenchWords) {
         expect(
@@ -247,29 +248,31 @@ void main() {
           throwsA(isA<UnsupportedError>()));
       expect(() => frenchExposedWordIds.add('probe'),
           throwsA(isA<UnsupportedError>()));
-      expect(() => frenchAudioResources['probe-ref'] = AudioResourceStatus.missing,
+      expect(
+          () => frenchAudioResources['probe-ref'] = AudioResourceStatus.missing,
           throwsA(isA<UnsupportedError>()));
       expect(
-          () => frenchAudioResources['fr-word-tout'] = AudioResourceStatus.missing,
+          () => frenchAudioResources['fr-word-tout'] =
+              AudioResourceStatus.missing,
           throwsA(isA<UnsupportedError>()));
       // The catalogue's own collections are detached and unmodifiable as
       // well.
       final CourseCurriculum curriculum = frenchCurriculum;
-      expect(() => curriculum.nodes.add(CourseNode(
-                 id: 'ghost',
-                 title: 'ghost',
-                 kind: CourseNodeKind.lesson,
-                 stage: CourseStage.hear,
-                 status: ContentStatus.planned,
-                 optional: false,
-                 prerequisiteIds: const [],
-                 sectionIds: const [],
-                 targetSounds: const [],
-               )),
+      expect(
+          () => curriculum.nodes.add(CourseNode(
+                id: 'ghost',
+                title: 'ghost',
+                kind: CourseNodeKind.lesson,
+                stage: CourseStage.hear,
+                status: ContentStatus.planned,
+                optional: false,
+                prerequisiteIds: const [],
+                sectionIds: const [],
+                targetSounds: const [],
+              )),
           throwsA(isA<UnsupportedError>()));
       expect(
-          () =>
-              curriculum.phonemeCoverage[0].practiceExerciseIds.add('ghost'),
+          () => curriculum.phonemeCoverage[0].practiceExerciseIds.add('ghost'),
           throwsA(isA<UnsupportedError>()));
     });
   });
@@ -277,7 +280,9 @@ void main() {
   group('optional and planned graph exactly as specified', () {
     test('node array order and every node field are exact', () {
       const allSeven = ['u', 'y', 'i', 'o', 'ɔ̃', 'ɑ̃', 'ʁ'];
-      expect([for (final n in frenchCurriculum.nodes) n.id], [
+      expect([
+        for (final n in frenchCurriculum.nodes) n.id
+      ], [
         'en-fr-u-y',
         'en-fr-targeted-review',
         'en-fr-games',
@@ -316,18 +321,31 @@ void main() {
       // Planned required main nodes with the specified prerequisite chain.
       const expectedMain = [
         // (id, kind, stage, title, prerequisite)
-        ('en-fr-find-sounds', CourseStage.find, 'Find sounds in context',
-            'en-fr-u-y'),
-        ('en-fr-connect-spellings', CourseStage.spell,
-            'Connect sounds and spellings', 'en-fr-find-sounds'),
-        ('en-fr-checkpoint', CourseStage.assess, 'Check your progress',
-            'en-fr-connect-spellings'),
+        (
+          'en-fr-find-sounds',
+          CourseStage.find,
+          'Find sounds in context',
+          'en-fr-u-y'
+        ),
+        (
+          'en-fr-connect-spellings',
+          CourseStage.spell,
+          'Connect sounds and spellings',
+          'en-fr-find-sounds'
+        ),
+        (
+          'en-fr-checkpoint',
+          CourseStage.assess,
+          'Check your progress',
+          'en-fr-connect-spellings'
+        ),
       ];
       for (var i = 0; i < 3; i++) {
         final CourseNode node = nodes[4 + i];
         expect(node.id, expectedMain[i].$1);
         expect(node.title, expectedMain[i].$3);
-        expect(node.kind, i < 2 ? CourseNodeKind.lesson : CourseNodeKind.assessment);
+        expect(node.kind,
+            i < 2 ? CourseNodeKind.lesson : CourseNodeKind.assessment);
         expect(node.stage, expectedMain[i].$2);
         expect(node.status, ContentStatus.planned);
         expect(node.optional, isFalse);
@@ -346,7 +364,8 @@ void main() {
   });
 
   group('validation report for the authored catalogue', () {
-    test('no structural errors; readiness issues are exactly the '
+    test(
+        'no structural errors; readiness issues are exactly the '
         'planned slots and missing reviewed recordings', () {
       final CourseValidationReport report = frenchCurriculumValidation;
       expect(report.isStructurallyValid, isTrue,
