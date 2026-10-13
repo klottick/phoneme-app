@@ -947,8 +947,9 @@ def _check_media_url(value: object, word: str, title: object,
             f"routes are not the selected original)")
         return
     name = _file_name_key(match.group(3))
-    if name.startswith("File:"):
-        name = name[len("File:"):]  # media URLs carry the file title
+    # The uploaded object's basename does NOT carry the Commons 'File:'
+    # description-title namespace (that prefix belongs to sourceTitle);
+    # stripping it or aliasing it in is not permitted here.
     expected_name = _selected_source_name(word)
     if _file_name_key(name) != _file_name_key(expected_name):
         diagnostics.append(

@@ -78,7 +78,20 @@ def _canonical_media_url(word: str) -> str:
     name = f"LL-Q150_(fra)-LoquaxFR-{word}.wav"
     digest = hashlib.md5(name.encode("utf-8")).hexdigest()
     return ("https://upload.wikimedia.org/wikipedia/commons/"
-            + digest[0] + "/" + digest[1:3] + "/" + quote(name, safe=""))
+            + digest[0] + "/" + digest[:2] + "/" + quote(name, safe=""))
+
+
+# Independently observed canonical selected originals, extracted from the
+# current Commons description pages by the reviewer and the controller
+# (task-1-controller-fix3-findings.log; read-only page inspection, no binary
+# downloads).  These literals — not the helper's algorithm — are the oracle
+# for the positive media controls.
+CANONICAL_ORIGINALS = {
+    "tout": ("https://upload.wikimedia.org/wikipedia/commons/4/4b/"
+             "LL-Q150_%28fra%29-LoquaxFR-tout.wav"),
+    "île": ("https://upload.wikimedia.org/wikipedia/commons/c/c7/"
+            "LL-Q150_%28fra%29-LoquaxFR-%C3%AEle.wav"),
+}
 
 # The 24 selected description revisions, verbatim from the committed research
 # (docs/superpowers/research/2026-10-12-french-reference-audio-sources.md,
@@ -1088,19 +1101,35 @@ class PackageMutationTests(FixtureBase):
 
     def test_original_media_failures(self):
         with self.subTest("valid selected tout and île original-media URLs"):
-            for word in ("tout", "île"):
+            for word, literal in CANONICAL_ORIGINALS.items():
                 with self.subTest(word=word):
                     self._fresh()
+                    self.assertEqual(
+                        _canonical_media_url(word), literal,
+                        msg="helper must reproduce the independently "
+                            "observed canonical original for this word")
                     entry = self._entry(
                         self._json("provenance.json")["entries"], word)
-                    expected = _canonical_media_url(word)
                     self.assertEqual(
-                        entry["originalDownloadUrl"], expected,
-                        msg="fixture must carry the canonical original URL")
+                        entry["originalDownloadUrl"], literal,
+                        msg="fixture must carry the independently observed "
+                            "canonical original URL for this word")
                     self.assertEqual(
                         verify_french_audio.verify_package(self.root), [],
-                        msg=f"canonical original-media URL must be "
+                        msg=f"the canonical selected original must be "
                             f"accepted for {word!r}")
+        with self.subTest("File:-prefixed media basename is not the original"):
+            for word, literal in CANONICAL_ORIGINALS.items():
+                with self.subTest(word=word):
+                    self._fresh()
+                    prefix, base = literal.rsplit("/", 1)
+                    prefixed = prefix + "/File%3A" + base
+                    self.assertNotEqual(prefixed, literal)
+                    self._mutate_provenance_entry(
+                        word,
+                        lambda e: e.update(
+                            {"originalDownloadUrl": prefixed}))
+                    self._expect_failure("originalDownloadUrl", "File:")
         with self.subTest("wrong original route, correct full source filename"):
             self._fresh()
             self._mutate_provenance_entry(
