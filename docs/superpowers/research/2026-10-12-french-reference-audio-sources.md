@@ -42,8 +42,9 @@ approved reference catalogue. Pending candidates must remain separate from the
 production resource declaration; importing them cannot set `reviewedRecording`,
 clear missing-reviewed-audio readiness warnings, or enable assessment use.
 The user subsequently approved the conversational candidate-package design;
-the [written spec](../specs/2026-10-13-french-reference-audio-design.md) is now for
-review. Written-spec and implementation-plan approvals remain required before
+the [written spec](../specs/2026-10-13-french-reference-audio-design.md) was approved
+at `82ee5fd`. The [implementation plan](../plans/2026-10-13-french-reference-audio.md)
+is now for review. Implementation-plan approval remains required before
 asset import or product/test implementation. The original FR-02
 linguistic-sign-off gate is deferred explicitly, not waived or represented as met.
 

@@ -10,9 +10,9 @@ licensing due diligence, retain MIT for the app, and choose **review pending**.
 The user approved the conversational design: 24 Lingua Libre / LoquaxFR word
 candidates, untouched original WAVs, per-file rights/provenance, explicit phoneme
 mappings, technical verification and a reviewer checklist; no runtime changes.
-This document is **for written-spec review**, not yet approved for implementation.
-Asset acquisition, implementation and worker dispatch wait for written-spec
-approval followed by a reviewed implementation plan and execution-method choice.
+The user approved this written specification at commit `82ee5fd` (“I approve”).
+Asset acquisition, implementation and worker dispatch still wait for a reviewed
+implementation plan and confirmation of the preserved execution method.
 
 This is a preparatory slice of FR-02, not completion of its original reviewed-audio
 acceptance criteria. Linguistic sign-off and platform playback validation remain
@@ -251,7 +251,7 @@ silently promote pending entries or clear readiness warnings on import.
 
 ## Written-spec review gate
 
-Ask the user to review this document before invoking writing-plans. The plan
-must then be reviewed and its execution method selected before implementation.
+Written-spec review is complete. The implementation plan must now be reviewed
+and its execution method confirmed before implementation.
 Retain the existing preference for sequential local-Qwen implementers with
 controller review and independent verification, subject to that plan review.
