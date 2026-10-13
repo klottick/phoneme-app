@@ -120,8 +120,45 @@ cd frontend
 
 Expected: the verifier prints
 `PASS: 24 pending French word candidates verified (technical/metadata only)`
-and the focused test passes. Actual run results are recorded in the task
-process logs. A PASS means the package is internally consistent and meets the
+and the focused test passes.
+
+### Actual final verification (controller-observed)
+
+Observed by the controller on 2026-10-13, re-run in full after the I1/I2
+diagnostic fixes, at the committed implementation revision
+`28acb72d15cb391458bdeb768525a89609d8182f` — the committed implementation
+this guide documents (a doc-only follow-up commit does not verify itself):
+
+| Actual command | Workdir | Exit | Observed result |
+| --- | --- | --- | --- |
+| `python3 -m unittest discover -s scripts -p 'test_*.py' -v` | repository root | 0 | 52 tests pass |
+| `python3 scripts/verify_french_audio.py --repo-root .` | repository root | 0 | `PASS: 24 pending French word candidates verified (technical/metadata only)` |
+| `/home/klottick/develop/flutter/bin/flutter test --no-pub` | `frontend` | 0 | 620 tests pass |
+| `/home/klottick/develop/flutter/bin/flutter analyze --no-pub` | `frontend` | 0 | no issues |
+
+The controller also re-ran the isolated malformed-input cases (giant
+`frameCount`; 5,000-digit `oldid`) through the real CLI child process and
+the public `verify_package`: actionable ERROR diagnostics, exit 1, no
+traceback, package bytes unchanged; the intact controls pass.
+
+Same-revision source/scope checks by the controller: all 24 committed
+WAVs byte-identical to the approved staged originals (1,563,206 bytes
+total), with versions, source SHA-1, credits, licences and mapping origin
+consistent; all physical PCM frames measured without rewriting; both
+retained licence texts equal the complete official plain-text responses
+(HTTP 200) with pinned SHA-256 and size; only the 36 allowed paths
+changed — no existing runtime, `pubspec.yaml`, lockfile, root `LICENSE`,
+backend, persisted API, progress or legacy test touched; the 35 live
+readiness items and `practiceTts` are unchanged.
+
+These are **technical and source-identity checks only**: they are not
+linguistic, native-speaker or accent acceptance; not assessment
+suitability; not browser/iOS/Android device playback; not app-terms, store
+or effective-DRM distribution approval; and not a copyright warranty.
+Byte-for-byte copy fidelity and licensing review remain separate
+concerns from these automatable consistency checks.
+
+A PASS means the package is internally consistent and meets the
 technical/metadata rules — **not** that its licence assertions are true, not
 that the speech is correct, and not playback approval. Manual per-file
 evidence inspection remains an independent acceptance check.
