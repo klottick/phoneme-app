@@ -184,6 +184,40 @@ credit corrections are a documented FR-03/release handoff, not a change here.
 
 ## Acquisition, failures and offline verification
 
+### Approved recovery amendment (2026-10-13)
+
+After acquisition exposed contradictory current `mur` structured licensing data
+and a uniform four-byte RIFF-size defect, the user approved this bounded recovery:
+
+- Select LoquaxFR's **2020-01-01T18:47:44Z `mur` original**, not its 2026
+  replacement. Original upload description revision **384728988** explicitly
+  names LoquaxFR and declares `CC-BY-SA-4.0`; preserve that original wikitext grant
+  and its association with the archived binary. Historical rendered pages can
+  include current structured data and current media links; they do not freeze
+  either of those. Record the later metadata conflict rather than hiding it.
+- Its archived original URL is
+  `https://upload.wikimedia.org/wikipedia/commons/archive/7/79/20261007075226%21LL-Q150_%28fra%29-LoquaxFR-mur.wav`.
+  The archive-name prefix identifies the replacement event, not the old recording
+  timestamp. Its source/local SHA-1 is
+  `14d1b1ee2a64653d1960c72c80dfe5ed621ff0b2`; measured SHA-256 is
+  `c37f34379cce3c5245f1fe951d179f0f39c49fdf679f1cf83e4fd02e5f6a44ad`;
+  byte count is **77,554**. No other source/version substitution is authorized.
+- Retain all original bytes. The offline verifier may accept **only the exact
+  four-byte RIFF-size omission in these 24 selected, SHA-256-pinned binaries**
+  (23 staged current originals plus this old `mur`, excluding current `mur`).
+  All physical chunk bounds, complete PCM frames, format, hashes and other
+  corruption checks remain enforced. Unknown hashes cannot obtain this exception.
+  This does not turn malformed WAVs generally into valid references.
+- Document that Python's ordinary WAV sample reader omits the final four PCM
+  bytes of these originals; successful header parsing is not complete playback.
+  Full-frame measurement must inspect the physical data chunk without rewriting
+  the file. Browser/iOS/Android playback suitability remains a separate gate.
+
+The selected measured total is now **1,563,206 bytes**, 17,030 above the research
+estimate because of the approved `mur` version switch. Public signatures, schema,
+pending linguistic statuses, unchanged-production constraints, independent
+controller import review and the final integration gate remain unchanged.
+
 After implementation approval, check source evidence, acquire each selected
 original, compute measurements, author manifest/provenance/credits, then verify
 the complete package offline. Do not publish an apparently complete catalogue
