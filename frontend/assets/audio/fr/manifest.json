@@ -1,0 +1,1359 @@
+{
+  "schemaVersion": 1,
+  "catalogueStatus": "candidate",
+  "language": "fr",
+  "entries": [
+    {
+      "id": "fr-word-tout",
+      "kind": "word",
+      "spokenText": "tout",
+      "assetPath": "frontend/assets/audio/fr/words/tout.wav",
+      "sha256": "ec761ca7114be7bb7178f380ff4e937763bbf934b0bd44d7366973394d61dec4",
+      "byteLength": 66836,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 44100,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 33396,
+        "durationSeconds": 0.7572789115646259
+      },
+      "mapping": {
+        "expectedIpa": "tu",
+        "phonemes": [
+          "t",
+          "u"
+        ],
+        "teachingTargets": [
+          "u"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-tout.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-tout",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-rouge",
+      "kind": "word",
+      "spokenText": "rouge",
+      "assetPath": "frontend/assets/audio/fr/words/rouge.wav",
+      "sha256": "c4540087629c8034a58b7b4f6ca5354234c1dd492a5a8d74e0dc8bff6bf2bd40",
+      "byteLength": 88364,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 48000,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 44160,
+        "durationSeconds": 0.92
+      },
+      "mapping": {
+        "expectedIpa": "ʁuʒ",
+        "phonemes": [
+          "ʁ",
+          "u",
+          "ʒ"
+        ],
+        "teachingTargets": [
+          "u",
+          "ʁ"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-rouge.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-rouge",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-vous",
+      "kind": "word",
+      "spokenText": "vous",
+      "assetPath": "frontend/assets/audio/fr/words/vous.wav",
+      "sha256": "9027202be18f5a94dc116e887ace62385692cbbb3493a67da371427cb35d3cf4",
+      "byteLength": 41324,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 48000,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 20640,
+        "durationSeconds": 0.43
+      },
+      "mapping": {
+        "expectedIpa": "vu",
+        "phonemes": [
+          "v",
+          "u"
+        ],
+        "teachingTargets": [
+          "u"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-vous.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-vous",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-doux",
+      "kind": "word",
+      "spokenText": "doux",
+      "assetPath": "frontend/assets/audio/fr/words/doux.wav",
+      "sha256": "bf45923e17129f3d05c446062962e378840aa7e254fc908c21fdcd037b615b09",
+      "byteLength": 36972,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 48000,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 18464,
+        "durationSeconds": 0.38466666666666666
+      },
+      "mapping": {
+        "expectedIpa": "du",
+        "phonemes": [
+          "d",
+          "u"
+        ],
+        "teachingTargets": [
+          "u"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-doux.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-doux",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-loup",
+      "kind": "word",
+      "spokenText": "loup",
+      "assetPath": "frontend/assets/audio/fr/words/loup.wav",
+      "sha256": "62c67dece782ef8a4be248e10b5537db8fa51e9fc8c378a1c6784eb8d58b012e",
+      "byteLength": 63788,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 48000,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 31872,
+        "durationSeconds": 0.664
+      },
+      "mapping": {
+        "expectedIpa": "lu",
+        "phonemes": [
+          "l",
+          "u"
+        ],
+        "teachingTargets": [
+          "u"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-loup.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-loup",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-soupe",
+      "kind": "word",
+      "spokenText": "soupe",
+      "assetPath": "frontend/assets/audio/fr/words/soupe.wav",
+      "sha256": "9d850d99b78dd1c521e0512b9be8df85f798702ed8bda6bef3ea0417607ed495",
+      "byteLength": 69420,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 48000,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 34688,
+        "durationSeconds": 0.7226666666666667
+      },
+      "mapping": {
+        "expectedIpa": "sup",
+        "phonemes": [
+          "s",
+          "u",
+          "p"
+        ],
+        "teachingTargets": [
+          "u"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-soupe.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-soupe",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-tu",
+      "kind": "word",
+      "spokenText": "tu",
+      "assetPath": "frontend/assets/audio/fr/words/tu.wav",
+      "sha256": "98f6aca710d17bc74b114e81b60b7d3e8ec8504b6073dbbe441af8df3a29020c",
+      "byteLength": 66836,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 44100,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 33396,
+        "durationSeconds": 0.7572789115646259
+      },
+      "mapping": {
+        "expectedIpa": "ty",
+        "phonemes": [
+          "t",
+          "y"
+        ],
+        "teachingTargets": [
+          "y"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-tu.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-tu",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-rue",
+      "kind": "word",
+      "spokenText": "rue",
+      "assetPath": "frontend/assets/audio/fr/words/rue.wav",
+      "sha256": "be717dc3763ff96ad35852799bf77269740c2c851ac1daf696eaefbfd28ed20d",
+      "byteLength": 77554,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 44100,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 38755,
+        "durationSeconds": 0.8787981859410431
+      },
+      "mapping": {
+        "expectedIpa": "ʁy",
+        "phonemes": [
+          "ʁ",
+          "y"
+        ],
+        "teachingTargets": [
+          "y",
+          "ʁ"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-rue.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-rue",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-lune",
+      "kind": "word",
+      "spokenText": "lune",
+      "assetPath": "frontend/assets/audio/fr/words/lune.wav",
+      "sha256": "9a7ef667189672b5ba2acb11dcb3b98449b958c0a535c85799309a225970e437",
+      "byteLength": 85746,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 44100,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 42851,
+        "durationSeconds": 0.9716780045351474
+      },
+      "mapping": {
+        "expectedIpa": "lyn",
+        "phonemes": [
+          "l",
+          "y",
+          "n"
+        ],
+        "teachingTargets": [
+          "y"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-lune.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-lune",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-jus",
+      "kind": "word",
+      "spokenText": "jus",
+      "assetPath": "frontend/assets/audio/fr/words/jus.wav",
+      "sha256": "27737f36cb89b05b59431bbf54426881e8f8e1cf786e54c551743cf9ed7a53df",
+      "byteLength": 75028,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 44100,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 37492,
+        "durationSeconds": 0.8501587301587301
+      },
+      "mapping": {
+        "expectedIpa": "ʒy",
+        "phonemes": [
+          "ʒ",
+          "y"
+        ],
+        "teachingTargets": [
+          "y"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-jus.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-jus",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-mur",
+      "kind": "word",
+      "spokenText": "mur",
+      "assetPath": "frontend/assets/audio/fr/words/mur.wav",
+      "sha256": "c37f34379cce3c5245f1fe951d179f0f39c49fdf679f1cf83e4fd02e5f6a44ad",
+      "byteLength": 77554,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 44100,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 38755,
+        "durationSeconds": 0.8787981859410431
+      },
+      "mapping": {
+        "expectedIpa": "myʁ",
+        "phonemes": [
+          "m",
+          "y",
+          "ʁ"
+        ],
+        "teachingTargets": [
+          "y",
+          "ʁ"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-mur.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-mur",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-plume",
+      "kind": "word",
+      "spokenText": "plume",
+      "assetPath": "frontend/assets/audio/fr/words/plume.wav",
+      "sha256": "767018eff1b9ec0e48546d71865e99d9d70670e94a5440d8314d16884aad1208",
+      "byteLength": 60524,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 48000,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 30240,
+        "durationSeconds": 0.63
+      },
+      "mapping": {
+        "expectedIpa": "plym",
+        "phonemes": [
+          "p",
+          "l",
+          "y",
+          "m"
+        ],
+        "teachingTargets": [
+          "y"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-plume.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-plume",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-lit",
+      "kind": "word",
+      "spokenText": "lit",
+      "assetPath": "frontend/assets/audio/fr/words/lit.wav",
+      "sha256": "41698332638a8540c2790a03dbbbfea871469a0d44b1dbe08825225fc918ab59",
+      "byteLength": 67884,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 48000,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 33920,
+        "durationSeconds": 0.7066666666666667
+      },
+      "mapping": {
+        "expectedIpa": "li",
+        "phonemes": [
+          "l",
+          "i"
+        ],
+        "teachingTargets": [
+          "i"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-lit.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-lit",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-si",
+      "kind": "word",
+      "spokenText": "si",
+      "assetPath": "frontend/assets/audio/fr/words/si.wav",
+      "sha256": "d9c5aff5fb44aed16963c68d1c7ebe49450c9e08c422f6affac76ca4c7870d7e",
+      "byteLength": 75028,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 44100,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 37492,
+        "durationSeconds": 0.8501587301587301
+      },
+      "mapping": {
+        "expectedIpa": "si",
+        "phonemes": [
+          "s",
+          "i"
+        ],
+        "teachingTargets": [
+          "i"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-si.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-si",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-vite",
+      "kind": "word",
+      "spokenText": "vite",
+      "assetPath": "frontend/assets/audio/fr/words/vite.wav",
+      "sha256": "5ae742cf467e17d6a5d183b1dd4b0b5a468df7e841b04486d9fe31de92216816",
+      "byteLength": 42092,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 48000,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 21024,
+        "durationSeconds": 0.438
+      },
+      "mapping": {
+        "expectedIpa": "vit",
+        "phonemes": [
+          "v",
+          "i",
+          "t"
+        ],
+        "teachingTargets": [
+          "i"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-vite.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-vite",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-île",
+      "kind": "word",
+      "spokenText": "île",
+      "assetPath": "frontend/assets/audio/fr/words/île.wav",
+      "sha256": "a7fed2bb2440a9980111cfe5c739e0abf722fc91b8de35be936d271f46f7f15a",
+      "byteLength": 69362,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 44100,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 34659,
+        "durationSeconds": 0.7859183673469388
+      },
+      "mapping": {
+        "expectedIpa": "il",
+        "phonemes": [
+          "i",
+          "l"
+        ],
+        "teachingTargets": [
+          "i"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-île.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-île",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-beau",
+      "kind": "word",
+      "spokenText": "beau",
+      "assetPath": "frontend/assets/audio/fr/words/beau.wav",
+      "sha256": "689c67d84da86eb932fed8e82c690951c44eda2c854962a943818b10a6cd2e21",
+      "byteLength": 57196,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 48000,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 28576,
+        "durationSeconds": 0.5953333333333334
+      },
+      "mapping": {
+        "expectedIpa": "bo",
+        "phonemes": [
+          "b",
+          "o"
+        ],
+        "teachingTargets": [
+          "o"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-beau.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-beau",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-mot",
+      "kind": "word",
+      "spokenText": "mot",
+      "assetPath": "frontend/assets/audio/fr/words/mot.wav",
+      "sha256": "a478bb690e724b5bd98dbc9bbea80270231f78ebad08b523b11daddc02b36398",
+      "byteLength": 77554,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 44100,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 38755,
+        "durationSeconds": 0.8787981859410431
+      },
+      "mapping": {
+        "expectedIpa": "mo",
+        "phonemes": [
+          "m",
+          "o"
+        ],
+        "teachingTargets": [
+          "o"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-mot.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-mot",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-eau",
+      "kind": "word",
+      "spokenText": "eau",
+      "assetPath": "frontend/assets/audio/fr/words/eau.wav",
+      "sha256": "7dfa03f4114a25322a881915a99ea2f0695727b045358e76396cba6373595f27",
+      "byteLength": 59948,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 48000,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 29952,
+        "durationSeconds": 0.624
+      },
+      "mapping": {
+        "expectedIpa": "o",
+        "phonemes": [
+          "o"
+        ],
+        "teachingTargets": [
+          "o"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-eau.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-eau",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-dos",
+      "kind": "word",
+      "spokenText": "dos",
+      "assetPath": "frontend/assets/audio/fr/words/dos.wav",
+      "sha256": "e50683ee0d1de5e1c78cae14d9d7c7a8e61961ec2a2996a73a172c6df58e2d4c",
+      "byteLength": 75028,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 44100,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 37492,
+        "durationSeconds": 0.8501587301587301
+      },
+      "mapping": {
+        "expectedIpa": "do",
+        "phonemes": [
+          "d",
+          "o"
+        ],
+        "teachingTargets": [
+          "o"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-dos.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-dos",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-bon",
+      "kind": "word",
+      "spokenText": "bon",
+      "assetPath": "frontend/assets/audio/fr/words/bon.wav",
+      "sha256": "1f369b90c51e1696371ac3b9e59af96986b4e0bef4a531c19723c7c682d86aff",
+      "byteLength": 54892,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 48000,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 27424,
+        "durationSeconds": 0.5713333333333334
+      },
+      "mapping": {
+        "expectedIpa": "bɔ̃",
+        "phonemes": [
+          "b",
+          "ɔ̃"
+        ],
+        "teachingTargets": [
+          "ɔ̃"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-bon.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-bon",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-nom",
+      "kind": "word",
+      "spokenText": "nom",
+      "assetPath": "frontend/assets/audio/fr/words/nom.wav",
+      "sha256": "a24dad922927a67621cc6a7feeeae6d0b047b2447e32922fd8e609a3d3ef60b1",
+      "byteLength": 55596,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 48000,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 27776,
+        "durationSeconds": 0.5786666666666667
+      },
+      "mapping": {
+        "expectedIpa": "nɔ̃",
+        "phonemes": [
+          "n",
+          "ɔ̃"
+        ],
+        "teachingTargets": [
+          "ɔ̃"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-nom.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-nom",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-banc",
+      "kind": "word",
+      "spokenText": "banc",
+      "assetPath": "frontend/assets/audio/fr/words/banc.wav",
+      "sha256": "cac71e6ba32e78358fab63b5ee28d3ec467816395c1550aa8bf2117caf62d74f",
+      "byteLength": 48748,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 48000,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 24352,
+        "durationSeconds": 0.5073333333333333
+      },
+      "mapping": {
+        "expectedIpa": "bɑ̃",
+        "phonemes": [
+          "b",
+          "ɑ̃"
+        ],
+        "teachingTargets": [
+          "ɑ̃"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-SA-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-banc.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ]
+      },
+      "provenanceId": "prov-fr-word-banc",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    },
+    {
+      "id": "fr-word-sans",
+      "kind": "word",
+      "spokenText": "sans",
+      "assetPath": "frontend/assets/audio/fr/words/sans.wav",
+      "sha256": "a053ac40269632413fd4d3fc288dc988febe07b06c137d9d848b889e1e795c24",
+      "byteLength": 69932,
+      "audio": {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": 48000,
+        "channels": 1,
+        "bitsPerSample": 16,
+        "frameCount": 34944,
+        "durationSeconds": 0.728
+      },
+      "mapping": {
+        "expectedIpa": "sɑ̃",
+        "phonemes": [
+          "s",
+          "ɑ̃"
+        ],
+        "teachingTargets": [
+          "ɑ̃"
+        ],
+        "origin": {
+          "path": "frontend/lib/src/core/course/french_course.dart",
+          "symbol": "frenchWords",
+          "revision": "cb0f9689497ba0e124a1dcc02d9d174a3a1d7afb",
+          "status": "existingCuratedNotRecordingReviewed"
+        }
+      },
+      "speaker": {
+        "sourceName": "LoquaxFR",
+        "qualificationStatus": "unverified",
+        "accent": null
+      },
+      "license": {
+        "spdxId": "CC-BY-4.0",
+        "url": "https://creativecommons.org/licenses/by/4.0/",
+        "textPath": "frontend/assets/audio/fr/licenses/CC-BY-4.0.txt",
+        "attribution": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-sans.wav', via Wikimedia Commons (CC BY 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use."
+        ]
+      },
+      "provenanceId": "prov-fr-word-sans",
+      "changes": [],
+      "review": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedAt": null,
+        "evidence": []
+      }
+    }
+  ]
+}
