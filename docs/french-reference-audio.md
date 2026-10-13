@@ -19,10 +19,17 @@ review by a qualified French reviewer against the **hashed binaries**.
   (the approved 2020 original of `mur` carries the uploader's explicit
   `{{cc-by-sa-4.0}}` grant — see the `mur` provenance note below).
 - The complete official legal texts of both licences are retained in this
-  package under `frontend/assets/audio/fr/licenses/` (`CC-BY-SA-4.0.txt`,
-  `CC-BY-4.0.txt`), obtained from the official Creative Commons legal-code
-  pages (retrieval records and extraction validation are archived with the
-  task evidence).
+  package under `frontend/assets/audio/fr/licenses/`, as byte-for-byte copies
+  of the official plain-text legal codes published by Creative Commons:
+  - `CC-BY-SA-4.0.txt` — complete official text from
+    [https://creativecommons.org/licenses/by-sa/4.0/legalcode.txt](https://creativecommons.org/licenses/by-sa/4.0/legalcode.txt)
+  - `CC-BY-4.0.txt` — complete official text from
+    [https://creativecommons.org/licenses/by/4.0/legalcode.txt](https://creativecommons.org/licenses/by/4.0/legalcode.txt)
+  The controller's archived raw responses and retrieval metadata are the
+  comparison authorities (before/after byte, size, SHA-256, title, opening,
+  closing and clause-structure checks recorded in the task report). These
+  replace an earlier draft's incomplete transformed extraction; retaining the
+  official texts is documentation, not a legal warranty or rights clearance.
 - Every entry keeps `review.status: "pending"`, `reviewer: null`,
   `reviewedAt: null`, `evidence: []`, `speaker.qualificationStatus:
   "unverified"`, `speaker.accent: null`, `changes: []`.
