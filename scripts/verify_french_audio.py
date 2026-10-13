@@ -6,6 +6,14 @@ never performs network activity. A PASS result is technical/metadata
 validation only - it is not linguistic sign-off or rights clearance. The
 live Dart catalogue mapping is checked by a separate independent oracle and
 is deliberately not parsed here.
+
+The approved FR-02 recovery amendment (2026-10-13) adds exactly two bounded
+acceptances, pinned to immutable verifier-side literals (never to package
+metadata): the exact four-byte RIFF-size underdeclaration in the 24
+selected, measured SHA-256-pinned binaries, and the single approved
+historical ``mur`` archive association. Nothing here generalises either:
+unknown hashes obtain no exception, malformed containers are not otherwise
+validated, and correctly framed PCM continues to pass unconditionally.
 """
 
 from __future__ import annotations
@@ -48,6 +56,91 @@ ORIGIN_SYMBOL = "frenchWords"
 ORIGIN_STATUS = "existingCuratedNotRecordingReviewed"
 REVIEW_STATUS = "pending"
 TEACHING_INVENTORY = ("u", "y", "i", "o", "ɔ̃", "ɑ̃", "ʁ")
+
+# ---------------------------------------------------------------------------
+# Approved FR-02 recovery amendment (2026-10-13): bounded byte-level pinning
+# ---------------------------------------------------------------------------
+
+# All 24 selected binaries (the 23 current originals plus the approved 2020
+# `mur` original; the 2026 `mur` replacement is NOT among these) arrived with
+# their RIFF size field exactly four bytes underdeclared: the field holds
+# fileLength - 12 instead of fileLength - 8, while the physical chunks are
+# complete through EOF. This immutable verifier-side allowlist keys the
+# measured SHA-256 to (word, byteLength). It is constant data in this module;
+# package metadata cannot add, remove or reassign a pin. A nonstandard size
+# is accepted ONLY when both the measured hash and byte length match here and
+# the field is exactly fileLength - 12 - never for arbitrary files, and it
+# does not make malformed WAVs generally valid.
+RIFF_ABBREV_SIZE_ALLOWLIST: dict[str, tuple[str, int]] = {
+    "ec761ca7114be7bb7178f380ff4e937763bbf934b0bd44d7366973394d61dec4":
+        ("tout", 66836),
+    "c4540087629c8034a58b7b4f6ca5354234c1dd492a5a8d74e0dc8bff6bf2bd40":
+        ("rouge", 88364),
+    "9027202be18f5a94dc116e887ace62385692cbbb3493a67da371427cb35d3cf4":
+        ("vous", 41324),
+    "bf45923e17129f3d05c446062962e378840aa7e254fc908c21fdcd037b615b09":
+        ("doux", 36972),
+    "62c67dece782ef8a4be248e10b5537db8fa51e9fc8c378a1c6784eb8d58b012e":
+        ("loup", 63788),
+    "9d850d99b78dd1c521e0512b9be8df85f798702ed8bda6bef3ea0417607ed495":
+        ("soupe", 69420),
+    "98f6aca710d17bc74b114e81b60b7d3e8ec8504b6073dbbe441af8df3a29020c":
+        ("tu", 66836),
+    "be717dc3763ff96ad35852799bf77269740c2c851ac1daf696eaefbfd28ed20d":
+        ("rue", 77554),
+    "9a7ef667189672b5ba2acb11dcb3b98449b958c0a535c85799309a225970e437":
+        ("lune", 85746),
+    "27737f36cb89b05b59431bbf54426881e8f8e1cf786e54c551743cf9ed7a53df":
+        ("jus", 75028),
+    # `mur`: the approved 2020 original (description revision 384728988),
+    # not the 2026 replacement that now sits at the current URL.
+    "c37f34379cce3c5245f1fe951d179f0f39c49fdf679f1cf83e4fd02e5f6a44ad":
+        ("mur", 77554),
+    "767018eff1b9ec0e48546d71865e99d9d70670e94a5440d8314d16884aad1208":
+        ("plume", 60524),
+    "41698332638a8540c2790a03dbbbfea871469a0d44b1dbe08825225fc918ab59":
+        ("lit", 67884),
+    "d9c5aff5fb44aed16963c68d1c7ebe49450c9e08c422f6affac76ca4c7870d7e":
+        ("si", 75028),
+    "5ae742cf467e17d6a5d183b1dd4b0b5a468df7e841b04486d9fe31de92216816":
+        ("vite", 42092),
+    "a7fed2bb2440a9980111cfe5c739e0abf722fc91b8de35be936d271f46f7f15a":
+        ("île", 69362),
+    "689c67d84da86eb932fed8e82c690951c44eda2c854962a943818b10a6cd2e21":
+        ("beau", 57196),
+    "a478bb690e724b5bd98dbc9bbea80270231f78ebad08b523b11daddc02b36398":
+        ("mot", 77554),
+    "7dfa03f4114a25322a881915a99ea2f0695727b045358e76396cba6373595f27":
+        ("eau", 59948),
+    "e50683ee0d1de5e1c78cae14d9d7c7a8e61961ec2a2996a73a172c6df58e2d4c":
+        ("dos", 75028),
+    "1f369b90c51e1696371ac3b9e59af96986b4e0bef4a531c19723c7c682d86aff":
+        ("bon", 54892),
+    "a24dad922927a67621cc6a7feeeae6d0b047b2447e32922fd8e609a3d3ef60b1":
+        ("nom", 55596),
+    "cac71e6ba32e78358fab63b5ee28d3ec467816395c1550aa8bf2117caf62d74f":
+        ("banc", 48748),
+    "a053ac40269632413fd4d3fc288dc988febe07b06c137d9d848b889e1e795c24":
+        ("sans", 69932),
+}
+
+# The single approved historical `mur` archive association. The archive-name
+# prefix (20261007075226) identifies the replacement event, NOT the original
+# recording timestamp; the archive URL is paired exclusively with the
+# original upload revision, the archived bytes' sourceSHA1/fullSHA256 and the
+# original timestamp. No other word/prefix/name/revision/date/hash pairing
+# may use this route.
+MUR_ARCHIVE_WORD = "mur"
+MUR_ARCHIVE_MEDIA_URL = (
+    "https://upload.wikimedia.org/wikipedia/commons/archive/7/79/"
+    "20261007075226%21LL-Q150_%28fra%29-LoquaxFR-mur.wav")
+MUR_ARCHIVE_MEDIA_PATH = (
+    "/wikipedia/commons/archive/7/79/"
+    "20261007075226!LL-Q150_(fra)-LoquaxFR-mur.wav")
+MUR_ARCHIVE_REVISION_ID = 384728988
+MUR_ARCHIVE_SHA1 = "14d1b1ee2a64653d1960c72c80dfe5ed621ff0b2"
+MUR_ARCHIVE_SHA256 = "c37f34379cce3c5245f1fe951d179f0f39c49fdf679f1cf83e4fd02e5f6a44ad"
+MUR_ARCHIVE_MEDIA_TIMESTAMP = "2020-01-01T18:47:44Z"
 
 MANIFEST_FIELDS = ("schemaVersion", "catalogueStatus", "language", "entries")
 ENTRY_FIELDS = (
@@ -306,11 +399,17 @@ def _parse_fmt(chunk: bytes) -> tuple[int, int, int, int, int]:
 
 
 def _parse_riff_container(raw: bytes) -> tuple[int, int, int, bytes]:
-    """Validate RIFF/WAVE bounds and return (rate, channels, bits, data).
+    """Validate RIFF/WAVE bounds; return (rate, channels, bits, data).
 
     Legitimate extra chunks (e.g. LIST metadata) and chunk-alignment padding
     inside the declared container are allowed; incomplete chunks, padding
     beyond the declared container, or non-PCM formats raise ValueError.
+
+    ``abbreviated`` is true only for the approved recovery-amendment case:
+    the measured SHA-256/byteLength is exactly one of the pinned selected
+    binaries AND the RIFF size field is exactly fileLength - 12 (four bytes
+    underdeclared). Chunks are still walked to the physical end of the bytes;
+    the shortfall is cross-checked against the stdlib reader in measure_wav.
     """
     if len(raw) < 12:
         raise ValueError("file is too small to be a RIFF container")
@@ -319,19 +418,28 @@ def _parse_riff_container(raw: bytes) -> tuple[int, int, int, bytes]:
     if raw[8:12] != b"WAVE":
         raise ValueError("missing WAVE form type (not a WAV file)")
     container_size = struct.unpack_from("<I", raw, 4)[0]
+    abbreviated = False
     if container_size != len(raw) - 8:
-        raise ValueError(
-            f"RIFF size {container_size} does not cover the whole file "
-            f"({len(raw) - 8} bytes present)")
+        pin = RIFF_ABBREV_SIZE_ALLOWLIST.get(hashlib.sha256(raw).hexdigest())
+        if (
+                pin is None
+                or container_size != len(raw) - 12
+                or pin[1] != len(raw)):
+            raise ValueError(
+                f"RIFF size {container_size} does not cover the whole file "
+                f"({len(raw) - 8} bytes present)")
+        abbreviated = True
     end = len(raw)
     pos = 12
     fmt_payload = None
     data_payload = None
+    last_chunk_id: bytes | None = None
     while pos < end:
         if pos + 8 > end:
             raise ValueError("truncated RIFF chunk header")
         chunk_id = raw[pos:pos + 4]
         size = struct.unpack_from("<I", raw, pos + 4)[0]
+        last_chunk_id = chunk_id
         body_start = pos + 8
         if body_start + size > end:
             raise ValueError(
@@ -360,6 +468,14 @@ def _parse_riff_container(raw: bytes) -> tuple[int, int, int, bytes]:
         raise ValueError("missing fmt chunk")
     if data_payload is None:
         raise ValueError("missing data chunk")
+    if abbreviated and last_chunk_id is not None and last_chunk_id != b"data":
+        # The approved exception describes the selected originals only:
+        # fmt + one complete data chunk reaching the end of the bytes.
+        # A trailing metadata chunk (or any other final chunk) is not that
+        # layout, and the shortfall is never shifted into it.
+        raise ValueError(
+            "the approved RIFF size exception covers only files whose "
+            "single complete data chunk reaches the end of the bytes")
     rate, channels, bits, _, block_align = _parse_fmt(fmt_payload)
     if block_align == 0:
         raise ValueError("zero sample width")
@@ -384,6 +500,10 @@ def measure_wav(path: Path) -> dict[str, str | int | float]:
     # Cross-check against the stdlib parser. It rejects some layouts (e.g.
     # a data chunk before the fmt chunk) by raising wave.Error; normalize
     # that known parser exception to this function's ValueError contract.
+    # The frameCount above is the FULL physical frame count; for the pinned
+    # four-byte underdeclared originals the stdlib reader omits only the
+    # final four PCM bytes when asked for samples, which is a disclosure,
+    # not a validation input.
     try:
         with wave.open(io.BytesIO(raw), "rb") as handle:
             header = (handle.getframerate(), handle.getnchannels(),
@@ -759,6 +879,12 @@ def _check_manifest_entry(index: int, word: str, entry: object,
                     f"{label}: assetPath {asset_path!r} is unreadable "
                     f"({exc.strerror or exc})")
             else:
+                digest = hashlib.sha256(wav_bytes).hexdigest()
+                pin = RIFF_ABBREV_SIZE_ALLOWLIST.get(digest)
+                if pin is not None and pin[0] != word:
+                    diagnostics.append(
+                        f"{label}: the file is the approved RIFF size "
+                        f"exception binary for {pin[0]!r}, not {word!r}")
                 if "sha256" in entry:
                     declared = entry["sha256"]
                     if not (_is_string(declared) and
@@ -766,11 +892,10 @@ def _check_manifest_entry(index: int, word: str, entry: object,
                         diagnostics.append(
                             f"{label}: sha256 is {declared!r}; it must be 64 "
                             f"lowercase hex characters")
-                    elif declared != hashlib.sha256(wav_bytes).hexdigest():
+                    elif declared != digest:
                         diagnostics.append(
                             f"{label}: sha256 is {declared!r}; the file "
-                            f"measures "
-                            f"{hashlib.sha256(wav_bytes).hexdigest()!r}")
+                            f"measures {digest!r}")
                 if "byteLength" in entry:
                     declared = entry["byteLength"]
                     if not _check_positive_int(
@@ -966,6 +1091,71 @@ def _check_media_url(value: object, word: str, title: object,
                     f"the sourceTitle filename {title_name!r}")
 
 
+def _normalizes_to_mur_archive_url(value: object) -> bool:
+    """True only for the selected approved historical ``mur`` archive URL.
+
+    The canonical percent-encoding (including the ``%21`` archive separator)
+    and a plain ``!`` are equivalent; any other prefix, filename, host, or
+    query/fragment is not this association and falls back to the generic
+    original-media rules.
+    """
+    if not _is_string(value):
+        return False
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return False
+    if parts.scheme != "https" or \
+            (parts.hostname or "").lower() != MEDIA_HOST:
+        return False
+    if parts.query or parts.fragment:
+        return False
+    return unquote(parts.path) == MUR_ARCHIVE_MEDIA_PATH
+
+
+def _check_mur_archive_association(prov: object, manifest_entry: object,
+                                   label: str,
+                                   diagnostics: list[str]) -> None:
+    """Enforce the pairing of the unique approved ``mur`` archive selection.
+
+    The archive URL may appear ONLY for word ``mur`` (the caller's gate) and
+    only when the whole association is pinned to the amended spec: the
+    original upload revision, the archived bytes' sourceSHA1 and full
+    SHA-256 manifest/provenance pairs, and the original recording timestamp
+    (the archive-name prefix is a replacement event, never a timestamp).
+    Each mismatch is reported on its own field.
+    """
+    if not isinstance(prov, dict):
+        diagnostics.append(f"{label} must be an object")
+        return
+    revision_id = prov.get("descriptionRevisionId")
+    if not _is_int(revision_id) or revision_id != MUR_ARCHIVE_REVISION_ID:
+        diagnostics.append(
+            f"{label}.descriptionRevisionId is {revision_id!r}; the mur "
+            f"archive association requires {MUR_ARCHIVE_REVISION_ID} "
+            f"(the original upload of the archived bytes)")
+    declared_sha1 = prov.get("sourceSha1")
+    if declared_sha1 != MUR_ARCHIVE_SHA1:
+        diagnostics.append(
+            f"{label}.sourceSha1 is {declared_sha1!r}; the mur archive "
+            f"association requires {MUR_ARCHIVE_SHA1!r}")
+    for doc, doc_label in (
+            (prov, f"{label}.sha256"),
+            (manifest_entry, "manifest.json sha256")):
+        declared = doc.get("sha256") if isinstance(doc, dict) else None
+        if declared != MUR_ARCHIVE_SHA256:
+            diagnostics.append(
+                f"{doc_label} is {declared!r}; the mur archive association "
+                f"requires {MUR_ARCHIVE_SHA256!r}")
+    timestamp = prov.get("mediaTimestamp")
+    if timestamp != MUR_ARCHIVE_MEDIA_TIMESTAMP:
+        diagnostics.append(
+            f"{label}.mediaTimestamp is {timestamp!r}; the mur archive "
+            f"association requires {MUR_ARCHIVE_MEDIA_TIMESTAMP!r} (the "
+            f"archive-name prefix identifies the replacement event, not the "
+            f"original recording)")
+
+
 def _check_license_evidence(evidence: object, word: object, label: str,
                             manifest_license: object,
                             diagnostics: list[str]) -> None:
@@ -1057,9 +1247,25 @@ def _check_provenance_entry(index: int, word: str, prov: object,
         _check_utc_iso(prov["retrievedAt"], f"{label}.retrievedAt",
                        diagnostics)
     if "originalDownloadUrl" in prov:
-        _check_media_url(
-            prov["originalDownloadUrl"], word, prov.get("sourceTitle"),
-            f"{label}.originalDownloadUrl", diagnostics)
+        url_value = prov["originalDownloadUrl"]
+        if word == MUR_ARCHIVE_WORD and _normalizes_to_mur_archive_url(url_value):
+            # The one approved archive route: keep enforcing the generic
+            # fields (title, revision URL, ...) and add the exact pairing.
+            _check_mur_archive_association(
+                prov, manifest, f"{label}.originalDownloadUrl", diagnostics)
+        else:
+            _check_media_url(
+                url_value, word, prov.get("sourceTitle"),
+                f"{label}.originalDownloadUrl", diagnostics)
+            revision_id = prov.get("descriptionRevisionId")
+            if (word == MUR_ARCHIVE_WORD and _is_int(revision_id) and
+                    revision_id == MUR_ARCHIVE_REVISION_ID):
+                diagnostics.append(
+                    f"{label}.originalDownloadUrl is {url_value!r}; the "
+                    f"selected 2020 `mur` original (revision "
+                    f"{MUR_ARCHIVE_REVISION_ID}) requires the approved "
+                    f"archive URL {MUR_ARCHIVE_MEDIA_URL!r} - the current "
+                    f"URL now serves the replacement binary")
     if "mediaTimestamp" in prov:
         _check_utc_iso(prov["mediaTimestamp"], f"{label}.mediaTimestamp",
                        diagnostics)

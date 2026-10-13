@@ -8,6 +8,7 @@ sign-off or rights clearance.
 """
 
 import contextlib
+import copy
 import hashlib
 import io
 import json
@@ -18,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 from unittest import mock
 from urllib.parse import quote, urlencode
@@ -1327,6 +1329,399 @@ class PackageMutationTests(FixtureBase):
         self.assertEqual(audio["frameCount"], 80)
         self.assertEqual(audio["durationSeconds"], 0.01)
         self.assertEqual(verify_french_audio.verify_package(self.root), [])
+
+
+# ---------------------------------------------------------------------------
+# Approved FR-02 recovery amendment (2026-10-13): bounded byte-level
+# acceptance.  Two new acceptance rules, pinned to explicit immutable
+# literals copied from the amended spec and the recovery brief (NOT derived
+# from the implementation, and NOT learned from package metadata):
+#
+#   1. the exact four-byte RIFF-size underdeclaration in the 24 selected,
+#      SHA-256-pinned binaries (23 current originals + the 2020 `mur`
+#      original; the 2026 `mur` replacement is excluded);
+#   2. the single approved historical `mur` archive association (archive URL
+#      + revision 384728988 + sourceSHA1 + fullSHA256 + the original
+#      2020-01-01T18:47:44Z timestamp), everything else rejected.
+# ---------------------------------------------------------------------------
+
+# Measured SHA-256 -> (word, byteLength), exactly as the recovery brief's
+# table of approved pins (recomputed from inspected staged bytes).
+APPROVED_RIFF_PINS = {
+    "ec761ca7114be7bb7178f380ff4e937763bbf934b0bd44d7366973394d61dec4": ("tout", 66836),
+    "c4540087629c8034a58b7b4f6ca5354234c1dd492a5a8d74e0dc8bff6bf2bd40": ("rouge", 88364),
+    "9027202be18f5a94dc116e887ace62385692cbbb3493a67da371427cb35d3cf4": ("vous", 41324),
+    "bf45923e17129f3d05c446062962e378840aa7e254fc908c21fdcd037b615b09": ("doux", 36972),
+    "62c67dece782ef8a4be248e10b5537db8fa51e9fc8c378a1c6784eb8d58b012e": ("loup", 63788),
+    "9d850d99b78dd1c521e0512b9be8df85f798702ed8bda6bef3ea0417607ed495": ("soupe", 69420),
+    "98f6aca710d17bc74b114e81b60b7d3e8ec8504b6073dbbe441af8df3a29020c": ("tu", 66836),
+    "be717dc3763ff96ad35852799bf77269740c2c851ac1daf696eaefbfd28ed20d": ("rue", 77554),
+    "9a7ef667189672b5ba2acb11dcb3b98449b958c0a535c85799309a225970e437": ("lune", 85746),
+    "27737f36cb89b05b59431bbf54426881e8f8e1cf786e54c551743cf9ed7a53df": ("jus", 75028),
+    "c37f34379cce3c5245f1fe951d179f0f39c49fdf679f1cf83e4fd02e5f6a44ad": ("mur", 77554),
+    "767018eff1b9ec0e48546d71865e99d9d70670e94a5440d8314d16884aad1208": ("plume", 60524),
+    "41698332638a8540c2790a03dbbbfea871469a0d44b1dbe08825225fc918ab59": ("lit", 67884),
+    "d9c5aff5fb44aed16963c68d1c7ebe49450c9e08c422f6affac76ca4c7870d7e": ("si", 75028),
+    "5ae742cf467e17d6a5d183b1dd4b0b5a468df7e841b04486d9fe31de92216816": ("vite", 42092),
+    "a7fed2bb2440a9980111cfe5c739e0abf722fc91b8de35be936d271f46f7f15a": ("île", 69362),
+    "689c67d84da86eb932fed8e82c690951c44eda2c854962a943818b10a6cd2e21": ("beau", 57196),
+    "a478bb690e724b5bd98dbc9bbea80270231f78ebad08b523b11daddc02b36398": ("mot", 77554),
+    "7dfa03f4114a25322a881915a99ea2f0695727b045358e76396cba6373595f27": ("eau", 59948),
+    "e50683ee0d1de5e1c78cae14d9d7c7a8e61961ec2a2996a73a172c6df58e2d4c": ("dos", 75028),
+    "1f369b90c51e1696371ac3b9e59af96986b4e0bef4a531c19723c7c682d86aff": ("bon", 54892),
+    "a24dad922927a67621cc6a7feeeae6d0b047b2447e32922fd8e609a3d3ef60b1": ("nom", 55596),
+    "cac71e6ba32e78358fab63b5ee28d3ec467816395c1550aa8bf2117caf62d74f": ("banc", 48748),
+    "a053ac40269632413fd4d3fc288dc988febe07b06c137d9d848b889e1e795c24": ("sans", 69932),
+}
+# The 2026 `mur` replacement original (the excluded one) carries a different
+# hash; equality of the whole set is what proves it holds no exception.
+
+MUR_ARCHIVE = {
+    # Archived original media URL (the `!` archive separator stays
+    # percent-encoded in the canonical spelling).
+    "url": ("https://upload.wikimedia.org/wikipedia/commons/archive/7/79/"
+            "20261007075226%21LL-Q150_%28fra%29-LoquaxFR-mur.wav"),
+    "revisionId": 384728988,
+    "revisionUrl": ("https://commons.wikimedia.org/w/index.php?"
+                    "title=File:LL-Q150_(fra)-LoquaxFR-mur.wav&oldid=384728988"),
+    "sourceSha1": "14d1b1ee2a64653d1960c72c80dfe5ed621ff0b2",
+    "sha256": "c37f34379cce3c5245f1fe951d179f0f39c49fdf679f1cf83e4fd02e5f6a44ad",
+    # The original recording timestamp — the archive-name prefix is the
+    # replacement event, NOT a timestamp.
+    "mediaTimestamp": "2020-01-01T18:47:44Z",
+    "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-mur.wav",
+}
+
+
+class RiffAbbreviationRecoveryTests(FixtureBase):
+    """The approved four-byte RIFF-size exception, pinned by measured hash.
+
+    The synthetic fixtures here are unmistakable test PCM; the module's
+    allowlist is test-only overridden with the fixture's own measured
+    SHA-256/byteLength to exercise the parser branch.  Real-byte acceptance
+    is evidenced separately by the manual staged-file integration probe.
+    """
+
+    def _abbrev_wav(self, frames=80, size_delta=-4, tail=b"") -> bytes:
+        """Fixture PCM WAV; `size_delta` offsets the RIFF size field from the
+        normal fileLength-8 (the approved defect is exactly -4)."""
+        payload = b"\x01\x02" * frames
+        fmt = struct.pack("<HHIIHH", 1, 1, 8000, 16000, 2, 16)
+        body = (b"fmt " + struct.pack("<I", len(fmt)) + fmt) + \
+            (b"data" + struct.pack("<I", len(payload)) + payload) + tail
+        return b"RIFF" + struct.pack("<I", len(body) + 4 + size_delta) + \
+            b"WAVE" + body
+
+    def _pin(self, data: bytes, word: str) -> None:
+        """Test-only override: pin the exception to the fixture's own bytes."""
+        patcher = mock.patch.object(
+            verify_french_audio, "RIFF_ABBREV_SIZE_ALLOWLIST",
+            {hashlib.sha256(data).hexdigest(): (word, len(data))})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_allowlist_pins_match_approved_table(self):
+        # The 24 literal pins, copied from the recovery brief's requirement
+        # table, are the sole authority — equality of the whole set also
+        # proves the 2026 `mur` replacement (any other hash) is excluded.
+        self.assertEqual(
+            verify_french_audio.RIFF_ABBREV_SIZE_ALLOWLIST,
+            dict(APPROVED_RIFF_PINS),
+            "the allowlist must be exactly the 24 approved pins, nothing more")
+        self.assertEqual(len(verify_french_audio.RIFF_ABBREV_SIZE_ALLOWLIST), 24)
+        self.assertEqual(
+            verify_french_audio.RIFF_ABBREV_SIZE_ALLOWLIST[
+                "c37f34379cce3c5245f1fe951d179f0f39c49fdf679f1cf83e4fd02e5f6a44ad"],
+            ("mur", 77554),
+            "the mur pin must be the approved 2020 original")
+
+    def test_measured_pins_cover_all_words(self):
+        self.assertEqual(
+            sorted(pin[0] for pin in
+                   verify_french_audio.RIFF_ABBREV_SIZE_ALLOWLIST.values()),
+            sorted(WORDS),
+            "each of the 24 words maps to exactly one pinned hash")
+
+    def test_approved_defect_measures_full_physical_frames(self):
+        # stdlib would read 78 frames (four PCM bytes short); the verifier
+        # must measure all 80 physical frames without touching the bytes.
+        data = self._abbrev_wav(frames=80)
+        self._pin(data, "tout")
+        wav = self._asset() / "words" / "tout.wav"
+        wav.write_bytes(data)
+        self._mutate_entry(
+            "tout",
+            lambda e: e.update(
+                {"sha256": hashlib.sha256(data).hexdigest(),
+                 "byteLength": len(data)}))
+        self._mutate_provenance_entry(
+            "tout",
+            lambda e: e.update(
+                {"sha256": hashlib.sha256(data).hexdigest(),
+                 "sourceSha1": hashlib.sha1(data, usedforsecurity=False).hexdigest()}))
+        before = wav.read_bytes()
+        audio = verify_french_audio.measure_wav(wav)
+        self.assertEqual(audio, {
+            "container": "wav", "encoding": "pcm", "sampleRateHz": 8000,
+            "channels": 1, "bitsPerSample": 16, "frameCount": 80,
+            "durationSeconds": 0.01,
+        }, "measurement must cover the full physical data chunk")
+        # Disclosure check (version-dependent, not the acceptance rule): the
+        # stdlib sample reader may see all 160 bytes or the approved
+        # four-byte omission (156), but never more; the authoritative frame
+        # count above is the full physical one either way.
+        with wave.open(io.BytesIO(data), "rb") as handle:
+            read_len = len(handle.readframes(handle.getnframes()))
+        self.assertIn(read_len, (156, 160),
+                      "stdlib must read no more than the declared data")
+        self.assertEqual(
+            verify_french_audio.verify_package(self.root), [],
+            "the approved, pinned defect must pass verification")
+        self.assertEqual(
+            wav.read_bytes(), before, "verification must not rewrite the file")
+
+    def test_unapproved_same_defect_rejected(self):
+        # Identical four-byte defect, different (unpinned) bytes: no blessing.
+        approved = self._abbrev_wav(frames=80)
+        other = self._abbrev_wav(frames=64)
+        self.assertNotEqual(
+            hashlib.sha256(approved).hexdigest(),
+            hashlib.sha256(other).hexdigest())
+        self._pin(approved, "tout")
+        wav = self._asset() / "words" / "tout.wav"
+        wav.write_bytes(other)
+        with self.assertRaisesRegex(ValueError, r"RIFF size"):
+            verify_french_audio.measure_wav(wav)
+        self._expect_failure("RIFF size", "does not cover the whole file")
+
+    def test_wrong_offset_defect_not_blessed(self):
+        # A two-byte underdeclaration (fileLength-10) must be rejected even
+        # though its own hash is pinned: only the exact fileLength-12 field.
+        data = self._abbrev_wav(frames=80, size_delta=-2)
+        self._pin(data, "tout")
+        wav = self._asset() / "words" / "tout.wav"
+        wav.write_bytes(data)
+        with self.assertRaisesRegex(ValueError, r"RIFF size"):
+            verify_french_audio.measure_wav(wav)
+
+    def test_data_not_final_chunk_not_blessed(self):
+        # The exception requires ONE complete data chunk reaching EOF; a
+        # trailing LIST chunk is not that layout and must not be blessed.
+        tail = b"LIST" + struct.pack("<I", 8) + b"ABCDABCD"
+        data = self._abbrev_wav(frames=80, size_delta=-4, tail=tail)
+        self._pin(data, "tout")
+        wav = self._asset() / "words" / "tout.wav"
+        wav.write_bytes(data)
+        with self.assertRaisesRegex(
+                ValueError, "single complete data chunk"):
+            verify_french_audio.measure_wav(wav)
+
+    def test_trailing_extra_bytes_not_blessed(self):
+        # Eight stray bytes beyond the declared container: reject even when
+        # the hash-pinned table is overridden for these exact bytes.
+        data = self._abbrev_wav(frames=80, size_delta=0) + b"\x00" * 8
+        self._pin(data, "tout")
+        wav = self._asset() / "words" / "tout.wav"
+        wav.write_bytes(data)
+        with self.assertRaisesRegex(ValueError, r"RIFF size"):
+            verify_french_audio.measure_wav(wav)
+
+    def test_wrong_word_pin_rejected(self):
+        # The pin belongs to `tout`; listing those exact bytes under `rouge`
+        # is a word-identity mismatch the verifier must name.
+        data = self._abbrev_wav(frames=80)
+        self._pin(data, "tout")
+        self._fresh()
+        (self._asset() / "words" / "rouge.wav").write_bytes(data)
+        self._mutate_entry(
+            "rouge",
+            lambda e: e.update(
+                {"sha256": hashlib.sha256(data).hexdigest(),
+                 "byteLength": len(data)}))
+        self._expect_failure(
+            "approved RIFF size exception binary", "'tout'", "'rouge'")
+
+
+class MurArchiveAssociationTests(FixtureBase):
+    """The single approved historical `mur` archive association."""
+
+    def _apply_correct_association(self) -> None:
+        manifest = self._json("manifest.json")
+        m_entry = self._entry(manifest["entries"], "mur")
+        m_entry["sha256"] = MUR_ARCHIVE["sha256"]
+        self._write_json("manifest.json", manifest)
+
+        def pair(prov):
+            prov["originalDownloadUrl"] = MUR_ARCHIVE["url"]
+            prov["descriptionRevisionId"] = MUR_ARCHIVE["revisionId"]
+            prov["descriptionRevisionUrl"] = MUR_ARCHIVE["revisionUrl"]
+            prov["sourceSha1"] = MUR_ARCHIVE["sourceSha1"]
+            prov["mediaTimestamp"] = MUR_ARCHIVE["mediaTimestamp"]
+            prov["sha256"] = MUR_ARCHIVE["sha256"]
+        self._mutate_provenance_entry("mur", pair)
+
+    def test_approved_mur_archive_literals(self):
+        self.assertEqual(
+            verify_french_audio.MUR_ARCHIVE_MEDIA_URL, MUR_ARCHIVE["url"])
+        self.assertEqual(
+            verify_french_audio.MUR_ARCHIVE_MEDIA_PATH,
+            "/wikipedia/commons/archive/7/79/"
+            "20261007075226!LL-Q150_(fra)-LoquaxFR-mur.wav")
+        self.assertEqual(
+            verify_french_audio.MUR_ARCHIVE_REVISION_ID,
+            MUR_ARCHIVE["revisionId"])
+        self.assertEqual(
+            verify_french_audio.MUR_ARCHIVE_SHA1, MUR_ARCHIVE["sourceSha1"])
+        self.assertEqual(
+            verify_french_audio.MUR_ARCHIVE_SHA256, MUR_ARCHIVE["sha256"])
+        self.assertEqual(
+            verify_french_audio.MUR_ARCHIVE_MEDIA_TIMESTAMP,
+            MUR_ARCHIVE["mediaTimestamp"])
+
+    def test_correct_association_accepted(self):
+        self._apply_correct_association()
+        prov = self._entry(
+            self._json("provenance.json")["entries"], "mur")
+        manifest_entry = self._entry(
+            self._json("manifest.json")["entries"], "mur")
+        diagnostics: list[str] = []
+        verify_french_audio._check_mur_archive_association(
+            prov, manifest_entry, "provenance.json entries[mur]", diagnostics)
+        self.assertEqual(diagnostics, [])
+
+    def test_single_field_breaks_rejected(self):
+        self._apply_correct_association()
+        prov = self._entry(
+            self._json("provenance.json")["entries"], "mur")
+        manifest_entry = self._entry(
+            self._json("manifest.json")["entries"], "mur")
+        cases = [
+            ("wrong revision",
+             {"descriptionRevisionId": 1284027183}, None,
+             ("descriptionRevisionId", "384728988")),
+            ("null revision",
+             {"descriptionRevisionId": None}, None,
+             ("descriptionRevisionId", "384728988")),
+            ("wrong sha1",
+             {"sourceSha1": "0" * 40}, None,
+             ("sourceSha1", MUR_ARCHIVE["sourceSha1"][0:16])),
+            ("missing sha1",
+             {"sourceSha1": None}, None,
+             ("sourceSha1", MUR_ARCHIVE["sourceSha1"][0:16])),
+            ("wrong prov sha256",
+             {"sha256": "f" * 64}, None,
+             ("sha256", MUR_ARCHIVE["sha256"][0:16])),
+            ("wrong manifest sha256",
+             None, {"sha256": "f" * 64},
+             ("sha256", MUR_ARCHIVE["sha256"][0:16])),
+            ("wrong timestamp",
+             {"mediaTimestamp": "2026-01-15T09:30:00Z"}, None,
+             ("mediaTimestamp", "2020-01-01T18:47:44Z")),
+            ("timestamp swapped for the archive prefix date",
+             {"mediaTimestamp": "2026-10-07T07:52:26Z"}, None,
+             ("mediaTimestamp", "2020-01-01T18:47:44Z")),
+        ]
+        for name, prov_patch, manifest_patch, tokens in cases:
+            with self.subTest(name=name):
+                broken = copy.deepcopy(prov)
+                if prov_patch is not None:
+                    broken.update(prov_patch)
+                broken_manifest = copy.deepcopy(manifest_entry)
+                if manifest_patch is not None:
+                    broken_manifest.update(manifest_patch)
+                diagnostics = []
+                verify_french_audio._check_mur_archive_association(
+                    broken, broken_manifest, "provenance.json entries[mur]",
+                    diagnostics)
+                self.assertTrue(diagnostics)
+                joined = "\n".join(diagnostics)
+                for token in tokens:
+                    self.assertIn(token, joined)
+
+    def test_correct_association_not_route_rejected(self):
+        # Through the full verifier: the archive URL must be accepted for
+        # `mur` in the paired state.  The synthetic fixture bytes still fail
+        # the hash/byteLength measurements (expected — the fixture is not the
+        # real binary), but no association-pairing diagnostic may appear.
+        self._apply_correct_association()
+        diagnostics = verify_french_audio.verify_package(self.root)
+        self.assertTrue(
+            diagnostics, "the synthetic fixture must still fail byte checks")
+        joined = "\n".join(diagnostics)
+        self.assertNotIn("mur archive association", joined)
+        self.assertNotIn("originalDownloadUrl", joined)
+        self.assertNotIn("2020-01-01T18:47:44Z", joined)
+
+    def test_wrong_word_association_rejected(self):
+        self._mutate_provenance_entry(
+            "tout",
+            lambda e: e.update({"originalDownloadUrl": MUR_ARCHIVE["url"]}))
+        self._expect_failure("originalDownloadUrl")
+
+    def test_wrong_prefix_rejected(self):
+        wrong = MUR_ARCHIVE["url"].replace(
+            "20261007075226%21", "20200101000000%21")
+        self.assertNotEqual(wrong, MUR_ARCHIVE["url"])
+        self._mutate_provenance_entry(
+            "mur", lambda e: e.update({"originalDownloadUrl": wrong}))
+        self._expect_failure("originalDownloadUrl")
+
+    def test_wrong_title_rejected(self):
+        wrong = MUR_ARCHIVE["url"].replace(
+            "LoquaxFR-mur.wav", "LoquaxFR-sans.wav")
+        self._mutate_provenance_entry(
+            "mur", lambda e: e.update({"originalDownloadUrl": wrong}))
+        self._expect_failure("originalDownloadUrl")
+
+    def test_wrong_revision_link_rejected(self):
+        self._apply_correct_association()
+        revision_id, revision_url = SELECTED_REVISIONS["mur"]  # 2026 rev
+        self.assertEqual(revision_id, 1284027183)
+        self._mutate_provenance_entry(
+            "mur",
+            lambda e: e.update(
+                {"descriptionRevisionId": revision_id,
+                 "descriptionRevisionUrl": revision_url}))
+        self._expect_failure(
+            "descriptionRevisionId", "384728988")
+
+    def test_wrong_timestamp_rejected(self):
+        self._apply_correct_association()
+        self._mutate_provenance_entry(
+            "mur",
+            lambda e: e.update(
+                {"mediaTimestamp": "2026-01-15T09:30:00Z"}))
+        self._expect_failure("mediaTimestamp", "2020-01-01T18:47:44Z")
+
+    def test_wrong_sha1_rejected(self):
+        self._apply_correct_association()
+        self._mutate_provenance_entry(
+            "mur", lambda e: e.update({"sourceSha1": "0" * 40}))
+        self._expect_failure(
+            "sourceSha1", MUR_ARCHIVE["sourceSha1"])
+
+    def test_wrong_sha256_rejected(self):
+        self._apply_correct_association()
+        manifest = self._json("manifest.json")
+        self._entry(manifest["entries"], "mur")["sha256"] = "f" * 64
+        self._write_json("manifest.json", manifest)
+        self._mutate_provenance_entry(
+            "mur", lambda e: e.update({"sha256": "f" * 64}))
+        self._expect_failure("sha256", MUR_ARCHIVE["sha256"])
+
+    def test_selected_revision_requires_archive_url(self):
+        # The 2020 original upload revision cannot be paired with the current
+        # redirect (which now serves the replacement binary).
+        self._mutate_provenance_entry(
+            "mur",
+            lambda e: e.update(
+                {"descriptionRevisionId": MUR_ARCHIVE["revisionId"],
+                 "descriptionRevisionUrl": MUR_ARCHIVE["revisionUrl"]}))
+        self.assertEqual(
+            self._entry(self._json("provenance.json")["entries"], "mur")[
+                "originalDownloadUrl"],
+            _canonical_media_url("mur"))
+        self._expect_failure("originalDownloadUrl", "archive")
 
 
 if __name__ == "__main__":
