@@ -20,6 +20,7 @@ import struct
 import sys
 import wave
 from datetime import datetime
+from fractions import Fraction
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -81,6 +82,10 @@ PASS_MESSAGE = (
     "(technical/metadata only)."
 )
 
+# Sentinel distinguishing "file unparsable/unreadable" from a successfully
+# parsed JSON root that is not an object (null, list, or scalar).
+_PARSE_FAILED = object()
+
 
 def _required_spdx(word: str) -> str:
     """Spec: 23 words are CC BY-SA 4.0; `sans` is CC BY 4.0."""
@@ -104,26 +109,31 @@ def _strict_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return dict(pairs)
 
 
-def _parse_json_file(path: Path, diagnostics: list[str]) -> object | None:
-    """Parse UTF-8 JSON strictly (duplicate keys, NaN/Infinity, bad UTF-8)."""
+def _parse_json_file(path: Path, diagnostics: list[str]) -> object:
+    """Parse UTF-8 JSON strictly (duplicate keys, NaN/Infinity, bad UTF-8).
+
+    Returns the parsed value (which may be a non-object JSON value such as
+    null, a list or a number), or ``_PARSE_FAILED`` when the file could not
+    be read or parsed (a diagnostic is appended in that case).
+    """
     try:
         text = path.read_bytes().decode("utf-8")
     except FileNotFoundError:
         diagnostics.append(f"{path}: missing file")
-        return None
+        return _PARSE_FAILED
     except UnicodeDecodeError as exc:
         diagnostics.append(f"{path}: invalid UTF-8 ({exc.reason})")
-        return None
+        return _PARSE_FAILED
     except OSError as exc:
         diagnostics.append(f"{path}: unreadable ({exc.strerror or exc})")
-        return None
+        return _PARSE_FAILED
     try:
         return json.loads(
             text, object_pairs_hook=_strict_object,
             parse_constant=_reject_constant)
     except ValueError as exc:
         diagnostics.append(f"{path}: invalid JSON ({exc})")
-        return None
+        return _PARSE_FAILED
 
 
 def _is_int(value: object) -> bool:
@@ -155,9 +165,11 @@ def _check_positive_int(value: object, label: str, diagnostics: list[str]) -> bo
 
 def _check_duration_value(value: object, label: str,
                           diagnostics: list[str]) -> bool:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or \
-            not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         diagnostics.append(f"{label} is {value!r}; it must be a finite number")
+        return False
+    if isinstance(value, float) and not math.isfinite(value):
+        diagnostics.append(f"{label} is {value!r}; it must be finite")
         return False
     if value <= 0:
         diagnostics.append(f"{label} is {value!r}; it must be positive")
@@ -335,8 +347,15 @@ def _parse_riff_container(raw: bytes) -> tuple[int, int, int, bytes]:
             data_payload = raw[body_start:body_start + size]
         # Other chunks (LIST, INFO, ...) are permitted; bounds already checked.
         pos = body_start + size
-        if size & 1 and pos < end:
-            pos += 1  # chunk-alignment padding, inside the container
+        if size & 1:
+            # RIFF framing requires a pad byte after odd-sized chunks; it
+            # must exist inside the declared container, even as the last
+            # byte right before the file ends.
+            if pos >= end:
+                raise ValueError(
+                    f"missing required RIFF padding byte after odd-sized "
+                    f"chunk {chunk_id.decode('latin-1')!r}")
+            pos += 1
     if fmt_payload is None:
         raise ValueError("missing fmt chunk")
     if data_payload is None:
@@ -362,13 +381,20 @@ def measure_wav(path: Path) -> dict[str, str | int | float]:
     if sample_bytes <= 0 or len(data) % sample_bytes:
         raise ValueError("data length is not a whole number of frames")
     frames = len(data) // sample_bytes
-    # Cross-check against the stdlib parser, which rejects unknown formats.
-    with wave.open(io.BytesIO(raw), "rb") as handle:
-        if (handle.getframerate(), handle.getnchannels(),
-                handle.getsampwidth() * 8) != (rate, channels, bits):
-            raise ValueError("fmt chunk disagrees with the WAVE header")
-        if handle.getnframes() != frames:
-            raise ValueError("data length disagrees with the frame count")
+    # Cross-check against the stdlib parser. It rejects some layouts (e.g.
+    # a data chunk before the fmt chunk) by raising wave.Error; normalize
+    # that known parser exception to this function's ValueError contract.
+    try:
+        with wave.open(io.BytesIO(raw), "rb") as handle:
+            header = (handle.getframerate(), handle.getnchannels(),
+                      handle.getsampwidth() * 8)
+            nframes = handle.getnframes()
+    except wave.Error as exc:
+        raise ValueError(f"unusable WAVE header: {exc}") from exc
+    if header != (rate, channels, bits):
+        raise ValueError("fmt chunk disagrees with the WAVE header")
+    if nframes != frames:
+        raise ValueError("data length disagrees with the frame count")
     if frames <= 0:
         raise ValueError("WAV contains no audio frames")
     return {
@@ -420,15 +446,23 @@ def _check_audio_object(audio: object, label: str,
                 audio["durationSeconds"], f"{label}.durationSeconds",
                 diagnostics):
         duration_ok = False
-    if integral and duration_ok:
-        rate, frames = audio.get("sampleRateHz"), audio.get("frameCount")
-        if _is_int(rate) and rate > 0 and _is_int(frames) and frames > 0 and \
-                isinstance(audio["durationSeconds"], (int, float)) and \
-                not isinstance(audio["durationSeconds"], bool):
+    if integral and duration_ok and \
+            "durationSeconds" in audio and "sampleRateHz" in audio and \
+            "frameCount" in audio:
+        rate, frames = audio["sampleRateHz"], audio["frameCount"]
+        if _is_int(rate) and rate > 0 and _is_int(frames) and frames > 0:
             expected = frames / rate
-            if abs(audio["durationSeconds"] - expected) > 1e-06:
+            duration = audio["durationSeconds"]
+            if _is_int(duration):
+                # Exact rational comparison so arbitrarily large integers
+                # neither overflow nor silently compare equal.
+                bad = abs(Fraction(duration) - Fraction(frames) / rate) > \
+                    Fraction(1, 1_000_000)
+            else:
+                bad = abs(duration - expected) > 1e-06
+            if bad:
                 diagnostics.append(
-                    f"{label}.durationSeconds is {audio['durationSeconds']!r}; "
+                    f"{label}.durationSeconds is {duration!r}; "
                     f"it must equal frameCount/sampleRateHz ({expected!r}) "
                     f"within 1 microsecond")
     return ok
@@ -440,9 +474,31 @@ def _check_audio_against_measurement(audio: object, measured: dict,
     if not isinstance(audio, dict):
         return
     for field, expected in measured.items():
-        if field in audio and audio[field] != expected:
+        if field not in audio:
+            continue
+        value = audio[field]
+        if field == "durationSeconds":
+            # The spec allows the same 1-microsecond absolute tolerance
+            # here; integers and strings (all other fields) stay exact.
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                diagnostics.append(
+                    f"{label}.durationSeconds is {value!r}; the file "
+                    f"measures {expected!r}")
+                continue
+            if isinstance(value, int):
+                bad = abs(Fraction(value) - Fraction(
+                    int(measured["frameCount"]),
+                    measured["sampleRateHz"])) > Fraction(1, 1_000_000)
+            else:
+                bad = abs(value - expected) > 1e-06
+            if bad:
+                diagnostics.append(
+                    f"{label}.durationSeconds is {value!r}; the file "
+                    f"measures {expected!r} (allowed difference is "
+                    f"1 microsecond)")
+        elif value != expected:
             diagnostics.append(
-                f"{label}.{field} is {audio[field]!r}, "
+                f"{label}.{field} is {value!r}, "
                 f"but the file measures {expected!r}")
 
 
@@ -550,19 +606,14 @@ def _check_license(license_obj: object, word: str, root: Path,
         return
     _check_fields(license_obj, LICENSE_FIELDS, label, diagnostics)
     required = _required_spdx(word)
-    spdx = license_obj.get("spdxId")
-    if _is_string(spdx) and spdx != required:
+    if "spdxId" in license_obj and license_obj["spdxId"] != required:
         diagnostics.append(
-            f"{label}.spdxId is {spdx!r}; word {word!r} requires {required!r}")
-    if "url" in license_obj:
-        url = license_obj["url"]
-        if _is_string(spdx) and spdx in LICENSE_URLS:
-            expected = LICENSE_URLS[spdx]
-            if url != expected:
-                diagnostics.append(
-                    f"{label}.url is {url!r}; {spdx} requires {expected!r}")
-        elif not _is_string(url) or not url:
-            diagnostics.append(f"{label}.url must be a nonempty URL")
+            f"{label}.spdxId is {license_obj['spdxId']!r}; word {word!r} "
+            f"requires {required!r}")
+    if "url" in license_obj and license_obj["url"] != LICENSE_URLS[required]:
+        diagnostics.append(
+            f"{label}.url is {license_obj['url']!r}; word {word!r} requires "
+            f"{LICENSE_URLS[required]!r}")
     if "attribution" in license_obj:
         _check_nonempty_string(
             license_obj["attribution"], f"{label}.attribution", diagnostics)
@@ -578,19 +629,17 @@ def _check_license(license_obj: object, word: str, root: Path,
 def _check_license_text(value: object, word: str, root: Path,
                         asset_dir: Path, label: str,
                         diagnostics: list[str]) -> None:
-    target = _safe_relative(value, asset_dir, label, diagnostics)
+    target = _safe_relative(value, root, label, diagnostics)
     if target is None:
         return
+    licenses_dir = asset_dir / LICENSES_DIR
+    licenses_display = "/".join(ASSET_DIR) + "/" + LICENSES_DIR
     try:
-        relative_parts = target.relative_to(asset_dir).parts
+        target.relative_to(licenses_dir)
     except ValueError:
         diagnostics.append(
-            f"{label} {value!r} must stay under the asset directory")
-        return
-    if not relative_parts or relative_parts[0] != LICENSES_DIR:
-        diagnostics.append(
-            f"{label} {value!r} must resolve to a licence text under the "
-            f"package '{LICENSES_DIR}/' directory")
+            f"{label} {value!r} must resolve to a licence text under "
+            f"'{licenses_display}/' relative to the repository root")
         return
     if not _check_file_chain(root, target, label, _is_string(value) and value or "",
                              diagnostics):
@@ -634,6 +683,7 @@ def _check_review(review: object, label: str,
 def _check_manifest_entry(index: int, word: str, entry: object,
                           root: Path, asset_dir: Path,
                           seen_ids: set[str], seen_paths: set[str],
+                          seen_prov_refs: set[str],
                           listed_wavs: set[Path],
                           diagnostics: list[str]) -> bytes | None:
     label = f"entries[{index}] (word {word!r})"
@@ -663,8 +713,16 @@ def _check_manifest_entry(index: int, word: str, entry: object,
                 f"{label}: spokenText is {spoken!r}; it must be exactly "
                 f"{word!r}")
     if "provenanceId" in entry:
-        _check_nonempty_string(
-            entry["provenanceId"], f"{label}: provenanceId", diagnostics)
+        ref = entry["provenanceId"]
+        if not _check_nonempty_string(ref, f"{label}: provenanceId",
+                                      diagnostics):
+            pass
+        elif ref in seen_prov_refs:
+            diagnostics.append(
+                f"{label}: provenanceId {ref!r} is duplicated across "
+                f"manifest entries")
+        else:
+            seen_prov_refs.add(ref)
     if "changes" in entry:
         changes = entry["changes"]
         if not isinstance(changes, list) or changes:
@@ -675,14 +733,21 @@ def _check_manifest_entry(index: int, word: str, entry: object,
     wav_bytes = None
     asset_path = entry.get("assetPath")
     target = _safe_relative(
-        asset_path, asset_dir, f"{label}: assetPath", diagnostics)
-    if target is None:
-        pass
-    else:
+        asset_path, root, f"{label}: assetPath", diagnostics)
+    if target is not None:
         if str(target) in seen_paths:
             diagnostics.append(
                 f"{label}: assetPath {asset_path!r} is not unique across entries")
         seen_paths.add(str(target))
+        try:
+            target.relative_to(asset_dir)
+        except ValueError:
+            asset_dir_display = "/".join(ASSET_DIR)
+            diagnostics.append(
+                f"{label}: assetPath {asset_path!r} must resolve under "
+                f"'{asset_dir_display}/' relative to the repository root")
+            target = None
+    if target is not None:
         listed_wavs.add(target)
         if _check_file_chain(
                 root, target, f"{label}: assetPath",
@@ -755,14 +820,22 @@ def _check_unlisted_wavs(root: Path, asset_dir: Path,
 # provenance entry checks
 # ---------------------------------------------------------------------------
 
-def _check_source_page_url(value: object, label: str,
+def _check_source_page_url(value: object, title: object, label: str,
                            diagnostics: list[str]) -> None:
     parts = _check_https_url(value, COMMONS_HOST, label, diagnostics)
     if parts is None:
         return
-    if "File:" not in unquote(parts.path):
+    path = unquote(parts.path).replace("_", " ").strip()
+    if not path.startswith("/wiki/"):
         diagnostics.append(
-            f"{label}: {value!r} must identify the audited Commons file page")
+            f"{label}: {value!r} must be a recognized Commons file page "
+            f"(path '/wiki/<file title>')")
+        return
+    expected = _normalized_title(title)
+    if expected is None or path[len("/wiki/"):] != expected:
+        diagnostics.append(
+            f"{label}: the page title {path[len('/wiki/'):]!r} must match "
+            f"sourceTitle {title!r}")
 
 
 def _normalized_title(value: object) -> str | None:
@@ -771,20 +844,62 @@ def _normalized_title(value: object) -> str | None:
     return value.replace("_", " ").strip()
 
 
+def _wav_final_name(name: str) -> str | None:
+    """Final name segment of an audio file name, or None if not a WAV name.
+
+    Underscores are Commons space normalizations; the last segment before
+    '.wav' (split on -, / and space) must carry the selected word exactly.
+    """
+    name = name.replace("_", " ").strip()
+    if not name.lower().endswith(".wav"):
+        return None
+    stem = name[: -len(".wav")]
+    parts = [part for part in re.split(r"[-/ ]+", stem) if part]
+    return parts[-1] if parts else None
+
+
+def _title_designates(title: object, word: str, label: str,
+                      diagnostics: list[str]) -> bool:
+    if not _is_string(title) or not title.strip():
+        diagnostics.append(
+            f"{label} is {title!r}; it must name the Commons original WAV "
+            f"for word {word!r} (a File: title ending in {word!r}.wav)")
+        return False
+    bare = title.replace("_", " ").strip()
+    if not bare.startswith("File:"):
+        diagnostics.append(
+            f"{label} is {title!r}; it must be a Commons file title "
+            f"designating the original WAV of word {word!r}")
+        return False
+    final = _wav_final_name(bare[len("File:"):])
+    if final is None:
+        diagnostics.append(
+            f"{label} names {title!r}; the selected media must be the "
+            f"original .wav file for word {word!r}")
+        return False
+    if final != word:
+        diagnostics.append(
+            f"{label} names {final!r}; it must designate the selected word "
+            f"{word!r}")
+        return False
+    return True
+
+
 def _check_source_title(value: object, word: str, label: str,
                         diagnostics: list[str]) -> None:
-    if not _check_nonempty_string(value, label, diagnostics):
-        return
-    if word not in _normalized_title(value):  # type: ignore[arg-type]
-        diagnostics.append(
-            f"{label} is {value!r}; it must designate the selected word "
-            f"{word!r} (Commons spaces vs underscores do not matter)")
+    _title_designates(value, word, label, diagnostics)
 
 
 def _check_revision_url(value: object, title: object, revision_id: object,
                         label: str, diagnostics: list[str]) -> None:
     parts = _check_https_url(value, COMMONS_HOST, label, diagnostics)
     if parts is None:
+        return
+    path = unquote(parts.path).replace("_", " ").strip()
+    if path != "/index.php":
+        diagnostics.append(
+            f"{label}: {value!r} must be a recognized Commons revision "
+            f"endpoint (path '/index.php')")
         return
     params = parse_qs(parts.query, keep_blank_values=True)
     url_title = params.get("title", [None])[0]
@@ -818,11 +933,16 @@ def _check_media_url(value: object, word: str, label: str,
         diagnostics.append(
             f"{label}: {value!r} must reference the original media file path")
         return
-    file_name = unquote(parts.path.rsplit("/", 1)[-1]).replace("_", " ")
-    if word not in file_name:
+    name = unquote(parts.path.rsplit("/", 1)[-1])
+    final = _wav_final_name(name)
+    if final is None:
         diagnostics.append(
-            f"{label}: {value!r} must reference the media file for word "
-            f"{word!r}")
+            f"{label}: the media file was {name!r}; it must be the original "
+            f".wav file for word {word!r}")
+    elif final != word:
+        diagnostics.append(
+            f"{label}: the media file names {final!r}; it must be the "
+            f"original .wav file for word {word!r}")
 
 
 def _check_license_evidence(evidence: object, word: object, label: str,
@@ -832,29 +952,27 @@ def _check_license_evidence(evidence: object, word: object, label: str,
         diagnostics.append(f"{label} must be an object")
         return
     _check_fields(evidence, EVIDENCE_FIELDS, label, diagnostics)
-    if "spdxId" in evidence:
-        declared = evidence["spdxId"]
-        if _is_string(declared) and declared not in LICENSE_URLS:
+    if _is_string(word):
+        required = _required_spdx(word)
+        if "spdxId" in evidence and evidence["spdxId"] != required:
             diagnostics.append(
-                f"{label}.spdxId is {declared!r}; it is not a supported "
-                f"audio licence")
-        elif _is_string(word) and _is_string(declared) and \
-                declared != _required_spdx(word):
+                f"{label}.spdxId is {evidence['spdxId']!r}; word {word!r} "
+                f"requires {required!r}")
+        if "url" in evidence and evidence["url"] != LICENSE_URLS[required]:
             diagnostics.append(
-                f"{label}.spdxId is {declared!r}; word {word!r} requires "
-                f"{_required_spdx(word)!r}")
-    if "url" in evidence:
-        declared = evidence["url"]
-        expected = LICENSE_URLS.get(
-            evidence.get("spdxId")) if _is_string(evidence.get("spdxId")) \
-            else None
-        if expected is not None and declared != expected:
-            diagnostics.append(
-                f"{label}.url is {declared!r}; it must match the licence "
-                f"URL {expected!r}")
+                f"{label}.url is {evidence['url']!r}; word {word!r} requires "
+                f"{LICENSE_URLS[required]!r}")
     if "creditText" in evidence:
-        _check_nonempty_string(
-            evidence["creditText"], f"{label}.creditText", diagnostics)
+        credit = evidence["creditText"]
+        if not _check_nonempty_string(credit, f"{label}.creditText",
+                                      diagnostics):
+            pass
+        elif isinstance(manifest_license, dict) and \
+                _is_string(manifest_license.get("attribution")) and \
+                credit != manifest_license["attribution"]:
+            diagnostics.append(
+                f"{label}.creditText is {credit!r}; it must agree with the "
+                f"manifest attribution {manifest_license['attribution']!r}")
     if "notices" in evidence:
         declared = evidence["notices"]
         if not _check_string_list(declared, f"{label}.notices", diagnostics):
@@ -873,6 +991,7 @@ def _check_license_evidence(evidence: object, word: object, label: str,
 def _check_provenance_entry(index: int, word: str, prov: object,
                             manifest_entry: object, wav_bytes: bytes | None,
                             root: Path,
+                            seen_prov_ids: set[str],
                             diagnostics: list[str]) -> None:
     label = f"provenance.json entries[{index}] (word {word!r})"
     if not isinstance(prov, dict):
@@ -883,16 +1002,24 @@ def _check_provenance_entry(index: int, word: str, prov: object,
 
     if "id" in prov:
         pid = prov["id"]
-        expected = manifest.get("provenanceId")
         if not _is_string(pid) or not pid:
             diagnostics.append(f"{label}: id must be a nonempty string")
-        elif _is_string(expected) and pid != expected:
-            diagnostics.append(
-                f"{label}: id is {pid!r}; it must match the manifest "
-                f"provenanceId {expected!r}")
+        else:
+            if pid in seen_prov_ids:
+                diagnostics.append(
+                    f"{label}: id {pid!r} is duplicated across evidence "
+                    f"entries")
+            else:
+                seen_prov_ids.add(pid)
+            expected = manifest.get("provenanceId")
+            if _is_string(expected) and pid != expected:
+                diagnostics.append(
+                    f"{label}: id is {pid!r}; it must match the manifest "
+                    f"provenanceId {expected!r}")
     if "sourcePageUrl" in prov:
-        _check_source_page_url(prov["sourcePageUrl"],
-                               f"{label}.sourcePageUrl", diagnostics)
+        _check_source_page_url(
+            prov["sourcePageUrl"], prov.get("sourceTitle"),
+            f"{label}.sourcePageUrl", diagnostics)
     if "sourceTitle" in prov:
         _check_source_title(prov["sourceTitle"], word,
                             f"{label}.sourceTitle", diagnostics)
@@ -972,10 +1099,12 @@ def _check_manifest_root(manifest: object,
         return None
     _check_fields(manifest, MANIFEST_FIELDS, "manifest.json", diagnostics)
     if "schemaVersion" in manifest and \
-            manifest["schemaVersion"] != SCHEMA_VERSION:
+            (not _is_int(manifest["schemaVersion"]) or
+             manifest["schemaVersion"] != SCHEMA_VERSION):
         diagnostics.append(
             f"manifest.json: schemaVersion is "
-            f"{manifest['schemaVersion']!r}; it must be {SCHEMA_VERSION}")
+            f"{manifest['schemaVersion']!r}; it must be the integer "
+            f"{SCHEMA_VERSION} (booleans and other types are not allowed)")
     if "catalogueStatus" in manifest and \
             manifest["catalogueStatus"] != CATALOGUE_STATUS:
         diagnostics.append(
@@ -1007,10 +1136,12 @@ def _check_provenance_root(provenance: object,
     _check_fields(provenance, ("schemaVersion", "entries"),
                   "provenance.json", diagnostics)
     if "schemaVersion" in provenance and \
-            provenance["schemaVersion"] != SCHEMA_VERSION:
+            (not _is_int(provenance["schemaVersion"]) or
+             provenance["schemaVersion"] != SCHEMA_VERSION):
         diagnostics.append(
             f"provenance.json: schemaVersion is "
-            f"{provenance['schemaVersion']!r}; it must be {SCHEMA_VERSION}")
+            f"{provenance['schemaVersion']!r}; it must be the integer "
+            f"{SCHEMA_VERSION} (booleans and other types are not allowed)")
     entries = provenance.get("entries")
     if not isinstance(entries, list):
         diagnostics.append("provenance.json: entries must be a list")
@@ -1043,9 +1174,25 @@ def verify_package(repo_root: Path) -> list[str]:
         return diagnostics
     asset_dir = root.joinpath(*ASSET_DIR)
 
-    manifest = _parse_json_file(asset_dir / "manifest.json", diagnostics)
-    provenance = _parse_json_file(asset_dir / "provenance.json", diagnostics)
-    if not isinstance(manifest, dict) or not isinstance(provenance, dict):
+    # Metadata files get the same path safety as referenced content:
+    # symlinks at any component must be rejected before any read.
+    manifest_path = asset_dir / "manifest.json"
+    provenance_path = asset_dir / "provenance.json"
+    manifest_chain_ok = _check_file_chain(
+        root, manifest_path, "manifest.json", "manifest.json", diagnostics)
+    provenance_chain_ok = _check_file_chain(
+        root, provenance_path, "provenance.json", "provenance.json", diagnostics)
+    manifest = _parse_json_file(
+        manifest_path, diagnostics) if manifest_chain_ok else _PARSE_FAILED
+    provenance = _parse_json_file(
+        provenance_path, diagnostics) if provenance_chain_ok else _PARSE_FAILED
+    for name, doc in (
+            ("manifest.json", manifest), ("provenance.json", provenance)):
+        if doc is _PARSE_FAILED:
+            continue  # read/parse diagnostic already reported above
+        if not isinstance(doc, dict):
+            diagnostics.append(f"{name}: root must be an object")
+    if not (isinstance(manifest, dict) and isinstance(provenance, dict)):
         return diagnostics
 
     manifest_entries = _check_manifest_root(manifest, diagnostics)
@@ -1055,20 +1202,22 @@ def verify_package(repo_root: Path) -> list[str]:
 
     seen_ids: set[str] = set()
     seen_paths: set[str] = set()
+    seen_prov_refs: set[str] = set()
     listed_wavs: set[Path] = set()
     wav_bytes_by_index: list[bytes | None] = []
     for index, (word, entry) in enumerate(zip(WORD_SEQUENCE, manifest_entries)):
         wav_bytes_by_index.append(
             _check_manifest_entry(
                 index, word, entry, root, asset_dir, seen_ids, seen_paths,
-                listed_wavs, diagnostics))
+                seen_prov_refs, listed_wavs, diagnostics))
 
     _check_unlisted_wavs(root, asset_dir, listed_wavs, diagnostics)
 
+    seen_prov_ids: set[str] = set()
     for index, (word, prov) in enumerate(zip(WORD_SEQUENCE, provenance_entries)):
         _check_provenance_entry(
             index, word, prov, manifest_entries[index],
-            wav_bytes_by_index[index], root, diagnostics)
+            wav_bytes_by_index[index], root, seen_prov_ids, diagnostics)
 
     return diagnostics
 

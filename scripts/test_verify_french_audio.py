@@ -63,10 +63,10 @@ WORD_TARGETS = {
 
 BY_SA = ("CC-BY-SA-4.0",
          "https://creativecommons.org/licenses/by-sa/4.0/",
-         "licenses/cc-by-sa-4-0.txt")
+         "frontend/assets/audio/fr/licenses/cc-by-sa-4-0.txt")
 BY = ("CC-BY-4.0",
       "https://creativecommons.org/licenses/by/4.0/",
-      "licenses/cc-by-4-0.txt")
+      "frontend/assets/audio/fr/licenses/cc-by-4-0.txt")
 NOTICES = ["Unmistakable unit-test notice; a placeholder, not a real rights statement."]
 ORIGIN = {
     "path": "frontend/lib/src/core/course/french_course.dart",
@@ -85,6 +85,15 @@ def _pcm_wav_bytes(frames=80, sample_rate=8000, extra_metadata=b""):
         extra += b"\x00"  # RIFF chunk-alignment padding
     body = (b"fmt " + struct.pack("<I", len(fmt)) + fmt) + extra + \
         (b"data" + struct.pack("<I", len(payload)) + payload)
+    return b"RIFF" + struct.pack("<I", len(body) + 4) + b"WAVE" + body
+
+
+def _wav_data_before_fmt() -> bytes:
+    """Coherent RIFF/WAVE container whose data chunk precedes the fmt chunk."""
+    payload = b"\x01\x02" * 80
+    fmt = struct.pack("<HHIIHH", 1, 1, 8000, 16000, 2, 16)
+    body = (b"data" + struct.pack("<I", len(payload)) + payload) + \
+        (b"fmt " + struct.pack("<I", len(fmt)) + fmt)
     return b"RIFF" + struct.pack("<I", len(body) + 4) + b"WAVE" + body
 
 
@@ -137,11 +146,15 @@ def make_package(repo_root: Path) -> None:
         spdx, url, text_path = BY if word == "sans" else BY_SA
         title = f"File:LoquaFr-{word}.wav"
         revision_id = 1_000_000 + index
+        credit_text = (
+            f"« {word} » spoken by LoquaxFR (Lingua Libre), {spdx}, "
+            f"via Wikimedia Commons (unmistakable test fixture)."
+        )
         entries.append({
             "id": f"fr-word-{word}",
             "kind": "word",
             "spokenText": word,
-            "assetPath": f"words/{word}.wav",
+            "assetPath": "frontend/assets/audio/fr/words/" + word + ".wav",
             "sha256": sha256,
             "byteLength": len(wav_bytes),
             "audio": dict(audio),
@@ -156,10 +169,7 @@ def make_package(repo_root: Path) -> None:
                 "spdxId": spdx,
                 "url": url,
                 "textPath": text_path,
-                "attribution": (
-                    f"« {word} » spoken by LoquaxFR (Lingua Libre), {spdx}, "
-                    f"via Wikimedia Commons (unmistakable test fixture)."
-                ),
+                "attribution": credit_text,
                 "notices": list(NOTICES),
             },
             "provenanceId": f"prov-{word}",
@@ -188,10 +198,7 @@ def make_package(repo_root: Path) -> None:
             "licenseEvidence": {
                 "spdxId": spdx,
                 "url": url,
-                "creditText": (
-                    f"LoquaxFR / Lingua Libre, {spdx} "
-                    f"(unmistakable test fixture credit)."
-                ),
+                "creditText": credit_text,
                 "notices": list(NOTICES),
                 "declaration": (
                     f"Unmistakable test-fixture declaration: source records {spdx}."
@@ -436,15 +443,63 @@ class PackageMutationTests(FixtureBase):
                 '"durationSeconds": NaN',
             )
             self._expect_failure("non-finite")
-        with self.subTest("Infinity byteLength"):
+        with self.subTest("Infinity duration"):
             self._fresh()
-            byte_len = len(_pcm_wav_bytes())
             self._replace_in_text(
                 "manifest.json",
-                f'"byteLength": {byte_len}',
-                f'"byteLength": Infinity, "byteLength": {byte_len}',
+                '"durationSeconds": 0.01',
+                '"durationSeconds": Infinity',
             )
             self._expect_failure("non-finite")
+        with self.subTest("missing durationSeconds"):
+            self._fresh()
+            self._mutate_entry(
+                "tout", lambda e: e["audio"].pop("durationSeconds"))
+            self._expect_failure("durationSeconds")
+        with self.subTest("enormous integer duration"):
+            self._fresh()
+            self._mutate_entry(
+                "tout", lambda e: e["audio"].update({"durationSeconds": 10 ** 400}))
+            self._expect_failure("durationSeconds")
+        with self.subTest("negative duration"):
+            self._fresh()
+            self._mutate_entry(
+                "tout", lambda e: e["audio"].update({"durationSeconds": -5}))
+            self._expect_failure("durationSeconds")
+        with self.subTest("boolean manifest schemaVersion"):
+            self._fresh()
+            manifest = self._json("manifest.json")
+            manifest["schemaVersion"] = True
+            self._write_json("manifest.json", manifest)
+            self._expect_failure("schemaVersion")
+        with self.subTest("boolean provenance schemaVersion"):
+            self._fresh()
+            doc = self._json("provenance.json")
+            doc["schemaVersion"] = True
+            self._write_json("provenance.json", doc)
+            self._expect_failure("schemaVersion")
+
+    # -- I1: non-object parsed roots must never pass -----------------------
+
+    def test_non_object_roots_fail(self):
+        with self.subTest("manifest root is a list"):
+            self._fresh()
+            (self._asset() / "manifest.json").write_text("[]", encoding="utf-8")
+            self._expect_failure("manifest.json", "object")
+        with self.subTest("manifest root is a scalar"):
+            self._fresh()
+            (self._asset() / "manifest.json").write_text("42", encoding="utf-8")
+            self._expect_failure("manifest.json", "object")
+        with self.subTest("provenance root is null"):
+            self._fresh()
+            (self._asset() / "provenance.json").write_text(
+                "null", encoding="utf-8")
+            self._expect_failure("provenance.json", "object")
+        with self.subTest("provenance root is a scalar"):
+            self._fresh()
+            (self._asset() / "provenance.json").write_text(
+                "42", encoding="utf-8")
+            self._expect_failure("provenance.json", "object")
 
     # -- identity ------------------------------------------------------------
 
@@ -570,6 +625,18 @@ class PackageMutationTests(FixtureBase):
                 "tout",
                 lambda e: e["license"].update({"textPath": "escape-licence.txt"}))
             self._expect_failure("licenses/")
+        with self.subTest("package-relative assetPath is invalid"):
+            self._fresh()
+            self._mutate_entry(
+                "tout", lambda e: e.update({"assetPath": "words/tout.wav"}))
+            self._expect_failure("frontend/assets/audio/fr/")
+        with self.subTest("package-relative textPath is invalid"):
+            self._fresh()
+            self._mutate_entry(
+                "tout",
+                lambda e: e["license"].update(
+                    {"textPath": "licenses/cc-by-sa-4-0.txt"}))
+            self._expect_failure("frontend/assets/audio/fr/licenses/")
 
     # -- integrity --------------------------------------------------------------
 
@@ -623,6 +690,21 @@ class PackageMutationTests(FixtureBase):
             wav = self._asset() / "words" / "tout.wav"
             wav.write_bytes(wav.read_bytes()[:60])
             self._expect_failure("RIFF")
+        with self.subTest("data chunk before fmt chunk"):
+            self._fresh()
+            wav_bytes = _wav_data_before_fmt()
+            wav_path = self._asset() / "words" / "tout.wav"
+            wav_path.write_bytes(wav_bytes)
+            sha256 = hashlib.sha256(wav_bytes).hexdigest()
+            sha1 = hashlib.sha1(wav_bytes, usedforsecurity=False).hexdigest()
+            self._mutate_entry(
+                "tout",
+                lambda e: e.update(
+                    {"sha256": sha256, "byteLength": len(wav_bytes)}))
+            self._mutate_provenance_entry(
+                "tout",
+                lambda e: e.update({"sha256": sha256, "sourceSha1": sha1}))
+            self._expect_failure("fmt")
 
     # -- rights and evidence -----------------------------------------------------
 
@@ -692,6 +774,27 @@ class PackageMutationTests(FixtureBase):
                 lambda e: e["licenseEvidence"].update(
                     {"spdxId": "CC-BY-4.0", "url": BY[1]}))
             self._expect_failure("spdxId")
+        with self.subTest("null manifest spdx with bogus URL"):
+            self._fresh()
+            self._mutate_entry(
+                "tout",
+                lambda e: e["license"].update(
+                    {"spdxId": None, "url": "bogus"}))
+            self._expect_failure("spdxId", "url")
+        with self.subTest("null evidence spdx and url"):
+            self._fresh()
+            self._mutate_provenance_entry(
+                "tout",
+                lambda e: e["licenseEvidence"].update(
+                    {"spdxId": None, "url": None}))
+            self._expect_failure("spdxId", "url")
+        with self.subTest("different credit text"):
+            self._fresh()
+            self._mutate_provenance_entry(
+                "tout",
+                lambda e: e["licenseEvidence"].update(
+                    {"creditText": "Different credit"}))
+            self._expect_failure("creditText")
         with self.subTest("source title not designating the word"):
             self._fresh()
             self._mutate_provenance_entry(
@@ -815,6 +918,138 @@ class PackageMutationTests(FixtureBase):
                 "tout", lambda e: e["speaker"].update({"sourceName": "Nobody"}))
             self._expect_failure("sourceName")
 
+    # -- I6: provenance identity and one-to-one linkage ---------------------
+
+    def test_provenance_identity_failures(self):
+        with self.subTest("coordinated duplicate provenance IDs"):
+            self._fresh()
+            manifest = self._json("manifest.json")
+            entry0 = self._entry(manifest["entries"], "tout")
+            entry1 = self._entry(manifest["entries"], "rouge")
+            entry1["provenanceId"] = entry0["provenanceId"]
+            self._write_json("manifest.json", manifest)
+            self._mutate_provenance_entry(
+                "rouge", lambda e: e.update({"id": entry0["provenanceId"]}))
+            self._expect_failure("prov-tout", "duplicat")
+        with self.subTest("duplicate manifest provenance references"):
+            self._fresh()
+            self._mutate_entry(
+                "rouge", lambda e: e.update({"provenanceId": "prov-tout"}))
+            self._expect_failure("prov-tout", "duplicat")
+
+    def test_metadata_file_path_failures(self):
+        with self.subTest("symlinked manifest with identical content"):
+            self._fresh()
+            manifest = self._asset() / "manifest.json"
+            external = self.root / "manifest-external.json"
+            external.write_bytes(manifest.read_bytes())
+            self._replace_with_symlink(manifest, external)
+            self._expect_failure("symlink")
+        with self.subTest("symlinked provenance with identical content"):
+            self._fresh()
+            provenance = self._asset() / "provenance.json"
+            external = self.root / "provenance-external.json"
+            external.write_bytes(provenance.read_bytes())
+            self._replace_with_symlink(provenance, external)
+            self._expect_failure("symlink")
+        with self.subTest("symlinked package parent directory"):
+            self._fresh()
+            package = self._asset()
+            real = self._asset().parent / "fr-real"
+            package.rename(real)
+            package.symlink_to(real)
+            self._expect_failure("symlink")
+
+    def test_source_link_failures(self):
+        with self.subTest("same-word JPEG title"):
+            self._fresh()
+            self._mutate_provenance_entry(
+                "tout",
+                lambda e: e.update({"sourceTitle": "File:tout.jpg"}))
+            self._expect_failure("sourceTitle")
+        with self.subTest("unrelated title containing the word"):
+            self._fresh()
+            self._mutate_provenance_entry(
+                "tout",
+                lambda e: e.update({"sourceTitle": "File:tout-rouge.wav"}))
+            self._expect_failure("sourceTitle")
+        with self.subTest("unrelated page title in page URL"):
+            self._fresh()
+            self._mutate_provenance_entry(
+                "tout",
+                lambda e: e.update(
+                    {"sourcePageUrl":
+                        "https://commons.wikimedia.org/wiki/File:Unrelated.wav"}))
+            self._expect_failure("sourcePageUrl")
+        with self.subTest("unrecognized revision endpoint"):
+            self._fresh()
+            def bad_endpoint(entry):
+                entry["descriptionRevisionUrl"] = (
+                    "https://commons.wikimedia.org/not-a-revision?"
+                    + urlencode({"title": entry["sourceTitle"],
+                                "oldid": entry["descriptionRevisionId"]}))
+            self._mutate_provenance_entry("tout", bad_endpoint)
+            self._expect_failure("descriptionRevisionUrl")
+        with self.subTest("coordinated unrelated page, endpoint and media"):
+            self._fresh()
+            def coordinated(entry):
+                entry["sourcePageUrl"] = (
+                    "https://commons.wikimedia.org/wiki/File:Unrelated.wav")
+                entry["descriptionRevisionUrl"] = (
+                    "https://commons.wikimedia.org/not-a-revision?"
+                    + urlencode({"title": "File:Unrelated.wav",
+                                 "oldid": entry["descriptionRevisionId"]}))
+                entry["originalDownloadUrl"] = (
+                    "https://upload.wikimedia.org/wikipedia/commons/"
+                    "ab/cd/not-original/tout.jpg")
+            self._mutate_provenance_entry("tout", coordinated)
+            self._expect_failure(
+                "sourcePageUrl", "descriptionRevisionUrl",
+                "originalDownloadUrl")
+
+    def _wav_odd_terminal_data(self, padded: bool) -> bytes:
+        """Coherent RIFF/WAVE whose final data chunk is odd (8-bit, 1 frame)."""
+        payload = b"\x41"  # one 8-bit sample; unmistakable test byte
+        fmt = struct.pack("<HHIIHH", 1, 1, 8000, 8000, 1, 8)
+        body = (b"fmt " + struct.pack("<I", len(fmt)) + fmt) + \
+            (b"data" + struct.pack("<I", len(payload)) + payload)
+        if padded:
+            body += b"\x00"  # required terminal pad byte, inside RIFF bounds
+        return b"RIFF" + struct.pack("<I", len(body) + 4) + b"WAVE" + body
+
+    def test_riff_padding_failures(self):
+        with self.subTest("missing terminal padding after odd data chunk"):
+            self._fresh()
+            path = self.root / "odd-terminal.wav"
+            path.write_bytes(self._wav_odd_terminal_data(padded=False))
+            with self.assertRaises(ValueError):
+                verify_french_audio.measure_wav(path)
+        with self.subTest("padded odd terminal data chunk is valid"):
+            self._fresh()
+            path = self.root / "odd-terminal-padded.wav"
+            path.write_bytes(self._wav_odd_terminal_data(padded=True))
+            audio = verify_french_audio.measure_wav(path)
+            self.assertEqual(
+                audio,
+                {"container": "wav", "encoding": "pcm", "sampleRateHz": 8000,
+                 "channels": 1, "bitsPerSample": 8, "frameCount": 1,
+                 "durationSeconds": 0.000125})
+
+    def test_duration_tolerance(self):
+        with self.subTest("inside one microsecond is accepted"):
+            self._fresh()
+            self._mutate_entry(
+                "tout",
+                lambda e: e["audio"].update({"durationSeconds": 0.0100005}))
+            self.assertEqual(
+                verify_french_audio.verify_package(self.root), [])
+        with self.subTest("outside one microsecond is rejected"):
+            self._fresh()
+            self._mutate_entry(
+                "tout",
+                lambda e: e["audio"].update({"durationSeconds": 0.0100011}))
+            self._expect_failure("durationSeconds")
+
     # -- CLI read-only failure -----------------------------------------------------
 
     def test_cli_failure_is_read_only(self):
@@ -854,6 +1089,7 @@ class PackageMutationTests(FixtureBase):
                 + struct.pack("<HHIIHH", 3, 1, 8000, 32000, 4, 32)
                 + b"data" + struct.pack("<I", 80) + b"\x00" * 80
             ),
+            "data chunk before fmt chunk": _wav_data_before_fmt(),
         }.items():
             with self.subTest(name=name):
                 path = self.root / f"invalid-{name}.wav"
