@@ -409,6 +409,8 @@ remain required. No recording production or playback is authorized by FR-01.
 
 ### FR-15 — Validate a local French pronunciation evaluator (deferred research gate)
 
+**Status (2026-10-13): Pending — not started.** The user requested that validation-tool evaluation remain a pending task after the [playback spike and tool research](../research/2026-10-13-french-audio-playback-validation-spike.md). That research identifies Praat-assisted review, MFA timing assistance and experimental OpenPronounce French scoring; it does not constitute tool evaluation or authorize installs, model downloads, benchmarking or production integration. Resume only after explicit approval of the evaluation scope and criteria. Qualified human linguistic review of the FR-02 candidates remains a separate pending gate.
+
 **Priority/type:** P2 / deferred, time-boxed feasibility investigation; not a first-release dependency. **Owner:** speech-evaluation worker + French reviewer. **Depends on:** FR-00, FR-01, approved local-evaluation criteria; FR-14 if collecting recordings. D3/D4 are resolved: candidates run locally and support browser and native mobile capture inputs, with no recording uploads.
 
 **Files:** Create `docs/speech/french-pronunciation-evaluation.md` and an approved evaluation manifest without private recordings/credentials. Any prototype lives outside production and is explicitly disposable.
