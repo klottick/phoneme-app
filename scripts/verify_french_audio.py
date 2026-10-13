@@ -844,43 +844,40 @@ def _normalized_title(value: object) -> str | None:
     return value.replace("_", " ").strip()
 
 
-def _wav_final_name(name: str) -> str | None:
-    """Final name segment of an audio file name, or None if not a WAV name.
+def _selected_source_name(word: str) -> str:
+    """Complete selected filename pattern (LoquaxFR originals, chosen slice).
 
-    Underscores are Commons space normalizations; the last segment before
-    '.wav' (split on -, / and space) must carry the selected word exactly.
+    The chosen files are named LL-Q150_(fra)-LoquaxFR-<word>.wav; a
+    different full filename — another speaker prefix, an embedded word, or
+    a derivative — is not the selected original.
     """
-    name = name.replace("_", " ").strip()
-    if not name.lower().endswith(".wav"):
-        return None
-    stem = name[: -len(".wav")]
-    parts = [part for part in re.split(r"[-/ ]+", stem) if part]
-    return parts[-1] if parts else None
+    return f"LL-Q150_(fra)-LoquaxFR-{word}.wav"
+
+
+def _file_name_key(name: str) -> str:
+    """Compare Commons file names with underscores/spaces and case trimmed.
+
+    Commons stores title spaces as underscores, so the two representations
+    of one file must normalize to the same key; the canonical spelling is
+    kept for diagnostics.
+    """
+    return name.replace("_", " ").strip()
 
 
 def _title_designates(title: object, word: str, label: str,
                       diagnostics: list[str]) -> bool:
     if not _is_string(title) or not title.strip():
         diagnostics.append(
-            f"{label} is {title!r}; it must name the Commons original WAV "
-            f"for word {word!r} (a File: title ending in {word!r}.wav)")
+            f"{label} is {title!r}; it must be the complete selected source "
+            f"title 'File:{_selected_source_name(word)}'")
         return False
-    bare = title.replace("_", " ").strip()
-    if not bare.startswith("File:"):
+    expected = "File:" + _selected_source_name(word)
+    if _file_name_key(title) != _file_name_key(expected):
         diagnostics.append(
-            f"{label} is {title!r}; it must be a Commons file title "
-            f"designating the original WAV of word {word!r}")
-        return False
-    final = _wav_final_name(bare[len("File:"):])
-    if final is None:
-        diagnostics.append(
-            f"{label} names {title!r}; the selected media must be the "
-            f"original .wav file for word {word!r}")
-        return False
-    if final != word:
-        diagnostics.append(
-            f"{label} names {final!r}; it must designate the selected word "
-            f"{word!r}")
+            f"{label} is {title!r}; it must be the complete selected source "
+            f"title {expected!r} (Commons may normalize spaces to underscores; "
+            f"another full filename or another speaker's file is not the "
+            f"chosen original)")
         return False
     return True
 
@@ -896,10 +893,13 @@ def _check_revision_url(value: object, title: object, revision_id: object,
     if parts is None:
         return
     path = unquote(parts.path).replace("_", " ").strip()
-    if path != "/index.php":
+    # The selected revisions are documented on the real Commons route
+    # '/w/index.php'; '/index.php' remains supported as the legacy alias.
+    # Arbitrary endpoints are still rejected.
+    if path not in ("/w/index.php", "/index.php"):
         diagnostics.append(
             f"{label}: {value!r} must be a recognized Commons revision "
-            f"endpoint (path '/index.php')")
+            f"endpoint (path '/w/index.php' or the '/index.php' alias)")
         return
     params = parse_qs(parts.query, keep_blank_values=True)
     url_title = params.get("title", [None])[0]
@@ -924,25 +924,45 @@ def _check_revision_url(value: object, title: object, revision_id: object,
             f"descriptionRevisionId {revision_id!r}")
 
 
-def _check_media_url(value: object, word: str, label: str,
-                     diagnostics: list[str]) -> None:
+# Ordinary original-file route on upload.wikimedia.org: one hex character
+# then two hex characters of the object hash, then the complete filename.
+# Thumbnails ('thumb/'), transcoded derivatives and other paths do not
+# match this layout and are rejected as the selected original.
+MEDIA_PATH_RE = re.compile(
+    r"^/wikipedia/commons/([0-9a-f])/([0-9a-f]{2})/(.+)$")
+
+
+def _check_media_url(value: object, word: str, title: object,
+                     label: str, diagnostics: list[str]) -> None:
     parts = _check_https_url(value, MEDIA_HOST, label, diagnostics)
     if parts is None:
         return
-    if not parts.path or parts.path == "/":
+    path = _file_name_key(unquote(parts.path))
+    match = MEDIA_PATH_RE.match(path)
+    if match is None:
         diagnostics.append(
-            f"{label}: {value!r} must reference the original media file path")
+            f"{label}: {value!r} must be an original media URL under "
+            f"'/wikipedia/commons/<1 hex>/<2 hex>/<filename>', the ordinary "
+            f"original-file layout (thumbs, transcoded derivatives and other "
+            f"routes are not the selected original)")
         return
-    name = unquote(parts.path.rsplit("/", 1)[-1])
-    final = _wav_final_name(name)
-    if final is None:
+    name = _file_name_key(match.group(3))
+    if name.startswith("File:"):
+        name = name[len("File:"):]  # media URLs carry the file title
+    expected_name = _selected_source_name(word)
+    if _file_name_key(name) != _file_name_key(expected_name):
         diagnostics.append(
-            f"{label}: the media file was {name!r}; it must be the original "
-            f".wav file for word {word!r}")
-    elif final != word:
-        diagnostics.append(
-            f"{label}: the media file names {final!r}; it must be the "
-            f"original .wav file for word {word!r}")
+            f"{label}: the media file is {name!r}; it must be the complete "
+            f"selected source filename {expected_name!r} (a different full "
+            f"filename is not the chosen original)")
+    if _is_string(title):
+        bare = title.strip()
+        if bare.startswith("File:"):
+            title_name = _file_name_key(bare[len("File:"):])
+            if _file_name_key(name) != title_name:
+                diagnostics.append(
+                    f"{label}: the media file is {name!r}; it must match "
+                    f"the sourceTitle filename {title_name!r}")
 
 
 def _check_license_evidence(evidence: object, word: object, label: str,
@@ -1036,8 +1056,9 @@ def _check_provenance_entry(index: int, word: str, prov: object,
         _check_utc_iso(prov["retrievedAt"], f"{label}.retrievedAt",
                        diagnostics)
     if "originalDownloadUrl" in prov:
-        _check_media_url(prov["originalDownloadUrl"], word,
-                         f"{label}.originalDownloadUrl", diagnostics)
+        _check_media_url(
+            prov["originalDownloadUrl"], word, prov.get("sourceTitle"),
+            f"{label}.originalDownloadUrl", diagnostics)
     if "mediaTimestamp" in prov:
         _check_utc_iso(prov["mediaTimestamp"], f"{label}.mediaTimestamp",
                        diagnostics)

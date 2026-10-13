@@ -20,7 +20,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -67,6 +67,98 @@ BY_SA = ("CC-BY-SA-4.0",
 BY = ("CC-BY-4.0",
       "https://creativecommons.org/licenses/by/4.0/",
       "frontend/assets/audio/fr/licenses/cc-by-4-0.txt")
+def _canonical_media_url(word: str) -> str:
+    """Canonical current original-media URL shape for the selected file.
+
+    '/wikipedia/commons/<1 hex>/<2 hex>/<complete filename>' — the ordinary
+    original-file layout, with the full selected filename
+    (LL-Q150_(fra)-LoquaxFR-<word>.wav) URL-encoded.  The hash directories
+    route the object storage layout; the identity is the complete filename.
+    """
+    name = f"LL-Q150_(fra)-LoquaxFR-{word}.wav"
+    digest = hashlib.md5(name.encode("utf-8")).hexdigest()
+    return ("https://upload.wikimedia.org/wikipedia/commons/"
+            + digest[0] + "/" + digest[1:3] + "/" + quote(name, safe=""))
+
+# The 24 selected description revisions, verbatim from the committed research
+# (docs/superpowers/research/2026-10-12-french-reference-audio-sources.md,
+# lines 102-125).  These are the actual selected Commons links the verifier
+# must accept: real /w/index.php route, real recorded oldids, parenthesized
+# filenames, and the percent-encoded UTF-8 identity for `île`.
+SELECTED_REVISIONS = {
+    "tout": (995917835,
+             "https://commons.wikimedia.org/w/index.php?"
+             "title=File:LL-Q150_(fra)-LoquaxFR-tout.wav&oldid=995917835"),
+    "rouge": (1284656035,
+              "https://commons.wikimedia.org/w/index.php?"
+              "title=File:LL-Q150_(fra)-LoquaxFR-rouge.wav&oldid=1284656035"),
+    "vous": (1278768654,
+             "https://commons.wikimedia.org/w/index.php?"
+             "title=File:LL-Q150_(fra)-LoquaxFR-vous.wav&oldid=1278768654"),
+    "doux": (1281359588,
+             "https://commons.wikimedia.org/w/index.php?"
+             "title=File:LL-Q150_(fra)-LoquaxFR-doux.wav&oldid=1281359588"),
+    "loup": (1279338035,
+             "https://commons.wikimedia.org/w/index.php?"
+             "title=File:LL-Q150_(fra)-LoquaxFR-loup.wav&oldid=1279338035"),
+    "soupe": (1285345152,
+              "https://commons.wikimedia.org/w/index.php?"
+              "title=File:LL-Q150_(fra)-LoquaxFR-soupe.wav&oldid=1285345152"),
+    "tu": (1094009241,
+           "https://commons.wikimedia.org/w/index.php?"
+           "title=File:LL-Q150_(fra)-LoquaxFR-tu.wav&oldid=1094009241"),
+    "rue": (1166165910,
+            "https://commons.wikimedia.org/w/index.php?"
+            "title=File:LL-Q150_(fra)-LoquaxFR-rue.wav&oldid=1166165910"),
+    "lune": (757831102,
+             "https://commons.wikimedia.org/w/index.php?"
+             "title=File:LL-Q150_(fra)-LoquaxFR-lune.wav&oldid=757831102"),
+    "jus": (1185863234,
+            "https://commons.wikimedia.org/w/index.php?"
+            "title=File:LL-Q150_(fra)-LoquaxFR-jus.wav&oldid=1185863234"),
+    "mur": (1284027183,
+            "https://commons.wikimedia.org/w/index.php?"
+            "title=File:LL-Q150_(fra)-LoquaxFR-mur.wav&oldid=1284027183"),
+    "plume": (1280911696,
+              "https://commons.wikimedia.org/w/index.php?"
+              "title=File:LL-Q150_(fra)-LoquaxFR-plume.wav&oldid=1280911696"),
+    "lit": (1279171160,
+            "https://commons.wikimedia.org/w/index.php?"
+            "title=File:LL-Q150_(fra)-LoquaxFR-lit.wav&oldid=1279171160"),
+    "si": (1128084534,
+           "https://commons.wikimedia.org/w/index.php?"
+           "title=File:LL-Q150_(fra)-LoquaxFR-si.wav&oldid=1128084534"),
+    "vite": (1284466369,
+             "https://commons.wikimedia.org/w/index.php?"
+             "title=File:LL-Q150_(fra)-LoquaxFR-vite.wav&oldid=1284466369"),
+    "île": (815828932,
+            "https://commons.wikimedia.org/w/index.php?"
+            "title=File:LL-Q150_(fra)-LoquaxFR-%C3%AEle.wav&oldid=815828932"),
+    "beau": (1282497196,
+             "https://commons.wikimedia.org/w/index.php?"
+             "title=File:LL-Q150_(fra)-LoquaxFR-beau.wav&oldid=1282497196"),
+    "mot": (758647723,
+            "https://commons.wikimedia.org/w/index.php?"
+            "title=File:LL-Q150_(fra)-LoquaxFR-mot.wav&oldid=758647723"),
+    "eau": (1280603339,
+            "https://commons.wikimedia.org/w/index.php?"
+            "title=File:LL-Q150_(fra)-LoquaxFR-eau.wav&oldid=1280603339"),
+    "dos": (1252930601,
+            "https://commons.wikimedia.org/w/index.php?"
+            "title=File:LL-Q150_(fra)-LoquaxFR-dos.wav&oldid=1252930601"),
+    "bon": (1284656117,
+            "https://commons.wikimedia.org/w/index.php?"
+            "title=File:LL-Q150_(fra)-LoquaxFR-bon.wav&oldid=1284656117"),
+    "nom": (1279088536,
+            "https://commons.wikimedia.org/w/index.php?"
+            "title=File:LL-Q150_(fra)-LoquaxFR-nom.wav&oldid=1279088536"),
+    "banc": (1283505337,
+             "https://commons.wikimedia.org/w/index.php?"
+             "title=File:LL-Q150_(fra)-LoquaxFR-banc.wav&oldid=1283505337"),
+    "sans": (1273911708,
+             "https://commons.wikimedia.org/w/index.php?"
+             "title=File:LL-Q150_(fra)-LoquaxFR-sans.wav&oldid=1273911708"),
+}
 NOTICES = ["Unmistakable unit-test notice; a placeholder, not a real rights statement."]
 ORIGIN = {
     "path": "frontend/lib/src/core/course/french_course.dart",
@@ -142,13 +234,18 @@ def make_package(repo_root: Path) -> None:
 
     entries = []
     provenance_entries = []
-    for index, word in enumerate(WORDS):
+    for word in WORDS:
         spdx, url, text_path = BY if word == "sans" else BY_SA
-        title = f"File:LoquaFr-{word}.wav"
-        revision_id = 1_000_000 + index
+        # Structurally valid selected-source representations: the chosen
+        # filename pattern and the documented /w/index.php description
+        # revisions from the committed research.  The audio bytes themselves
+        # remain synthetic unit-test data (see credit).
+        revision_id, revision_url = SELECTED_REVISIONS[word]
+        title = f"File:LL-Q150_(fra)-LoquaxFR-{word}.wav"
         credit_text = (
             f"« {word} » spoken by LoquaxFR (Lingua Libre), {spdx}, "
-            f"via Wikimedia Commons (unmistakable test fixture)."
+            f"via Wikimedia Commons (unmistakable test fixture; the unit-test "
+            f"WAV bytes are synthetic, not the source binary)."
         )
         entries.append({
             "id": f"fr-word-{word}",
@@ -178,18 +275,14 @@ def make_package(repo_root: Path) -> None:
         })
         provenance_entries.append({
             "id": f"prov-{word}",
-            "sourcePageUrl": f"https://commons.wikimedia.org/wiki/{title}",
+            "sourcePageUrl": (
+                "https://commons.wikimedia.org/wiki/" + quote(title, safe="")
+            ),
             "sourceTitle": title,
             "descriptionRevisionId": revision_id,
-            "descriptionRevisionUrl": (
-                "https://commons.wikimedia.org/index.php?"
-                + urlencode({"title": title, "oldid": revision_id})
-            ),
+            "descriptionRevisionUrl": revision_url,
             "retrievedAt": "2026-10-12T10:00:00Z",
-            "originalDownloadUrl": (
-                "https://upload.wikimedia.org/wikipedia/commons/ab/cd/"
-                + urlencode({"path": title})
-            ),
+            "originalDownloadUrl": _canonical_media_url(word),
             "mediaTimestamp": "2026-01-15T09:30:00Z",
             "sourceSha1": sha1,
             "sourceTranscription": word,
@@ -959,6 +1052,94 @@ class PackageMutationTests(FixtureBase):
             package.rename(real)
             package.symlink_to(real)
             self._expect_failure("symlink")
+
+    # -- N1: the 24 documented selected revision links -------------------------
+
+    def test_selected_revision_links_pass(self):
+        # Offline positive control: every selected description-revision link
+        # from docs/superpowers/research/2026-10-12-french-reference-audio-sources.md
+        # (lines 102-125) must validate verbatim — the real /w/index.php
+        # route, the recorded oldids, the parenthesized filenames, and the
+        # percent-encoded UTF-8 identity for `île`.  No network is used.
+        self.assertEqual(set(SELECTED_REVISIONS), set(WORDS))
+        self.assertEqual(len(SELECTED_REVISIONS), 24)
+        self.assertIn("%C3%AEle", SELECTED_REVISIONS["île"][1])
+        self.assertTrue(
+            SELECTED_REVISIONS["tout"][1].startswith(
+                "https://commons.wikimedia.org/w/index.php?title=File:"
+                "LL-Q150_(fra)-LoquaxFR-tout.wav&oldid=995917835"))
+        for word in WORDS:
+            with self.subTest(word=word):
+                self._fresh()
+                entry = self._entry(
+                    self._json("provenance.json")["entries"], word)
+                oldid, link = SELECTED_REVISIONS[word]
+                self.assertEqual(entry["descriptionRevisionId"], oldid)
+                self.assertEqual(entry["descriptionRevisionUrl"], link)
+                self.assertEqual(
+                    entry["sourceTitle"],
+                    f"File:LL-Q150_(fra)-LoquaxFR-{word}.wav")
+                self.assertEqual(
+                    verify_french_audio.verify_package(self.root), [],
+                    msg="the documented selected revision link must be "
+                        "accepted for this word")
+
+    # -- I8: original-media route and complete source-filename identity -------
+
+    def test_original_media_failures(self):
+        with self.subTest("valid selected tout and île original-media URLs"):
+            for word in ("tout", "île"):
+                with self.subTest(word=word):
+                    self._fresh()
+                    entry = self._entry(
+                        self._json("provenance.json")["entries"], word)
+                    expected = _canonical_media_url(word)
+                    self.assertEqual(
+                        entry["originalDownloadUrl"], expected,
+                        msg="fixture must carry the canonical original URL")
+                    self.assertEqual(
+                        verify_french_audio.verify_package(self.root), [],
+                        msg=f"canonical original-media URL must be "
+                            f"accepted for {word!r}")
+        with self.subTest("wrong original route, correct full source filename"):
+            self._fresh()
+            self._mutate_provenance_entry(
+                "tout",
+                lambda e: e.update({
+                    "originalDownloadUrl":
+                        "https://upload.wikimedia.org/not-original/"
+                        "LL-Q150_%28fra%29-LoquaxFR-tout.wav"}))
+            self._expect_failure(
+                "originalDownloadUrl", "wikipedia/commons")
+        with self.subTest("recognized route, other speaker's full filename"):
+            self._fresh()
+            self._mutate_provenance_entry(
+                "tout",
+                lambda e: e.update({
+                    "originalDownloadUrl":
+                        "https://upload.wikimedia.org/wikipedia/commons/a/ab/"
+                        "OtherSpeaker-tout.wav"}))
+            self._expect_failure(
+                "originalDownloadUrl",
+                "LL-Q150_(fra)-LoquaxFR-tout.wav")
+        with self.subTest("recognized route, transcoded derivative name"):
+            self._fresh()
+            self._mutate_provenance_entry(
+                "tout",
+                lambda e: e.update({
+                    "originalDownloadUrl":
+                        "https://upload.wikimedia.org/wikipedia/commons/a/ab/"
+                        "transcoded/LoquaxFR-tout.ogg"}))
+            self._expect_failure("originalDownloadUrl")
+        with self.subTest("same word embedded in a different full title"):
+            self._fresh()
+            def different_full_name(entry):
+                fake = "File:LL-Q150_(fra)-LoquaxFR-toutt.wav"
+                entry["sourceTitle"] = fake
+                entry["sourcePageUrl"] = (
+                    "https://commons.wikimedia.org/wiki/" + quote(fake, safe=""))
+            self._mutate_provenance_entry("tout", different_full_name)
+            self._expect_failure("sourceTitle", "LoquaxFR-tout.wav")
 
     def test_source_link_failures(self):
         with self.subTest("same-word JPEG title"):
