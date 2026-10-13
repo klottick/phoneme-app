@@ -1611,6 +1611,12 @@ class MurArchiveAssociationTests(FixtureBase):
             ("wrong prov sha256",
              {"sha256": "f" * 64}, None,
              ("sha256", MUR_ARCHIVE["sha256"][0:16])),
+            ("wrong URL (current route is not the association)",
+             {"originalDownloadUrl":
+                 "https://upload.wikimedia.org/wikipedia/commons/7/79/"
+                 "LL-Q150_%28fra%29-LoquaxFR-mur.wav"},
+             None,
+             ("originalDownloadUrl", "20261007075226")),
             ("wrong manifest sha256",
              None, {"sha256": "f" * 64},
              ("sha256", MUR_ARCHIVE["sha256"][0:16])),
@@ -1709,6 +1715,22 @@ class MurArchiveAssociationTests(FixtureBase):
             "mur", lambda e: e.update({"sha256": "f" * 64}))
         self._expect_failure("sha256", MUR_ARCHIVE["sha256"])
 
+    def test_selected_original_identity_requires_archive_url(self):
+        # Pairing-level guard: with the association fields otherwise correct,
+        # the URL itself must be the selected archived original.
+        self._apply_correct_association()
+        prov = self._entry(
+            self._json("provenance.json")["entries"], "mur")
+        manifest_entry = self._entry(
+            self._json("manifest.json")["entries"], "mur")
+        prov["originalDownloadUrl"] = _canonical_media_url("mur")
+        diagnostics: list[str] = []
+        verify_french_audio._check_mur_archive_association(
+            prov, manifest_entry, "provenance.json entries[mur]", diagnostics)
+        joined = "\n".join(diagnostics)
+        self.assertIn("originalDownloadUrl", joined)
+        self.assertIn(MUR_ARCHIVE["url"], joined)
+
     def test_selected_revision_requires_archive_url(self):
         # The 2020 original upload revision cannot be paired with the current
         # redirect (which now serves the replacement binary).
@@ -1722,6 +1744,127 @@ class MurArchiveAssociationTests(FixtureBase):
                 "originalDownloadUrl"],
             _canonical_media_url("mur"))
         self._expect_failure("originalDownloadUrl", "archive")
+
+
+# ---------------------------------------------------------------------------
+# I1 (fix round 1): the MEASURED byte identity of the approved old `mur`
+# must bind its provenance.  Holding the audited selected bytes, a
+# coordinated current-URL + current-revision swap (and any other claimed
+# hash/URL/revision combination) must not escape the association
+# requirement.  The authority is the independently computed SHA-256 of the
+# audited bytes, not the record's claimed URL, revision, or hashes.
+#
+# Test-only substitution (brief-permitted, synthetic PCM only): the two
+# byte-derived approval constants are pointed at the fixture's own
+# unmistakable synthetic `mur` PCM bytes so the measured-identity trigger
+# fires on real fixture bytes; no real audio is embedded or staged, and all
+# hashing, file reads, diagnostics and the full verify_package pipeline are
+# unmocked.
+# ---------------------------------------------------------------------------
+
+
+class MeasuredIdentityRecoveryTests(FixtureBase):
+    """I1: measured selected-old-mur identity requires the full association."""
+
+    def _patch_selected_identity(self) -> None:
+        data = (self._asset() / "words" / "mur.wav").read_bytes()
+        patchers = [
+            mock.patch.object(
+                verify_french_audio, "MUR_ARCHIVE_SHA256",
+                hashlib.sha256(data).hexdigest()),
+            mock.patch.object(
+                verify_french_audio, "MUR_ARCHIVE_SHA1",
+                hashlib.sha1(data, usedforsecurity=False).hexdigest()),
+        ]
+        for patcher in patchers:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _assert_fixture_current_association(self) -> None:
+        entry = self._entry(self._json("provenance.json")["entries"], "mur")
+        self.assertEqual(
+            entry["originalDownloadUrl"], _canonical_media_url("mur"),
+            "fixture mur must hold the CURRENT original route")
+        self.assertEqual(
+            entry["descriptionRevisionId"], 1284027183,
+            "fixture mur must hold the CURRENT revision")
+        self.assertEqual(
+            entry["descriptionRevisionUrl"],
+            SELECTED_REVISIONS["mur"][1])
+
+    def test_generic_mur_fixture_stays_current_association(self):
+        # Positive control: a normal, correctly framed mur fixture holding
+        # the CURRENT selected recording is NOT forced into the historical
+        # association; its measured bytes are not the selected old original.
+        self._assert_fixture_current_association()
+        self.assertEqual(
+            verify_french_audio.verify_package(self.root), [],
+            "a generic correctly framed mur fixture must keep passing")
+
+    def test_actual_identity_correct_association_passes(self):
+        # Positive control through the full verifier: holding the measured
+        # selected-old-mur identity, the approved archive association is a
+        # fully passing package (no diagnostics of any kind).
+        self._patch_selected_identity()
+        self._mutate_provenance_entry(
+            "mur",
+            lambda e: e.update(
+                {"originalDownloadUrl": MUR_ARCHIVE["url"],
+                 "descriptionRevisionId": MUR_ARCHIVE["revisionId"],
+                 "descriptionRevisionUrl": MUR_ARCHIVE["revisionUrl"],
+                 "mediaTimestamp": MUR_ARCHIVE["mediaTimestamp"]}))
+        # The fixture record already carries sourceSha1/sha256 of the same
+        # audited bytes, so no hash field is touched at all.
+        self.assertEqual(
+            verify_french_audio.verify_package(self.root), [],
+            "selected old mur bytes with the correct archive association "
+            "must be a fully passing package")
+
+    def test_coordinated_url_revision_swap_rejected(self):
+        # The I1 bypass: the audited bytes ARE the selected old original,
+        # but the record jointly swaps the URL and revision ID/link to the
+        # current pair.  The measured identity must still require the
+        # archive association, and ONLY association diagnostics may fire
+        # (every other field of the record is internally consistent).
+        self._patch_selected_identity()
+        self._assert_fixture_current_association()
+        diagnostics = verify_french_audio.verify_package(self.root)
+        self.assertTrue(
+            diagnostics,
+            "holding the selected old mur bytes, the coordinated current "
+            "URL/revision swap must be diagnosed")
+        joined = "\n".join(diagnostics)
+        for token in (
+                "mur archive association",
+                MUR_ARCHIVE["url"],
+                "384728988",
+        ):
+            self.assertIn(token, joined)
+        for diagnostic in diagnostics:
+            self.assertIn(
+                "mur archive association", diagnostic,
+                "only association diagnostics are expected here, not "
+                "unrelated hash/metadata failures")
+
+    def test_claimed_hash_change_does_not_evade_measured_trigger(self):
+        # Coordinated claimed-hash changes (consistent manifest + provenance
+        # false hashes) plus the current URL/revision pair: the trigger must
+        # still fire from the MEASURED audited bytes and name the required
+        # association, even though the declared hashes differ.
+        self._patch_selected_identity()
+        self._assert_fixture_current_association()
+        manifest = self._json("manifest.json")
+        self._entry(manifest["entries"], "mur")["sha256"] = "f" * 64
+        self._write_json("manifest.json", manifest)
+        self._mutate_provenance_entry(
+            "mur", lambda e: e.update({"sha256": "f" * 64}))
+        joined = "\n".join(verify_french_audio.verify_package(self.root))
+        for token in (
+                "mur archive association",
+                MUR_ARCHIVE["url"],
+                "384728988",
+        ):
+            self.assertIn(token, joined)
 
 
 if __name__ == "__main__":

@@ -1118,16 +1118,24 @@ def _check_mur_archive_association(prov: object, manifest_entry: object,
                                    diagnostics: list[str]) -> None:
     """Enforce the pairing of the unique approved ``mur`` archive selection.
 
-    The archive URL may appear ONLY for word ``mur`` (the caller's gate) and
-    only when the whole association is pinned to the amended spec: the
-    original upload revision, the archived bytes' sourceSHA1 and full
-    SHA-256 manifest/provenance pairs, and the original recording timestamp
-    (the archive-name prefix is a replacement event, never a timestamp).
-    Each mismatch is reported on its own field.
+    The association may apply ONLY for word ``mur`` (the caller's gate) and
+    requires the WHOLE pairing to be pinned to the amended spec: the
+    selected archived original URL, the original upload revision, the
+    archived bytes' sourceSHA1 and full SHA-256 manifest/provenance pairs,
+    and the original recording timestamp (the archive-name prefix is a
+    replacement event, never a timestamp).  Each mismatch is reported on
+    its own field.
     """
     if not isinstance(prov, dict):
         diagnostics.append(f"{label} must be an object")
         return
+    declared_url = prov.get("originalDownloadUrl")
+    if not _normalizes_to_mur_archive_url(declared_url):
+        diagnostics.append(
+            f"{label}.originalDownloadUrl is {declared_url!r}; the mur "
+            f"archive association requires the selected archived original "
+            f"URL {MUR_ARCHIVE_MEDIA_URL!r} (the current URL now serves "
+            f"the replacement binary)")
     revision_id = prov.get("descriptionRevisionId")
     if not _is_int(revision_id) or revision_id != MUR_ARCHIVE_REVISION_ID:
         diagnostics.append(
@@ -1248,11 +1256,26 @@ def _check_provenance_entry(index: int, word: str, prov: object,
                        diagnostics)
     if "originalDownloadUrl" in prov:
         url_value = prov["originalDownloadUrl"]
-        if word == MUR_ARCHIVE_WORD and _normalizes_to_mur_archive_url(url_value):
+        # Root-cause guard (recovery review I1): the authority is the
+        # INDEPENDENTLY MEASURED identity of the audited bytes, not the
+        # record's claimed URL or revision.  When `mur`'s audited bytes ARE
+        # the approved 2020 original, the full association (selected archive
+        # URL plus every pairing field) is required whatever the URL and
+        # revision inputs jointly claim - a coordinated swap to the current
+        # route + current revision cannot escape it.  Records whose audited
+        # bytes are any other correctly framed binary are untouched.
+        measured_selected_original = (
+            word == MUR_ARCHIVE_WORD
+            and wav_bytes is not None
+            and hashlib.sha256(wav_bytes).hexdigest() == MUR_ARCHIVE_SHA256)
+        if word == MUR_ARCHIVE_WORD and (
+                _normalizes_to_mur_archive_url(url_value)
+                or measured_selected_original):
             # The one approved archive route: keep enforcing the generic
-            # fields (title, revision URL, ...) and add the exact pairing.
+            # fields (title, revision URL, ...) and add the exact pairing
+            # (the helper names each field on the entry label itself).
             _check_mur_archive_association(
-                prov, manifest, f"{label}.originalDownloadUrl", diagnostics)
+                prov, manifest, label, diagnostics)
         else:
             _check_media_url(
                 url_value, word, prov.get("sourceTitle"),
