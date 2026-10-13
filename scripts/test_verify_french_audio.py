@@ -1262,6 +1262,75 @@ class PackageMutationTests(FixtureBase):
                 lambda e: e["audio"].update({"durationSeconds": 0.0100011}))
             self._expect_failure("durationSeconds")
 
+    def test_giant_frame_count_diagnosed_not_overflow(self):
+        """A frameCount beyond any finite float must yield the duration
+        diagnostic, not an OverflowError escape from verify_package/CLI."""
+        with self.subTest("passing control accepts the intact fixture"):
+            self._fresh()
+            self.assertEqual(verify_french_audio.verify_package(self.root), [])
+        with self.subTest("verify_package names the record and field"):
+            self._fresh()
+            self._mutate_entry(
+                "tout", lambda e: e["audio"].update({"frameCount": 10**400}))
+            self._expect_failure(
+                "manifest.json entries[0]", "word 'tout'",
+                "durationSeconds", "frameCount")
+        with self.subTest("CLI reports ERROR without a traceback"):
+            self._fresh()
+            self._mutate_entry(
+                "tout", lambda e: e["audio"].update({"frameCount": 10**400}))
+            before = self._tree_snapshot()
+            output, errors = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(output), \
+                    contextlib.redirect_stderr(errors):
+                status = verify_french_audio.main(
+                    ["--repo-root", str(self.root)])
+            self.assertEqual(status, 1)
+            self.assertIn("ERROR:", errors.getvalue())
+            self.assertIn("durationSeconds", errors.getvalue())
+            self.assertNotIn("Traceback", errors.getvalue())
+            self.assertEqual(self._tree_snapshot(), before)
+
+    def test_oversized_oldid_diagnosed_not_integer_limit(self):
+        """A description-revision oldid far beyond Python's integer-string
+        digit limit must yield the oldid mismatch diagnostic, not a
+        ValueError escape from verify_package/CLI."""
+        with self.subTest("passing control accepts the selected revision link"):
+            self._fresh()
+            self.assertEqual(verify_french_audio.verify_package(self.root), [])
+            self.assertIn(
+                "title=File:LL-Q150_(fra)-LoquaxFR-tout.wav&oldid=995917835",
+                self._json("provenance.json")["entries"][0]["descriptionRevisionUrl"])
+        with self.subTest("verify_package names the record and field"):
+            self._fresh()
+            self._mutate_provenance_entry(
+                "tout",
+                lambda e: e.update({"descriptionRevisionUrl":
+                                   e["descriptionRevisionUrl"].replace(
+                                       "oldid=995917835", "oldid=" + "9" * 5000)}))
+            self._expect_failure(
+                "provenance.json entries[0]", "word 'tout'",
+                "descriptionRevisionUrl", "oldid",
+                "descriptionRevisionId")
+        with self.subTest("CLI reports ERROR without a traceback"):
+            self._fresh()
+            self._mutate_provenance_entry(
+                "tout",
+                lambda e: e.update({"descriptionRevisionUrl":
+                                   e["descriptionRevisionUrl"].replace(
+                                       "oldid=995917835", "oldid=" + "9" * 5000)}))
+            before = self._tree_snapshot()
+            output, errors = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(output), \
+                    contextlib.redirect_stderr(errors):
+                status = verify_french_audio.main(
+                    ["--repo-root", str(self.root)])
+            self.assertEqual(status, 1)
+            self.assertIn("ERROR:", errors.getvalue())
+            self.assertIn("descriptionRevisionUrl", errors.getvalue())
+            self.assertNotIn("Traceback", errors.getvalue())
+            self.assertEqual(self._tree_snapshot(), before)
+
     # -- CLI read-only failure -----------------------------------------------------
 
     def test_cli_failure_is_read_only(self):

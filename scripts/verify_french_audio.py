@@ -571,8 +571,14 @@ def _check_audio_object(audio: object, label: str,
             "frameCount" in audio:
         rate, frames = audio["sampleRateHz"], audio["frameCount"]
         if _is_int(rate) and rate > 0 and _is_int(frames) and frames > 0:
-            expected = frames / rate
             duration = audio["durationSeconds"]
+            try:
+                expected = frames / rate
+            except OverflowError:
+                # The ratio is beyond the finite float range (a finite
+                # durationSeconds then always fails the one-microsecond
+                # comparison below; the ratio is only shown as inf here).
+                expected = float("inf")
             if _is_int(duration):
                 # Exact rational comparison so arbitrarily large integers
                 # neither overflow nor silently compare equal.
@@ -1043,7 +1049,11 @@ def _check_revision_url(value: object, title: object, revision_id: object,
             f"{label}: the 'oldid' query parameter must be the positive "
             f"integer descriptionRevisionId")
         return
-    if int(url_oldid) != revision_id:
+    # Compared as canonical digit strings (leading zeros stripped) instead
+    # of int(url_oldid): the value is already constrained to ASCII digits
+    # above, and the conversion can exceed Python's integer-string digit
+    # limit for an absurd oldid while the match decision is unchanged.
+    if (url_oldid.lstrip("0") or "0") != str(revision_id):
         diagnostics.append(
             f"{label}: 'oldid' is {url_oldid!r}; it must match "
             f"descriptionRevisionId {revision_id!r}")
