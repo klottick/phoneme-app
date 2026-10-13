@@ -182,4 +182,4 @@ Primary sources inspected on 2026-10-13:
 - [Parselmouth documentation](https://parselmouth.readthedocs.io/en/stable/) and [licence declaration](https://github.com/YannickJadoul/Parselmouth#license)
 - [MFA alignment concepts](https://montreal-forced-aligner.readthedocs.io/en/latest/user_guide/index.html) and [French model metadata](https://github.com/MontrealCorpusTools/mfa-models/blob/main/acoustic/french/mfa/v3.0.0/meta.json)
 - [OpenPronounce README: French/calibration/privacy limits](https://github.com/Halleck45/OpenPronounce#limitations)
-- [Whisper model card: evaluated use and limitations](https://github.com/openai/whisper/blob/main/model-card.md)
+- [Whisper model card: evaluated use and limitations](https://github.com/openai/whisper/blob/main/model-card.md), [README code/weights licence declaration](https://github.com/openai/whisper#license) and [MIT licence text](https://github.com/openai/whisper/blob/main/LICENSE)
