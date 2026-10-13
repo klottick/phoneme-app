@@ -1,0 +1,1509 @@
+"""Offline, read-only verifier for the FR-02 French word-audio candidate package.
+
+Reads and measures only files under the repository's
+``frontend/assets/audio/fr`` directory; it never rewrites the package and
+never performs network activity. A PASS result is technical/metadata
+validation only - it is not linguistic sign-off or rights clearance. The
+live Dart catalogue mapping is checked by a separate independent oracle and
+is deliberately not parsed here.
+
+The approved FR-02 recovery amendment (2026-10-13) adds exactly two bounded
+acceptances, pinned to immutable verifier-side literals (never to package
+metadata): the exact four-byte RIFF-size underdeclaration in the 24
+selected, measured SHA-256-pinned binaries, and the single approved
+historical ``mur`` archive association. Nothing here generalises either:
+unknown hashes obtain no exception, malformed containers are not otherwise
+validated, and correctly framed PCM continues to pass unconditionally.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import io
+import json
+import math
+import re
+import struct
+import sys
+import wave
+from datetime import datetime
+from fractions import Fraction
+from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlsplit
+
+SCHEMA_VERSION = 1
+CATALOGUE_STATUS = "candidate"
+LANGUAGE = "fr"
+ASSET_DIR = ("frontend", "assets", "audio", "fr")
+LICENSES_DIR = "licenses"
+
+# Current `frenchWords` order, per the approved FR-02 spec.
+WORD_SEQUENCE = [
+    "tout", "rouge", "vous", "doux", "loup", "soupe", "tu", "rue", "lune",
+    "jus", "mur", "plume", "lit", "si", "vite", "île", "beau", "mot", "eau",
+    "dos", "bon", "nom", "banc", "sans",
+]
+
+LICENSE_URLS = {
+    "CC-BY-SA-4.0": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "CC-BY-4.0": "https://creativecommons.org/licenses/by/4.0/",
+}
+SPEAKER_NAME = "LoquaxFR"
+SPEAKER_QUALIFICATION = "unverified"
+ORIGIN_PATH = "frontend/lib/src/core/course/french_course.dart"
+ORIGIN_SYMBOL = "frenchWords"
+ORIGIN_STATUS = "existingCuratedNotRecordingReviewed"
+REVIEW_STATUS = "pending"
+TEACHING_INVENTORY = ("u", "y", "i", "o", "ɔ̃", "ɑ̃", "ʁ")
+
+# ---------------------------------------------------------------------------
+# Approved FR-02 recovery amendment (2026-10-13): bounded byte-level pinning
+# ---------------------------------------------------------------------------
+
+# All 24 selected binaries (the 23 current originals plus the approved 2020
+# `mur` original; the 2026 `mur` replacement is NOT among these) arrived with
+# their RIFF size field exactly four bytes underdeclared: the field holds
+# fileLength - 12 instead of fileLength - 8, while the physical chunks are
+# complete through EOF. This immutable verifier-side allowlist keys the
+# measured SHA-256 to (word, byteLength). It is constant data in this module;
+# package metadata cannot add, remove or reassign a pin. A nonstandard size
+# is accepted ONLY when both the measured hash and byte length match here and
+# the field is exactly fileLength - 12 - never for arbitrary files, and it
+# does not make malformed WAVs generally valid.
+RIFF_ABBREV_SIZE_ALLOWLIST: dict[str, tuple[str, int]] = {
+    "ec761ca7114be7bb7178f380ff4e937763bbf934b0bd44d7366973394d61dec4":
+        ("tout", 66836),
+    "c4540087629c8034a58b7b4f6ca5354234c1dd492a5a8d74e0dc8bff6bf2bd40":
+        ("rouge", 88364),
+    "9027202be18f5a94dc116e887ace62385692cbbb3493a67da371427cb35d3cf4":
+        ("vous", 41324),
+    "bf45923e17129f3d05c446062962e378840aa7e254fc908c21fdcd037b615b09":
+        ("doux", 36972),
+    "62c67dece782ef8a4be248e10b5537db8fa51e9fc8c378a1c6784eb8d58b012e":
+        ("loup", 63788),
+    "9d850d99b78dd1c521e0512b9be8df85f798702ed8bda6bef3ea0417607ed495":
+        ("soupe", 69420),
+    "98f6aca710d17bc74b114e81b60b7d3e8ec8504b6073dbbe441af8df3a29020c":
+        ("tu", 66836),
+    "be717dc3763ff96ad35852799bf77269740c2c851ac1daf696eaefbfd28ed20d":
+        ("rue", 77554),
+    "9a7ef667189672b5ba2acb11dcb3b98449b958c0a535c85799309a225970e437":
+        ("lune", 85746),
+    "27737f36cb89b05b59431bbf54426881e8f8e1cf786e54c551743cf9ed7a53df":
+        ("jus", 75028),
+    # `mur`: the approved 2020 original (description revision 384728988),
+    # not the 2026 replacement that now sits at the current URL.
+    "c37f34379cce3c5245f1fe951d179f0f39c49fdf679f1cf83e4fd02e5f6a44ad":
+        ("mur", 77554),
+    "767018eff1b9ec0e48546d71865e99d9d70670e94a5440d8314d16884aad1208":
+        ("plume", 60524),
+    "41698332638a8540c2790a03dbbbfea871469a0d44b1dbe08825225fc918ab59":
+        ("lit", 67884),
+    "d9c5aff5fb44aed16963c68d1c7ebe49450c9e08c422f6affac76ca4c7870d7e":
+        ("si", 75028),
+    "5ae742cf467e17d6a5d183b1dd4b0b5a468df7e841b04486d9fe31de92216816":
+        ("vite", 42092),
+    "a7fed2bb2440a9980111cfe5c739e0abf722fc91b8de35be936d271f46f7f15a":
+        ("île", 69362),
+    "689c67d84da86eb932fed8e82c690951c44eda2c854962a943818b10a6cd2e21":
+        ("beau", 57196),
+    "a478bb690e724b5bd98dbc9bbea80270231f78ebad08b523b11daddc02b36398":
+        ("mot", 77554),
+    "7dfa03f4114a25322a881915a99ea2f0695727b045358e76396cba6373595f27":
+        ("eau", 59948),
+    "e50683ee0d1de5e1c78cae14d9d7c7a8e61961ec2a2996a73a172c6df58e2d4c":
+        ("dos", 75028),
+    "1f369b90c51e1696371ac3b9e59af96986b4e0bef4a531c19723c7c682d86aff":
+        ("bon", 54892),
+    "a24dad922927a67621cc6a7feeeae6d0b047b2447e32922fd8e609a3d3ef60b1":
+        ("nom", 55596),
+    "cac71e6ba32e78358fab63b5ee28d3ec467816395c1550aa8bf2117caf62d74f":
+        ("banc", 48748),
+    "a053ac40269632413fd4d3fc288dc988febe07b06c137d9d848b889e1e795c24":
+        ("sans", 69932),
+}
+
+# The single approved historical `mur` archive association. The archive-name
+# prefix (20261007075226) identifies the replacement event, NOT the original
+# recording timestamp; the archive URL is paired exclusively with the
+# original upload revision, the archived bytes' sourceSHA1/fullSHA256 and the
+# original timestamp. No other word/prefix/name/revision/date/hash pairing
+# may use this route.
+MUR_ARCHIVE_WORD = "mur"
+MUR_ARCHIVE_MEDIA_URL = (
+    "https://upload.wikimedia.org/wikipedia/commons/archive/7/79/"
+    "20261007075226%21LL-Q150_%28fra%29-LoquaxFR-mur.wav")
+MUR_ARCHIVE_MEDIA_PATH = (
+    "/wikipedia/commons/archive/7/79/"
+    "20261007075226!LL-Q150_(fra)-LoquaxFR-mur.wav")
+MUR_ARCHIVE_REVISION_ID = 384728988
+MUR_ARCHIVE_SHA1 = "14d1b1ee2a64653d1960c72c80dfe5ed621ff0b2"
+MUR_ARCHIVE_SHA256 = "c37f34379cce3c5245f1fe951d179f0f39c49fdf679f1cf83e4fd02e5f6a44ad"
+MUR_ARCHIVE_MEDIA_TIMESTAMP = "2020-01-01T18:47:44Z"
+
+MANIFEST_FIELDS = ("schemaVersion", "catalogueStatus", "language", "entries")
+ENTRY_FIELDS = (
+    "id", "kind", "spokenText", "assetPath", "sha256", "byteLength", "audio",
+    "mapping", "speaker", "license", "provenanceId", "changes", "review",
+)
+AUDIO_FIELDS = (
+    "container", "encoding", "sampleRateHz", "channels", "bitsPerSample",
+    "frameCount", "durationSeconds",
+)
+MAPPING_FIELDS = ("expectedIpa", "phonemes", "teachingTargets", "origin")
+ORIGIN_FIELDS = ("path", "symbol", "revision", "status")
+SPEAKER_FIELDS = ("sourceName", "qualificationStatus", "accent")
+LICENSE_FIELDS = ("spdxId", "url", "textPath", "attribution", "notices")
+REVIEW_FIELDS = ("status", "reviewer", "reviewedAt", "evidence")
+PROVENANCE_FIELDS = (
+    "id", "sourcePageUrl", "sourceTitle", "descriptionRevisionId",
+    "descriptionRevisionUrl", "retrievedAt", "originalDownloadUrl",
+    "mediaTimestamp", "sourceSha1", "sourceTranscription", "sourceSpeaker",
+    "creditedCreators", "licenseEvidence", "sha256",
+)
+EVIDENCE_FIELDS = ("spdxId", "url", "creditText", "notices", "declaration")
+
+SHA256_RE = re.compile(r"[0-9a-f]{64}")
+SHA1_RE = re.compile(r"[0-9a-f]{40}")
+UTC_ISO_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$")
+COMMONS_HOST = "commons.wikimedia.org"
+MEDIA_HOST = "upload.wikimedia.org"
+
+PASS_MESSAGE = (
+    "PASS: 24 pending French word candidates verified "
+    "(technical/metadata only)."
+)
+
+# Sentinel distinguishing "file unparsable/unreadable" from a successfully
+# parsed JSON root that is not an object (null, list, or scalar).
+_PARSE_FAILED = object()
+
+
+def _required_spdx(word: str) -> str:
+    """Spec: 23 words are CC BY-SA 4.0; `sans` is CC BY 4.0."""
+    return "CC-BY-4.0" if word == "sans" else "CC-BY-SA-4.0"
+
+
+# ---------------------------------------------------------------------------
+# small shared checks
+# ---------------------------------------------------------------------------
+
+def _reject_constant(value: str) -> object:
+    raise ValueError(f"non-finite JSON constant is not allowed: {value!r}")
+
+
+def _strict_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    keys = [key for key, _ in pairs]
+    duplicates = sorted({key for key in keys if keys.count(key) > 1})
+    if duplicates:
+        raise ValueError(
+            "duplicate JSON keys: " + ", ".join(duplicates))
+    return dict(pairs)
+
+
+def _parse_json_file(path: Path, diagnostics: list[str]) -> object:
+    """Parse UTF-8 JSON strictly (duplicate keys, NaN/Infinity, bad UTF-8).
+
+    Returns the parsed value (which may be a non-object JSON value such as
+    null, a list or a number), or ``_PARSE_FAILED`` when the file could not
+    be read or parsed (a diagnostic is appended in that case).
+    """
+    try:
+        text = path.read_bytes().decode("utf-8")
+    except FileNotFoundError:
+        diagnostics.append(f"{path}: missing file")
+        return _PARSE_FAILED
+    except UnicodeDecodeError as exc:
+        diagnostics.append(f"{path}: invalid UTF-8 ({exc.reason})")
+        return _PARSE_FAILED
+    except OSError as exc:
+        diagnostics.append(f"{path}: unreadable ({exc.strerror or exc})")
+        return _PARSE_FAILED
+    try:
+        return json.loads(
+            text, object_pairs_hook=_strict_object,
+            parse_constant=_reject_constant)
+    except ValueError as exc:
+        diagnostics.append(f"{path}: invalid JSON ({exc})")
+        return _PARSE_FAILED
+
+
+def _is_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_string(value: object) -> bool:
+    return isinstance(value, str)
+
+
+def _check_fields(obj: dict, names: tuple[str, ...], label: str,
+                  diagnostics: list[str]) -> None:
+    unknown = sorted(key for key in obj if key not in names)
+    missing = [name for name in names if name not in obj]
+    if unknown:
+        diagnostics.append(f"{label}: unknown fields: {', '.join(unknown)}")
+    if missing:
+        diagnostics.append(f"{label}: missing fields: {', '.join(missing)}")
+
+
+def _check_positive_int(value: object, label: str, diagnostics: list[str]) -> bool:
+    if not _is_int(value) or value < 1:
+        diagnostics.append(
+            f"{label} is {value!r}; it must be a positive integer "
+            f"(booleans and other types are not integers)")
+        return False
+    return True
+
+
+def _check_duration_value(value: object, label: str,
+                          diagnostics: list[str]) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        diagnostics.append(f"{label} is {value!r}; it must be a finite number")
+        return False
+    if isinstance(value, float) and not math.isfinite(value):
+        diagnostics.append(f"{label} is {value!r}; it must be finite")
+        return False
+    if value <= 0:
+        diagnostics.append(f"{label} is {value!r}; it must be positive")
+        return False
+    return True
+
+
+def _check_nonempty_string(value: object, label: str,
+                           diagnostics: list[str]) -> bool:
+    if not _is_string(value) or not value.strip():
+        diagnostics.append(f"{label} is {value!r}; it must be a nonempty string")
+        return False
+    return True
+
+
+def _check_string_list(value: object, label: str, diagnostics: list[str],
+                       require_items: bool = True) -> bool:
+    if not isinstance(value, list):
+        diagnostics.append(f"{label} is {value!r}; it must be a list of strings")
+        return False
+    for index, item in enumerate(value):
+        if not _is_string(item) or (require_items and not item.strip()):
+            diagnostics.append(
+                f"{label}[{index}] is {item!r}; items must be nonempty strings")
+            return False
+    return True
+
+
+def _check_utc_iso(value: object, label: str, diagnostics: list[str]) -> bool:
+    if not _is_string(value) or not UTC_ISO_RE.match(value):
+        diagnostics.append(
+            f"{label} is {value!r}; it must be a UTC ISO 8601 timestamp "
+            f"(YYYY-MM-DDTHH:MM:SSZ)")
+        return False
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        diagnostics.append(f"{label} {value!r} is not a valid calendar date")
+        return False
+    return True
+
+
+def _check_file_chain(root: Path, target: Path, label: str, display: str,
+                      diagnostics: list[str]) -> bool:
+    """Reject symlinks at every component; require a regular readable file."""
+    current = root
+    for part in target.relative_to(root).parts:
+        current = current / part
+        if current.is_symlink():
+            diagnostics.append(
+                f"{label}: {display!r} is or passes through a symlink "
+                f"(component {part!r}); symlinks are not allowed")
+            return False
+    if not current.is_file():
+        diagnostics.append(
+            f"{label}: {display!r} does not resolve to a readable regular file")
+        return False
+    return True
+
+
+def _safe_relative(value: object, base: Path, label: str,
+                   diagnostics: list[str]) -> Path | None:
+    """Accept only relative, non-traversing paths; escapees are never content."""
+    if not _is_string(value) or not value:
+        diagnostics.append(f"{label} is {value!r}; it must be a nonempty string")
+        return None
+    candidate = Path(value)
+    if candidate.is_absolute():
+        diagnostics.append(
+            f"{label}: {value!r} must be a relative path (absolute paths are unsafe)")
+        return None
+    if ".." in candidate.parts:
+        diagnostics.append(
+            f"{label}: {value!r} must not traverse ('..') outside the package")
+        return None
+    return base / candidate
+
+
+def _check_https_url(value: object, host: str, label: str,
+                     diagnostics: list[str]) -> object:
+    if not _is_string(value):
+        diagnostics.append(f"{label} is {value!r}; it must be a string URL")
+        return None
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        diagnostics.append(f"{label}: {value!r} is not a valid URL")
+        return None
+    if parts.scheme != "https":
+        diagnostics.append(f"{label}: {value!r} must use HTTPS")
+        return parts
+    if (parts.hostname or "").lower() != host:
+        diagnostics.append(f"{label}: {value!r} must point at {host}")
+        return parts
+    return parts
+
+
+# ---------------------------------------------------------------------------
+# WAV measurement
+# ---------------------------------------------------------------------------
+
+def _reject_format(fmt_code: int) -> None:
+    raise ValueError(
+        f"unsupported WAV audio format code {fmt_code:04X} "
+        f"(only PCM is allowed)")
+
+
+def _parse_fmt(chunk: bytes) -> tuple[int, int, int, int, int]:
+    """Return (rate, channels, bits, byte_rate, block_align) from a fmt chunk."""
+    if len(chunk) < 16:
+        raise ValueError("fmt chunk is truncated")
+    (audio_format, channels, rate, byte_rate, block_align, bits) = (
+        struct.unpack_from("<HHIIHH", chunk, 0)[:6])
+    if audio_format == 0xFFFE:  # WAVE_FORMAT_EXTENSIBLE: read the true subformat
+        cb_size = struct.unpack_from("<H", chunk, 16)[0] if len(chunk) >= 18 \
+            else -1
+        if len(chunk) < 40 or cb_size != 22:
+            raise ValueError("extensible fmt chunk is truncated or invalid")
+        sub = struct.unpack_from("<H", chunk, 24)[0]  # SubFormat GUID data1
+        if sub != 1:
+            _reject_format(sub)
+    elif audio_format != 1:
+        _reject_format(audio_format)
+    if channels < 1 or rate < 1 or bits < 1 or block_align < 1:
+        raise ValueError("fmt chunk has degenerate values")
+    if bits % 8 != 0:
+        raise ValueError(
+            f"bits per sample {bits} is not an integral number of bytes")
+    if byte_rate != rate * channels * (bits // 8):
+        raise ValueError("byte rate does not match rate * channels * width")
+    if block_align != channels * (bits // 8):
+        raise ValueError("block align does not match channels * width")
+    return rate, channels, bits, byte_rate, block_align
+
+
+def _parse_riff_container(raw: bytes) -> tuple[int, int, int, bytes]:
+    """Validate RIFF/WAVE bounds; return (rate, channels, bits, data).
+
+    Legitimate extra chunks (e.g. LIST metadata) and chunk-alignment padding
+    inside the declared container are allowed; incomplete chunks, padding
+    beyond the declared container, or non-PCM formats raise ValueError.
+
+    ``abbreviated`` is true only for the approved recovery-amendment case:
+    the measured SHA-256/byteLength is exactly one of the pinned selected
+    binaries AND the RIFF size field is exactly fileLength - 12 (four bytes
+    underdeclared). Chunks are still walked to the physical end of the bytes;
+    the shortfall is cross-checked against the stdlib reader in measure_wav.
+    """
+    if len(raw) < 12:
+        raise ValueError("file is too small to be a RIFF container")
+    if raw[0:4] != b"RIFF":
+        raise ValueError("missing RIFF header")
+    if raw[8:12] != b"WAVE":
+        raise ValueError("missing WAVE form type (not a WAV file)")
+    container_size = struct.unpack_from("<I", raw, 4)[0]
+    abbreviated = False
+    if container_size != len(raw) - 8:
+        pin = RIFF_ABBREV_SIZE_ALLOWLIST.get(hashlib.sha256(raw).hexdigest())
+        if (
+                pin is None
+                or container_size != len(raw) - 12
+                or pin[1] != len(raw)):
+            raise ValueError(
+                f"RIFF size {container_size} does not cover the whole file "
+                f"({len(raw) - 8} bytes present)")
+        abbreviated = True
+    end = len(raw)
+    pos = 12
+    fmt_payload = None
+    data_payload = None
+    last_chunk_id: bytes | None = None
+    while pos < end:
+        if pos + 8 > end:
+            raise ValueError("truncated RIFF chunk header")
+        chunk_id = raw[pos:pos + 4]
+        size = struct.unpack_from("<I", raw, pos + 4)[0]
+        last_chunk_id = chunk_id
+        body_start = pos + 8
+        if body_start + size > end:
+            raise ValueError(
+                f"chunk {chunk_id.decode('latin-1')} is incomplete: "
+                f"declared {size} bytes, only {end - body_start} available")
+        if chunk_id == b"fmt ":
+            if fmt_payload is not None:
+                raise ValueError("multiple fmt chunks")
+            fmt_payload = raw[body_start:body_start + size]
+        elif chunk_id == b"data":
+            if data_payload is not None:
+                raise ValueError("multiple data chunks")
+            data_payload = raw[body_start:body_start + size]
+        # Other chunks (LIST, INFO, ...) are permitted; bounds already checked.
+        pos = body_start + size
+        if size & 1:
+            # RIFF framing requires a pad byte after odd-sized chunks; it
+            # must exist inside the declared container, even as the last
+            # byte right before the file ends.
+            if pos >= end:
+                raise ValueError(
+                    f"missing required RIFF padding byte after odd-sized "
+                    f"chunk {chunk_id.decode('latin-1')!r}")
+            pos += 1
+    if fmt_payload is None:
+        raise ValueError("missing fmt chunk")
+    if data_payload is None:
+        raise ValueError("missing data chunk")
+    if abbreviated and last_chunk_id is not None and last_chunk_id != b"data":
+        # The approved exception describes the selected originals only:
+        # fmt + one complete data chunk reaching the end of the bytes.
+        # A trailing metadata chunk (or any other final chunk) is not that
+        # layout, and the shortfall is never shifted into it.
+        raise ValueError(
+            "the approved RIFF size exception covers only files whose "
+            "single complete data chunk reaches the end of the bytes")
+    rate, channels, bits, _, block_align = _parse_fmt(fmt_payload)
+    if block_align == 0:
+        raise ValueError("zero sample width")
+    return rate, channels, bits, data_payload
+
+
+def measure_wav(path: Path) -> dict[str, str | int | float]:
+    """Return the entry's `audio` object, measured from the file's bytes.
+
+    Malformed, empty, truncated or unsupported (non-PCM) WAVs raise ValueError.
+    """
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as exc:
+        raise ValueError(f"unreadable WAV ({exc.strerror or exc})") from exc
+    rate, channels, bits, data = _parse_riff_container(raw)
+    width = bits // 8
+    sample_bytes = width * channels
+    if sample_bytes <= 0 or len(data) % sample_bytes:
+        raise ValueError("data length is not a whole number of frames")
+    frames = len(data) // sample_bytes
+    # Cross-check against the stdlib parser. It rejects some layouts (e.g.
+    # a data chunk before the fmt chunk) by raising wave.Error; normalize
+    # that known parser exception to this function's ValueError contract.
+    # The frameCount above is the FULL physical frame count; for the pinned
+    # four-byte underdeclared originals the stdlib reader omits only the
+    # final four PCM bytes when asked for samples, which is a disclosure,
+    # not a validation input.
+    try:
+        with wave.open(io.BytesIO(raw), "rb") as handle:
+            header = (handle.getframerate(), handle.getnchannels(),
+                      handle.getsampwidth() * 8)
+            nframes = handle.getnframes()
+    except wave.Error as exc:
+        raise ValueError(f"unusable WAVE header: {exc}") from exc
+    if header != (rate, channels, bits):
+        raise ValueError("fmt chunk disagrees with the WAVE header")
+    if nframes != frames:
+        raise ValueError("data length disagrees with the frame count")
+    if frames <= 0:
+        raise ValueError("WAV contains no audio frames")
+    return {
+        "container": "wav",
+        "encoding": "pcm",
+        "sampleRateHz": rate,
+        "channels": channels,
+        "bitsPerSample": bits,
+        "frameCount": frames,
+        "durationSeconds": frames / rate,
+    }
+
+
+# ---------------------------------------------------------------------------
+# manifest entry checks
+# ---------------------------------------------------------------------------
+
+def _check_audio_object(audio: object, label: str,
+                        diagnostics: list[str]) -> bool:
+    if not isinstance(audio, dict):
+        diagnostics.append(f"{label} is {audio!r}; it must be an object")
+        return False
+    _check_fields(audio, AUDIO_FIELDS, label, diagnostics)
+    ok = True
+    if "container" in audio and audio["container"] != "wav":
+        diagnostics.append(
+            f"{label}.container is {audio['container']!r}; it must be 'wav'")
+        ok = False
+    if "encoding" in audio and audio["encoding"] != "pcm":
+        diagnostics.append(
+            f"{label}.encoding is {audio['encoding']!r}; it must be 'pcm'")
+        ok = False
+    integral = True
+    for field in ("sampleRateHz", "channels", "bitsPerSample", "frameCount"):
+        if field in audio and \
+                not _check_positive_int(audio[field], f"{label}.{field}",
+                                        diagnostics):
+            integral = False
+    if "bitsPerSample" in audio and \
+            _is_int(audio["bitsPerSample"]) and \
+            audio["bitsPerSample"] % 8 != 0:
+        diagnostics.append(
+            f"{label}.bitsPerSample {audio['bitsPerSample']!r} "
+            f"is not an integral number of bytes")
+        integral = False
+    duration_ok = True
+    if "durationSeconds" in audio and \
+            not _check_duration_value(
+                audio["durationSeconds"], f"{label}.durationSeconds",
+                diagnostics):
+        duration_ok = False
+    if integral and duration_ok and \
+            "durationSeconds" in audio and "sampleRateHz" in audio and \
+            "frameCount" in audio:
+        rate, frames = audio["sampleRateHz"], audio["frameCount"]
+        if _is_int(rate) and rate > 0 and _is_int(frames) and frames > 0:
+            duration = audio["durationSeconds"]
+            try:
+                expected = frames / rate
+            except OverflowError:
+                # The ratio is beyond the finite float range (a finite
+                # durationSeconds then always fails the one-microsecond
+                # comparison below; the ratio is only shown as inf here).
+                expected = float("inf")
+            if _is_int(duration):
+                # Exact rational comparison so arbitrarily large integers
+                # neither overflow nor silently compare equal.
+                bad = abs(Fraction(duration) - Fraction(frames) / rate) > \
+                    Fraction(1, 1_000_000)
+            else:
+                bad = abs(duration - expected) > 1e-06
+            if bad:
+                diagnostics.append(
+                    f"{label}.durationSeconds is {duration!r}; "
+                    f"it must equal frameCount/sampleRateHz ({expected!r}) "
+                    f"within 1 microsecond")
+    return ok
+
+
+def _check_audio_against_measurement(audio: object, measured: dict,
+                                     label: str,
+                                     diagnostics: list[str]) -> None:
+    if not isinstance(audio, dict):
+        return
+    for field, expected in measured.items():
+        if field not in audio:
+            continue
+        value = audio[field]
+        if field == "durationSeconds":
+            # The spec allows the same 1-microsecond absolute tolerance
+            # here; integers and strings (all other fields) stay exact.
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                diagnostics.append(
+                    f"{label}.durationSeconds is {value!r}; the file "
+                    f"measures {expected!r}")
+                continue
+            if isinstance(value, int):
+                bad = abs(Fraction(value) - Fraction(
+                    int(measured["frameCount"]),
+                    measured["sampleRateHz"])) > Fraction(1, 1_000_000)
+            else:
+                bad = abs(value - expected) > 1e-06
+            if bad:
+                diagnostics.append(
+                    f"{label}.durationSeconds is {value!r}; the file "
+                    f"measures {expected!r} (allowed difference is "
+                    f"1 microsecond)")
+        elif value != expected:
+            diagnostics.append(
+                f"{label}.{field} is {value!r}, "
+                f"but the file measures {expected!r}")
+
+
+def _check_targets(value: object, label: str, diagnostics: list[str]) -> None:
+    if not _check_string_list(value, label, diagnostics):
+        return
+    for index, item in enumerate(value):
+        if item not in TEACHING_INVENTORY:
+            diagnostics.append(
+                f"{label}[{index}] is {item!r}; teachingTargets must be drawn "
+                f"from the teaching inventory "
+                f"({', '.join(TEACHING_INVENTORY)})")
+    ranks = [TEACHING_INVENTORY.index(item)
+             for item in value if item in TEACHING_INVENTORY]
+    if ranks != sorted(ranks):
+        diagnostics.append(
+            f"{label} {value!r} must follow the teaching inventory order "
+            f"({', '.join(TEACHING_INVENTORY)})")
+    if len(set(value)) != len(value):
+        diagnostics.append(f"{label} {value!r} must not repeat a target")
+
+
+def _check_mapping(mapping: object, label: str,
+                   diagnostics: list[str]) -> None:
+    if not isinstance(mapping, dict):
+        diagnostics.append(f"{label} must be an object")
+        return
+    _check_fields(mapping, MAPPING_FIELDS, label, diagnostics)
+    if "expectedIpa" in mapping:
+        ipa = mapping["expectedIpa"]
+        if _check_nonempty_string(ipa, f"{label}.expectedIpa", diagnostics):
+            if isinstance(ipa, str) and (ipa.startswith("/") or ipa.endswith("/")):
+                diagnostics.append(
+                    f"{label}.expectedIpa is {ipa!r}; it must not be "
+                    f"slash-decorated")
+    if "phonemes" in mapping:
+        phonemes = mapping["phonemes"]
+        if _check_string_list(phonemes, f"{label}.phonemes", diagnostics) and \
+                not phonemes:
+            diagnostics.append(
+                f"{label}.phonemes must list the ordered sounds of the word")
+    if "teachingTargets" in mapping:
+        _check_targets(mapping["teachingTargets"], f"{label}.teachingTargets",
+                       diagnostics)
+    if "origin" in mapping:
+        _check_origin(mapping["origin"], f"{label}.origin", diagnostics)
+
+
+def _check_origin(origin: object, label: str,
+                  diagnostics: list[str]) -> None:
+    if not isinstance(origin, dict):
+        diagnostics.append(f"{label} must be an object")
+        return
+    _check_fields(origin, ORIGIN_FIELDS, label, diagnostics)
+    if "path" in origin and origin["path"] != ORIGIN_PATH:
+        diagnostics.append(
+            f"{label}.path is {origin['path']!r}; it must be {ORIGIN_PATH!r}")
+    if "symbol" in origin and origin["symbol"] != ORIGIN_SYMBOL:
+        diagnostics.append(
+            f"{label}.symbol is {origin['symbol']!r}; it must be {ORIGIN_SYMBOL!r}")
+    if "status" in origin and origin["status"] != ORIGIN_STATUS:
+        diagnostics.append(
+            f"{label}.status is {origin['status']!r}; it must be "
+            f"{ORIGIN_STATUS!r}")
+    if "revision" in origin:
+        revision = origin["revision"]
+        if not (isinstance(revision, str) and
+                re.fullmatch(r"[0-9a-f]{40}", revision)):
+            diagnostics.append(
+                f"{label}.revision is {revision!r}; it must be a full "
+                f"lowercase 40-hex Git revision")
+
+
+def _check_speaker(speaker: object, label: str,
+                   diagnostics: list[str]) -> None:
+    if not isinstance(speaker, dict):
+        diagnostics.append(f"{label} must be an object")
+        return
+    _check_fields(speaker, SPEAKER_FIELDS, label, diagnostics)
+    if "sourceName" in speaker and \
+            not _check_nonempty_string(speaker["sourceName"], f"{label}.sourceName",
+                                       diagnostics):
+        return
+    if "sourceName" in speaker and speaker["sourceName"] != SPEAKER_NAME:
+        diagnostics.append(
+            f"{label}.sourceName is {speaker['sourceName']!r}; it must be "
+            f"{SPEAKER_NAME!r} (the recorded source speaker)")
+    if "qualificationStatus" in speaker and \
+            speaker["qualificationStatus"] != SPEAKER_QUALIFICATION:
+        diagnostics.append(
+            f"{label}.qualificationStatus is "
+            f"{speaker['qualificationStatus']!r}; speaker qualification is "
+            f"unverified and must stay {SPEAKER_QUALIFICATION!r}")
+    if "accent" in speaker and speaker["accent"] is not None:
+        diagnostics.append(
+            f"{label}.accent is {speaker['accent']!r}; accent must remain null "
+            f"(no accent claim)")
+
+
+def _check_license(license_obj: object, word: str, root: Path,
+                   asset_dir: Path, label: str,
+                   diagnostics: list[str]) -> None:
+    if not isinstance(license_obj, dict):
+        diagnostics.append(f"{label} must be an object")
+        return
+    _check_fields(license_obj, LICENSE_FIELDS, label, diagnostics)
+    required = _required_spdx(word)
+    if "spdxId" in license_obj and license_obj["spdxId"] != required:
+        diagnostics.append(
+            f"{label}.spdxId is {license_obj['spdxId']!r}; word {word!r} "
+            f"requires {required!r}")
+    if "url" in license_obj and license_obj["url"] != LICENSE_URLS[required]:
+        diagnostics.append(
+            f"{label}.url is {license_obj['url']!r}; word {word!r} requires "
+            f"{LICENSE_URLS[required]!r}")
+    if "attribution" in license_obj:
+        _check_nonempty_string(
+            license_obj["attribution"], f"{label}.attribution", diagnostics)
+    if "notices" in license_obj:
+        _check_string_list(license_obj["notices"], f"{label}.notices",
+                           diagnostics)
+    if "textPath" in license_obj:
+        _check_license_text(
+            license_obj["textPath"], word, root, asset_dir,
+            f"{label}.textPath", diagnostics)
+
+
+def _check_license_text(value: object, word: str, root: Path,
+                        asset_dir: Path, label: str,
+                        diagnostics: list[str]) -> None:
+    target = _safe_relative(value, root, label, diagnostics)
+    if target is None:
+        return
+    licenses_dir = asset_dir / LICENSES_DIR
+    licenses_display = "/".join(ASSET_DIR) + "/" + LICENSES_DIR
+    try:
+        target.relative_to(licenses_dir)
+    except ValueError:
+        diagnostics.append(
+            f"{label} {value!r} must resolve to a licence text under "
+            f"'{licenses_display}/' relative to the repository root")
+        return
+    if not _check_file_chain(root, target, label, _is_string(value) and value or "",
+                             diagnostics):
+        return
+    try:
+        content = target.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        diagnostics.append(f"{label} {value!r} is not readable UTF-8 text")
+        return
+    if not content.strip():
+        diagnostics.append(f"{label} {value!r} is empty; the official licence "
+                           f"for word {word!r} must be retained")
+
+
+def _check_review(review: object, label: str,
+                  diagnostics: list[str]) -> None:
+    if not isinstance(review, dict):
+        diagnostics.append(f"{label} must be an object")
+        return
+    _check_fields(review, REVIEW_FIELDS, label, diagnostics)
+    if "status" in review:
+        status = review["status"]
+        if not _is_string(status) or status != REVIEW_STATUS:
+            diagnostics.append(
+                f"{label}.status is {status!r}; it must be "
+                f"{REVIEW_STATUS!r} (linguistic review is deliberately pending)")
+    if "reviewer" in review and review["reviewer"] is not None:
+        diagnostics.append(
+            f"{label}.reviewer is {review['reviewer']!r}; it must be null "
+            f"while the review is pending")
+    if "reviewedAt" in review and review["reviewedAt"] is not None:
+        diagnostics.append(
+            f"{label}.reviewedAt is {review['reviewedAt']!r}; it must be "
+            f"null while the review is pending")
+    if "evidence" in review and review["evidence"] != []:
+        diagnostics.append(
+            f"{label}.evidence is {review['evidence']!r}; it must be empty "
+            f"while the review is pending")
+
+
+def _check_manifest_entry(index: int, word: str, entry: object,
+                          root: Path, asset_dir: Path,
+                          seen_ids: set[str], seen_paths: set[str],
+                          seen_prov_refs: set[str],
+                          listed_wavs: set[Path],
+                          diagnostics: list[str]) -> bytes | None:
+    label = f"entries[{index}] (word {word!r})"
+    if not isinstance(entry, dict):
+        diagnostics.append(f"manifest.json {label}: entry must be an object")
+        return None
+    _check_fields(entry, ENTRY_FIELDS, f"manifest.json {label}", diagnostics)
+    label = f"manifest.json {label}"
+
+    expected_id = f"fr-word-{word}"
+    if "id" in entry:
+        entry_id = entry["id"]
+        if entry_id != expected_id:
+            diagnostics.append(
+                f"{label}: id is {entry_id!r}, expected {expected_id!r}")
+        if _is_string(entry_id):
+            if entry_id in seen_ids:
+                diagnostics.append(f"{label}: id {entry_id!r} is duplicated")
+            seen_ids.add(entry_id)
+    if "kind" in entry and entry["kind"] != "word":
+        diagnostics.append(
+            f"{label}: kind is {entry['kind']!r}, it must be 'word'")
+    if "spokenText" in entry:
+        spoken = entry["spokenText"]
+        if not _is_string(spoken) or spoken != word:
+            diagnostics.append(
+                f"{label}: spokenText is {spoken!r}; it must be exactly "
+                f"{word!r}")
+    if "provenanceId" in entry:
+        ref = entry["provenanceId"]
+        if not _check_nonempty_string(ref, f"{label}: provenanceId",
+                                      diagnostics):
+            pass
+        elif ref in seen_prov_refs:
+            diagnostics.append(
+                f"{label}: provenanceId {ref!r} is duplicated across "
+                f"manifest entries")
+        else:
+            seen_prov_refs.add(ref)
+    if "changes" in entry:
+        changes = entry["changes"]
+        if not isinstance(changes, list) or changes:
+            diagnostics.append(
+                f"{label}: changes is {changes!r}; it must be an empty list "
+                f"(the original bytes must be unchanged)")
+
+    wav_bytes = None
+    asset_path = entry.get("assetPath")
+    target = _safe_relative(
+        asset_path, root, f"{label}: assetPath", diagnostics)
+    if target is not None:
+        if str(target) in seen_paths:
+            diagnostics.append(
+                f"{label}: assetPath {asset_path!r} is not unique across entries")
+        seen_paths.add(str(target))
+        try:
+            target.relative_to(asset_dir)
+        except ValueError:
+            asset_dir_display = "/".join(ASSET_DIR)
+            diagnostics.append(
+                f"{label}: assetPath {asset_path!r} must resolve under "
+                f"'{asset_dir_display}/' relative to the repository root")
+            target = None
+    if target is not None:
+        listed_wavs.add(target)
+        if _check_file_chain(
+                root, target, f"{label}: assetPath",
+                _is_string(asset_path) and asset_path or "", diagnostics):
+            try:
+                wav_bytes = target.read_bytes()
+            except OSError as exc:
+                diagnostics.append(
+                    f"{label}: assetPath {asset_path!r} is unreadable "
+                    f"({exc.strerror or exc})")
+            else:
+                digest = hashlib.sha256(wav_bytes).hexdigest()
+                pin = RIFF_ABBREV_SIZE_ALLOWLIST.get(digest)
+                if pin is not None and pin[0] != word:
+                    diagnostics.append(
+                        f"{label}: the file is the approved RIFF size "
+                        f"exception binary for {pin[0]!r}, not {word!r}")
+                if "sha256" in entry:
+                    declared = entry["sha256"]
+                    if not (_is_string(declared) and
+                            SHA256_RE.fullmatch(declared)):
+                        diagnostics.append(
+                            f"{label}: sha256 is {declared!r}; it must be 64 "
+                            f"lowercase hex characters")
+                    elif declared != digest:
+                        diagnostics.append(
+                            f"{label}: sha256 is {declared!r}; the file "
+                            f"measures {digest!r}")
+                if "byteLength" in entry:
+                    declared = entry["byteLength"]
+                    if not _check_positive_int(
+                            declared, f"{label}: byteLength", diagnostics) or \
+                            declared != len(wav_bytes):
+                        diagnostics.append(
+                            f"{label}: byteLength is {declared!r}; the file "
+                            f"measures {len(wav_bytes)} bytes")
+                if "audio" in entry:
+                    if wav_bytes is not None:
+                        try:
+                            measured = measure_wav(target)
+                        except ValueError as exc:
+                            diagnostics.append(f"{label}: {exc}")
+                        else:
+                            _check_audio_against_measurement(
+                                entry["audio"], measured,
+                                f"{label}.audio", diagnostics)
+
+    if "audio" in entry:
+        _check_audio_object(entry["audio"], f"{label}.audio", diagnostics)
+    if "mapping" in entry:
+        _check_mapping(entry["mapping"], f"{label}.mapping", diagnostics)
+    if "speaker" in entry:
+        _check_speaker(entry["speaker"], f"{label}.speaker", diagnostics)
+    if "license" in entry:
+        _check_license(entry["license"], word, root, asset_dir,
+                       f"{label}.license", diagnostics)
+    if "review" in entry:
+        _check_review(entry["review"], f"{label}.review", diagnostics)
+    return wav_bytes
+
+
+def _check_unlisted_wavs(root: Path, asset_dir: Path,
+                         listed_wavs: set[Path],
+                         diagnostics: list[str]) -> None:
+    if not asset_dir.is_dir():
+        return
+    for path in sorted(asset_dir.rglob("*.wav")):
+        if path not in listed_wavs:
+            diagnostics.append(
+                f"{path.relative_to(root)}: WAV file is not listed in the "
+                f"manifest entries")
+
+
+# ---------------------------------------------------------------------------
+# provenance entry checks
+# ---------------------------------------------------------------------------
+
+def _check_source_page_url(value: object, title: object, label: str,
+                           diagnostics: list[str]) -> None:
+    parts = _check_https_url(value, COMMONS_HOST, label, diagnostics)
+    if parts is None:
+        return
+    path = unquote(parts.path).replace("_", " ").strip()
+    if not path.startswith("/wiki/"):
+        diagnostics.append(
+            f"{label}: {value!r} must be a recognized Commons file page "
+            f"(path '/wiki/<file title>')")
+        return
+    expected = _normalized_title(title)
+    if expected is None or path[len("/wiki/"):] != expected:
+        diagnostics.append(
+            f"{label}: the page title {path[len('/wiki/'):]!r} must match "
+            f"sourceTitle {title!r}")
+
+
+def _normalized_title(value: object) -> str | None:
+    if not _is_string(value) or not value.strip():
+        return None
+    return value.replace("_", " ").strip()
+
+
+def _selected_source_name(word: str) -> str:
+    """Complete selected filename pattern (LoquaxFR originals, chosen slice).
+
+    The chosen files are named LL-Q150_(fra)-LoquaxFR-<word>.wav; a
+    different full filename — another speaker prefix, an embedded word, or
+    a derivative — is not the selected original.
+    """
+    return f"LL-Q150_(fra)-LoquaxFR-{word}.wav"
+
+
+def _file_name_key(name: str) -> str:
+    """Compare Commons file names with underscores/spaces and case trimmed.
+
+    Commons stores title spaces as underscores, so the two representations
+    of one file must normalize to the same key; the canonical spelling is
+    kept for diagnostics.
+    """
+    return name.replace("_", " ").strip()
+
+
+def _title_designates(title: object, word: str, label: str,
+                      diagnostics: list[str]) -> bool:
+    if not _is_string(title) or not title.strip():
+        diagnostics.append(
+            f"{label} is {title!r}; it must be the complete selected source "
+            f"title 'File:{_selected_source_name(word)}'")
+        return False
+    expected = "File:" + _selected_source_name(word)
+    if _file_name_key(title) != _file_name_key(expected):
+        diagnostics.append(
+            f"{label} is {title!r}; it must be the complete selected source "
+            f"title {expected!r} (Commons may normalize spaces to underscores; "
+            f"another full filename or another speaker's file is not the "
+            f"chosen original)")
+        return False
+    return True
+
+
+def _check_source_title(value: object, word: str, label: str,
+                        diagnostics: list[str]) -> None:
+    _title_designates(value, word, label, diagnostics)
+
+
+def _check_revision_url(value: object, title: object, revision_id: object,
+                        label: str, diagnostics: list[str]) -> None:
+    parts = _check_https_url(value, COMMONS_HOST, label, diagnostics)
+    if parts is None:
+        return
+    path = unquote(parts.path).replace("_", " ").strip()
+    # The selected revisions are documented on the real Commons route
+    # '/w/index.php'; '/index.php' remains supported as the legacy alias.
+    # Arbitrary endpoints are still rejected.
+    if path not in ("/w/index.php", "/index.php"):
+        diagnostics.append(
+            f"{label}: {value!r} must be a recognized Commons revision "
+            f"endpoint (path '/w/index.php' or the '/index.php' alias)")
+        return
+    params = parse_qs(parts.query, keep_blank_values=True)
+    url_title = params.get("title", [None])[0]
+    expected_title = _normalized_title(title)
+    if url_title is None or expected_title is None:
+        diagnostics.append(
+            f"{label}: the 'title' query parameter must match sourceTitle")
+    elif _normalized_title(url_title) != expected_title:
+        diagnostics.append(
+            f"{label}: 'title' is {url_title!r}; it must match sourceTitle "
+            f"{title!r}")
+    url_oldid = params.get("oldid", [None])[0]
+    if url_oldid is None or not _is_int(revision_id) or \
+            not re.fullmatch(r"\d+", url_oldid):
+        diagnostics.append(
+            f"{label}: the 'oldid' query parameter must be the positive "
+            f"integer descriptionRevisionId")
+        return
+    # Compared as canonical digit strings (leading zeros stripped) instead
+    # of int(url_oldid): the value is already constrained to ASCII digits
+    # above, and the conversion can exceed Python's integer-string digit
+    # limit for an absurd oldid while the match decision is unchanged.
+    if (url_oldid.lstrip("0") or "0") != str(revision_id):
+        diagnostics.append(
+            f"{label}: 'oldid' is {url_oldid!r}; it must match "
+            f"descriptionRevisionId {revision_id!r}")
+
+
+# Ordinary original-file route on upload.wikimedia.org: one hex character
+# then two hex characters of the object hash, then the complete filename.
+# Thumbnails ('thumb/'), transcoded derivatives and other paths do not
+# match this layout and are rejected as the selected original.
+MEDIA_PATH_RE = re.compile(
+    r"^/wikipedia/commons/([0-9a-f])/([0-9a-f]{2})/(.+)$")
+
+
+def _check_media_url(value: object, word: str, title: object,
+                     label: str, diagnostics: list[str]) -> None:
+    parts = _check_https_url(value, MEDIA_HOST, label, diagnostics)
+    if parts is None:
+        return
+    path = _file_name_key(unquote(parts.path))
+    match = MEDIA_PATH_RE.match(path)
+    if match is None:
+        diagnostics.append(
+            f"{label}: {value!r} must be an original media URL under "
+            f"'/wikipedia/commons/<1 hex>/<2 hex>/<filename>', the ordinary "
+            f"original-file layout (thumbs, transcoded derivatives and other "
+            f"routes are not the selected original)")
+        return
+    name = _file_name_key(match.group(3))
+    # The uploaded object's basename does NOT carry the Commons 'File:'
+    # description-title namespace (that prefix belongs to sourceTitle);
+    # stripping it or aliasing it in is not permitted here.
+    expected_name = _selected_source_name(word)
+    if _file_name_key(name) != _file_name_key(expected_name):
+        diagnostics.append(
+            f"{label}: the media file is {name!r}; it must be the complete "
+            f"selected source filename {expected_name!r} (a different full "
+            f"filename is not the chosen original)")
+    if _is_string(title):
+        bare = title.strip()
+        if bare.startswith("File:"):
+            title_name = _file_name_key(bare[len("File:"):])
+            if _file_name_key(name) != title_name:
+                diagnostics.append(
+                    f"{label}: the media file is {name!r}; it must match "
+                    f"the sourceTitle filename {title_name!r}")
+
+
+def _normalizes_to_mur_archive_url(value: object) -> bool:
+    """True only for the selected approved historical ``mur`` archive URL.
+
+    The canonical percent-encoding (including the ``%21`` archive separator)
+    and a plain ``!`` are equivalent; any other prefix, filename, host, or
+    query/fragment is not this association and falls back to the generic
+    original-media rules.
+    """
+    if not _is_string(value):
+        return False
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return False
+    if parts.scheme != "https" or \
+            (parts.hostname or "").lower() != MEDIA_HOST:
+        return False
+    if parts.query or parts.fragment:
+        return False
+    return unquote(parts.path) == MUR_ARCHIVE_MEDIA_PATH
+
+
+def _check_mur_archive_association(prov: object, manifest_entry: object,
+                                   label: str,
+                                   diagnostics: list[str]) -> None:
+    """Enforce the pairing of the unique approved ``mur`` archive selection.
+
+    The association may apply ONLY for word ``mur`` (the caller's gate) and
+    requires the WHOLE pairing to be pinned to the amended spec: the
+    selected archived original URL, the original upload revision, the
+    archived bytes' sourceSHA1 and full SHA-256 manifest/provenance pairs,
+    and the original recording timestamp (the archive-name prefix is a
+    replacement event, never a timestamp).  Each mismatch is reported on
+    its own field.
+    """
+    if not isinstance(prov, dict):
+        diagnostics.append(f"{label} must be an object")
+        return
+    declared_url = prov.get("originalDownloadUrl")
+    if not _normalizes_to_mur_archive_url(declared_url):
+        diagnostics.append(
+            f"{label}.originalDownloadUrl is {declared_url!r}; the mur "
+            f"archive association requires the selected archived original "
+            f"URL {MUR_ARCHIVE_MEDIA_URL!r} (the current URL now serves "
+            f"the replacement binary)")
+    revision_id = prov.get("descriptionRevisionId")
+    if not _is_int(revision_id) or revision_id != MUR_ARCHIVE_REVISION_ID:
+        diagnostics.append(
+            f"{label}.descriptionRevisionId is {revision_id!r}; the mur "
+            f"archive association requires {MUR_ARCHIVE_REVISION_ID} "
+            f"(the original upload of the archived bytes)")
+    declared_sha1 = prov.get("sourceSha1")
+    if declared_sha1 != MUR_ARCHIVE_SHA1:
+        diagnostics.append(
+            f"{label}.sourceSha1 is {declared_sha1!r}; the mur archive "
+            f"association requires {MUR_ARCHIVE_SHA1!r}")
+    for doc, doc_label in (
+            (prov, f"{label}.sha256"),
+            (manifest_entry, "manifest.json sha256")):
+        declared = doc.get("sha256") if isinstance(doc, dict) else None
+        if declared != MUR_ARCHIVE_SHA256:
+            diagnostics.append(
+                f"{doc_label} is {declared!r}; the mur archive association "
+                f"requires {MUR_ARCHIVE_SHA256!r}")
+    timestamp = prov.get("mediaTimestamp")
+    if timestamp != MUR_ARCHIVE_MEDIA_TIMESTAMP:
+        diagnostics.append(
+            f"{label}.mediaTimestamp is {timestamp!r}; the mur archive "
+            f"association requires {MUR_ARCHIVE_MEDIA_TIMESTAMP!r} (the "
+            f"archive-name prefix identifies the replacement event, not the "
+            f"original recording)")
+
+
+def _check_license_evidence(evidence: object, word: object, label: str,
+                            manifest_license: object,
+                            diagnostics: list[str]) -> None:
+    if not isinstance(evidence, dict):
+        diagnostics.append(f"{label} must be an object")
+        return
+    _check_fields(evidence, EVIDENCE_FIELDS, label, diagnostics)
+    if _is_string(word):
+        required = _required_spdx(word)
+        if "spdxId" in evidence and evidence["spdxId"] != required:
+            diagnostics.append(
+                f"{label}.spdxId is {evidence['spdxId']!r}; word {word!r} "
+                f"requires {required!r}")
+        if "url" in evidence and evidence["url"] != LICENSE_URLS[required]:
+            diagnostics.append(
+                f"{label}.url is {evidence['url']!r}; word {word!r} requires "
+                f"{LICENSE_URLS[required]!r}")
+    if "creditText" in evidence:
+        credit = evidence["creditText"]
+        if not _check_nonempty_string(credit, f"{label}.creditText",
+                                      diagnostics):
+            pass
+        elif isinstance(manifest_license, dict) and \
+                _is_string(manifest_license.get("attribution")) and \
+                credit != manifest_license["attribution"]:
+            diagnostics.append(
+                f"{label}.creditText is {credit!r}; it must agree with the "
+                f"manifest attribution {manifest_license['attribution']!r}")
+    if "notices" in evidence:
+        declared = evidence["notices"]
+        if not _check_string_list(declared, f"{label}.notices", diagnostics):
+            return
+        if isinstance(manifest_license, dict) and \
+                isinstance(manifest_license.get("notices"), list) and \
+                declared != manifest_license["notices"]:
+            diagnostics.append(
+                f"{label}.notices is {declared!r}; it must agree with the "
+                f"manifest license.notices {manifest_license['notices']!r}")
+    if "declaration" in evidence:
+        _check_nonempty_string(
+            evidence["declaration"], f"{label}.declaration", diagnostics)
+
+
+def _check_provenance_entry(index: int, word: str, prov: object,
+                            manifest_entry: object, wav_bytes: bytes | None,
+                            root: Path,
+                            seen_prov_ids: set[str],
+                            diagnostics: list[str]) -> None:
+    label = f"provenance.json entries[{index}] (word {word!r})"
+    if not isinstance(prov, dict):
+        diagnostics.append(f"{label}: entry must be an object")
+        return
+    _check_fields(prov, PROVENANCE_FIELDS, label, diagnostics)
+    manifest = manifest_entry if isinstance(manifest_entry, dict) else {}
+
+    if "id" in prov:
+        pid = prov["id"]
+        if not _is_string(pid) or not pid:
+            diagnostics.append(f"{label}: id must be a nonempty string")
+        else:
+            if pid in seen_prov_ids:
+                diagnostics.append(
+                    f"{label}: id {pid!r} is duplicated across evidence "
+                    f"entries")
+            else:
+                seen_prov_ids.add(pid)
+            expected = manifest.get("provenanceId")
+            if _is_string(expected) and pid != expected:
+                diagnostics.append(
+                    f"{label}: id is {pid!r}; it must match the manifest "
+                    f"provenanceId {expected!r}")
+    if "sourcePageUrl" in prov:
+        _check_source_page_url(
+            prov["sourcePageUrl"], prov.get("sourceTitle"),
+            f"{label}.sourcePageUrl", diagnostics)
+    if "sourceTitle" in prov:
+        _check_source_title(prov["sourceTitle"], word,
+                            f"{label}.sourceTitle", diagnostics)
+    if "descriptionRevisionId" in prov:
+        _check_positive_int(
+            prov["descriptionRevisionId"],
+            f"{label}.descriptionRevisionId", diagnostics)
+    if "descriptionRevisionUrl" in prov:
+        _check_revision_url(
+            prov["descriptionRevisionUrl"], prov.get("sourceTitle"),
+            prov.get("descriptionRevisionId"),
+            f"{label}.descriptionRevisionUrl", diagnostics)
+    if "retrievedAt" in prov:
+        _check_utc_iso(prov["retrievedAt"], f"{label}.retrievedAt",
+                       diagnostics)
+    if "originalDownloadUrl" in prov:
+        url_value = prov["originalDownloadUrl"]
+        # Root-cause guard (recovery review I1): the authority is the
+        # INDEPENDENTLY MEASURED identity of the audited bytes, not the
+        # record's claimed URL or revision.  When `mur`'s audited bytes ARE
+        # the approved 2020 original, the full association (selected archive
+        # URL plus every pairing field) is required whatever the URL and
+        # revision inputs jointly claim - a coordinated swap to the current
+        # route + current revision cannot escape it.  Records whose audited
+        # bytes are any other correctly framed binary are untouched.
+        measured_selected_original = (
+            word == MUR_ARCHIVE_WORD
+            and wav_bytes is not None
+            and hashlib.sha256(wav_bytes).hexdigest() == MUR_ARCHIVE_SHA256)
+        if word == MUR_ARCHIVE_WORD and (
+                _normalizes_to_mur_archive_url(url_value)
+                or measured_selected_original):
+            # The one approved archive route: keep enforcing the generic
+            # fields (title, revision URL, ...) and add the exact pairing
+            # (the helper names each field on the entry label itself).
+            _check_mur_archive_association(
+                prov, manifest, label, diagnostics)
+        else:
+            _check_media_url(
+                url_value, word, prov.get("sourceTitle"),
+                f"{label}.originalDownloadUrl", diagnostics)
+            revision_id = prov.get("descriptionRevisionId")
+            if (word == MUR_ARCHIVE_WORD and _is_int(revision_id) and
+                    revision_id == MUR_ARCHIVE_REVISION_ID):
+                diagnostics.append(
+                    f"{label}.originalDownloadUrl is {url_value!r}; the "
+                    f"selected 2020 `mur` original (revision "
+                    f"{MUR_ARCHIVE_REVISION_ID}) requires the approved "
+                    f"archive URL {MUR_ARCHIVE_MEDIA_URL!r} - the current "
+                    f"URL now serves the replacement binary")
+    if "mediaTimestamp" in prov:
+        _check_utc_iso(prov["mediaTimestamp"], f"{label}.mediaTimestamp",
+                       diagnostics)
+    if "sourceSha1" in prov:
+        declared = prov["sourceSha1"]
+        if declared is None:
+            pass
+        elif not (_is_string(declared) and SHA1_RE.fullmatch(declared)):
+            diagnostics.append(
+                f"{label}: sourceSha1 is {declared!r}; it must be null or "
+                f"lowercase 40-hex")
+        elif wav_bytes is not None and \
+                hashlib.sha1(wav_bytes, usedforsecurity=False).hexdigest() \
+                != declared:
+            diagnostics.append(
+                f"{label}: sourceSha1 is {declared!r}; it does not match "
+                f"the audited file bytes")
+    if "sourceTranscription" in prov:
+        declared = prov["sourceTranscription"]
+        if not _is_string(declared) or declared != word:
+            diagnostics.append(
+                f"{label}: sourceTranscription is {declared!r}; it must "
+                f"agree with the manifest spokenText {word!r}")
+    if "sourceSpeaker" in prov:
+        declared = prov["sourceSpeaker"]
+        if declared != SPEAKER_NAME:
+            diagnostics.append(
+                f"{label}: sourceSpeaker is {declared!r}; it must be "
+                f"{SPEAKER_NAME!r}")
+    if "creditedCreators" in prov:
+        creators = prov["creditedCreators"]
+        if not _check_string_list(
+                creators, f"{label}.creditedCreators", diagnostics) or \
+                not creators:
+            diagnostics.append(
+                f"{label}: creditedCreators is {creators!r}; it must be a "
+                f"nonempty list of credited names")
+    if "licenseEvidence" in prov:
+        _check_license_evidence(
+            prov["licenseEvidence"], word, f"{label}.licenseEvidence",
+            manifest.get("license"), diagnostics)
+    if "sha256" in prov:
+        declared = prov["sha256"]
+        expected = manifest.get("sha256")
+        if not (_is_string(declared) and SHA256_RE.fullmatch(declared)):
+            diagnostics.append(
+                f"{label}: sha256 is {declared!r}; it must be 64 lowercase "
+                f"hex characters")
+        elif _is_string(expected) and declared != expected:
+            diagnostics.append(
+                f"{label}: sha256 is {declared!r}; it must match the "
+                f"manifest sha256 {expected!r}")
+
+
+def _check_manifest_root(manifest: object,
+                         diagnostics: list[str]) -> list | None:
+    if not isinstance(manifest, dict):
+        diagnostics.append("manifest.json: root must be an object")
+        return None
+    _check_fields(manifest, MANIFEST_FIELDS, "manifest.json", diagnostics)
+    if "schemaVersion" in manifest and \
+            (not _is_int(manifest["schemaVersion"]) or
+             manifest["schemaVersion"] != SCHEMA_VERSION):
+        diagnostics.append(
+            f"manifest.json: schemaVersion is "
+            f"{manifest['schemaVersion']!r}; it must be the integer "
+            f"{SCHEMA_VERSION} (booleans and other types are not allowed)")
+    if "catalogueStatus" in manifest and \
+            manifest["catalogueStatus"] != CATALOGUE_STATUS:
+        diagnostics.append(
+            f"manifest.json: catalogueStatus is "
+            f"{manifest['catalogueStatus']!r}; it must be "
+            f"{CATALOGUE_STATUS!r}")
+    if "language" in manifest and manifest["language"] != LANGUAGE:
+        diagnostics.append(
+            f"manifest.json: language is {manifest['language']!r}; it must "
+            f"be {LANGUAGE!r}")
+    entries = manifest.get("entries")
+    if not isinstance(entries, list):
+        diagnostics.append("manifest.json: entries must be a list")
+        return None
+    if len(entries) != len(WORD_SEQUENCE):
+        diagnostics.append(
+            f"manifest.json: entries must list exactly the "
+            f"{len(WORD_SEQUENCE)} candidate words in frenchWords order "
+            f"(got {len(entries)})")
+        return None
+    return entries
+
+
+def _check_provenance_root(provenance: object,
+                           diagnostics: list[str]) -> list | None:
+    if not isinstance(provenance, dict):
+        diagnostics.append("provenance.json: root must be an object")
+        return None
+    _check_fields(provenance, ("schemaVersion", "entries"),
+                  "provenance.json", diagnostics)
+    if "schemaVersion" in provenance and \
+            (not _is_int(provenance["schemaVersion"]) or
+             provenance["schemaVersion"] != SCHEMA_VERSION):
+        diagnostics.append(
+            f"provenance.json: schemaVersion is "
+            f"{provenance['schemaVersion']!r}; it must be the integer "
+            f"{SCHEMA_VERSION} (booleans and other types are not allowed)")
+    entries = provenance.get("entries")
+    if not isinstance(entries, list):
+        diagnostics.append("provenance.json: entries must be a list")
+        return None
+    if len(entries) != len(WORD_SEQUENCE):
+        diagnostics.append(
+            f"provenance.json: entries must list exactly the "
+            f"{len(WORD_SEQUENCE)} evidence records (got {len(entries)})")
+        return None
+    return entries
+
+
+# ---------------------------------------------------------------------------
+# orchestration
+# ---------------------------------------------------------------------------
+
+def verify_package(repo_root: Path) -> list[str]:
+    """Validate the candidate package under ``repo_root``.
+
+    Returns deterministic, actionable diagnostics; an empty list means the
+    package passed every technical/metadata check. Only ValueError/OSError
+    from reading package files are turned into diagnostics; programming
+    errors are not masked.
+    """
+    root = Path(repo_root).resolve()
+    diagnostics: list[str] = []
+    if not root.is_dir():
+        diagnostics.append(
+            f"{root}: repository root is missing or is not a directory")
+        return diagnostics
+    asset_dir = root.joinpath(*ASSET_DIR)
+
+    # Metadata files get the same path safety as referenced content:
+    # symlinks at any component must be rejected before any read.
+    manifest_path = asset_dir / "manifest.json"
+    provenance_path = asset_dir / "provenance.json"
+    manifest_chain_ok = _check_file_chain(
+        root, manifest_path, "manifest.json", "manifest.json", diagnostics)
+    provenance_chain_ok = _check_file_chain(
+        root, provenance_path, "provenance.json", "provenance.json", diagnostics)
+    manifest = _parse_json_file(
+        manifest_path, diagnostics) if manifest_chain_ok else _PARSE_FAILED
+    provenance = _parse_json_file(
+        provenance_path, diagnostics) if provenance_chain_ok else _PARSE_FAILED
+    for name, doc in (
+            ("manifest.json", manifest), ("provenance.json", provenance)):
+        if doc is _PARSE_FAILED:
+            continue  # read/parse diagnostic already reported above
+        if not isinstance(doc, dict):
+            diagnostics.append(f"{name}: root must be an object")
+    if not (isinstance(manifest, dict) and isinstance(provenance, dict)):
+        return diagnostics
+
+    manifest_entries = _check_manifest_root(manifest, diagnostics)
+    provenance_entries = _check_provenance_root(provenance, diagnostics)
+    if manifest_entries is None or provenance_entries is None:
+        return diagnostics
+
+    seen_ids: set[str] = set()
+    seen_paths: set[str] = set()
+    seen_prov_refs: set[str] = set()
+    listed_wavs: set[Path] = set()
+    wav_bytes_by_index: list[bytes | None] = []
+    for index, (word, entry) in enumerate(zip(WORD_SEQUENCE, manifest_entries)):
+        wav_bytes_by_index.append(
+            _check_manifest_entry(
+                index, word, entry, root, asset_dir, seen_ids, seen_paths,
+                seen_prov_refs, listed_wavs, diagnostics))
+
+    _check_unlisted_wavs(root, asset_dir, listed_wavs, diagnostics)
+
+    seen_prov_ids: set[str] = set()
+    for index, (word, prov) in enumerate(zip(WORD_SEQUENCE, provenance_entries)):
+        _check_provenance_entry(
+            index, word, prov, manifest_entries[index],
+            wav_bytes_by_index[index], root, seen_prov_ids, diagnostics)
+
+    return diagnostics
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry point: exit 0 on a valid package, 1 on failure, 2 on usage."""
+    default_root = Path(__file__).resolve().parent.parent
+    parser = argparse.ArgumentParser(
+        prog="verify_french_audio",
+        description="Read-only, offline check of the French word-audio "
+                    "candidate package (technical/metadata only; no network, "
+                    "no rewrites).")
+    parser.add_argument(
+        "--repo-root", type=Path, default=default_root, metavar="PATH",
+        help="repository root containing frontend/ "
+             "(default: this script's repository root)")
+    args = parser.parse_args(argv)
+    diagnostics = verify_package(args.repo_root)
+    for diagnostic in diagnostics:
+        print(f"ERROR: {diagnostic}", file=sys.stderr)
+    if diagnostics:
+        return 1
+    print(PASS_MESSAGE)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

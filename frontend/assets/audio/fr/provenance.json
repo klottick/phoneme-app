@@ -1,0 +1,652 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "id": "prov-fr-word-tout",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-tout.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-tout.wav",
+      "descriptionRevisionId": 995917835,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-tout.wav&oldid=995917835",
+      "retrievedAt": "2026-10-13T04:31:01Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/4/4b/LL-Q150_%28fra%29-LoquaxFR-tout.wav",
+      "mediaTimestamp": "2020-01-01T11:16:38Z",
+      "sourceSha1": "a33f23fdb6b6384c55945fa1a9fea6687d655a08",
+      "sourceTranscription": "tout",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-tout.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "ec761ca7114be7bb7178f380ff4e937763bbf934b0bd44d7366973394d61dec4"
+    },
+    {
+      "id": "prov-fr-word-rouge",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-rouge.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-rouge.wav",
+      "descriptionRevisionId": 1284656035,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-rouge.wav&oldid=1284656035",
+      "retrievedAt": "2026-10-13T04:31:10Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/1/16/LL-Q150_%28fra%29-LoquaxFR-rouge.wav",
+      "mediaTimestamp": "2026-10-08T16:42:35Z",
+      "sourceSha1": "7f7a93005eef32a0f3799e2fd6e2e53662499b60",
+      "sourceTranscription": "rouge",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-rouge.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "c4540087629c8034a58b7b4f6ca5354234c1dd492a5a8d74e0dc8bff6bf2bd40"
+    },
+    {
+      "id": "prov-fr-word-vous",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-vous.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-vous.wav",
+      "descriptionRevisionId": 1278768654,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-vous.wav&oldid=1278768654",
+      "retrievedAt": "2026-10-13T04:31:19Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/1/15/LL-Q150_%28fra%29-LoquaxFR-vous.wav",
+      "mediaTimestamp": "2026-09-20T08:02:58Z",
+      "sourceSha1": "a0b7ce81494369e5e2d4c2bb07a5450ec3799989",
+      "sourceTranscription": "vous",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-vous.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "9027202be18f5a94dc116e887ace62385692cbbb3493a67da371427cb35d3cf4"
+    },
+    {
+      "id": "prov-fr-word-doux",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-doux.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-doux.wav",
+      "descriptionRevisionId": 1281359588,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-doux.wav&oldid=1281359588",
+      "retrievedAt": "2026-10-13T04:31:29Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/a/a2/LL-Q150_%28fra%29-LoquaxFR-doux.wav",
+      "mediaTimestamp": "2026-09-28T15:50:00Z",
+      "sourceSha1": "d52de8bcb1346f563840a6b048a315a021ce681b",
+      "sourceTranscription": "doux",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-doux.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "bf45923e17129f3d05c446062962e378840aa7e254fc908c21fdcd037b615b09"
+    },
+    {
+      "id": "prov-fr-word-loup",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-loup.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-loup.wav",
+      "descriptionRevisionId": 1279338035,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-loup.wav&oldid=1279338035",
+      "retrievedAt": "2026-10-13T04:31:38Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/2/2e/LL-Q150_%28fra%29-LoquaxFR-loup.wav",
+      "mediaTimestamp": "2026-09-22T08:02:57Z",
+      "sourceSha1": "d4670c1b89729685e037cb91a9a37655f98f0a52",
+      "sourceTranscription": "loup",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-loup.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "62c67dece782ef8a4be248e10b5537db8fa51e9fc8c378a1c6784eb8d58b012e"
+    },
+    {
+      "id": "prov-fr-word-soupe",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-soupe.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-soupe.wav",
+      "descriptionRevisionId": 1285345152,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-soupe.wav&oldid=1285345152",
+      "retrievedAt": "2026-10-13T04:31:47Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/0/01/LL-Q150_%28fra%29-LoquaxFR-soupe.wav",
+      "mediaTimestamp": "2026-10-10T08:19:10Z",
+      "sourceSha1": "fa058a681205340169156aa455caef236f6e34ea",
+      "sourceTranscription": "soupe",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-soupe.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "9d850d99b78dd1c521e0512b9be8df85f798702ed8bda6bef3ea0417607ed495"
+    },
+    {
+      "id": "prov-fr-word-tu",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-tu.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-tu.wav",
+      "descriptionRevisionId": 1094009241,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-tu.wav&oldid=1094009241",
+      "retrievedAt": "2026-10-13T04:32:12Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/f/fa/LL-Q150_%28fra%29-LoquaxFR-tu.wav",
+      "mediaTimestamp": "2020-07-29T13:48:38Z",
+      "sourceSha1": "591ddc1b3570a3e764c2f873a0e11c47d93447a6",
+      "sourceTranscription": "tu",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-tu.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "98f6aca710d17bc74b114e81b60b7d3e8ec8504b6073dbbe441af8df3a29020c"
+    },
+    {
+      "id": "prov-fr-word-rue",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-rue.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-rue.wav",
+      "descriptionRevisionId": 1166165910,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-rue.wav&oldid=1166165910",
+      "retrievedAt": "2026-10-13T04:32:21Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/9/9e/LL-Q150_%28fra%29-LoquaxFR-rue.wav",
+      "mediaTimestamp": "2020-01-01T20:21:56Z",
+      "sourceSha1": "7fc2cb1d4c8b56c15bd4823f3edba8fd1bec0bc2",
+      "sourceTranscription": "rue",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-rue.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "be717dc3763ff96ad35852799bf77269740c2c851ac1daf696eaefbfd28ed20d"
+    },
+    {
+      "id": "prov-fr-word-lune",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-lune.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-lune.wav",
+      "descriptionRevisionId": 757831102,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-lune.wav&oldid=757831102",
+      "retrievedAt": "2026-10-13T04:32:31Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/4/4e/LL-Q150_%28fra%29-LoquaxFR-lune.wav",
+      "mediaTimestamp": "2019-12-14T08:40:51Z",
+      "sourceSha1": "7aeff65a3f213169cb418ffdb40f5f21f273913d",
+      "sourceTranscription": "lune",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-lune.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "9a7ef667189672b5ba2acb11dcb3b98449b958c0a535c85799309a225970e437"
+    },
+    {
+      "id": "prov-fr-word-jus",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-jus.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-jus.wav",
+      "descriptionRevisionId": 1185863234,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-jus.wav&oldid=1185863234",
+      "retrievedAt": "2026-10-13T04:32:40Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/9/98/LL-Q150_%28fra%29-LoquaxFR-jus.wav",
+      "mediaTimestamp": "2020-01-01T18:43:11Z",
+      "sourceSha1": "84753a20554ad4536357a87946b3667238d3172c",
+      "sourceTranscription": "jus",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-jus.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "27737f36cb89b05b59431bbf54426881e8f8e1cf786e54c551743cf9ed7a53df"
+    },
+    {
+      "id": "prov-fr-word-mur",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-mur.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-mur.wav",
+      "descriptionRevisionId": 384728988,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File:LL-Q150_(fra)-LoquaxFR-mur.wav&oldid=384728988",
+      "retrievedAt": "2026-10-13T15:37:22Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/archive/7/79/20261007075226%21LL-Q150_%28fra%29-LoquaxFR-mur.wav",
+      "mediaTimestamp": "2020-01-01T18:47:44Z",
+      "sourceSha1": "14d1b1ee2a64653d1960c72c80dfe5ed621ff0b2",
+      "sourceTranscription": "mur",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-mur.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "{{cc-by-sa-4.0}}"
+      },
+      "sha256": "c37f34379cce3c5245f1fe951d179f0f39c49fdf679f1cf83e4fd02e5f6a44ad"
+    },
+    {
+      "id": "prov-fr-word-plume",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-plume.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-plume.wav",
+      "descriptionRevisionId": 1280911696,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-plume.wav&oldid=1280911696",
+      "retrievedAt": "2026-10-13T04:33:15Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/4/4d/LL-Q150_%28fra%29-LoquaxFR-plume.wav",
+      "mediaTimestamp": "2026-09-27T07:52:19Z",
+      "sourceSha1": "2edb2a1e37edcf943f172db737c05670e2eeeb9c",
+      "sourceTranscription": "plume",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-plume.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "767018eff1b9ec0e48546d71865e99d9d70670e94a5440d8314d16884aad1208"
+    },
+    {
+      "id": "prov-fr-word-lit",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-lit.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-lit.wav",
+      "descriptionRevisionId": 1279171160,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-lit.wav&oldid=1279171160",
+      "retrievedAt": "2026-10-13T04:43:24Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/2/2d/LL-Q150_%28fra%29-LoquaxFR-lit.wav",
+      "mediaTimestamp": "2026-09-21T16:23:41Z",
+      "sourceSha1": "970f39b0278f8980c54a26cc110c0b23069312a0",
+      "sourceTranscription": "lit",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-lit.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "41698332638a8540c2790a03dbbbfea871469a0d44b1dbe08825225fc918ab59"
+    },
+    {
+      "id": "prov-fr-word-si",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-si.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-si.wav",
+      "descriptionRevisionId": 1128084534,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-si.wav&oldid=1128084534",
+      "retrievedAt": "2026-10-13T04:43:34Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/e/ef/LL-Q150_%28fra%29-LoquaxFR-si.wav",
+      "mediaTimestamp": "2020-07-29T13:48:45Z",
+      "sourceSha1": "a85e77754754ba59efb3dde72cf6e2d15f8730a1",
+      "sourceTranscription": "si",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-si.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "d9c5aff5fb44aed16963c68d1c7ebe49450c9e08c422f6affac76ca4c7870d7e"
+    },
+    {
+      "id": "prov-fr-word-vite",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-vite.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-vite.wav",
+      "descriptionRevisionId": 1284466369,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-vite.wav&oldid=1284466369",
+      "retrievedAt": "2026-10-13T04:43:44Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/5/53/LL-Q150_%28fra%29-LoquaxFR-vite.wav",
+      "mediaTimestamp": "2026-10-08T06:21:45Z",
+      "sourceSha1": "db94af8118619c7c9eef665d688632ab8195b87c",
+      "sourceTranscription": "vite",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-vite.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "5ae742cf467e17d6a5d183b1dd4b0b5a468df7e841b04486d9fe31de92216816"
+    },
+    {
+      "id": "prov-fr-word-île",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-île.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-île.wav",
+      "descriptionRevisionId": 815828932,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-%C3%AEle.wav&oldid=815828932",
+      "retrievedAt": "2026-10-13T04:43:53Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/c/c7/LL-Q150_%28fra%29-LoquaxFR-%C3%AEle.wav",
+      "mediaTimestamp": "2020-01-01T18:41:50Z",
+      "sourceSha1": "b9939556fa7868aff4087c6b8bc6addedc51f00d",
+      "sourceTranscription": "île",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-île.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "a7fed2bb2440a9980111cfe5c739e0abf722fc91b8de35be936d271f46f7f15a"
+    },
+    {
+      "id": "prov-fr-word-beau",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-beau.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-beau.wav",
+      "descriptionRevisionId": 1282497196,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-beau.wav&oldid=1282497196",
+      "retrievedAt": "2026-10-13T04:44:03Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/b/b2/LL-Q150_%28fra%29-LoquaxFR-beau.wav",
+      "mediaTimestamp": "2026-10-02T12:36:52Z",
+      "sourceSha1": "71086822510db62c4d325e6e2fb07781aad9c1ce",
+      "sourceTranscription": "beau",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-beau.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "689c67d84da86eb932fed8e82c690951c44eda2c854962a943818b10a6cd2e21"
+    },
+    {
+      "id": "prov-fr-word-mot",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-mot.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-mot.wav",
+      "descriptionRevisionId": 758647723,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-mot.wav&oldid=758647723",
+      "retrievedAt": "2026-10-13T04:44:12Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/8/8b/LL-Q150_%28fra%29-LoquaxFR-mot.wav",
+      "mediaTimestamp": "2019-12-16T18:32:36Z",
+      "sourceSha1": "9158bed418a4407fb8b9f1a2fd0dda20a40d716a",
+      "sourceTranscription": "mot",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-mot.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "a478bb690e724b5bd98dbc9bbea80270231f78ebad08b523b11daddc02b36398"
+    },
+    {
+      "id": "prov-fr-word-eau",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-eau.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-eau.wav",
+      "descriptionRevisionId": 1280603339,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-eau.wav&oldid=1280603339",
+      "retrievedAt": "2026-10-13T04:44:22Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/a/a9/LL-Q150_%28fra%29-LoquaxFR-eau.wav",
+      "mediaTimestamp": "2026-09-26T08:31:48Z",
+      "sourceSha1": "1a79861cb36f40dd42b50951c32b4cb845f8368c",
+      "sourceTranscription": "eau",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-eau.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "7dfa03f4114a25322a881915a99ea2f0695727b045358e76396cba6373595f27"
+    },
+    {
+      "id": "prov-fr-word-dos",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-dos.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-dos.wav",
+      "descriptionRevisionId": 1252930601,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-dos.wav&oldid=1252930601",
+      "retrievedAt": "2026-10-13T04:44:31Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/9/9a/LL-Q150_%28fra%29-LoquaxFR-dos.wav",
+      "mediaTimestamp": "2020-07-29T13:48:38Z",
+      "sourceSha1": "8377ebaf60030ba0313010da76feeec6dd53ee83",
+      "sourceTranscription": "dos",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-dos.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "e50683ee0d1de5e1c78cae14d9d7c7a8e61961ec2a2996a73a172c6df58e2d4c"
+    },
+    {
+      "id": "prov-fr-word-bon",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-bon.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-bon.wav",
+      "descriptionRevisionId": 1284656117,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-bon.wav&oldid=1284656117",
+      "retrievedAt": "2026-10-13T04:44:41Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/1/1f/LL-Q150_%28fra%29-LoquaxFR-bon.wav",
+      "mediaTimestamp": "2026-10-08T16:42:48Z",
+      "sourceSha1": "f3c5be2d4fc61836f312d5bc1d31c6108e4d8030",
+      "sourceTranscription": "bon",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-bon.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "1f369b90c51e1696371ac3b9e59af96986b4e0bef4a531c19723c7c682d86aff"
+    },
+    {
+      "id": "prov-fr-word-nom",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-nom.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-nom.wav",
+      "descriptionRevisionId": 1279088536,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-nom.wav&oldid=1279088536",
+      "retrievedAt": "2026-10-13T04:44:50Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/3/31/LL-Q150_%28fra%29-LoquaxFR-nom.wav",
+      "mediaTimestamp": "2026-09-21T10:16:01Z",
+      "sourceSha1": "d99d4d0f8b6339682e50d8cbc21d60140a9d9f20",
+      "sourceTranscription": "nom",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-nom.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "a24dad922927a67621cc6a7feeeae6d0b047b2447e32922fd8e609a3d3ef60b1"
+    },
+    {
+      "id": "prov-fr-word-banc",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-banc.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-banc.wav",
+      "descriptionRevisionId": 1283505337,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-banc.wav&oldid=1283505337",
+      "retrievedAt": "2026-10-13T04:55:15Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/f/f2/LL-Q150_%28fra%29-LoquaxFR-banc.wav",
+      "mediaTimestamp": "2026-10-05T13:38:04Z",
+      "sourceSha1": "0cae86a4a12b223c294d83090b567a191a883fce",
+      "sourceTranscription": "banc",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-banc.wav', via Wikimedia Commons (CC BY SA 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.",
+          "share alike – If you remix, transform, or build upon the material, you must distribute your contributions under the same or compatible license as the original."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution-Share Alike 4.0 International license."
+      },
+      "sha256": "cac71e6ba32e78358fab63b5ee28d3ec467816395c1550aa8bf2117caf62d74f"
+    },
+    {
+      "id": "prov-fr-word-sans",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-sans.wav",
+      "sourceTitle": "File:LL-Q150_(fra)-LoquaxFR-sans.wav",
+      "descriptionRevisionId": 1273911708,
+      "descriptionRevisionUrl": "https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-sans.wav&oldid=1273911708",
+      "retrievedAt": "2026-10-13T04:55:24Z",
+      "originalDownloadUrl": "https://upload.wikimedia.org/wikipedia/commons/c/c8/LL-Q150_%28fra%29-LoquaxFR-sans.wav",
+      "mediaTimestamp": "2026-09-08T12:24:09Z",
+      "sourceSha1": "fa87117332ac4c1342a204ea15d3fbc09720ccf6",
+      "sourceTranscription": "sans",
+      "sourceSpeaker": "LoquaxFR",
+      "creditedCreators": [
+        "LoquaxFR"
+      ],
+      "licenseEvidence": {
+        "spdxId": "CC-BY-4.0",
+        "url": "https://creativecommons.org/licenses/by/4.0/",
+        "creditText": "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-sans.wav', via Wikimedia Commons (CC BY 4.0)",
+        "notices": [
+          "attribution – You must give appropriate credit, provide a link to the license, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use."
+        ],
+        "declaration": "This file is licensed under the Creative Commons Attribution 4.0 International license."
+      },
+      "sha256": "a053ac40269632413fd4d3fc288dc988febe07b06c137d9d848b889e1e795c24"
+    }
+  ]
+}
