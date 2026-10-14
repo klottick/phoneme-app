@@ -97,7 +97,11 @@ final class CourseAudioCatalog {
   /// policy tests do not need the shipped manifest. Reference identities
   /// must be unique exactly as authored; two `word` identities may not share
   /// an exact spoken text (that would make word lookup arbitrary); and each
-  /// entry must pair with a reference that appears at most once. Throws a
+  /// entry must pair with a reference that appears at most once. The pairing
+  /// is coherent: the entry's reference and its credit must agree with the
+  /// catalogue reference by id, kind and exact spoken text — compared by
+  /// field values (exact Unicode equality), never by object identity, so
+  /// distinct immutable objects with equal fields are accepted. Throws a
   /// [CourseAudioException] with
   /// [CourseAudioFailureReason.invalidCatalogue] on any violation.
   factory CourseAudioCatalog({
@@ -105,16 +109,35 @@ final class CourseAudioCatalog {
     required List<CourseAudioEntry> entries,
   }) {
     _validateReferences(references);
-    final Set<String> referenceIds = <String>{};
+    final Map<String, CourseAudioReference> canonicalById = <String,
+        CourseAudioReference>{};
     for (final CourseAudioReference reference in references) {
-      referenceIds.add(reference.id);
+      canonicalById[reference.id] = reference;
     }
     final Set<String> entryReferenceIds = <String>{};
     for (final CourseAudioEntry entry in entries) {
-      if (!referenceIds.contains(entry.reference.id)) {
+      final CourseAudioReference? canonical =
+          canonicalById[entry.reference.id];
+      if (canonical == null) {
         throw _invalid(
             'every entry needs a matching reference; '
             '"${entry.reference.id}" is unknown');
+      }
+      if (entry.reference.kind != canonical.kind) {
+        throw _invalid(
+            'entry "${canonical.id}" kind must be "${canonical.kind.name}"');
+      }
+      if (entry.reference.spokenText != canonical.spokenText) {
+        throw _invalid('entry "${canonical.id}" spokenText must be '
+            '"${canonical.spokenText}"');
+      }
+      if (entry.credit.referenceId != canonical.id) {
+        throw _invalid('credit referenceId for "${canonical.id}" must be '
+            '"${canonical.id}"');
+      }
+      if (entry.credit.spokenText != canonical.spokenText) {
+        throw _invalid('credit spokenText for "${canonical.id}" must be '
+            '"${canonical.spokenText}"');
       }
       if (!entryReferenceIds.add(entry.reference.id)) {
         throw _invalid('each reference may own one entry; '

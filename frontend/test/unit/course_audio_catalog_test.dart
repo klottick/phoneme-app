@@ -156,8 +156,13 @@ Matcher get _invalidCatalogueMatcher =>
         ));
 
 /// Test-only entry for injected construction fixtures (missing coverage,
-/// mixed kinds, immutability, association).
-CourseAudioEntry _injectedEntry(CourseAudioReference reference) =>
+/// mixed kinds, immutability, association). Optional overrides let a fixture
+/// carry a credit that disagrees with its own reference.
+CourseAudioEntry _injectedEntry(
+  CourseAudioReference reference, {
+  String? creditReferenceId,
+  String? creditSpokenText,
+}) =>
     CourseAudioEntry(
       reference: reference,
       recordings: <CourseAudioVariant, CourseAudioRecording>{
@@ -169,8 +174,8 @@ CourseAudioEntry _injectedEntry(CourseAudioReference reference) =>
         ),
       },
       credit: CourseAudioCredit(
-        referenceId: reference.id,
-        spokenText: reference.spokenText,
+        referenceId: creditReferenceId ?? reference.id,
+        spokenText: creditSpokenText ?? reference.spokenText,
         creator: 'LoquaxFR',
         sourceUrl:
             'https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-tout.wav',
@@ -721,6 +726,69 @@ void main() {
       expect(
         () => CourseAudioCatalog(
             references: [a], entries: <CourseAudioEntry>[entryA, entryA]),
+        _invalidCatalogueMatcher,
+      );
+    });
+
+    test('accepts distinct equal-field references and entries', () {
+      // Coherence is by field values (exact, Unicode-equal), never by object
+      // identity: a distinct immutable reference object with equal fields is
+      // a valid pairing.
+      final reference = CourseAudioReference(
+          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'tout');
+      final distinct = CourseAudioReference(
+          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'tout');
+      expect(identical(reference, distinct), isFalse);
+      final catalog =
+          CourseAudioCatalog(references: [reference],
+              entries: <CourseAudioEntry>[_injectedEntry(distinct)]);
+      expect(catalog.references.length, 1);
+      expect(catalog.entries.single.reference.id, 'fr-word-tout');
+      expect(catalog.entries.single.credit.referenceId, 'fr-word-tout');
+      expect(catalog.entries.single.credit.spokenText, 'tout');
+      expect(catalog.recordingFor('fr-word-tout', CourseAudioVariant.normal),
+          isNotNull);
+    });
+
+    test('rejects a same-ID entry with a wrong kind or spoken text', () {
+      final reference = CourseAudioReference(
+          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'tout');
+      final wrongKind = CourseAudioReference(
+          id: 'fr-word-tout',
+          kind: AudioReferenceKind.sentence,
+          spokenText: 'tout');
+      final wrongText = CourseAudioReference(
+          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'rouge');
+      expect(
+        () => CourseAudioCatalog(
+            references: [reference],
+            entries: <CourseAudioEntry>[_injectedEntry(wrongKind)]),
+        _invalidCatalogueMatcher,
+      );
+      expect(
+        () => CourseAudioCatalog(
+            references: [reference],
+            entries: <CourseAudioEntry>[_injectedEntry(wrongText)]),
+        _invalidCatalogueMatcher,
+      );
+    });
+
+    test('rejects credits carrying the wrong reference id or spoken text',
+        () {
+      final reference = CourseAudioReference(
+          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'tout');
+      expect(
+        () => CourseAudioCatalog(references: [reference],
+            entries: <CourseAudioEntry>[
+          _injectedEntry(reference, creditReferenceId: 'fr-word-rouge'),
+        ]),
+        _invalidCatalogueMatcher,
+      );
+      expect(
+        () => CourseAudioCatalog(references: [reference],
+            entries: <CourseAudioEntry>[
+          _injectedEntry(reference, creditSpokenText: 'rouge'),
+        ]),
         _invalidCatalogueMatcher,
       );
     });
