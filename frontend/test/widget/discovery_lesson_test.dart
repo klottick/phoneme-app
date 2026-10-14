@@ -1218,11 +1218,59 @@ void main() {
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
       expect(
-          find.textContaining(
+          find.text(
               'Alpha audio: recordings are unverified; '
               'device speech is practice-only.'),
           findsOneWidget,
           reason: 'practice surfaces must carry the exact alpha label');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets(
+        'the exercise surface pins the exact disclosure persistently — '
+        'initial, pending and success — with no device-source claim',
+        (tester) async {
+      final audio = GateAudio();
+      final store = FakeSectionStore();
+      await tester.pumpWidget(pumpLesson(tester, audio, store));
+      await tester.pumpAndSettle();
+      expect(
+          find.text(
+              'Alpha audio: recordings are unverified; '
+              'device speech is practice-only.'),
+          findsWidgets,
+          reason: 'the exact alpha disclosure must be present from the '
+              'initial state, before any playback at all (I1: previously only '
+              'failure wording carried it)');
+      expect(
+          find.textContaining('Practice audio: spoken by this device.'),
+          findsNothing,
+          reason: 'covered words now select recorded (unverified) assets — '
+              'the unconditional device-source claim is false and must be '
+              'gone');
+      // Pending (held) playback keeps the same disclosure.
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      expect(
+          find.text(
+              'Alpha audio: recordings are unverified; '
+              'device speech is practice-only.'),
+          findsWidgets);
+      expect(choicesEnabled(tester), isFalse);
+      // Success keeps the same disclosure: a successful listener must see
+      // the alpha sentence, not a device-speech claim.
+      audio.gate.complete();
+      await tester.pumpAndSettle();
+      expect(
+          find.text(
+              'Alpha audio: recordings are unverified; '
+              'device speech is practice-only.'),
+          findsWidgets,
+          reason: 'the disclosure must persist on the success state');
+      expect(choicesEnabled(tester), isTrue);
+      expect(
+          find.textContaining('Practice audio: spoken by this device.'),
+          findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
   });

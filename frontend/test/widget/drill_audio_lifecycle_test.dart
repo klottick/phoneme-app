@@ -1,20 +1,25 @@
-// FR-03 Task 4: minimal-pair drill lifecycle with the default (shared)
-// player.
+// FR-03 Task 4 (fix round 1): minimal-pair drill lifecycle with the default
+// (shared) player.
 //
 // Screen-level behavior over the REAL [DrillScreen]. The first drill pair
 // uses the unmapped drill word `roue`, so the practice-speech fallback path
 // is the one under test: the surface must never present it as a reviewed or
 // human recording — the exact alpha disclosure says device speech is
-// practice-only. Gate-controlled boundary audio proves: held completion
-// locking, the Play/Stop control retiring in-flight playback, source-
-// appropriate failure guidance with no wrong-answer outcome, and
-// end-session/dispose retiring audio so a late settlement can never mark
-// heard or unlock the choices.
+// practice-only.
 //
-// RED note: on the pre-Task-4 baseline the exact-disclosure assertion
-// fails (no label), the Stop-control and end/dispose assertions fail
-// (the old screen never stops in-flight audio), and the late-success
-// assertion fails (the old screen marks a stale request heard).
+// Boundary doubles (I3 fix): [CancellingCueAudio] is the realistic facade
+// shape (Stop hands the caller a cancellation terminal); [HeldCueAudio] is
+// the adversarial compatible shape — Stop only records itself, each request
+// is retained per cue and REALLY settles (success or an exact engine error)
+// after retirement, while a newer request may be held. A stale settlement
+// must never publish heard/unlock/feedback, clear a newer request, or leak
+// an unhandled error.
+//
+// RED note (fix round 1): on the pre-fix code the suspension assertions
+// fail (the screen never observed the lifecycle: no stop, a late success
+// still unlocked); the Stop/End/leaving tests with the pre-fix
+// self-cancelling double had release calls that were no-ops, so they never
+// actually delivered a late settlement.
 
 import 'dart:async';
 
@@ -30,11 +35,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 const String alphaDisclosure =
     'Alpha audio: recordings are unverified; device speech is practice-only.';
 
-/// Gate-controlled [CourseAudio] boundary double: the test decides when a
-/// requested playback settles and with what outcome (success, an engine
-/// error, or cancellation). [stop] cancels the held request exactly like
-/// the shared player's stop semantics.
-class GateAudio implements CourseAudio {
+/// Realistic prompt cancellation: [stop] invalidates the held request now
+/// (the facade hands the caller its cancellation terminal).
+final class CancellingCueAudio implements CourseAudio {
   final List<String> spoken = <String>[];
   int stops = 0;
   Completer<Object?>? _pending;
@@ -44,7 +47,10 @@ class GateAudio implements CourseAudio {
     spoken.add(word);
     final Completer<Object?> settle = Completer<Object?>();
     _pending = settle;
-    return settle.future.then((Object? _) {});
+    final Future<void> delivery = settle.future.then((Object? _) {});
+    unawaited(delivery.then<void>(
+        (Object? value) {}, onError: (Object error) {}));
+    return delivery;
   }
 
   @override
@@ -65,6 +71,55 @@ class GateAudio implements CourseAudio {
     } else {
       pending.completeError(error);
     }
+  }
+}
+
+/// One retained request of [HeldCueAudio]: released exactly once, with
+/// success or the exact engine error.
+final class HeldCue {
+  HeldCue(this._settle);
+
+  final Completer<Object?> _settle;
+
+  bool get settled => _settle.isCompleted;
+
+  void release([Object? error]) {
+    if (_settle.isCompleted) return;
+    if (error == null) {
+      _settle.complete();
+    } else {
+      _settle.completeError(error);
+    }
+  }
+}
+
+/// Adversarial-compatible [CourseAudio] for caller-generation tests:
+/// [speak] retains a per-request cue; [stop] only records itself; the cues
+/// then really settle with success or an exact error — each must be
+/// survivable by the caller's generation guard.
+final class HeldCueAudio implements CourseAudio {
+  final List<String> spoken = <String>[];
+  final List<HeldCue> cues = <HeldCue>[];
+  int stops = 0;
+
+  @override
+  Future<void> speak(String word) {
+    spoken.add(word);
+    final Completer<Object?> settle = Completer<Object?>();
+    final HeldCue cue = HeldCue(settle);
+    cues.add(cue);
+    final Future<void> delivery = settle.future.then((Object? _) {});
+    unawaited(delivery.then<void>(
+        (Object? value) {}, onError: (Object error) {}));
+    return delivery;
+  }
+
+  @override
+  Future<void> stop() {
+    // Stop is recorded; the request stays retained and settles later,
+    // really — that is the stale-settlement shape callers must survive.
+    stops++;
+    return Future<void>.value();
   }
 }
 
@@ -92,7 +147,7 @@ class DrillHarness {
   DrillHarness(this.navigator, this.audio);
 
   final GlobalKey<NavigatorState> navigator;
-  final GateAudio audio;
+  final CourseAudio audio;
 
   Future<void> pump(WidgetTester tester) async {
     await tester.pumpWidget(ProviderScope(
@@ -126,9 +181,8 @@ void main() {
       'the drill pins the exact alpha disclosure and never claims a '
       'reviewed or human recording for the unmapped practice speech',
       (WidgetTester tester) async {
-    final GateAudio audio = GateAudio();
-    final DrillHarness harness = DrillHarness(
-        GlobalKey<NavigatorState>(), audio);
+    final DrillHarness harness =
+        DrillHarness(GlobalKey<NavigatorState>(), HeldCueAudio());
     await harness.pump(tester);
     // 'roue' is item 1: unmapped, so the practice-speech fallback is the
     // path under test.
@@ -151,11 +205,11 @@ void main() {
   });
 
   testWidgets(
-      'Play holds the choices locked; a late success unlocks only after '
-      'the request still owns the screen', (WidgetTester tester) async {
-    final GateAudio audio = GateAudio();
-    final DrillHarness harness = DrillHarness(
-        GlobalKey<NavigatorState>(), audio);
+      'Play holds the choices locked; an actual completion unlocks only '
+      'while that request still owns the screen', (WidgetTester tester) async {
+    final HeldCueAudio audio = HeldCueAudio();
+    final DrillHarness harness =
+        DrillHarness(GlobalKey<NavigatorState>(), audio);
     await harness.pump(tester);
     await tester.tap(find.byIcon(Icons.play_arrow));
     await settle(tester);
@@ -166,7 +220,7 @@ void main() {
       isFalse,
       reason: 'a held playback must not unlock the choices',
     );
-    audio.release();
+    audio.cues[0].release();
     await settle(tester);
     expect(
       optionEnabled(tester, 'roue'),
@@ -175,16 +229,17 @@ void main() {
     );
   });
 
-  testWidgets('the Stop control retires in-flight playback: no heard mark, '
-      'no unlock, no failure snackbar', (WidgetTester tester) async {
-    final GateAudio audio = GateAudio();
+  testWidgets('Stop retires in-flight playback; a really released stale '
+      'error of the old request cannot surface over the newer held one',
+      (WidgetTester tester) async {
+    final HeldCueAudio audio = HeldCueAudio();
     final DrillHarness harness =
         DrillHarness(GlobalKey<NavigatorState>(), audio);
     await harness.pump(tester);
     await tester.tap(find.byIcon(Icons.play_arrow));
     await settle(tester);
     expect(audio.spoken, <String>['roue']);
-    // The Stop control retires the held request.
+    // The Stop control retires the held request (recorded stop).
     await tester.tap(find.byIcon(Icons.stop));
     await settle(tester);
     expect(
@@ -192,25 +247,67 @@ void main() {
       greaterThanOrEqualTo(1),
       reason: 'the Stop control must actually stop the shared playback',
     );
-    // The engine still settles late; the retiring screen must ignore it.
-    audio.release(const CourseAudioCancelledException());
-    audio.release();
-    await settle(tester);
     expect(
       find.text('French audio unavailable. Please retry.'),
       findsNothing,
       reason: 'a user stop must not surface as an audio failure',
     );
-    expect(
-      optionEnabled(tester, 'roue'),
-      isFalse,
-      reason: 'a stopped request must never mark audio heard',
-    );
-    // Retry is open after a stop.
+    expect(optionEnabled(tester, 'roue'), isFalse);
+    // Retry is open after a stop: a newer request is now held.
     await tester.tap(find.byIcon(Icons.play_arrow));
     await settle(tester);
     expect(audio.spoken, hasLength(2));
-    audio.release();
+    expect(find.byIcon(Icons.stop), findsOneWidget);
+    // The OLD request now settles for real, with an engine error, while the
+    // newer one is still held: it must stay the newer request's own state.
+    audio.cues[0].release(StateError('late engine failure'));
+    await settle(tester);
+    expect(
+      find.text('French audio unavailable. Please retry.'),
+      findsNothing,
+      reason: 'a stale error must not publish failure over the newer '
+          'request',
+    );
+    expect(
+      find.byIcon(Icons.stop),
+      findsOneWidget,
+      reason: 'a stale error must not end the newer held playback',
+    );
+    expect(
+      optionEnabled(tester, 'roue'),
+      isFalse,
+      reason: 'a stale settlement must never mark audio heard',
+    );
+    audio.cues[1].release();
+    await settle(tester);
+    expect(optionEnabled(tester, 'roue'), isTrue);
+  });
+
+  testWidgets('a stale SUCCESS of a retired request during a newer held '
+      'attempt cannot unlock', (WidgetTester tester) async {
+    final HeldCueAudio audio = HeldCueAudio();
+    final DrillHarness harness =
+        DrillHarness(GlobalKey<NavigatorState>(), audio);
+    await harness.pump(tester);
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await settle(tester);
+    await tester.tap(find.byIcon(Icons.stop));
+    await settle(tester);
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await settle(tester);
+    expect(audio.spoken, hasLength(2));
+    // The OLD request settles with success, really, while the newer one is
+    // still held.
+    audio.cues[0].release();
+    await settle(tester);
+    expect(
+      optionEnabled(tester, 'roue'),
+      isFalse,
+      reason: 'a stale success must not unlock the choices',
+    );
+    expect(find.byIcon(Icons.stop), findsOneWidget,
+        reason: 'a stale success must not end the newer held playback');
+    audio.cues[1].release();
     await settle(tester);
     expect(optionEnabled(tester, 'roue'), isTrue);
   });
@@ -218,13 +315,13 @@ void main() {
   testWidgets(
       'a failed speech keeps the practice-retry guidance and records no '
       'wrong-answer outcome', (WidgetTester tester) async {
-    final GateAudio audio = GateAudio();
+    final HeldCueAudio audio = HeldCueAudio();
     final DrillHarness harness =
         DrillHarness(GlobalKey<NavigatorState>(), audio);
     await harness.pump(tester);
     await tester.tap(find.byIcon(Icons.play_arrow));
     await settle(tester);
-    audio.release(StateError('speech engine failed'));
+    audio.cues[0].release(StateError('speech engine failed'));
     await settle(tester);
     expect(
       find.text('French audio unavailable. Please retry.'),
@@ -246,49 +343,109 @@ void main() {
     await tester.tap(find.byIcon(Icons.play_arrow));
     await settle(tester);
     expect(audio.spoken, hasLength(2));
-    audio.release();
+    audio.cues[1].release();
     await settle(tester);
     expect(optionEnabled(tester, 'roue'), isTrue);
   });
 
-  testWidgets(
-      'End Session retires in-flight audio and books practice exactly '
-      'once', (WidgetTester tester) async {
-    final GateAudio audio = GateAudio();
-    final DrillHarness harness = DrillHarness(
-        GlobalKey<NavigatorState>(), audio);
-    await harness.pump(tester);
-    await tester.tap(find.byIcon(Icons.play_arrow));
-    await settle(tester);
-    await tester.tap(find.text('End Session'));
-    await settle(tester);
-    expect(
-      find.textContaining('Session complete'),
-      findsOneWidget,
-      reason: 'End Session books the practice streak',
-    );
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
-    expect(prefs.getInt('current_streak'), 1);
-    // The in-flight audio is retired before the screen exits.
-    expect(
-      audio.stops,
-      greaterThanOrEqualTo(1),
-      reason: 'End Session must stop in-flight playback',
-    );
-    // The engine settles late after the session ended: quiet on both sides.
-    audio.release();
-    await settle(tester);
-    expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox());
-  });
+  final List<Object?> endOutcomes = <Object?>[
+    null,
+    StateError('late engine failure'),
+  ];
+  for (final Object? outcome in endOutcomes) {
+    testWidgets(
+        'End Session retires in-flight audio (late ${outcome == null ? 'success' : 'error'} release stays quiet) and books practice exactly once',
+        (WidgetTester tester) async {
+      final HeldCueAudio audio = HeldCueAudio();
+      final DrillHarness harness =
+          DrillHarness(GlobalKey<NavigatorState>(), audio);
+      await harness.pump(tester);
+      await tester.tap(find.byIcon(Icons.play_arrow));
+      await settle(tester);
+      await tester.tap(find.text('End Session'));
+      // Assert inside the snackbar's display window (the screen leaves a
+      // few frames later in this harness).
+      await settle(tester);
+      expect(
+        find.textContaining('Session complete'),
+        findsOneWidget,
+        reason: 'End Session books the practice streak',
+      );
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      expect(prefs.getInt('current_streak'), 1);
+      // The in-flight audio is retired before the screen exits.
+      expect(
+        audio.stops,
+        greaterThanOrEqualTo(1),
+        reason: 'End Session must stop in-flight playback',
+      );
+      // The engine settles late after the session ended — for real now:
+      // quiet, no exception.
+      audio.cues[0].release(outcome);
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
 
-  testWidgets('leaving the drill retires in-flight audio and a late '
-      'settlement stays quiet', (WidgetTester tester) async {
-    final GateAudio audio = GateAudio();
+  final List<Object?> leaveOutcomes = <Object?>[
+    null,
+    StateError('late engine failure'),
+  ];
+  for (final Object? outcome in leaveOutcomes) {
+    testWidgets('leaving the drill retires in-flight audio and a really '
+        'late ${outcome == null ? 'success' : 'error'} settlement stays quiet',
+        (WidgetTester tester) async {
+      final HeldCueAudio audio = HeldCueAudio();
+      final navigator = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(ProviderScope(
+        overrides: <Override>[
+          minimalPairsProvider
+              .overrideWith((ref) => Future.value(drillPairs)),
+          courseAudioProvider.overrideWithValue(audio),
+        ],
+        child: MaterialApp(
+          navigatorKey: navigator,
+          home: Builder(builder: (BuildContext context) {
+            return TextButton(
+              onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<Widget>(
+                      builder: (_) => const DrillScreen())),
+              child: const Text('Open drill'),
+            );
+          }),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Open drill'));
+      await tester.pumpAndSettle(); // route transition before interacting
+      await tester.tap(find.byIcon(Icons.play_arrow));
+      await settle(tester);
+      expect(audio.spoken, <String>['roue']);
+      navigator.currentState!.pop();
+      await tester.pumpAndSettle(); // disposal needs the full transition
+      expect(
+        audio.stops,
+        greaterThanOrEqualTo(1),
+        reason: 'leaving the drill must stop its audio',
+      );
+      // Late settlements must stay quiet after disposal — delivered for
+      // real, with success or the exact failure.
+      audio.cues[0].release(outcome);
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
+  testWidgets('leaving the drill after a realistic cancellation stays '
+      'quiet', (WidgetTester tester) async {
+    final CancellingCueAudio audio = CancellingCueAudio();
     final navigator = GlobalKey<NavigatorState>();
     await tester.pumpWidget(ProviderScope(
       overrides: <Override>[
-        minimalPairsProvider.overrideWith((ref) => Future.value(drillPairs)),
+        minimalPairsProvider
+            .overrideWith((ref) => Future.value(drillPairs)),
         courseAudioProvider.overrideWithValue(audio),
       ],
       child: MaterialApp(
@@ -296,35 +453,115 @@ void main() {
         home: Builder(builder: (BuildContext context) {
           return TextButton(
             onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<Widget>(
-                    builder: (_) => const DrillScreen())),
+                MaterialPageRoute<Widget>(builder: (_) => const DrillScreen())),
             child: const Text('Open drill'),
           );
         }),
       ),
     ));
-    await settle(tester);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Open drill'));
-    await tester.pumpAndSettle(); // let the route transition settle before tapping
+    await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.play_arrow));
     await settle(tester);
     expect(audio.spoken, <String>['roue']);
     navigator.currentState!.pop();
-    // The route-removal transition must finish for the drill element to
-    // dispose; two micro-pumps are not the 300ms transition.
     await tester.pumpAndSettle();
-    expect(
-      audio.stops,
-      greaterThanOrEqualTo(1),
-      reason: 'leaving the drill must stop its audio',
-    );
-    // Late settlements must stay quiet after disposal.
+    expect(audio.stops, greaterThanOrEqualTo(1));
+    // The prompt cancellation terminal settles into a disposed listener.
     audio.release();
     await settle(tester);
     expect(tester.takeException(), isNull);
-    audio.release(StateError('late engine failure'));
-    await settle(tester);
-    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('app suspension retires a held playback: stopped, retryable, '
+      'and stale success during a newer attempt cannot unlock',
+      (WidgetTester tester) async {
+    final HeldCueAudio audio = HeldCueAudio();
+    final DrillHarness harness =
+        DrillHarness(GlobalKey<NavigatorState>(), audio);
+    await harness.pump(tester);
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await settle(tester);
+    expect(find.byIcon(Icons.stop), findsOneWidget);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await settle(tester);
+    expect(
+      audio.stops,
+      greaterThanOrEqualTo(1),
+      reason: 'suspending the app must stop the in-flight playback',
+    );
+    expect(find.byIcon(Icons.play_arrow), findsOneWidget,
+        reason: 'the retired request must not look like an active playback');
+    expect(optionEnabled(tester, 'roue'), isFalse);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await settle(tester);
+    expect(
+      optionEnabled(tester, 'roue'),
+      isFalse,
+      reason: 'resuming must require a fresh listen, never auto-replay',
+    );
+    expect(find.byIcon(Icons.play_arrow), findsOneWidget);
+    expect(audio.spoken, hasLength(1),
+        reason: 'resume must not replay the retired request');
+
+    // A newer attempt: the retired request's late success (really settled
+    // after its retirement) must not touch it.
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await settle(tester);
+    expect(audio.spoken, hasLength(2));
+    audio.cues[0].release();
+    await settle(tester);
+    expect(
+      optionEnabled(tester, 'roue'),
+      isFalse,
+      reason: 'a stale success must not unlock the choices',
+    );
+    expect(find.byIcon(Icons.stop), findsOneWidget,
+        reason: 'a stale success must not end the newer held playback');
+    audio.cues[1].release();
+    await settle(tester);
+    expect(optionEnabled(tester, 'roue'), isTrue);
+  });
+
+  testWidgets('a stale error after suspension cannot publish failure '
+      'feedback over a newer held attempt', (WidgetTester tester) async {
+    final HeldCueAudio audio = HeldCueAudio();
+    final DrillHarness harness =
+        DrillHarness(GlobalKey<NavigatorState>(), audio);
+    await harness.pump(tester);
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await settle(tester);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await settle(tester);
+    expect(audio.stops, greaterThanOrEqualTo(1));
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await settle(tester);
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await settle(tester);
+    expect(audio.spoken, hasLength(2));
+    expect(find.byIcon(Icons.stop), findsOneWidget);
+    audio.cues[0].release(StateError('late engine failure'));
+    await settle(tester);
+    expect(
+      find.text('French audio unavailable. Please retry.'),
+      findsNothing,
+      reason: 'a stale error must not publish failure over the newer '
+          'request',
+    );
+    expect(
+      find.byIcon(Icons.stop),
+      findsOneWidget,
+      reason: 'a stale error must not end the newer held playback',
+    );
+    expect(optionEnabled(tester, 'roue'), isFalse);
+    audio.cues[1].release();
+    await settle(tester);
+    expect(optionEnabled(tester, 'roue'), isTrue);
   });
 }

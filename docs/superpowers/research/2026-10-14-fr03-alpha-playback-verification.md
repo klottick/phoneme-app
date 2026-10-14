@@ -18,10 +18,30 @@ must come from. No gate in the PENDING section below has passing evidence.
   Engine 9161402dc0e134b, Dart **3.11.5**), CLI at
   `/home/klottick/develop/flutter/bin/flutter`; all commands run with
   `--no-pub` against the cached dependency set (riverpod 2.6.1).
-- **No browser is available here.** `which google-chrome`, `which chromium`,
-  `which chromium-browser` all returned nothing; `/usr/bin` contains no
-  `chrom*`/`firefox` binaries. The gate owner must run the browser gate on a
-  machine that has a real user agent.
+- **Browser: installed, but no sandbox-capable run is authorized here**
+  (round-1 amendment — the round-0 wording "no browser is available" was
+  inaccurate): a Chromium user agent IS installed in this environment, not
+  on `PATH` (by design of the ms-playwright cache, so `which google-chrome`,
+  `which chromium`, `which chromium-browser` return nothing):
+  `/home/klottick/.cache/ms-playwright/chromium-1248/chrome-linux64/chrome`
+  (Chromium 1248). A plain launch of that binary FAILS in this sandbox
+  with `No usable sandbox!` (AppArmor disables unprivileged user
+  namespaces) and exits -6 — inherited controller evidence:
+  `task-3-fix-2-controller-sandbox-probe.log` (exact command, FATAL
+  message, exit -6). The documented workaround is `--no-sandbox`; running a
+  browser with the sandbox disabled is NOT authorized in this environment,
+  so **no browser command was run by the worker and none may be reported
+  as evidence**. The gate owner must run the browser gate on a machine
+  where the agent can launch with a working sandbox (or an explicit,
+  recorded authorization for the alternative).
+- Controller-supplied exact-head build evidence for `d58e314` (controller
+  ran these; they are build evidence, NOT playback evidence):
+  `task-4-controller-web-build.log` (`flutter build web --no-pub --debug`
+  JS debug build succeeded, 20.2s, with locked flutter_tts4.2.5 Wasm
+  dry-run interop warnings) and `task-4-controller-built-assets.json`
+  (head `d58e314`, exit 0, all 28 registered audio package assets
+  byte-identical, 24 pending WAVs; records "browser: not launched;
+  ordinary sandbox unavailable; no bypass authorized").
 - No iOS/Android device or emulator is attached to this environment.
 
 The automated results below were produced with no browser, device, network,
@@ -63,17 +83,20 @@ no `pubspec.yaml`/lockfile, no root `LICENSE`, no `scripts/` change.
   background suspend and the held-cue switch to Word Match — no heard mark,
   no choice unlock, no progress/evidence, no failure text.
 - The exact label `Alpha audio: recordings are unverified; device speech is
-  practice-only.` appears on the lesson, discovery (failure guidance),
-  drill, and arcade surfaces; failure copy is Retry/unavailable, never
-  "Install a French voice".
+  practice-only.` appears on the lesson, discovery (pinned persistently on
+  the exercise surface per fix round 1, I1), drill, and arcade surfaces;
+  failure copy is Retry/unavailable, never "Install a French voice".
 - Readiness stays 35 pending; WAV/provenance/licence bytes unchanged; no
   `sound_word_help_test` import was introduced; FR-15 untouched.
 
 ## Manual gates — PENDING (no evidence exists; not passed)
 
 1. **Browser playback (controller-owned gate; no browser was launched —
-   none exists in this sandbox; see environment facts).** On a machine with
-   a real user agent: load the app and confirm (a) covered words (e.g.
+   a plain launch here fails with "No usable sandbox" and the only
+   workaround, `--no-sandbox`, is not authorized; see environment facts).**
+   On a machine where the agent can launch with a working sandbox (or an
+   explicit, recorded authorization for the alternative): load the app and
+   confirm (a) covered words (e.g.
    `tout`, `île`) play the bundled recording from the lesson, discovery,
    drill and arcade surfaces; (b) all four surfaces render the exact
    disclosure string; (c) Stop / End Session / navigation / background

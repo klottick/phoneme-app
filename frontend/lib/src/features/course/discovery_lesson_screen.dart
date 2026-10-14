@@ -106,10 +106,13 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   static const String _conflictText =
       'This copy no longer matches the saved progress for this section. Tap '
       '"Reload saved progress" to load the saved state.';
+  // Pure Retry/unavailable guidance (I1): the exact shared alpha disclosure
+  // is pinned persistently on the exercise surface itself
+  // (DiscoverySectionView), so the transient failure wording stays focused
+  // on retry — mirroring the published lesson surface.
   static const String _audioErrorText =
       'The French audio could not be played. Tap "Listen to the word" to try '
-      'again. '
-      'Alpha audio: recordings are unverified; device speech is practice-only.';
+      'again.';
 
   LessonSection? _section;
   LessonSectionStore? _store;

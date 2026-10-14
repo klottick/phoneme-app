@@ -16,6 +16,13 @@
 // `courseReferenceAudioProvider` wiring, so it does not compile on the
 // pre-Task-4 baseline; the red log records that along with the real
 // assertion failures of the screen-level lifecycle tests.
+//
+// Fix round 1 (I4): the `containerFor`-based tests run a TEST-built facade
+// (its disposal hook is registered on the override) — they are honest
+// facade-contract evidence, not production-body evidence. The
+// `productionBody` group below runs the REAL provider body (facade
+// construction + its own `ref.onDispose`) with only the factory-function
+// and catalogue-asset seams overridden.
 
 import 'dart:async';
 import 'dart:io';
@@ -61,6 +68,39 @@ class _FlakyBundle extends AssetBundle {
   }
 }
 
+/// Serves the real files but holds each read behind [gate] — the asset
+/// seam for proving the production body's cancellation fence around a
+/// catalogue load still in flight at disposal time.
+class _GatedBundle extends AssetBundle {
+  _GatedBundle(this.gate) : _delegate = _RealFileBundle();
+
+  final Completer<void> gate;
+  final AssetBundle _delegate;
+  final List<String> loads = <String>[];
+
+  @override
+  Future<ByteData> load(String key, {bool cache = true}) {
+    loads.add(key);
+    return gate.future
+        .then((Object? _) => _delegate.load(key));
+  }
+}
+
+/// Counts catalogue-asset reads so the laziness test can prove zero setup
+/// activity before a requested Play.
+class _CountingBundle extends AssetBundle {
+  _CountingBundle(this._delegate);
+
+  final AssetBundle _delegate;
+  final List<String> loads = <String>[];
+
+  @override
+  Future<ByteData> load(String key, {bool cache = true}) {
+    loads.add(key);
+    return _delegate.load(key);
+  }
+}
+
 /// Settles a flag the moment [future] settles (success or failure) — the
 /// probe [until] loops poll instead of the Future API, which has no
 /// completion state getter.
@@ -102,6 +142,40 @@ final class SessionCounts {
   final List<FakeCourseSpeechSession> speeches = <FakeCourseSpeechSession>[];
   int recordingCreations = 0;
   int speechCreations = 0;
+}
+
+/// I4 (approved factory boundary): the container overrides ONLY the two
+/// factory-function seams plus the catalogue loader — the REAL
+/// `courseReferenceAudioProvider` body (facade construction, lazy factory
+/// storage, and its own `ref.onDispose` retirement) runs unmodified, and
+/// no separately-constructed facade is substituted.
+ProviderContainer productionBody(
+  CourseAudioCatalogLoader loader,
+  SessionCounts counts, {
+  List<FakeCourseRecordingSession> firstRecordings =
+      const <FakeCourseRecordingSession>[],
+  List<FakeCourseSpeechSession> firstSpeeches =
+      const <FakeCourseSpeechSession>[],
+}) {
+  return ProviderContainer(overrides: <Override>[
+    courseAudioCatalogLoaderProvider.overrideWithValue(loader),
+    courseRecordingSessionFactoryProvider.overrideWithValue(() {
+      final FakeCourseRecordingSession session = firstRecordings.isNotEmpty
+          ? firstRecordings.removeAt(0)
+          : FakeCourseRecordingSession();
+      counts.recordingCreations++;
+      counts.recordings.add(session);
+      return session;
+    }),
+    courseSpeechSessionFactoryProvider.overrideWithValue(() {
+      final FakeCourseSpeechSession session = firstSpeeches.isNotEmpty
+          ? firstSpeeches.removeAt(0)
+          : FakeCourseSpeechSession();
+      counts.speechCreations++;
+      counts.speeches.add(session);
+      return session;
+    }),
+  ]);
 }
 
 CourseAudioCatalogLoader buildLoader(AssetBundle bundle) =>
@@ -461,6 +535,284 @@ void main() {
       session.emitCompleted();
       await until(() => retryProbe.done, reason: 'retry completes');
       expect(retry, completes);
+    });
+  });
+
+  // I4 (fix round 1): the REAL `courseReferenceAudioProvider` body is now
+  // exercised end-to-end. Only the factory FUNCTIONS and the catalogue/
+  // asset boundary are overridden — the provider's facade construction and
+  // its own `ref.onDispose` retirement run unmodified. This is the
+  // production evidence the containerFor-based facade-contract tests above
+  // (which register their disposal hook on the override) cannot provide.
+  group('production provider body through the factory seams', () {
+    test('both provider names serve the one real owned player', () {
+      final CourseAudioCatalogLoader loader =
+          buildLoader(_CountingBundle(_RealFileBundle()));
+      final SessionCounts counts = SessionCounts();
+      final ProviderContainer container =
+          productionBody(loader, counts);
+      addTearDown(container.dispose);
+
+      final CourseAudio legacy = container.read(courseAudioProvider);
+      final CourseReferenceAudio reference =
+          container.read(courseReferenceAudioProvider);
+      expect(
+        identical(legacy, reference),
+        isTrue,
+        reason: 'the two providers must serve one shared player, '
+            'never a second engine',
+      );
+      expect(legacy, isA<CourseReferenceAudio>());
+    });
+
+    test('lazy before Play through the real provider body: zero engines, '
+        'zero asset reads', () async {
+      final _CountingBundle bundle = _CountingBundle(_RealFileBundle());
+      final CourseAudioCatalogLoader loader = buildLoader(bundle);
+      final SessionCounts counts = SessionCounts();
+      final ProviderContainer container =
+          productionBody(loader, counts);
+      addTearDown(container.dispose);
+
+      container.read(courseAudioProvider);
+      container.read(courseReferenceAudioProvider);
+      await pump();
+      await pump();
+      expect(
+        bundle.loads,
+        isEmpty,
+        reason: 'reading the shared provider must not load the catalogue',
+      );
+      expect(
+        counts.recordingCreations,
+        0,
+        reason: 'no recording engine may exist before a requested Play',
+      );
+      expect(
+        counts.speechCreations,
+        0,
+        reason: 'no speech engine may exist before a requested Play',
+      );
+    });
+
+    test('all 24 current words select the bundled recording and each '
+        'request completes for real, without TTS', () async {
+      final CourseAudioCatalogLoader loader = buildLoader(files);
+      final SessionCounts counts = SessionCounts();
+      final ProviderContainer container =
+          productionBody(loader, counts);
+      addTearDown(container.dispose);
+      final CourseAudio legacy = container.read(courseAudioProvider);
+
+      final List<CourseAudioReference> references =
+          frenchCurriculum.audioReferences;
+      expect(
+        references.length,
+        24,
+        reason: 'the authored catalogue has exactly 24 covered words',
+      );
+
+      for (final CourseAudioReference reference in references) {
+        final Future<void> speak = legacy.speak(reference.spokenText);
+        final SettledProbe probe = SettledProbe(speak);
+        final int before = counts.recordingCreations;
+        await until(
+          () => counts.recordingCreations >= before + 1,
+          reason: 'a recording session is selected for ${reference.id}',
+        );
+        final FakeCourseRecordingSession session = counts.recordings.last;
+        await session.waitForStart();
+        session.emitCompleted();
+        await until(
+          () => probe.done,
+          reason: 'completion settles for ${reference.id}',
+        );
+        // SUCCESS assertion (I4): the request completes, not merely settles.
+        expect(speak, completes);
+        expect(
+          session.preparedRecording,
+          isNotNull,
+          reason: '${reference.id} must prepare its bundled asset',
+        );
+        expect(
+          session.preparedRecording!.assetKey,
+          'assets/audio/fr/words/${reference.spokenText}.wav',
+          reason: 'exact authored identity (including île) for '
+              '${reference.id}',
+        );
+        await pump();
+      }
+      expect(
+        counts.speechCreations,
+        0,
+        reason: 'no covered word may reach the practice-speech engine',
+      );
+      expect(counts.recordingCreations, 24);
+    });
+
+    test('unmapped legacy text selects practice speech through the '
+        'production body', () async {
+      final CourseAudioCatalogLoader loader = buildLoader(files);
+      final SessionCounts counts = SessionCounts();
+      final ProviderContainer container =
+          productionBody(loader, counts);
+      addTearDown(container.dispose);
+      final CourseAudio legacy = container.read(courseAudioProvider);
+
+      final Future<void> speak = legacy.speak('roue');
+      await until(() => counts.speechCreations == 1,
+          reason: 'unmapped text selects practice speech');
+      expect(counts.speeches.single.calls, contains('speak:roue'));
+      expect(counts.recordingCreations, 0);
+      expect(speak, completes);
+    });
+
+    test('catalogue failure fails honestly and Retry recovers through the '
+        'production body', () async {
+      final CourseAudioCatalogLoader flaky =
+          buildLoader(_FlakyBundle(1));
+      final SessionCounts counts = SessionCounts();
+      final ProviderContainer container =
+          productionBody(flaky, counts);
+      addTearDown(container.dispose);
+      final CourseAudio legacy = container.read(courseAudioProvider);
+
+      final Future<void> speak = legacy.speak('tout');
+      final SettledProbe probe = SettledProbe(speak);
+      await until(() => probe.done, reason: 'failure settles');
+      expect(speak, throwsA(isA<CourseAudioException>()));
+      expect(counts.recordingCreations, 0);
+      expect(counts.speechCreations, 0);
+
+      final Future<void> retry = legacy.speak('tout');
+      final SettledProbe retryProbe = SettledProbe(retry);
+      await until(() => counts.recordingCreations == 1,
+          reason: 'Retry re-reads the catalogue and selects the recording');
+      final FakeCourseRecordingSession session = counts.recordings.last;
+      await session.waitForStart();
+      session.emitCompleted();
+      await until(() => retryProbe.done, reason: 'retry completes');
+      expect(retry, completes);
+    });
+
+    test('container disposal cancels a speak held on an in-flight real '
+        'catalogue load, and fences the late load outcomes', () async {
+      for (final Object? lateOutcome in <Object?>[
+        PlatformException(code: 'disposed-load'),
+        null,
+      ]) {
+        final Completer<void> gate = Completer<void>();
+        final _GatedBundle bundle = _GatedBundle(gate);
+        final CourseAudioCatalogLoader loader = buildLoader(bundle);
+        final SessionCounts counts = SessionCounts();
+        final ProviderContainer container =
+            productionBody(loader, counts);
+
+        final CourseAudio legacy = container.read(courseAudioProvider);
+        final Future<void> speak = legacy.speak('tout');
+        final SettledProbe probe = SettledProbe(speak);
+        await until(
+          () => bundle.loads.isNotEmpty,
+          reason: 'the catalogue load is in flight',
+        );
+
+        // The production provider body's own ref.onDispose retires the
+        // facade: the pending speak hands the caller a cancellation NOW.
+        container.dispose();
+        await until(
+          () => probe.done,
+          reason: 'disposal settles the pending request',
+        );
+        expect(
+          speak,
+          throwsA(isA<CourseAudioCancelledException>()),
+          reason: 'a disposed owner must hand the caller a cancellation',
+        );
+
+        // The held catalogue load releases late — success or failure — and
+        // the disposed facade must fence it quietly with no late dispatch.
+        if (lateOutcome == null) {
+          gate.complete();
+        } else {
+          gate.completeError(lateOutcome);
+        }
+        await pump();
+        await pump();
+        await pump();
+        expect(
+          counts.recordingCreations,
+          0,
+          reason: 'a late catalogue load of a disposed owner must not '
+              'dispatch any session',
+        );
+        expect(counts.speechCreations, 0);
+      }
+    });
+
+    test('container disposal with a real held start cancels the request, '
+        'retires the session, and fences the late start outcome', () async {
+      for (final Object? lateOutcome in <Object?>[
+        PlatformException(code: 'disposed-start'),
+        null,
+      ]) {
+        final Completer<void> heldStart = Completer<void>();
+        final FakeCourseRecordingSession held =
+            FakeCourseRecordingSession()
+              ..startGate = heldStart.future;
+        final CourseAudioCatalogLoader loader = buildLoader(files);
+        final SessionCounts counts = SessionCounts();
+        final ProviderContainer container = productionBody(loader, counts,
+            firstRecordings: <FakeCourseRecordingSession>[held]);
+
+        final CourseAudio legacy = container.read(courseAudioProvider);
+        final Future<void> speak = legacy.speak('tout');
+        final SettledProbe probe = SettledProbe(speak);
+        await until(() => counts.recordingCreations == 1,
+            reason: 'the declared recording is selected');
+        await held.waitForStart();
+
+        container.dispose();
+        await pump();
+        await until(
+          () => probe.done,
+          reason: 'disposal settles the pending request',
+        );
+        expect(
+          speak,
+          throwsA(isA<CourseAudioCancelledException>()),
+          reason: 'a disposed owner must hand the caller a cancellation, '
+              'never a late completion',
+        );
+        expect(
+          held.calls,
+          contains('stop'),
+          reason: 'disposal must retire the active recording session',
+        );
+
+        // The platform start releases late — for REAL, success or failure —
+        // and stays fenced: no unhandled failure, no late completion
+        // delivered to the already-cancelled caller.
+        if (lateOutcome == null) {
+          heldStart.complete();
+        } else {
+          heldStart.completeError(lateOutcome);
+        }
+        await pump();
+        await pump();
+        await pump();
+      }
+    });
+
+    test('a disposed container is unusable: no new request may play', () {
+      final CourseAudioCatalogLoader loader = buildLoader(files);
+      final ProviderContainer container =
+          productionBody(loader, SessionCounts());
+      container.dispose();
+      expect(
+        () => container.read(courseAudioProvider),
+        throwsA(anything),
+        reason: 'a disposed container must not serve a new request',
+      );
     });
   });
 

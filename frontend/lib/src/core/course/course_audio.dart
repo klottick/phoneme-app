@@ -222,7 +222,24 @@ class FrenchWordAudio implements CourseAudio {
 const String alphaAudioDisclosure =
     'Alpha audio: recordings are unverified; device speech is practice-only.';
 
-/// The shared reference-audio player for the alpha. This provider [owns]
+/// Dependency seam for the recording-engine factory (I4, approved factory
+/// boundary): the production [courseReferenceAudioProvider] reads the
+/// factory's FUNCTION here without invoking it — engines are still
+/// constructed only when a request selects one. Tests override this seam
+/// (plus the catalogue-asset seam) to run the real provider body against
+/// controlled engines, without overriding the provider or replacing the
+/// owned facade.
+final courseRecordingSessionFactoryProvider =
+    Provider<CourseRecordingSession Function()>(
+        (ref) => createCourseRecordingSession);
+
+/// Dependency seam for the practice-speech factory (I4, approved factory
+/// boundary), same lazy-factory contract as the recording seam.
+final courseSpeechSessionFactoryProvider =
+    Provider<CoursePracticeSpeechSession Function()>(
+        (ref) => createFrenchPracticeSpeechSession);
+
+/// The shared reference-audio provider for the alpha. This provider [owns]
 /// the one [FrenchReferenceAudio] instance: construction is lazy (no
 /// catalogue load, no recording engine, no speech engine until a request
 /// selects one), covered words select the bundled unverified recordings
@@ -233,8 +250,10 @@ final courseReferenceAudioProvider = Provider<CourseReferenceAudio>((ref) {
       ref.watch(courseAudioCatalogLoaderProvider);
   final FrenchReferenceAudio audio = FrenchReferenceAudio(
     loadCatalog: loader.load,
-    recordingFactory: createCourseRecordingSession,
-    speechFactory: createFrenchPracticeSpeechSession,
+    // The factory FUNCTIONS are stored, never invoked here: the engines are
+    // built only when the facade actually selects a recording or speech.
+    recordingFactory: ref.watch(courseRecordingSessionFactoryProvider),
+    speechFactory: ref.watch(courseSpeechSessionFactoryProvider),
     deadlines: const CourseAudioDeadlines(),
   );
   ref.onDispose(() {

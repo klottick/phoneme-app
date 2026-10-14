@@ -18,7 +18,8 @@ class CourseLessonScreen extends ConsumerStatefulWidget {
   ConsumerState<CourseLessonScreen> createState() => _CourseLessonScreenState();
 }
 
-class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen> {
+class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
+    with WidgetsBindingObserver {
   int _index = 0;
   bool _heard = false, _busy = false, _answered = false, _recording = false;
   String _feedback = '';
@@ -47,12 +48,52 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     final recorder = _recorder;
     if (recorder != null) unawaited(_releaseRecorder(recorder));
     _listenGeneration++;
     _audio?.stop().catchError((Object _) {});
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _retireForBackground();
+    }
+  }
+
+  /// App suspension retires a held playback (I2): the generation is
+  /// invalidated BEFORE the captured shared playback is stopped, then only
+  /// the audio-owned state is reset. The microphone/recorder operation is
+  /// deliberately untouched: a capture in flight keeps its own busy guard
+  /// and its own cleanup; resuming requires a fresh listen and never
+  /// auto-replays the retired request.
+  void _retireForBackground() {
+    final CourseAudio? audio = _audio;
+    if (audio == null && !_busy) return;
+    _listenGeneration++;
+    _audio = null;
+    if (audio != null) {
+      unawaited(audio.stop().catchError((Object _) {}));
+    }
+    if (mounted) {
+      setState(() {
+        _heard = false;
+        if (!_recording) {
+          _busy = false;
+        }
+      });
+    }
   }
 
   Future<void> _releaseRecorder(RecordingService recorder) async {

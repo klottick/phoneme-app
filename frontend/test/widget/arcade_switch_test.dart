@@ -23,38 +23,47 @@ class FailablePreferences extends InMemorySharedPreferencesStore {
 }
 
 /// Held-cue boundary audio: [speak] stays open until [release] settles it,
-/// and [stop] retires the held request as a cancellation, like the shared
-/// player's stop semantics.
+/// [stop] only records itself (a compatible implementation may settle
+/// after Stop); [cues] retain each request so the test can release the
+/// held one — really, with success or the exact engine error — AFTER the
+/// navigation that retired it.
 final class _HeldCueAudio implements CourseAudio {
   final List<String> spoken = <String>[];
+  final List<_HeldCue> cues = <_HeldCue>[];
   int stops = 0;
-  Completer<Object?>? _pending;
 
   @override
   Future<void> speak(String word) {
     spoken.add(word);
     final Completer<Object?> settle = Completer<Object?>();
-    _pending = settle;
-    return settle.future.then((Object? _) {});
+    final _HeldCue cue = _HeldCue(settle);
+    cues.add(cue);
+    final Future<void> delivery = settle.future.then((Object? value) {});
+    unawaited(delivery.then<void>(
+        (Object? value) {}, onError: (Object error) {}));
+    return delivery;
   }
 
   @override
   Future<void> stop() {
     stops++;
-    final Completer<Object?>? pending = _pending;
-    if (pending != null && !pending.isCompleted) {
-      pending.completeError(const CourseAudioCancelledException());
-    }
     return Future<void>.value();
   }
+}
+
+final class _HeldCue {
+  _HeldCue(this._settle);
+
+  final Completer<Object?> _settle;
+
+  bool get settled => _settle.isCompleted;
 
   void release([Object? error]) {
-    final Completer<Object?>? pending = _pending;
-    if (pending == null || pending.isCompleted) return;
+    if (_settle.isCompleted) return;
     if (error == null) {
-      pending.complete();
+      _settle.complete();
     } else {
-      pending.completeError(error);
+      _settle.completeError(error);
     }
   }
 }
@@ -182,15 +191,21 @@ void main() {
         (saved['session'] as Map<String, dynamic>)['score'],
         greaterThanOrEqualTo(50),
         reason: 'the round checkpoint must be saved');
-    // The held cue settles late: quiet, no evidence, no leaked exception.
-    audio.release();
+    // The held cue settles late — DELIVERED, with a real engine failure —
+    // after the navigation retired it: quiet, no evidence, no exception.
+    audio.cues[0].release(StateError('late engine failure'));
     await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Audio unavailable.'),
+      findsNothing,
+      reason: 'a navigation-retired cue must not publish failure feedback',
+    );
     expect(tester.takeException(), isNull);
     final data = await CourseProgressStore('en-fr').load();
     expect(
       data['evidence'],
       isEmpty,
-      reason: 'a cue cancelled by navigation must not record evidence',
+      reason: 'a navigation-retired cue must not record evidence',
     );
     await tester.pumpWidget(const SizedBox());
   });

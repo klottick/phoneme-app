@@ -15,7 +15,8 @@ class DrillScreen extends ConsumerStatefulWidget {
   ConsumerState<DrillScreen> createState() => _DrillScreenState();
 }
 
-class _DrillScreenState extends ConsumerState<DrillScreen> {
+class _DrillScreenState extends ConsumerState<DrillScreen>
+    with WidgetsBindingObserver {
   int _index = 0;
   int _correct = 0;
   bool _isPlaying = false;
@@ -28,18 +29,49 @@ class _DrillScreenState extends ConsumerState<DrillScreen> {
   int _playGeneration = 0;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _retireAudio();
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _retireForBackground();
+    }
+  }
+
   /// Retires in-flight shared playback: the current request loses ownership
-  /// (its late settlement is cancelled and ignored) and then stops.
+  /// FIRST (its late settlement is cancelled and ignored) and then stops.
   void _retireAudio() {
     _playGeneration++;
     final CourseAudio? audio = _audio;
     if (audio != null) {
       unawaited(audio.stop().catchError((Object _) {}));
+    }
+  }
+
+  /// App suspension retires a held playback (I2): invalidate the generation
+  /// before stopping the captured shared playback, then reset the drill's
+  /// playback/hearing state so a stale settlement cannot unlock or replay.
+  /// Scoring and the End Session streak path are untouched; a fresh
+  /// foreground Play is required and resume never auto-replays.
+  void _retireForBackground() {
+    _retireAudio();
+    if (mounted) {
+      setState(() {
+        _isPlaying = false;
+        _heard = false;
+      });
     }
   }
 
