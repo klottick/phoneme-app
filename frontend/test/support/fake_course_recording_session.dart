@@ -50,8 +50,10 @@ final class FakeCourseRecordingSession implements CourseRecordingSession {
   /// releases the held operation as a failure.
   Future<void>? startGate;
 
-  /// The shared `stop`/`dispose` settlement awaits this gate; completing
-  /// it with an error fails the shared retirement for every caller.
+  /// The shared `stop`/`dispose` settlement is captured and observed at
+  /// retirement entry — before raw work is awaited — then awaited after
+  /// raw quiescence; completing it with an error fails the shared
+  /// retirement for every caller with that exact cause.
   Future<void>? stopGate;
 
   /// The recording most recently prepared, if any.
@@ -137,6 +139,18 @@ final class FakeCourseRecordingSession implements CourseRecordingSession {
   }
 
   Future<void> _runRetirement() async {
+    // Capture the settlement gate at retirement entry — before raw work
+    // is awaited — and observe it at the same time: a gate failure
+    // released while raw work is still pending must already be observed
+    // (never an uncaught async failure), and the retirement's gate is
+    // fixed at retirement entry. The gate outcome must not bypass raw
+    // quiescence: settlement is deferred until every raw operation has
+    // settled.
+    final Future<void>? gate = stopGate;
+    if (gate != null) {
+      // ignore: unawaited_futures
+      unawaited(gate.then<void>(_quietlySettled, onError: _quietlySettled));
+    }
     // Fence: every dispatched raw operation settles (success or failure)
     // before the retirement settles — quiescence, whatever the outcome.
     final List<Future<void>> pending = List.of(_rawOps);
@@ -149,9 +163,8 @@ final class FakeCourseRecordingSession implements CourseRecordingSession {
         // that every dispatched op settled.
       }
     }
-    // The shared settlement gate: releasable with success or failure; a
-    // failure is the shared retirement outcome for every caller.
-    final Future<void>? gate = stopGate;
+    // Then settle on the captured gate: success, or the original gate
+    // failure shared by every retirement caller.
     if (gate != null) await gate;
   }
 

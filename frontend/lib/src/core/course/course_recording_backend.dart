@@ -81,13 +81,6 @@ final class AudioplayersRecordingSession implements CourseRecordingSession {
   /// failure, held by every `stop`/`dispose` caller.
   Future<void>? _retirement;
 
-  /// The confirmed failed-creation cause, when the drained construction
-  /// read observed the creation failure. The locked plugin rethrows
-  /// exactly this object from the failed player's disposal chain, before
-  /// any platform call (no audible resource registered), so teardown can
-  /// distinguish it from an ordinary active-player cleanup failure.
-  Object? _creationFailure;
-
   @override
   Stream<CourseRecordingEvent> get events => _events.stream;
 
@@ -181,19 +174,15 @@ final class AudioplayersRecordingSession implements CourseRecordingSession {
         await player.dispose();
         _player = null;
       } on Object catch (error) {
-        if (!identical(error, _creationFailure)) {
-          // An ordinary teardown failure: a platform stop/release/dispose
-          // acknowledgement failed on an active player and the plugin
-          // chain (dispose -> release -> stop -> platform acks) stopped
-          // there. Rethrow the original cause instead of advertising
-          // quiescence.
-          cleanupFailure ??= error;
-        }
-        // A rethrown confirmed creation failure is absorbed: the plugin
-        // rethrows it before any platform call (the platform saw no
-        // stop/release/dispose for this identity), the preparing call
-        // already owns that exact diagnostic, and quiescence for a
-        // never-created player holds.
+        // The rethrown cause may be a creation failure or an interrupted
+        // active-player cleanup; the locked public API cannot prove
+        // which (the drained read first awaits creation and may then
+        // fail independently as a platform position read, and even a
+        // successful read is not a creation-success predicate), so the
+        // failure is propagated conservatively and shared by every
+        // retirement caller with the original object — never silently
+        // absorbed as if quiescence held.
+        cleanupFailure ??= error;
       }
     }
     _prepared = false;
@@ -232,13 +221,14 @@ final class AudioplayersRecordingSession implements CourseRecordingSession {
       // prepare call can miss the completion window and the failure would
       // escape as an unhandled async error. Attaching a drained read at
       // construction observes it immediately; the diagnostic still reaches
-      // the prepare future exactly once. The failure side of the drain
-      // records the confirmed creation cause for the teardown's
-      // failed-creation distinction.
+      // the prepare future exactly once. The probe's own result feeds NO
+      // session decision — neither its failure (which may be merely a
+      // position read on a successfully created player) nor its success
+      // is treated as a creation-phase predicate.
       unawaited(
         player
             .getCurrentPosition()
-            .then<void>(_ignoreSettled, onError: _recordCreationFailure),
+            .then<void>(_ignoreSettled, onError: _ignoreSettled),
       );
     }
     return player;
@@ -291,16 +281,8 @@ final class AudioplayersRecordingSession implements CourseRecordingSession {
       throw StateError('recording session is retired; construct a new session');
     }
   }
-
-  /// Failure side of the drained construction read: records the confirmed
-  /// failed-creation cause so the teardown can distinguish it from an
-  /// ordinary active-player cleanup failure.
-  void _recordCreationFailure(Object? error) {
-    if (error == null) return;
-    _creationFailure = error;
-  }
 }
 
-/// Success side of the creation-probe drain: observes the settlement
-/// without acting on it.
+/// Drain handler for the creation probe: observes the settlement without
+/// acting on it either way; the result feeds no session decision.
 void _ignoreSettled(Object? value) {}
