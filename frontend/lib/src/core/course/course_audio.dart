@@ -36,12 +36,16 @@ export 'course_audio_contract.dart';
 /// utterance ([CourseAudioDeadlines.ttsUtterance]); direct callers keep the
 /// tested quiet stale-cancellation semantics.
 ///
-/// A real speech-error platform callback is observed on the active utterance
-/// before its dispatch: the locked web engine drops the utterance completer
-/// on a speech error and reports only through that callback, so the request
-/// settles from whichever arrives first — utterance or callback — with the
-/// original diagnostic on either path. The unresolved raw utterance stays
-/// fenced for [quiesce].
+/// A real speech-error platform callback is observed only at the isolated
+/// single-attempt practice-session boundary: the session arms a callback sink
+/// on its own adapter before dispatch, and the locked web engine — which drops
+/// the utterance completer on a speech error and reports only through that
+/// callback — settles that single request from whichever arrives first, with
+/// the original diagnostic. The direct raw path never arms that sink: the
+/// locked flutter_tts delivers `speak.onError` identity-free over one global,
+/// last-constructed-wins channel, so an uncorrelated callback never fails a
+/// mutable direct request and stale direct failures drain quietly. The
+/// unresolved raw utterance stays fenced for [quiesce] on every path.
 ///
 /// [quiesce] settles once every dispatched raw platform operation has
 /// settled — the practice-session wrapper uses it to fence raw work before
@@ -57,16 +61,29 @@ class FrenchWordAudio implements CourseAudio {
   final FlutterTts _tts = FlutterTts();
   final CourseAudioDeadlines _deadlines;
 
-  /// Sink for the active utterance's real speech-error callback. Replaced on
-  /// every utterance dispatch; a late event for an older utterance still
-  /// reaches its sink (and that request drains quietly).
+  /// Sink for the isolated single-attempt practice-session's real speech-error
+  /// callback. Armed once by the session before its dispatch and retired
+  /// permanently with that single-use session (a new owner builds a new adapter
+  /// and a new engine). The direct raw path never arms it: the locked
+  /// flutter_tts delivers `speak.onError` identity-free over one global,
+  /// last-constructed-wins channel, so an uncorrelated callback must never fail
+  /// a mutable direct request.
   Completer<Object?>? _speechErrorSignal;
+
+  /// Arms the isolated single-attempt session's callback sink before its
+  /// dispatch (idempotent; the session is single-use and retires it with
+  /// itself before any new owner).
+  void armSpeechErrorSink() {
+    _speechErrorSignal ??= Completer<Object?>();
+  }
 
   void _onSpeechError(Object? message) {
     final Completer<Object?>? signal = _speechErrorSignal;
     if (signal != null && !signal.isCompleted) {
       signal.complete(message);
     }
+    // else: the direct raw path has no armed sink — the uncorrelated,
+    // identity-free callback drains quietly and never fails a direct request.
   }
 
   /// Raw platform operations dispatched and not yet settled, tracked
@@ -138,32 +155,36 @@ class FrenchWordAudio implements CourseAudio {
   Future<void> speak(String word) async {
     final mine = ++_current;
     try {
-      // The setup allowance bounds the whole setup phase; the utterance is
-      // bounded by the existing 12-second allowance by default.
-      try {
-        await _runSetup(mine).timeout(_deadlines.setup);
-      } on TimeoutException catch (error, stackTrace) {
-        // Type the phase: the setup allowance expired before the utterance
-        // began. Direct callers still see a TimeoutException.
-        Error.throwWithStackTrace(
-            PhaseTimeoutException(
-                CourseAudioFailureReason.startupTimeout,
-                'The setup phase deadline was exceeded.',
-                error.duration),
-            stackTrace);
-      }
+      // The setup allowance bounds the whole setup phase. The phase error is
+      // created only on THIS adapter's own setup-timer expiry (onTimeout): a
+      // source TimeoutException that settles before the allowance passes
+      // through unchanged for the direct caller and the stable facade failure,
+      // and is never relabelled as an expired phase of this adapter.
+      await _runSetup(mine).timeout(
+        _deadlines.setup,
+        onTimeout: () {
+          throw PhaseTimeoutException(
+              CourseAudioFailureReason.startupTimeout,
+              'The setup phase deadline was exceeded.',
+              _deadlines.setup);
+        },
+      );
       if (mine != _current) return;
 
-      final Completer<Object?> signal = Completer<Object?>();
-      _speechErrorSignal = signal;
+      // R1 boundary: only the isolated single-attempt practice session arms a
+      // callback sink (armSpeechErrorSink) before dispatch. The direct raw
+      // path settles the request from the utterance pipeline alone, so an
+      // uncorrelated, identity-free callback can never fail a mutable direct
+      // request; a superseded direct request drains quietly.
+      final Completer<Object?>? callbackSignal = _speechErrorSignal;
       final Future<dynamic> utterance = _tts.speak(word);
       _track(utterance);
-      // The utterance and the real speech-error callback are independent
-      // settlements: the locked web engine drops the utterance completer on
-      // a speech error and reports only through the callback. Whichever
-      // arrives first settles the active request; the original diagnostic
-      // is preserved on either path, and the raw utterance stays tracked
-      // for quiescence.
+      // The utterance and, when the session armed a sink, the real speech-
+      // error callback are independent settlements: the locked web engine
+      // drops the utterance completer on a speech error and reports only
+      // through the callback. Whichever arrives first settles the request;
+      // the original diagnostic is preserved on either path, and the raw
+      // utterance stays tracked for quiescence.
       final Completer<dynamic> outcome = Completer<dynamic>();
       void completeOutcome(dynamic value) {
         if (!outcome.isCompleted) {
@@ -177,32 +198,36 @@ class FrenchWordAudio implements CourseAudio {
         }
       }
 
-      unawaited(utterance.timeout(_deadlines.ttsUtterance).then<dynamic>(
-            (dynamic value) => completeOutcome(value),
-            onError: (Object error, StackTrace stackTrace) {
-              if (error is TimeoutException) {
-                // Type the phase: the utterance allowance expired. Direct
-                // callers can still catch a TimeoutException.
-                failOutcome(
-                    PhaseTimeoutException(
-                        CourseAudioFailureReason.completionTimeout,
-                        'The utterance phase deadline was exceeded.',
-                        error.duration),
-                    stackTrace);
-                return;
-              }
-              failOutcome(error, stackTrace);
+      // R2: the phase error is created only on THIS adapter's own utterance-
+      // timer expiry (onTimeout). A source error — including a source
+      // TimeoutException that settles before the allowance — passes through
+      // to the caller and the stable fixture failure unchanged.
+      unawaited(utterance
+          .timeout(
+            _deadlines.ttsUtterance,
+            onTimeout: () {
+              throw PhaseTimeoutException(
+                  CourseAudioFailureReason.completionTimeout,
+                  'The utterance phase deadline was exceeded.',
+                  _deadlines.ttsUtterance);
             },
-          ));
-      unawaited(signal.future.then<dynamic>(
-            (Object? message) => failOutcome(
-                // The callback is delivered as sent; an empty payload is a
-                // neutral speech failure, never an invented diagnosis.
-                message ?? StateError('French speech failed.'),
-                StackTrace.current),
+          )
+          .then<dynamic>(
+            (dynamic value) => completeOutcome(value),
             onError: (Object error, StackTrace stackTrace) =>
                 failOutcome(error, stackTrace),
           ));
+      if (callbackSignal != null) {
+        unawaited(callbackSignal.future.then<dynamic>(
+              (Object? message) => failOutcome(
+                  // The callback is delivered as sent; an empty payload is a
+                  // neutral speech failure, never an invented diagnosis.
+                  message ?? StateError('French speech failed.'),
+                  StackTrace.current),
+              onError: (Object error, StackTrace stackTrace) =>
+                  failOutcome(error, stackTrace),
+            ));
+      }
       // The outer catch owns staleness: an abandoned request drains any
       // failure quietly; an active failure invalidates its token and
       // rethrows the same error with its original stack trace.
@@ -281,6 +306,12 @@ final class FrenchPracticeSpeechSession implements CoursePracticeSpeechSession {
           'practice speech session is retired; construct a new session');
     }
     final FrenchWordAudio audio = _audio ??= FrenchWordAudio(_deadlines);
+    // R1 boundary: arm this isolated single-attempt session's callback sink
+    // before dispatch. It retires permanently with this single-use session
+    // (before any new owner), so a real inbound speech-error callback settles
+    // this single request — never a later owner's — with the original
+    // diagnostic.
+    audio.armSpeechErrorSink();
     final Future<void> speakFuture = audio.speak(text);
     // Observe quietly: an abandonment settlement (stop/dispose/replacement)
     // must never become an unhandled async failure.

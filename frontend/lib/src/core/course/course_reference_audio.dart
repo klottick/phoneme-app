@@ -39,6 +39,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart' show PlatformException;
 
+import 'browser_rejection_boundary.dart';
 import 'course_audio_catalog.dart';
 import 'course_audio_contract.dart';
 import 'course_exercise.dart';
@@ -842,14 +843,20 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
     );
   }
 
-  /// Narrow recognition of a browser autoplay/gesture rejection: only the
-  /// standard DOM exception name delivered as a platform-exception *code*.
-  /// Substring inference (code or message) would relabel unrelated
-  /// failures as gesture requirements; message and code resemblance stay
-  /// generic. Actual platform behavior must be verified on a real browser
+  /// Narrow recognition of a browser autoplay/gesture rejection: the exact
+  /// standard DOM exception name delivered either as a platform-exception
+  /// *code* (the exact PlatformException transport path, still supported)
+  /// or as the exact DOM name of an untranslated source-shaped rejection
+  /// recognized at the platform boundary [isBrowserAutoplayRejection].
+  /// Substring inference (code, message, or source shape) would relabel
+  /// unrelated failures as gesture requirements; code, message and shape
+  /// resemblance that is not this exact name stay generic. Recognition only
+  /// relabels the reason — the original cause and stack are always
+  /// retained. Actual platform behavior must be verified on a real browser
   /// — this only stabilizes the classification.
   bool _isBrowserGestureRejection(Object error) {
-    return error is PlatformException && error.code == 'NotAllowedError';
+    return (error is PlatformException && error.code == 'NotAllowedError') ||
+        isBrowserAutoplayRejection(error);
   }
 }
 

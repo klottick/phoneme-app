@@ -1008,6 +1008,258 @@ void main() {
           reason: 'the newer owner resolves on its own completion');
       expect(identical(h.lastSpeech, newer), isTrue);
     });
+
+    test(
+        'stop during a held legacy catalogue load never dispatches TTS '
+        'when the stale settlement is a success',
+        () async {
+      final loaderHold = Completer<void>();
+      var loads = 0;
+      final h = Harness(
+        loader: () async {
+          loads++;
+          if (loads == 1) {
+            await loaderHold.future;
+            return fixtureCatalogue();
+          }
+          return fixtureCatalogue();
+        },
+        recordings: const <FakeCourseRecordingSession>[],
+        // No speech session queued on purpose: a stale dispatch would
+        // fabricate and consume one.
+        speeches: [speech()],
+      );
+      final pending = h.facade.speak('quelques mots');
+      await until(() => loads >= 1, reason: 'legacy load dispatch');
+      await h.facade.stop();
+      Object? legacyCaught;
+      try {
+        await pending;
+      } on Object catch (error) {
+        legacyCaught = error;
+      }
+      expect(legacyCaught, isA<CourseAudioCancelledException>(),
+          reason: 'stop cancels the pending legacy request distinctly');
+      loaderHold.complete(); // the stale settlement arrives as a success
+      await pumpEventQueue();
+      expect(h.speechCreations, 0,
+          reason: 'a stale catalogue success must never select speech');
+      expect(h.lastSpeech, isNull,
+          reason: 'no stale speech engine may be created or retained');
+      // The facade remains usable for a newer owner after the stale
+      // success.
+      await expectLater(h.facade.speak('quelques mots'), completes,
+          reason: 'facade survives the stale catalogue success');
+      expect(h.speechCreations, 1,
+          reason: 'only the newer, owned request may use the queued speech');
+    });
+
+    test(
+        'disposal during a held legacy catalogue load dispatches nothing '
+        'when the settlement is a success',
+        () async {
+      final loaderHold = Completer<void>();
+      final h = Harness(
+        loader: () async {
+          await loaderHold.future;
+          return fixtureCatalogue();
+        },
+      );
+      final pending = h.facade.speak('quelques mots');
+      await pumpEventQueue();
+      await h.facade.dispose();
+      Object? legacyCaught;
+      try {
+        await pending;
+      } on Object catch (error) {
+        legacyCaught = error;
+      }
+      expect(legacyCaught, isA<CourseAudioCancelledException>(),
+          reason: 'disposal cancels the pending legacy request distinctly');
+      loaderHold.complete(); // stale success settlement after disposal
+      await pumpEventQueue();
+      expect(h.speechCreations, 0,
+          reason: 'a disposed facade must never dispatch speech for a stale '
+              'catalogue success');
+      expect(h.lastSpeech, isNull);
+    });
+
+    test(
+        'replacement never dispatches the stale TTS when the stale '
+        'settlement is a success',
+        () async {
+      final newer = speech();
+      final utteranceHold = Completer<void>();
+      newer.speakGate = utteranceHold.future;
+      final loaderHold = Completer<void>();
+      var loads = 0;
+      final h = Harness(
+        loader: () async {
+          loads++;
+          if (loads == 1) {
+            await loaderHold.future;
+            return fixtureCatalogue();
+          }
+          return fixtureCatalogue();
+        },
+        recordings: const <FakeCourseRecordingSession>[],
+        speeches: [newer],
+      );
+      final stalePending = h.facade.speak('quelques mots');
+      await until(() => loads >= 1, reason: 'stale load dispatch');
+      final newerPending = h.facade.speak('bonjour');
+      await until(
+          () => h.lastSpeech == newer && newer.calls.contains('speak:bonjour'),
+          reason: 'newer speech dispatch');
+      Object? staleCaught;
+      try {
+        await stalePending;
+      } on Object catch (error) {
+        staleCaught = error;
+      }
+      expect(staleCaught, isA<CourseAudioCancelledException>(),
+          reason: 'replacement cancels the stale legacy request distinctly');
+      loaderHold.complete(); // stale success while the newer owner is pending
+      await pumpEventQueue();
+      expect(h.speechCreations, 1,
+          reason: 'the stale catalogue success must never dispatch speech');
+      expect(
+          newer.calls.where((String c) => c == 'speak:quelques mots').length, 0,
+          reason: 'no stale utterance may overwrite the newer speech identity');
+      utteranceHold.complete();
+      await pumpEventQueue();
+      await expectLater(newerPending, completes,
+          reason: 'the newer owner resolves on its own completion');
+      expect(identical(h.lastSpeech, newer), isTrue);
+    });
+
+    test(
+        'a stale load settling after its setup deadline is never '
+        'dispatched for a stopped request',
+        () async {
+      final loaderHold = Completer<void>();
+      var loads = 0;
+      final h = Harness(
+        loader: () async {
+          loads++;
+          if (loads == 1) {
+            await loaderHold.future;
+            return fixtureCatalogue();
+          }
+          return fixtureCatalogue();
+        },
+        recordings: const <FakeCourseRecordingSession>[],
+        speeches: [speech()],
+      );
+      final pending = h.facade.speak('quelques mots');
+      await until(() => loads >= 1, reason: 'legacy load dispatch');
+      await h.facade.stop();
+      Object? legacyCaught;
+      try {
+        await pending;
+      } on Object catch (error) {
+        legacyCaught = error;
+      }
+      expect(legacyCaught, isA<CourseAudioCancelledException>(),
+          reason: 'stop cancels the pending legacy request distinctly');
+      // Let the harness setup allowance (150ms) expire before the stale
+      // settlement arrives: a revoked timeout, not a prompt settlement.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      loaderHold.complete();
+      await pumpEventQueue();
+      expect(h.speechCreations, 0,
+          reason: 'a settlement arriving after its setup deadline must not '
+              'select speech');
+      expect(h.lastSpeech, isNull);
+    });
+
+    test(
+        'a stale load settling after its setup deadline is never '
+        'dispatched for a disposed request',
+        () async {
+      final loaderHold = Completer<void>();
+      final h = Harness(
+        loader: () async {
+          await loaderHold.future;
+          return fixtureCatalogue();
+        },
+      );
+      final pending = h.facade.speak('quelques mots');
+      await pumpEventQueue();
+      await h.facade.dispose();
+      Object? legacyCaught;
+      try {
+        await pending;
+      } on Object catch (error) {
+        legacyCaught = error;
+      }
+      expect(legacyCaught, isA<CourseAudioCancelledException>(),
+          reason: 'disposal cancels the pending legacy request distinctly');
+      // Let the harness setup allowance (150ms) expire before the stale
+      // settlement arrives: a revoked timeout, not a prompt settlement.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      loaderHold.complete();
+      await pumpEventQueue();
+      expect(h.speechCreations, 0,
+          reason: 'a settlement arriving after its setup deadline must not '
+              'select speech on a disposed facade');
+      expect(h.lastSpeech, isNull);
+    });
+
+    test(
+        'a stale load settling after its setup deadline never dispatches '
+        'over the newer owner',
+        () async {
+      final newer = speech();
+      final utteranceHold = Completer<void>();
+      newer.speakGate = utteranceHold.future;
+      final loaderHold = Completer<void>();
+      var loads = 0;
+      final h = Harness(
+        loader: () async {
+          loads++;
+          if (loads == 1) {
+            await loaderHold.future;
+            return fixtureCatalogue();
+          }
+          return fixtureCatalogue();
+        },
+        recordings: const <FakeCourseRecordingSession>[],
+        speeches: [newer],
+      );
+      final stalePending = h.facade.speak('quelques mots');
+      await until(() => loads >= 1, reason: 'stale load dispatch');
+      final newerPending = h.facade.speak('bonjour');
+      await until(
+          () => h.lastSpeech == newer && newer.calls.contains('speak:bonjour'),
+          reason: 'newer speech dispatch');
+      Object? staleCaught;
+      try {
+        await stalePending;
+      } on Object catch (error) {
+        staleCaught = error;
+      }
+      expect(staleCaught, isA<CourseAudioCancelledException>(),
+          reason: 'replacement cancels the stale legacy request distinctly');
+      // Let the harness setup allowance (150ms) expire before the stale
+      // settlement arrives: a revoked timeout, not a prompt settlement.
+      // 220ms also stays inside the newer owner's 300ms facade backstop
+      // (setup 150ms + utterance 150ms), so the newer request can still
+      // complete on its own when its utterance is released.
+      await Future<void>.delayed(const Duration(milliseconds: 220));
+      loaderHold.complete(); // stale success after its own deadline
+      await pumpEventQueue();
+      expect(h.speechCreations, 1,
+          reason: 'a revoked stale settlement must never dispatch speech');
+      expect(
+          newer.calls.where((String c) => c == 'speak:quelques mots').length, 0,
+          reason: 'no stale utterance may overwrite the newer speech identity');
+      utteranceHold.complete();
+      await pumpEventQueue();
+      await expectLater(newerPending, completes,
+          reason: 'the newer owner resolves on its own completion');
+      expect(identical(h.lastSpeech, newer), isTrue);
+    });
   });
 
   group('recording held-boundary coordination (I1)', () {
@@ -1153,6 +1405,128 @@ void main() {
           reason: 'a disposed request never reaches the start dispatch');
     });
 
+    test('stop during a held prepare never starts the recording', () async {
+      final session = recording();
+      final prepareHold = Completer<void>();
+      session.prepareGate = prepareHold.future;
+      final h = Harness(recordings: [session]);
+      final pending = h.facade.playReference('fr-word-tout');
+      await until(() => session.calls.contains('prepare'),
+          reason: 'prepare dispatch');
+      await h.facade.stop();
+      final result = await pending;
+      expect(result.outcome, CourseAudioOutcome.cancelled,
+          reason: 'stop cancels the held prepare distinctly');
+      prepareHold.complete(); // the stale prepare settles as a success
+      await pumpEventQueue();
+      expect(session.calls.contains('start'), isFalse,
+          reason: 'a stopped request never reaches the start dispatch, '
+              'even on a successful stale prepare');
+    });
+
+    test(
+        'stop during a held prepare never starts the recording when the '
+        'stale prepare fails',
+        () async {
+      final session = recording();
+      final prepareHold = Completer<void>();
+      session.prepareGate = prepareHold.future;
+      final h = Harness(recordings: [session]);
+      final pending = h.facade.playReference('fr-word-tout');
+      await until(() => session.calls.contains('prepare'),
+          reason: 'prepare dispatch');
+      await h.facade.stop();
+      final result = await pending;
+      expect(result.outcome, CourseAudioOutcome.cancelled,
+          reason: 'stop cancels the held prepare distinctly');
+      prepareHold.completeError(PlatformException(code: 'prepare-stale'));
+      await pumpEventQueue();
+      expect(session.calls.contains('start'), isFalse,
+          reason: 'a failed stale prepare never reaches the start dispatch '
+              'on a stopped request');
+    });
+
+    test(
+        'replacement waits for a held stale prepare, then proceeds with the '
+        'newer identity, never the stale start',
+        () async {
+      final stale = recording();
+      final newer = recording();
+      final prepareHold = Completer<void>();
+      stale.prepareGate = prepareHold.future;
+      final h = Harness(recordings: [stale, newer]);
+      final stalePending = h.facade.playReference('fr-word-tout');
+      await until(() => stale.calls.contains('prepare'),
+          reason: 'stale prepare dispatch');
+      final newerPending = h.facade.playReference('fr-word-tout');
+      // While the stale prepare raw operation is still held, the newer
+      // owner must not be created or dispatched.
+      await pumpEventQueue();
+      await pumpEventQueue();
+      expect(h.recordingCreations, 1,
+          reason: 'the newer recording is not created while the stale '
+              'prepare is still held');
+      expect(newer.calls, isEmpty,
+          reason: 'no start dispatch may occur while the stale prepare is '
+              'still held');
+      prepareHold.complete(); // the stale prepare settles as a success
+      await until(
+          () => h.lastRecording == newer && newer.calls.contains('start'),
+          reason: 'newer dispatch after the stale prepare quiesces');
+      final staleResult = await stalePending;
+      expect(staleResult.outcome, CourseAudioOutcome.cancelled,
+          reason: 'replacement cancels the stale request distinctly');
+      expect(stale.calls.contains('start'), isFalse,
+          reason: 'the stale request never reaches start under the newer '
+              'identity');
+      newer.emitCompleted();
+      final result = await newerPending.timeout(const Duration(seconds: 2));
+      expect(result.outcome, CourseAudioOutcome.completed);
+      expect(identical(h.lastRecording, newer), isTrue,
+          reason: 'the newer identity is preserved');
+    });
+
+    test(
+        'replacement proceeds with the newer identity even when the stale '
+        'prepare settles as a failure',
+        () async {
+      final stale = recording();
+      final newer = recording();
+      final prepareHold = Completer<void>();
+      stale.prepareGate = prepareHold.future;
+      final h = Harness(recordings: [stale, newer]);
+      final stalePending = h.facade.playReference('fr-word-tout');
+      await until(() => stale.calls.contains('prepare'),
+          reason: 'stale prepare dispatch');
+      final newerPending = h.facade.playReference('fr-word-tout');
+      // While the stale prepare raw operation is still held, the newer
+      // owner must not be created or dispatched.
+      await pumpEventQueue();
+      await pumpEventQueue();
+      expect(h.recordingCreations, 1,
+          reason: 'the newer recording is not created while the stale '
+              'prepare is still held');
+      expect(newer.calls, isEmpty,
+          reason: 'no start dispatch may occur while the stale prepare is '
+              'still held');
+      prepareHold.completeError(PlatformException(code: 'prepare-stale'));
+      await until(
+          () => h.lastRecording == newer && newer.calls.contains('start'),
+          reason: 'newer dispatch after the stale prepare quiesces');
+      final staleResult = await stalePending;
+      expect(staleResult.outcome, CourseAudioOutcome.cancelled,
+          reason: 'replacement cancels the stale request distinctly');
+      expect(stale.calls.contains('start'), isFalse,
+          reason: 'the failed stale prepare never reaches start');
+      newer.emitCompleted();
+      final result = await newerPending.timeout(const Duration(seconds: 2));
+      expect(result.outcome, CourseAudioOutcome.completed,
+          reason: 'a failed stale prepare operation is fenced by '
+              'quiescence and must not block the newer owner');
+      expect(identical(h.lastRecording, newer), isTrue,
+          reason: 'the newer identity is preserved');
+    });
+
     test(
         'a stale ack failure after cancellation is fenced; the cancelled '
         'terminal is the only one',
@@ -1292,6 +1666,31 @@ void main() {
       expect(identical(result.failure!.cause, cause), isTrue,
           reason: 'the original opaque cause is preserved');
     });
+
+    test(
+        'a native Dart object resembling a browser rejection stays generic '
+        'off the web platform',
+        () async {
+      final session = recording();
+      // A native Dart object whose surface deliberately mimics a browser
+      // DOMException (string name/message fields). Off the web platform it
+      // is not a browser diagnostic and must stay generic.
+      const cause = _NativeRejectionLike(
+          message: 'play() not allowed', name: 'NotAllowedError');
+      final h = Harness(recordings: [session]);
+      final pending = h.facade.playReference('fr-word-tout');
+      await until(() => session.calls.contains('start'), reason: 'dispatch');
+      await session.waitForStart();
+      session.emitError(cause);
+      final result = await pending;
+      expect(result.outcome, CourseAudioOutcome.failed);
+      expect(result.failure!.reason, CourseAudioFailureReason.unsupportedPlayback,
+          reason:
+              'a native Dart .name surface is not a browser DOMException; '
+                  'the VM boundary fabricates no gesture diagnosis');
+      expect(identical(result.failure!.cause, cause), isTrue,
+          reason: 'the original cause is preserved');
+    });
   });
 
   group('applied production defaults and remaining matrix (I6)', () {
@@ -1312,13 +1711,15 @@ void main() {
         deadlines: const CourseAudioDeadlines(), // production defaults
       );
       final pending = facade.playReference('fr-word-tout');
-      await tester.pump();
-      expect(loads, 1, reason: 'the load is dispatched once');
-      await tester.pump(const Duration(milliseconds: 9500));
       var settled = false;
+      // Terminal observer attached BEFORE the fake clock is advanced.
       pending.then<void>(
           (CourseAudioResult _) => settled = true,
           onError: (Object _) => settled = true);
+      await tester.pump();
+      expect(loads, 1, reason: 'the load is dispatched once');
+      await tester.pump(const Duration(milliseconds: 9500));
+      await tester.pump(); // yield so the observer runs before asserting
       expect(settled, isFalse,
           reason: 'inside the default setup allowance the request is '
               'still pending, not failed');
@@ -1355,12 +1756,14 @@ void main() {
       final cancelled = await first;
       expect(cancelled.outcome, CourseAudioOutcome.cancelled);
       final second = facade.playReference('fr-word-tout');
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 4900));
       var settled = false;
+      // Terminal observer attached BEFORE the fake clock is advanced.
       second.then<void>(
           (CourseAudioResult _) => settled = true,
           onError: (Object _) => settled = true);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 4900));
+      await tester.pump(); // yield so the observer runs before asserting
       expect(settled, isFalse,
           reason: 'the next owner waits for quiescence instead of '
               'overlapping audio');
@@ -1394,13 +1797,23 @@ void main() {
         deadlines: const CourseAudioDeadlines(), // production defaults
       );
       final pending = facade.playReference('fr-word-tout');
+      var settled = false;
+      // Terminal observer attached BEFORE the fake clock is advanced.
+      pending.then<void>(
+          (CourseAudioResult _) => settled = true,
+          onError: (Object _) => settled = true);
       await tester.pump();
       await tester.pump();
       expect(session.calls, contains('start'),
           reason: 'the start is dispatched and the ack is held raw');
+      await tester.pump(const Duration(seconds: 9)); // inside the 10s floor
+      await tester.pump(); // yield so the observer runs before asserting
+      expect(settled, isFalse,
+          reason: 'inside the default completion floor the request stays '
+              'pending, not failed');
       // No completion event is ever emitted; the dispatch-origin bound is
       // the default completion floor (10s) for this declared duration.
-      await tester.pump(const Duration(seconds: 11));
+      await tester.pump(const Duration(seconds: 2)); // past the 10s floor
       final result = await pending;
       expect(result.outcome, CourseAudioOutcome.failed);
       expect(result.failure!.reason, CourseAudioFailureReason.completionTimeout,
@@ -1426,6 +1839,16 @@ void main() {
           () => speechFake.calls.contains('speak:quelques mots'),
           reason: 'speech dispatch');
       final pending = h.facade.playReference('fr-word-tout');
+      // While the stale speech's raw utterance is still held, the newer
+      // recording must not be created or dispatched.
+      await pumpEventQueue();
+      await pumpEventQueue();
+      expect(h.recordingCreations, 0,
+          reason: 'recording creation is blocked while the old speech is '
+              'still held');
+      expect(rec.calls, isEmpty,
+          reason: 'no start dispatch may occur while the old speech is '
+              'still held');
       // The newer owner may not overlap audible work: the stale speech's
       // raw utterance must quiesce before the recording dispatches.
       utteranceHold.complete(); // the stale utterance settles (raw fence)
@@ -1497,6 +1920,69 @@ void main() {
           reason: 'a stale raw settlement after disposal is fenced, never '
               'a second terminal');
     });
+
+    test(
+        'a real session utterance-phase expiry through the facade keeps '
+        'the typed completion-timeout cause and stack',
+        () async {
+      const channel = MethodChannel('flutter_tts');
+      final binding = TestWidgetsFlutterBinding.instance;
+      final gate = Completer<Object?>();
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+          (call) async {
+        if (call.method == 'speak') {
+          return gate.future; // hold the raw utterance past the bound
+        }
+        if (call.method == 'isLanguageAvailable') return true;
+        return 1;
+      });
+      final facade = FrenchReferenceAudio(
+        loadCatalog: () =>
+            Future<CourseAudioCatalog>.value(fixtureCatalogue()),
+        recordingFactory: () => FakeCourseRecordingSession(),
+        speechFactory: () => createFrenchPracticeSpeechSession(
+            deadlines: const CourseAudioDeadlines(
+                setup: Duration(milliseconds: 100),
+                ttsUtterance: Duration(milliseconds: 150))),
+        // The facade backstop (setup + utterance = 450ms) outlives the
+        // session's own phases (setup 100ms + utterance 150ms), so the
+        // session-typed expiry wins over the facade's backstop
+        // classification.
+        deadlines: const CourseAudioDeadlines(
+          setup: Duration(milliseconds: 150),
+          cleanup: Duration(milliseconds: 200),
+          completionFloor: Duration(milliseconds: 50),
+          completionSlack: Duration(milliseconds: 80),
+          ttsUtterance: Duration(milliseconds: 300),
+        ),
+      );
+      Object? caught;
+      try {
+        await facade
+            .speak('quelques mots')
+            .timeout(const Duration(seconds: 2));
+      } on Object catch (error) {
+        caught = error;
+      }
+      expect(caught, isA<CourseAudioException>(),
+          reason: 'the failure is surfaced through the legacy bridge');
+      final failure = (caught! as CourseAudioException).failure;
+      expect(failure.reason, CourseAudioFailureReason.completionTimeout,
+          reason: 'the expired utterance phase classifies as a completion '
+              'timeout');
+      expect(failure.cause, isA<PhaseTimeoutException>(),
+          reason: 'the session-typed owned-deadline diagnostic is the cause '
+              'preserved through the stable facade contract');
+      expect(
+          (failure.cause! as PhaseTimeoutException).phase,
+          CourseAudioFailureReason.completionTimeout,
+          reason: 'the typed phase is the utterance phase');
+      expect(failure.stackTrace, isNotNull,
+          reason: 'the stable failure carries a stack trace for diagnosis');
+      gate.complete(null); // release the held raw utterance (fence hygiene)
+      await pumpEventQueue();
+      await pumpEventQueue();
+    });
   });
 
   group('typed phase and stack preservation (I3)', () {
@@ -1552,6 +2038,251 @@ void main() {
               'a completion timeout');
       gate.complete(null); // drain the held setup raw operation
       await pumpEventQueue();
+    });
+
+    test(
+        'stop during a held speech setup never dispatches the utterance, '
+        'even when the stale setup settles as a success',
+        () async {
+      const channel = MethodChannel('flutter_tts');
+      final binding = TestWidgetsFlutterBinding.instance;
+      final gate = Completer<Object?>();
+      var hasHeld = false;
+      var utterances = 0;
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+          (call) async {
+        if (call.method == 'isLanguageAvailable') return true;
+        if (call.method == 'speak') {
+          utterances++;
+          return null;
+        }
+        if (!hasHeld) {
+          hasHeld = true;
+          return gate.future; // hold the setup phase
+        }
+        return 1;
+      });
+      final facade = FrenchReferenceAudio(
+        loadCatalog: () =>
+            Future<CourseAudioCatalog>.value(fixtureCatalogue()),
+        recordingFactory: () => FakeCourseRecordingSession(),
+        speechFactory: () => createFrenchPracticeSpeechSession(
+            deadlines: const CourseAudioDeadlines(
+                setup: Duration(milliseconds: 150),
+                ttsUtterance: Duration(milliseconds: 300))),
+        deadlines: const CourseAudioDeadlines(
+          setup: Duration(milliseconds: 150),
+          cleanup: Duration(milliseconds: 200),
+          completionFloor: Duration(milliseconds: 50),
+          completionSlack: Duration(milliseconds: 80),
+          ttsUtterance: Duration(milliseconds: 150),
+        ),
+      );
+      final pending = facade.speak('quelques mots');
+      await until(() => hasHeld, reason: 'setup dispatch held');
+      await facade.stop();
+      Object? caught;
+      try {
+        await pending;
+      } on Object catch (error) {
+        caught = error;
+      }
+      expect(caught, isA<CourseAudioCancelledException>(),
+          reason: 'stop cancels the held speech request distinctly');
+      gate.complete(null); // the stale setup settles as a success
+      await pumpEventQueue();
+      await pumpEventQueue();
+      expect(utterances, 0,
+          reason: 'a stopped request must never start an utterance, even '
+              'when the stale setup succeeds');
+    });
+
+    test(
+        'stop during a held speech setup never dispatches the utterance '
+        'when the stale setup fails',
+        () async {
+      const channel = MethodChannel('flutter_tts');
+      final binding = TestWidgetsFlutterBinding.instance;
+      final gate = Completer<Object?>();
+      var hasHeld = false;
+      var utterances = 0;
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+          (call) async {
+        if (call.method == 'isLanguageAvailable') return true;
+        if (call.method == 'speak') {
+          utterances++;
+          return null;
+        }
+        if (!hasHeld) {
+          hasHeld = true;
+          return gate.future; // hold the setup phase
+        }
+        return 1;
+      });
+      final facade = FrenchReferenceAudio(
+        loadCatalog: () =>
+            Future<CourseAudioCatalog>.value(fixtureCatalogue()),
+        recordingFactory: () => FakeCourseRecordingSession(),
+        speechFactory: () => createFrenchPracticeSpeechSession(
+            deadlines: const CourseAudioDeadlines(
+                setup: Duration(milliseconds: 150),
+                ttsUtterance: Duration(milliseconds: 300))),
+        deadlines: const CourseAudioDeadlines(
+          setup: Duration(milliseconds: 150),
+          cleanup: Duration(milliseconds: 200),
+          completionFloor: Duration(milliseconds: 50),
+          completionSlack: Duration(milliseconds: 80),
+          ttsUtterance: Duration(milliseconds: 150),
+        ),
+      );
+      final pending = facade.speak('quelques mots');
+      await until(() => hasHeld, reason: 'setup dispatch held');
+      await facade.stop();
+      Object? caught;
+      try {
+        await pending;
+      } on Object catch (error) {
+        caught = error;
+      }
+      expect(caught, isA<CourseAudioCancelledException>(),
+          reason: 'stop cancels the held speech request distinctly');
+      gate.completeError(StateError('setup-stale')); // stale setup failure
+      await pumpEventQueue();
+      await pumpEventQueue();
+      expect(utterances, 0,
+          reason: 'a failed stale setup must never start an utterance on a '
+              'stopped request');
+    });
+
+    test(
+        'replacement waits for a held stale speech setup, then dispatches '
+        'only the newer utterance',
+        () async {
+      const channel = MethodChannel('flutter_tts');
+      final binding = TestWidgetsFlutterBinding.instance;
+      final gate = Completer<Object?>();
+      var hasHeld = false;
+      final spoken = <String>[];
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+          (call) async {
+        if (call.method == 'isLanguageAvailable') return true;
+        if (call.method == 'speak') {
+          spoken.add('${call.arguments}');
+          return null;
+        }
+        if (!hasHeld) {
+          hasHeld = true;
+          return gate.future; // hold only the first (stale) setup call
+        }
+        return 1;
+      });
+      final facade = FrenchReferenceAudio(
+        loadCatalog: () =>
+            Future<CourseAudioCatalog>.value(fixtureCatalogue()),
+        recordingFactory: () => FakeCourseRecordingSession(),
+        speechFactory: () => createFrenchPracticeSpeechSession(
+            deadlines: const CourseAudioDeadlines(
+                setup: Duration(milliseconds: 150),
+                ttsUtterance: Duration(milliseconds: 300))),
+        deadlines: const CourseAudioDeadlines(
+          setup: Duration(milliseconds: 150),
+          cleanup: Duration(milliseconds: 200),
+          completionFloor: Duration(milliseconds: 50),
+          completionSlack: Duration(milliseconds: 80),
+          ttsUtterance: Duration(milliseconds: 150),
+        ),
+      );
+      final stalePending = facade.speak('quelques mots');
+      await until(() => hasHeld, reason: 'stale setup held');
+      final newerPending = facade.speak('bonjour');
+      // While the stale setup raw operation is still held, neither
+      // utterance may dispatch: the newer owner waits for quiescence.
+      await pumpEventQueue();
+      await pumpEventQueue();
+      expect(spoken, isEmpty,
+          reason: 'no utterance may dispatch while the stale setup is '
+              'still held');
+      gate.complete(null); // the stale setup settles as a success
+      await until(() => spoken.contains('bonjour'), reason: 'newer utterance');
+      expect(spoken.contains('quelques mots'), isFalse,
+          reason: 'the stale utterance must never dispatch under the newer '
+              'identity');
+      Object? staleCaught;
+      try {
+        await stalePending;
+      } on Object catch (error) {
+        staleCaught = error;
+      }
+      expect(staleCaught, isA<CourseAudioCancelledException>(),
+          reason: 'replacement cancels the stale speech request distinctly');
+      await expectLater(newerPending, completes,
+          reason: 'the newer utterance resolves on its own completion');
+    });
+
+    test(
+        'replacement proceeds with the newer utterance even when the stale '
+        'speech setup settles as a failure',
+        () async {
+      const channel = MethodChannel('flutter_tts');
+      final binding = TestWidgetsFlutterBinding.instance;
+      final gate = Completer<Object?>();
+      var hasHeld = false;
+      final spoken = <String>[];
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+          (call) async {
+        if (call.method == 'isLanguageAvailable') return true;
+        if (call.method == 'speak') {
+          spoken.add('${call.arguments}');
+          return null;
+        }
+        if (!hasHeld) {
+          hasHeld = true;
+          return gate.future; // hold only the first (stale) setup call
+        }
+        return 1;
+      });
+      final facade = FrenchReferenceAudio(
+        loadCatalog: () =>
+            Future<CourseAudioCatalog>.value(fixtureCatalogue()),
+        recordingFactory: () => FakeCourseRecordingSession(),
+        speechFactory: () => createFrenchPracticeSpeechSession(
+            deadlines: const CourseAudioDeadlines(
+                setup: Duration(milliseconds: 150),
+                ttsUtterance: Duration(milliseconds: 300))),
+        deadlines: const CourseAudioDeadlines(
+          setup: Duration(milliseconds: 150),
+          cleanup: Duration(milliseconds: 200),
+          completionFloor: Duration(milliseconds: 50),
+          completionSlack: Duration(milliseconds: 80),
+          ttsUtterance: Duration(milliseconds: 150),
+        ),
+      );
+      final stalePending = facade.speak('quelques mots');
+      await until(() => hasHeld, reason: 'stale setup held');
+      final newerPending = facade.speak('bonjour');
+      // While the stale setup raw operation is still held, neither
+      // utterance may dispatch: the newer owner waits for quiescence.
+      await pumpEventQueue();
+      await pumpEventQueue();
+      expect(spoken, isEmpty,
+          reason: 'no utterance may dispatch while the stale setup is '
+              'still held');
+      gate.completeError(StateError('setup-stale')); // stale setup failure
+      await until(() => spoken.contains('bonjour'), reason: 'newer utterance');
+      expect(spoken.contains('quelques mots'), isFalse,
+          reason: 'a failed stale setup must never dispatch the stale '
+              'utterance');
+      Object? staleCaught;
+      try {
+        await stalePending;
+      } on Object catch (error) {
+        staleCaught = error;
+      }
+      expect(staleCaught, isA<CourseAudioCancelledException>(),
+          reason: 'replacement cancels the stale speech request distinctly');
+      await expectLater(newerPending, completes,
+          reason: 'a failed stale setup operation is fenced by quiescence '
+              'and must not block the newer owner');
     });
 
     test(
@@ -1880,4 +2611,15 @@ Future<void> _settleGate(Completer<void> hold) async {
   } on Object {
     // A planted failure, already accounted for by the session.
   }
+}
+
+/// A native Dart object whose surface deliberately mimics a browser
+/// DOMException (a string `name` property). It must never become a gesture
+/// diagnosis on a non-web platform: the VM recognition boundary is
+/// conservative by construction, and a Dart `.name` double is not proof of
+/// the actual JS rejection path (that path is browser-only test ground).
+final class _NativeRejectionLike {
+  const _NativeRejectionLike({required this.message, required this.name});
+  final String message;
+  final String name;
 }

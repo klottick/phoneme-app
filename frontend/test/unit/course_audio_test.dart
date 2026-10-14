@@ -88,6 +88,137 @@ void main() {
             'speech');
   });
 
+  testWidgets(
+      'R2: the owned utterance deadline expiry is the typed completionTimeout '
+          'phase (the direct caller may still catch a TimeoutException)',
+      (tester) async {
+    final gate = Completer<Object?>();
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+        (call) async {
+      if (call.method == 'isLanguageAvailable') return true;
+      if (call.method == 'speak') {
+        return gate.future; // the raw utterance is held past the allowance
+      }
+      return 1;
+    });
+    const Duration allowance = Duration(milliseconds: 200);
+    final audio = FrenchWordAudio(const CourseAudioDeadlines(
+        setup: Duration(seconds: 30), ttsUtterance: allowance));
+    final pending = audio
+        .speak('mot')
+        .then<Object?>(
+            (Object? value) => null, onError: (Object error) => error);
+    await tester.pump();
+    // Held raw work settles only from the owned deadline, not from a source.
+    await tester.pump(allowance + const Duration(milliseconds: 50));
+    final Object? outcome = await pending;
+    expect(outcome, isA<PhaseTimeoutException>(),
+        reason:
+            'the expired allowance is reported as the typed owned deadline');
+    expect((outcome! as PhaseTimeoutException).phase,
+        CourseAudioFailureReason.completionTimeout,
+        reason: 'the utterance phase is what expired, not the setup phase');
+    expect(outcome, isA<TimeoutException>(),
+        reason: 'the direct caller may still catch a TimeoutException');
+    expect((outcome as PhaseTimeoutException).duration, allowance,
+        reason: 'the phase carries the owned allowance, not an inferred one');
+    gate.complete(null); // release the held raw work for the fence
+    await tester.pump();
+  });
+
+  test('R2: a source timeout settling before the allowance is conservatively '
+      'preserved and is not relabelled as the owned phase', () async {
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+        (call) async {
+      if (call.method == 'isLanguageAvailable') return true;
+      if (call.method == 'speak') {
+        // A genuine source (platform) timeout that settles before this
+        // adapter's allowance. It is delivered as the source's own failure,
+        // and must not be relabelled as an expired phase of this adapter.
+        throw TimeoutException('source-timed-out',
+            const Duration(milliseconds: 1));
+      }
+      return 1;
+    });
+    final audio = FrenchWordAudio(const CourseAudioDeadlines(
+        setup: Duration(seconds: 30), ttsUtterance: Duration(seconds: 30)));
+    Object? caught;
+    try {
+      await audio.speak('mot');
+    } on Object catch (error) {
+      caught = error;
+    }
+    expect(caught, isNot(isA<PhaseTimeoutException>()),
+        reason:
+            'an arbitrary source timeout must not be relabelled as this '
+                'adapter expired phase');
+    // The source failure is preserved as delivered: the channel carries the
+    // source diagnostic (it is never a phase of this adapter).
+    expect(caught, isA<PlatformException>(),
+        reason: 'the source timeout reaches the direct caller as the source '
+            'diagnostic, not as a phase of this adapter');
+    expect((caught! as PlatformException).message, contains('source-timed-out'),
+        reason: 'the original source diagnostic is preserved');
+  });
+
+  testWidgets(
+      'R4: the real direct TTS default 10-second setup allowance is applied '
+      'behaviorally while a raw setup call is held',
+      (tester) async {
+    final gate = Completer<Object?>();
+    var hasHeld = false;
+    var utterances = 0;
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+        (call) async {
+      if (call.method == 'isLanguageAvailable') return true;
+      if (call.method == 'speak') {
+        utterances++;
+        return null; // web completion shape
+      }
+      if (!hasHeld) {
+        hasHeld = true;
+        return gate.future; // hold a raw setup call past the public bound
+      }
+      return 1;
+    });
+    final audio = FrenchWordAudio(); // production defaults (setup 10s)
+    final Future<void> pending = audio.speak('mot');
+    var settled = false;
+    // Terminal observer attached BEFORE any fake-time advance; both
+    // callbacks agree on the inferred result type (no value-returning
+    // mismatch in the error handler).
+    pending.then((_) => settled = true, onError: (Object error) => settled = true);
+    await tester.pump();
+    expect(hasHeld, isTrue, reason: 'the raw setup call is held');
+    await tester.pump(const Duration(seconds: 9));
+    await tester.pump(); // yield before the pending assertion
+    expect(settled, isFalse,
+        reason:
+            'inside the default 10s setup allowance the direct request '
+                'remains pending; an early setup timeout cannot pass');
+    await tester.pump(const Duration(seconds: 2)); // past the 10s default
+    Object? outcome;
+    try {
+      await pending;
+    } on Object catch (error) {
+      outcome = error;
+    }
+    expect(outcome, isA<PhaseTimeoutException>(),
+        reason: 'the expired default setup allowance is the typed owned '
+            'deadline of this adapter');
+    expect(
+        (outcome! as PhaseTimeoutException).phase,
+        CourseAudioFailureReason.startupTimeout,
+        reason: 'the setup phase is what expired');
+    expect(outcome, isA<TimeoutException>(),
+        reason: 'the direct caller may still catch a TimeoutException');
+    expect(utterances, 0,
+        reason: 'a held setup must never start an utterance');
+    gate.complete(null); // the stale raw setup settles after the public bound
+    await tester.pump();
+    await tester.pump();
+  });
+
   group('FrenchPracticeSpeechSession (bounded real adapter)', () {
     test('rejects nonpositive deadlines at construction', () {
       expect(
@@ -309,77 +440,83 @@ void main() {
           reason: 'a session rethrow must not become the leading frame');
     });
 
-    test('a real inbound speech-error callback fails the active request '
-        'with the original diagnostic, not an utterance timeout', () async {
-      final gate = Completer<Object?>();
-      var dispatched = false;
+    test('R1: an uncorrelated stale speech-error callback is drained and does '
+        'not fail the newer direct request', () async {
+      final olderGate = Completer<Object?>();
+      final newerGate = Completer<Object?>();
+      final spoken = <String>[];
       binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
           (call) async {
-        if (call.method == 'speak') {
-          dispatched = true;
-          // The locked web engine drops the utterance completer on a speech
-          // error: the raw utterance never settles — the error arrives only
-          // as the real 'speak.onError' method callback.
-          return gate.future;
-        }
         if (call.method == 'isLanguageAvailable') return true;
+        if (call.method == 'speak') {
+          final Object? args = call.arguments;
+          final Object? text = args is String
+              ? args
+              : (args is Map ? args['text'] : null);
+          spoken.add(text?.toString() ?? '');
+          // Each raw utterance stays unresolved (the locked web engine shape).
+          if (text == 'un') return olderGate.future;
+          if (text == 'deux') return newerGate.future;
+        }
         return 1;
       });
       final audio = FrenchWordAudio(const CourseAudioDeadlines(
-          setup: Duration(milliseconds: 300),
-          ttsUtterance: Duration(milliseconds: 600)));
-      final pending = audio.speak('mot');
-      unawaited(pending.then<void>((Object? value) {},
+          setup: Duration(seconds: 30), ttsUtterance: Duration(seconds: 30)));
+      final older = audio.speak('un');
+      unawaited(older.then<void>((Object? value) {},
           onError: (Object error) {}));
-      final stopwatch = Stopwatch()..start();
-      while (!dispatched && stopwatch.elapsed < const Duration(seconds: 5)) {
+      final wait1 = Stopwatch()..start();
+      while (spoken.isEmpty && wait1.elapsed < const Duration(seconds: 5)) {
         await Future<void>.delayed(Duration.zero);
       }
-      expect(dispatched, isTrue, reason: 'the utterance must be dispatched');
-      // The real incoming platform callback, through the plugin's channel
-      // machinery (the same path the locked web engine uses).
+      final newer = audio.speak('deux');
+      unawaited(newer.then<void>((Object? value) {},
+          onError: (Object error) {}));
+      final wait2 = Stopwatch()..start();
+      while (spoken.length < 2 && wait2.elapsed < const Duration(seconds: 5)) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(spoken, containsAll(<String>['un', 'deux']),
+          reason: 'both utterances must be dispatched and held');
+
+      // The identity-free callback (it may belong to the superseded older
+      // utterance) is delivered via the locked channel machinery while the
+      // newer direct request is still pending.
       await binding.defaultBinaryMessenger.handlePlatformMessage(
           'flutter_tts',
           const StandardMethodCodec().encodeMethodCall(const MethodCall(
               'speak.onError',
-              {'code': 'speech-engine-failure',
-               'message': 'web speech failed'})),
+              {'code': 'stale-speech-failure',
+               'message': 'older utterance failed'})),
           (ByteData? reply) {});
-      Object? caught;
-      final delivery = Stopwatch()..start();
-      try {
-        await pending.timeout(const Duration(milliseconds: 400));
-      } on Object catch (error) {
-        caught = error;
-      }
-      expect(caught, isNotNull,
-          reason: 'a real speech error must fail the active request');
-      expect(caught, isNot(isA<TimeoutException>()),
-          reason: 'delivery is the real speech error, not the '
-              'utterance bound expiring');
-      expect(caught, isA<Map>(),
-          reason: 'the original diagnostic travels through the '
-              'channel codec unchanged');
-      expect((caught! as Map)['code'], 'speech-engine-failure');
-      expect((caught as Map)['message'], 'web speech failed');
-      expect(
-          delivery.elapsed, lessThan(const Duration(milliseconds: 500)),
-          reason: 'delivery is prompt, independent of the utterance bound');
-      // The raw utterance remains unresolved: quiescence stays fenced.
+      // Quiescence must stay fenced while both raw utterances are unresolved.
       var quiesced = false;
       unawaited(audio.quiesce().then<void>(
           (Object? value) => quiesced = true,
           onError: (Object error) => quiesced = true));
       await Future<void>.delayed(const Duration(milliseconds: 30));
       expect(quiesced, isFalse,
+          reason: 'unresolved raw work must keep quiescence fenced');
+
+      // Release both raw utterances (web completion shape).
+      olderGate.complete(null);
+      newerGate.complete(null);
+      await expectLater(
+          newer,
+          completes,
           reason:
-              'an unresolved raw utterance must keep quiescence fenced; '
-              'neither the error callback nor a public timeout is '
-              'quiescence');
-      gate.complete(null); // settle the raw utterance (web completion)
+              'an uncorrelated, identity-free callback must not fail the '
+                  'newer direct request (direct overlap / quiet-stale '
+                  'semantics are preserved)');
+      await expectLater(
+          older,
+          completes,
+          reason:
+              'the superseded older request drains quietly rather than '
+                  'failing on the stale callback');
       await Future<void>.delayed(const Duration(milliseconds: 30));
       expect(quiesced, isTrue,
-          reason: 'quiescence settles once the raw utterance settles');
+          reason: 'quiescence settles once both raw utterances have settled');
     });
 
     test('a real speech error fails the session speak and the shared '
