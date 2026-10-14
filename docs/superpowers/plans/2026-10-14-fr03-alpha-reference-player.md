@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-14-fr03-alpha-reference-player-design.md` (user approved at `71e1be8`, 2026-10-14).
 
+**Approval:** The user approved this implementation plan at commit `66e600a` on 2026-10-14, retaining sequential `ollama/qwen3.8:27b` workers and the reviewed PR delivery process.
+
 ## Global Constraints
 
 - Alpha playback may use pending candidates; keep `catalogueStatus: candidate`, `review.status: pending`, null reviewer/date, empty review evidence and unverified speaker qualification.
@@ -227,5 +229,5 @@ caller lifecycle/labels/progress/manual evidence/current docs and final delivery
 All five Review Focus items have explicit owning regressions; shared names/types,
 deadline values, file ownership and sequential publication are consistent.
 No code bodies or retained probe are prescribed as product implementation.
-Do not treat this review or a draft PR as user approval: execution waits for the
-user's plan review and confirmation of the preserved worker method.
+The user's explicit plan approval is recorded above. Execute with the preserved
+sequential worker method; self-review alone is not execution authorization.
