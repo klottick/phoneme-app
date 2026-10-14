@@ -112,6 +112,15 @@ class FakeAudioplayersPlatform
   /// Holds `resume` after the dispatch is recorded.
   Completer<void>? resumeGate;
 
+  /// When set, `stop` records the dispatch and then throws it.
+  Object? stopError;
+
+  /// When set, `release` records the dispatch and then throws it.
+  Object? releaseError;
+
+  /// When set, `dispose` records the dispatch and then throws it.
+  Object? disposeError;
+
   /// When true, `setSourceUrl` (local) is followed by a `prepared` event,
   /// like a real platform.
   bool autoPrepared = true;
@@ -130,6 +139,9 @@ class FakeAudioplayersPlatform
     createError = null;
     createGate = null;
     resumeGate = null;
+    stopError = null;
+    releaseError = null;
+    disposeError = null;
     autoPrepared = true;
     for (final StreamController<AudioEvent> controller
         in _playerEvents.values) {
@@ -151,8 +163,14 @@ class FakeAudioplayersPlatform
     _controllerFor(playerId).add(event);
   }
 
-  void failPlayerStream(String playerId, Object error) {
-    _controllerFor(playerId).addError(error);
+  /// Injects a stream error for [playerId]. When [stackTrace] is given it
+  /// is the diagnostic attached to the error delivery.
+  void failPlayerStream(
+    String playerId,
+    Object error, [
+    StackTrace? stackTrace,
+  ]) {
+    _controllerFor(playerId).addError(error, stackTrace);
   }
 
   /// Signals source readiness for [lastPlayerId].
@@ -226,18 +244,24 @@ class FakeAudioplayersPlatform
   Future<void> stop(String playerId) async {
     stoppedPlayerIds.add(playerId);
     calls.add('stop:$playerId');
+    final Object? error = stopError;
+    if (error != null) throw error;
   }
 
   @override
   Future<void> release(String playerId) async {
     releasedPlayerIds.add(playerId);
     calls.add('release:$playerId');
+    final Object? error = releaseError;
+    if (error != null) throw error;
   }
 
   @override
   Future<void> dispose(String playerId) async {
     disposedPlayerIds.add(playerId);
     calls.add('dispose:$playerId');
+    final Object? error = disposeError;
+    if (error != null) throw error;
   }
 
   @override
@@ -481,19 +505,16 @@ void main() {
     test('stop during held preparation prevents resume (error release)',
         () async {
       // The failure is released through the held bundled-asset staging
-      // (the plugin's own `@visibleForTesting` `loadAsset` seam), the
-      // immediate-error vehicle of the bundled pipeline on the
-      // `Future<void>` chain: the original cause then reaches the prepare
-      // call directly, fast and deterministically.
-      // A stream error on the plugin's `prepared` event stream is
-      // deliberately avoided: plugin 6.6.0 routes that stream through
-      // `firstWhere(...).timeout(...)` on a `Future<bool>`, and errors
-      // delivered there hit a Dart SDK quirk (a void-typed listener result
-      // cast) that reports an uninterceptable
-      // `ArgumentError("Invalid argument(s) (onError): ...")` to the zone
-      // and never settles the prepare call within the plugin's own 30s
-      // `preparationTimeout` window — a plugin-internal path no session
-      // code can fence, and slower than any sane test bound.
+      // (the plugin's own `@visibleForTesting` `loadAsset` seam): a
+      // distinct bundled-asset I/O failure path on the `Future<void>`
+      // chain, released deterministically while the stop is already
+      // queued. The separate plugin `prepared` event-stream error path is
+      // covered directly by the live/retired stream-error tests below; on
+      // the pinned SDK that exact pipeline was probed and preserved the
+      // injected cause with zero uncaught zone errors once the pipeline
+      // is attached before injection (the earlier blanket "uninterceptable
+      // SDK quirk" claim was refuted: a 30s hang there is a pre-attach
+      // broadcast drop, not an intrinsic plugin limitation).
       final _HeldStagingCache staging = _HeldStagingCache()
         ..gate = Completer<void>();
       const Object failure = _FakePreparationError();
@@ -632,6 +653,268 @@ void main() {
       expect(fake.createdPlayerIds, isEmpty);
       await session.dispose();
     });
+
+    // -- I1: teardown failures must not read as successful quiescence --
+
+    test('stop propagates a failed platform stop, after the dispatch',
+        () async {
+      final List<AudioPlayer> players = [];
+      final CourseRecordingSession session = _sessionWith(players);
+      const Object failure = _FakePreparationError();
+      await session.prepare(_ileRecording);
+      fake.stopError = failure;
+      final Future<void> stopFuture = session.stop();
+      // Observe the retiring call before the failure can fire.
+      final Future<dynamic> expectStopFailure = expectLater(
+        stopFuture,
+        throwsA(predicate<Object>(
+            (Object error) => identical(error, failure))),
+      );
+      await expectStopFailure;
+      final String id = players.single.playerId;
+      // The dispatch was attempted and recorded; the plugin chain
+      // (release after stop) never reached the platform release or
+      // disposal, yet the stop must not have advertised quiescence.
+      expect(fake.stoppedPlayerIds, contains(id));
+      expect(fake.releasedPlayerIds, isEmpty);
+      expect(fake.disposedPlayerIds, isEmpty);
+      expect(fake.resumedPlayerIds, isEmpty);
+      // Retirement is permanent even though quiescence failed.
+      await expectLater(session.start(), throwsA(isA<StateError>()));
+    });
+
+    test('stop propagates a failed platform release', () async {
+      final List<AudioPlayer> players = [];
+      final CourseRecordingSession session = _sessionWith(players);
+      const Object failure = _FakePreparationError();
+      await session.prepare(_ileRecording);
+      fake.releaseError = failure;
+      final Future<void> stopFuture = session.stop();
+      final Future<dynamic> expectStopFailure = expectLater(
+        stopFuture,
+        throwsA(predicate<Object>(
+            (Object error) => identical(error, failure))),
+      );
+      await expectStopFailure;
+      final String id = players.single.playerId;
+      // Stop succeeded, release dispatch was attempted, and the chain
+      // blocked platform disposal — without a successful stop.
+      expect(fake.stoppedPlayerIds, contains(id));
+      expect(fake.releasedPlayerIds, contains(id));
+      expect(fake.disposedPlayerIds, isEmpty);
+      await expectLater(session.start(), throwsA(isA<StateError>()));
+    });
+
+    test('stop propagates a failed platform dispose', () async {
+      final List<AudioPlayer> players = [];
+      final CourseRecordingSession session = _sessionWith(players);
+      const Object failure = _FakePreparationError();
+      await session.prepare(_ileRecording);
+      fake.disposeError = failure;
+      final Future<void> stopFuture = session.stop();
+      final Future<dynamic> expectStopFailure = expectLater(
+        stopFuture,
+        throwsA(predicate<Object>(
+            (Object error) => identical(error, failure))),
+      );
+      await expectStopFailure;
+      final String id = players.single.playerId;
+      // Stop and release succeeded, the platform dispose dispatch was
+      // attempted, and the failure must still fail the stop.
+      expect(fake.stoppedPlayerIds, contains(id));
+      expect(fake.releasedPlayerIds, contains(id));
+      expect(fake.disposedPlayerIds, contains(id));
+      await expectLater(session.start(), throwsA(isA<StateError>()));
+    });
+
+    // -- I2: shared retirement across repeated/overlapping callers --
+
+    test('two stop callers both await the held late-resume fence', () async {
+      final List<AudioPlayer> players = [];
+      final CourseRecordingSession session = _sessionWith(players);
+      await session.prepare(_ileRecording);
+      final Completer<void> gate = Completer<void>();
+      fake.resumeGate = gate;
+      final Future<void> startFuture = session.start();
+      await _settle();
+      final String id = players.single.playerId;
+      expect(fake.resumedPlayerIds, [id]);
+      final Future<void> stopOne = session.stop();
+      final Future<void> stopTwo = session.stop();
+      int settled = 0;
+      stopOne.whenComplete(() => settled++);
+      stopTwo.whenComplete(() => settled++);
+      await _settle();
+      expect(settled, 0,
+          reason: 'a second stop must not observe early quiescence');
+      // Release the held acknowledgement: every stop caller settles only
+      // after the late ack and the teardown settle.
+      gate.complete();
+      await expectLater(startFuture, completes);
+      await expectLater(stopOne, completes);
+      await expectLater(stopTwo, completes);
+      await _settle();
+      expect(settled, 2);
+      final int resumeIndex = fake.calls.indexOf('resume:$id');
+      final int stopIndex = fake.calls.indexOf('stop:$id');
+      expect(resumeIndex, greaterThanOrEqualTo(0));
+      expect(stopIndex, greaterThan(resumeIndex),
+          reason: 'the fence must stop the retired identity after the ack');
+      await expectLater(session.start(), throwsA(isA<StateError>()));
+    });
+
+    test('stop during an in-flight dispose shares the pending fence', () async {
+      // A held bundled-asset staging keeps the prepare task in flight, so
+      // the dispose's queued teardown is pending when the stop lands.
+      final _HeldStagingCache staging = _HeldStagingCache()
+        ..gate = Completer<void>();
+      final List<AudioPlayer> players = [];
+      final CourseRecordingSession session = AudioplayersRecordingSession(
+        playerFactory: () {
+          final AudioPlayer player = AudioPlayer();
+          players.add(player);
+          return player;
+        },
+        audioCacheFactory: () => staging,
+      );
+      final Future<void> prepareFuture = session.prepare(_ileRecording);
+      for (int i = 0; i < 1000 && !staging.held; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(staging.held, isTrue);
+      final Future<void> disposeFuture = session.dispose();
+      final Future<void> stopFuture = session.stop();
+      int settled = 0;
+      disposeFuture.whenComplete(() => settled++);
+      stopFuture.whenComplete(() => settled++);
+      await _settle();
+      expect(settled, 0,
+          reason: 'stop during dispose must share the pending fence');
+      // Release the held staging with success: every caller settles only
+      // after the in-flight prepare and the teardown settle.
+      staging.gate!.complete();
+      await expectLater(prepareFuture, completes);
+      await expectLater(stopFuture, completes);
+      await expectLater(disposeFuture, completes);
+      expect(fake.disposedPlayerIds, contains(players.single.playerId));
+      await expectLater(session.start(), throwsA(isA<StateError>()));
+    });
+
+    test('a failing teardown is shared by every subsequent caller',
+        () async {
+      final List<AudioPlayer> players = [];
+      final CourseRecordingSession session = _sessionWith(players);
+      const Object failure = _FakePreparationError();
+      await session.prepare(_ileRecording);
+      fake.stopError = failure;
+      final Future<void> stopOne = session.stop();
+      final Future<dynamic> expectStopFailureOne = expectLater(
+        stopOne,
+        throwsA(predicate<Object>(
+            (Object error) => identical(error, failure))),
+      );
+      await expectStopFailureOne;
+      // The failure is the retirement outcome: later stops and the
+      // dispose all observe it, never an early success or a dropped
+      // player.
+      await expectLater(
+        session.stop(),
+        throwsA(predicate<Object>(
+            (Object error) => identical(error, failure))),
+      );
+      await expectLater(
+        session.dispose(),
+        throwsA(predicate<Object>(
+            (Object error) => identical(error, failure))),
+      );
+      // No platform disposal occurred while the identity is retained.
+      expect(fake.disposedPlayerIds, isEmpty);
+      expect(fake.releasedPlayerIds, isEmpty);
+      await expectLater(session.start(), throwsA(isA<StateError>()));
+    });
+
+    // -- I3: the actual preparation-stream error path, live and retired --
+
+    test('pending preparation stream error reaches prepare; stop settles',
+        () async {
+      fake.autoPrepared = false;
+      final List<AudioPlayer> players = [];
+      final CourseRecordingSession session = _sessionWith(players);
+      const Object failure = _FakePreparationError();
+      final Future<void> prepareFuture = session.prepare(_ileRecording);
+      // Source dispatched: the plugin's prepared pipeline is attached, so
+      // the injection below is race-free.
+      await _untilSourceDispatched(fake);
+      // Observe the preparing call before the error injection.
+      final Future<dynamic> expectPrepareFailure = expectLater(
+        prepareFuture,
+        throwsA(predicate<Object>(
+            (Object error) => identical(error, failure))),
+      );
+      fake.failPrepared(failure);
+      await expectPrepareFailure;
+      // The session still retires cleanly: quiescence is established and
+      // no uncaught error remains (flutter_test would fail otherwise).
+      await expectLater(session.stop(), completes);
+      expect(fake.disposedPlayerIds, contains(players.single.playerId));
+      expect(fake.resumedPlayerIds, isEmpty);
+      await expectLater(session.start(), throwsA(isA<StateError>()));
+    });
+
+    test(
+        'stream error after retirement but before teardown settles '
+        'preserves the cause; stop settles', () async {
+      fake.autoPrepared = false;
+      final List<AudioPlayer> players = [];
+      final CourseRecordingSession session = _sessionWith(players);
+      const Object failure = _FakePreparationError();
+      final Future<void> prepareFuture = session.prepare(_ileRecording);
+      await _untilSourceDispatched(fake);
+      final Future<void> stopFuture = session.stop();
+      // Observe the preparing call before the error injection.
+      final Future<dynamic> expectPrepareFailure = expectLater(
+        prepareFuture,
+        throwsA(predicate<Object>(
+            (Object error) => identical(error, failure))),
+      );
+      // The retired preparation is still pending: its late failure must
+      // settle the fence without an uncaught error.
+      fake.failPrepared(failure);
+      await expectPrepareFailure;
+      await expectLater(stopFuture, completes);
+      expect(fake.disposedPlayerIds, contains(players.single.playerId));
+      expect(fake.resumedPlayerIds, isEmpty);
+      await expectLater(session.start(), throwsA(isA<StateError>()));
+    });
+
+    test('live error after successful prepare is delivered with its cause',
+        () async {
+      final List<AudioPlayer> players = [];
+      final CourseRecordingSession session = _sessionWith(players);
+      await session.prepare(_ileRecording);
+      await session.start();
+      final List<Object> receivedErrors = [];
+      final StreamSubscription<void> sub = session.events.listen(
+        (CourseRecordingEvent event) {},
+        onError: (Object error, StackTrace stackTrace) {
+          receivedErrors.add(error);
+        },
+      );
+      await _settle();
+      const Object failure = _FakePreparationError();
+      // Listener attached before injection: delivery is race-free.
+      fake.failPlayerStream(players.single.playerId, failure);
+      await _settle();
+      // The diagnostic cause is delivered to the session events, the
+      // original object, not a copy. (The locked plugin's own single-arg
+      // platform-stream forwarding attaches its own stack trace to the
+      // re-emitted error; stack provenance is therefore asserted on the
+      // adapter's forwarding itself, not across the plugin boundary.)
+      expect(receivedErrors, hasLength(1));
+      expect(identical(receivedErrors.single, failure), isTrue);
+      await sub.cancel();
+      await session.dispose();
+    });
   });
 
   group('FakeCourseRecordingSession double contract', () {
@@ -661,23 +944,194 @@ void main() {
               (Object error) => identical(error, failure))));
     });
 
-    test('waitForStart resolves when start dispatches', () async {
+    test('waitForStart resolves on dispatch before the held acknowledgement',
+        () async {
       final FakeCourseRecordingSession session = FakeCourseRecordingSession();
       await session.prepare(_ileRecording);
       final Completer<void> gate = Completer<void>();
       session.startGate = gate.future;
       final Future<void> startFuture = session.start();
       await _settle();
-      bool started = false;
-      session.waitForStart().then((void _) => started = true);
+      // The dispatch is observable while the acknowledgement is still
+      // held: this is the raw-quiescence shape the facade needs.
+      bool dispatched = false;
+      unawaited(session.waitForStart().then<void>((_) {
+        dispatched = true;
+      }));
       await _settle();
-      expect(started, isFalse, reason: 'the held gate must not dispatch start');
+      bool startSettled = false;
+      unawaited(startFuture.then<void>((_) {
+        startSettled = true;
+      }));
+      expect(dispatched, isTrue,
+          reason: 'dispatch must be observable before the ack releases');
+      expect(startSettled, isFalse, reason: 'the held gate must hold the ack');
       gate.complete();
       await expectLater(startFuture, completes);
-      await _settle();
-      expect(started, isTrue, reason: 'start must dispatch after the gate');
       expect(session.calls, ['prepare', 'start']);
       await session.dispose();
+    });
+
+    test('stop fences a held start and settles after its late ack', () async {
+      final FakeCourseRecordingSession session = FakeCourseRecordingSession();
+      await session.prepare(_ileRecording);
+      final Completer<void> gate = Completer<void>();
+      session.startGate = gate.future;
+      final Future<void> startFuture = session.start();
+      unawaited(session.waitForStart().then<void>((_) {}));
+      await _settle();
+      final Future<void> stopFuture = session.stop();
+      bool startSettled = false;
+      bool stopSettled = false;
+      unawaited(startFuture.then<void>((_) {
+        startSettled = true;
+      }));
+      unawaited(stopFuture.then<void>((_) {
+        stopSettled = true;
+      }));
+      await _settle();
+      expect(stopSettled, isFalse,
+          reason: 'stop must not settle while the start is unacknowledged');
+      // Release the acknowledgement after stop: the late ack of the
+      // already-dispatched work is represented, and only then does the
+      // fence settle.
+      gate.complete();
+      await _settle();
+      expect(startSettled, isTrue);
+      expect(stopSettled, isTrue);
+      await expectLater(startFuture, completes);
+      await expectLater(stopFuture, completes);
+      await expectLater(session.start(), throwsA(isA<StateError>()));
+    });
+
+    test('the stop fence settles even when the held start ack fails',
+        () async {
+      final FakeCourseRecordingSession session = FakeCourseRecordingSession();
+      await session.prepare(_ileRecording);
+      const Object failure = _FakePreparationError();
+      final Completer<void> gate = Completer<void>();
+      session.startGate = gate.future;
+      final Future<void> startFuture = session.start();
+      unawaited(session.waitForStart().then<void>((_) {}));
+      await _settle();
+      final Future<void> stopFuture = session.stop();
+      // Observe the failing operation before the failure release.
+      final Future<dynamic> expectStartFailure = expectLater(
+        startFuture,
+        throwsA(predicate<Object>(
+            (Object error) => identical(error, failure))),
+      );
+      gate.completeError(failure);
+      await expectStartFailure;
+      // Quiescence means every dispatched op settled, whatever its
+      // outcome: the stop still settles.
+      await expectLater(stopFuture, completes);
+      await expectLater(session.start(), throwsA(isA<StateError>()));
+    });
+
+    test('repeated stops share the fence behind a held start', () async {
+      final FakeCourseRecordingSession session = FakeCourseRecordingSession();
+      await session.prepare(_ileRecording);
+      final Completer<void> gate = Completer<void>();
+      session.startGate = gate.future;
+      final Future<void> startFuture = session.start();
+      unawaited(session.waitForStart().then<void>((_) {}));
+      await _settle();
+      final Future<void> stopOne = session.stop();
+      final Future<void> stopTwo = session.stop();
+      int settled = 0;
+      unawaited(stopOne.then<void>((_) {
+        settled++;
+      }));
+      unawaited(stopTwo.then<void>((_) {
+        settled++;
+      }));
+      await _settle();
+      expect(settled, 0,
+          reason: 'no stop may settle while the start is unacknowledged');
+      gate.complete();
+      await _settle();
+      expect(settled, 2);
+      await expectLater(startFuture, completes);
+      await expectLater(stopOne, completes);
+      await expectLater(stopTwo, completes);
+    });
+
+    test('dispose fences a held start and shares it with a concurrent stop',
+        () async {
+      final FakeCourseRecordingSession session = FakeCourseRecordingSession();
+      await session.prepare(_ileRecording);
+      final Completer<void> gate = Completer<void>();
+      session.startGate = gate.future;
+      final Future<void> startFuture = session.start();
+      unawaited(session.waitForStart().then<void>((_) {}));
+      await _settle();
+      final Future<void> disposeFuture = session.dispose();
+      final Future<void> stopFuture = session.stop();
+      int settled = 0;
+      unawaited(disposeFuture.then<void>((_) {
+        settled++;
+      }));
+      unawaited(stopFuture.then<void>((_) {
+        settled++;
+      }));
+      await _settle();
+      expect(settled, 0,
+          reason: 'dispose must fence the pending start like stop does');
+      gate.complete();
+      await _settle();
+      expect(settled, 2);
+      await expectLater(startFuture, completes);
+      await expectLater(disposeFuture, completes);
+      await expectLater(stopFuture, completes);
+      await expectLater(session.start(), throwsA(isA<StateError>()));
+    });
+
+    test('a held stop gate keeps every retirement caller pending', () async {
+      final FakeCourseRecordingSession session = FakeCourseRecordingSession();
+      await session.prepare(_ileRecording);
+      final Completer<void> gate = Completer<void>();
+      session.stopGate = gate.future;
+      final Future<void> stopFuture = session.stop();
+      final Future<void> disposeFuture = session.dispose();
+      int settled = 0;
+      unawaited(stopFuture.then<void>((_) {
+        settled++;
+      }));
+      unawaited(disposeFuture.then<void>((_) {
+        settled++;
+      }));
+      await _settle();
+      expect(settled, 0,
+          reason: 'dispose must share the held stop settlement');
+      gate.complete();
+      await _settle();
+      expect(settled, 2);
+      await expectLater(session.start(), throwsA(isA<StateError>()));
+    });
+
+    test('a failed stop gate fails the shared retirement', () async {
+      final FakeCourseRecordingSession session = FakeCourseRecordingSession();
+      await session.prepare(_ileRecording);
+      const Object failure = _FakePreparationError();
+      final Completer<void> gate = Completer<void>();
+      session.stopGate = gate.future;
+      final Future<void> stopFuture = session.stop();
+      // Observe the retiring call before the failure release.
+      final Future<dynamic> expectStopFailure = expectLater(
+        stopFuture,
+        throwsA(predicate<Object>(
+            (Object error) => identical(error, failure))),
+      );
+      gate.completeError(failure);
+      await expectStopFailure;
+      // The failed retirement outcome is shared with a later dispose.
+      await expectLater(
+        session.dispose(),
+        throwsA(predicate<Object>(
+            (Object error) => identical(error, failure))),
+      );
+      await expectLater(session.start(), throwsA(isA<StateError>()));
     });
 
     test('emits completed and error events on events', () async {

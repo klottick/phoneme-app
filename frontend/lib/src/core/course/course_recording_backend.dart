@@ -77,6 +77,17 @@ final class AudioplayersRecordingSession implements CourseRecordingSession {
   bool _retired = false;
   bool _prepared = false;
 
+  /// Shared retirement outcome (the enqueued teardown), success or
+  /// failure, held by every `stop`/`dispose` caller.
+  Future<void>? _retirement;
+
+  /// The confirmed failed-creation cause, when the drained construction
+  /// read observed the creation failure. The locked plugin rethrows
+  /// exactly this object from the failed player's disposal chain, before
+  /// any platform call (no audible resource registered), so teardown can
+  /// distinguish it from an ordinary active-player cleanup failure.
+  Object? _creationFailure;
+
   @override
   Stream<CourseRecordingEvent> get events => _events.stream;
 
@@ -119,41 +130,75 @@ final class AudioplayersRecordingSession implements CourseRecordingSession {
 
   @override
   Future<void> stop() async {
-    if (_retired) return;
     _retired = true;
-    await _enqueue(_teardown);
+    await _retire();
   }
 
   @override
   Future<void> dispose() async {
     _retired = true;
-    await _enqueue(_teardown);
-    if (!_events.isClosed) {
-      await _events.close();
+    try {
+      await _retire();
+    } finally {
+      if (!_events.isClosed) {
+        await _events.close();
+      }
     }
   }
 
+  /// Shared retirement: whichever of `stop`/`dispose` starts it first
+  /// owns the enqueued teardown; every later caller awaits the same
+  /// outcome — success or failure — instead of observing an early
+  /// quiescence while raw work is still in flight.
+  Future<void> _retire() {
+    final Future<void>? existing = _retirement;
+    if (existing != null) return existing;
+    _retirement = _enqueue(_teardown);
+    return _retirement!;
+  }
+
+  /// Teardown is the one shared retirement work. It cleans what can be
+  /// cleaned independently — the session's own event subscription first,
+  /// so a failed cancellation cannot skip the player — and propagates the
+  /// first original cleanup cause: a failed `stop`/`dispose` means
+  /// quiescence was not established, never that it was.
   Future<void> _teardown() async {
-    try {
-      final StreamSubscription<AudioEvent>? subscription = _playerEvents;
-      _playerEvents = null;
-      if (subscription != null) {
+    Object? cleanupFailure;
+    final StreamSubscription<AudioEvent>? subscription = _playerEvents;
+    _playerEvents = null;
+    if (subscription != null) {
+      try {
         await subscription.cancel();
+      } on Object catch (error) {
+        cleanupFailure ??= error;
       }
-      final AudioPlayer? player = _player;
-      _player = null;
-      _prepared = false;
-      if (player == null) return;
+    }
+    // The player identity is only cleared once its own cleanup settled,
+    // so a failed teardown never discards it before cleanup succeeded.
+    final AudioPlayer? player = _player;
+    if (player != null) {
       try {
         await player.dispose();
-      } on Exception catch (_) {
-        // A failed platform creation surfaces on the preparing call's
-        // future; drain it here so no unhandled async failure remains and
-        // the unpopulated late plugin fields are never touched.
+        _player = null;
+      } on Object catch (error) {
+        if (!identical(error, _creationFailure)) {
+          // An ordinary teardown failure: a platform stop/release/dispose
+          // acknowledgement failed on an active player and the plugin
+          // chain (dispose -> release -> stop -> platform acks) stopped
+          // there. Rethrow the original cause instead of advertising
+          // quiescence.
+          cleanupFailure ??= error;
+        }
+        // A rethrown confirmed creation failure is absorbed: the plugin
+        // rethrows it before any platform call (the platform saw no
+        // stop/release/dispose for this identity), the preparing call
+        // already owns that exact diagnostic, and quiescence for a
+        // never-created player holds.
       }
-    } catch (_) {
-      // Quiescence must always settle; teardown holds no caller recovery
-      // beyond the operation futures that already own the diagnostics.
+    }
+    _prepared = false;
+    if (cleanupFailure != null) {
+      throw cleanupFailure;
     }
   }
 
@@ -173,7 +218,11 @@ final class AudioplayersRecordingSession implements CourseRecordingSession {
         },
         onError: (Object error, StackTrace stackTrace) {
           if (_retired) return;
-          _events.addError(error);
+          // Forward the diagnostic cause together with the stack trace the
+          // adapter receives (the locked plugin's own single-arg platform
+          // forwarding attaches its own stack; the adapter must not drop
+          // the one it is handed).
+          _events.addError(error, stackTrace);
         },
       );
       // audioplayers 6.6.0 reports a failed platform `create` through the
@@ -183,11 +232,13 @@ final class AudioplayersRecordingSession implements CourseRecordingSession {
       // prepare call can miss the completion window and the failure would
       // escape as an unhandled async error. Attaching a drained read at
       // construction observes it immediately; the diagnostic still reaches
-      // the prepare future exactly once.
+      // the prepare future exactly once. The failure side of the drain
+      // records the confirmed creation cause for the teardown's
+      // failed-creation distinction.
       unawaited(
         player
             .getCurrentPosition()
-            .then<void>(_ignoreSettled, onError: _ignoreSettled),
+            .then<void>(_ignoreSettled, onError: _recordCreationFailure),
       );
     }
     return player;
@@ -240,8 +291,16 @@ final class AudioplayersRecordingSession implements CourseRecordingSession {
       throw StateError('recording session is retired; construct a new session');
     }
   }
+
+  /// Failure side of the drained construction read: records the confirmed
+  /// failed-creation cause so the teardown can distinguish it from an
+  /// ordinary active-player cleanup failure.
+  void _recordCreationFailure(Object? error) {
+    if (error == null) return;
+    _creationFailure = error;
+  }
 }
 
-/// Drain handler for the creation probe: observes the settlement without
-/// acting on it either way.
+/// Success side of the creation-probe drain: observes the settlement
+/// without acting on it.
 void _ignoreSettled(Object? value) {}
