@@ -36,55 +36,39 @@ export 'course_audio_contract.dart';
 /// utterance ([CourseAudioDeadlines.ttsUtterance]); direct callers keep the
 /// tested quiet stale-cancellation semantics.
 ///
-/// A real speech-error platform callback is observed only at the isolated
-/// single-attempt practice-session boundary: the session arms a callback sink
-/// on its own adapter before dispatch, and the locked web engine — which drops
-/// the utterance completer on a speech error and reports only through that
-/// callback — settles that single request from whichever arrives first, with
-/// the original diagnostic. The direct raw path never arms that sink: the
-/// locked flutter_tts delivers `speak.onError` identity-free over one global,
-/// last-constructed-wins channel, so an uncorrelated callback never fails a
-/// mutable direct request and stale direct failures drain quietly. The
-/// unresolved raw utterance stays fenced for [quiesce] on every path.
+/// Approved alpha override ("Option 1"): a real speech-error platform
+/// callback is NOT an outcome source on any path. The locked flutter_tts
+/// delivers `speak.onError` identity-free over one global,
+/// last-constructed-wins channel; this adapter installs no error handler, so
+/// the callback is drained by the locked global handler with zero side
+/// effects and can neither complete, fail, nor count as heard playback.
+/// The request settles only from the raw method future or from this adapter's
+/// own typed deadline (created on `onTimeout`). The isolated
+/// `FrenchPracticeSpeechSession` enforces a genuine one-attempt guard before
+/// init/dispatch (permanently consumed even when the first attempt fails),
+/// so no attempt can ever inherit a predecessor's callback. The unresolved
+/// raw utterance stays fenced for [quiesce] on every path.
 ///
 /// [quiesce] settles once every dispatched raw platform operation has
 /// settled — the practice-session wrapper uses it to fence raw work before
 /// reporting quiescence.
 class FrenchWordAudio implements CourseAudio {
-  FrenchWordAudio(
-      [CourseAudioDeadlines deadlines = const CourseAudioDeadlines()])
-      : _deadlines = deadlines {
+  FrenchWordAudio([
+    CourseAudioDeadlines deadlines = const CourseAudioDeadlines(),
+    FlutterTts? flutterTts,
+  ])  : _deadlines = deadlines,
+        _tts = flutterTts ?? FlutterTts() {
     _deadlines.validate();
-    _tts.setErrorHandler(_onSpeechError);
+    // Approved alpha override ("Option 1"): NO error handler is installed.
+    // The locked flutter_tts routes `speak.onError` to the last-constructed
+    // engine's handler; with none set, the identity-free callback is drained
+    // by the locked global handler with zero side effects and is never a
+    // source of a request outcome. The raw method future (or this adapter's
+    // own typed deadline) is the only settlement path.
   }
 
-  final FlutterTts _tts = FlutterTts();
+  final FlutterTts _tts;
   final CourseAudioDeadlines _deadlines;
-
-  /// Sink for the isolated single-attempt practice-session's real speech-error
-  /// callback. Armed once by the session before its dispatch and retired
-  /// permanently with that single-use session (a new owner builds a new adapter
-  /// and a new engine). The direct raw path never arms it: the locked
-  /// flutter_tts delivers `speak.onError` identity-free over one global,
-  /// last-constructed-wins channel, so an uncorrelated callback must never fail
-  /// a mutable direct request.
-  Completer<Object?>? _speechErrorSignal;
-
-  /// Arms the isolated single-attempt session's callback sink before its
-  /// dispatch (idempotent; the session is single-use and retires it with
-  /// itself before any new owner).
-  void armSpeechErrorSink() {
-    _speechErrorSignal ??= Completer<Object?>();
-  }
-
-  void _onSpeechError(Object? message) {
-    final Completer<Object?>? signal = _speechErrorSignal;
-    if (signal != null && !signal.isCompleted) {
-      signal.complete(message);
-    }
-    // else: the direct raw path has no armed sink — the uncorrelated,
-    // identity-free callback drains quietly and never fails a direct request.
-  }
 
   /// Raw platform operations dispatched and not yet settled, tracked
   /// separately from any bounded public future so retirement can fence them.
@@ -171,38 +155,18 @@ class FrenchWordAudio implements CourseAudio {
       );
       if (mine != _current) return;
 
-      // R1 boundary: only the isolated single-attempt practice session arms a
-      // callback sink (armSpeechErrorSink) before dispatch. The direct raw
-      // path settles the request from the utterance pipeline alone, so an
-      // uncorrelated, identity-free callback can never fail a mutable direct
-      // request; a superseded direct request drains quietly.
-      final Completer<Object?>? callbackSignal = _speechErrorSignal;
-      final Future<dynamic> utterance = _tts.speak(word);
+      // Approved alpha override ("Option 1"): the utterance settles only
+      // from its raw method future or this adapter's own typed utterance
+      // bound (created on onTimeout). An identity-free `speak.onError`
+      // callback is drained by the locked global handler and is never an
+      // outcome source: it cannot complete, fail, or count as heard
+      // playback. A superseded utterance drains quietly below.
+      final Future<Object?> utterance = _tts.speak(word);
       _track(utterance);
-      // The utterance and, when the session armed a sink, the real speech-
-      // error callback are independent settlements: the locked web engine
-      // drops the utterance completer on a speech error and reports only
-      // through the callback. Whichever arrives first settles the request;
-      // the original diagnostic is preserved on either path, and the raw
-      // utterance stays tracked for quiescence.
-      final Completer<dynamic> outcome = Completer<dynamic>();
-      void completeOutcome(dynamic value) {
-        if (!outcome.isCompleted) {
-          outcome.complete(value);
-        }
-      }
-
-      void failOutcome(Object error, StackTrace stackTrace) {
-        if (!outcome.isCompleted) {
-          outcome.completeError(error, stackTrace);
-        }
-      }
-
-      // R2: the phase error is created only on THIS adapter's own utterance-
-      // timer expiry (onTimeout). A source error — including a source
-      // TimeoutException that settles before the allowance — passes through
-      // to the caller and the stable fixture failure unchanged.
-      unawaited(utterance
+      // A source error — including a source TimeoutException that settles
+      // before the allowance — passes through to the caller unchanged; the
+      // phase error exists only on this adapter's own timer expiry.
+      final dynamic result = await utterance
           .timeout(
             _deadlines.ttsUtterance,
             onTimeout: () {
@@ -211,27 +175,10 @@ class FrenchWordAudio implements CourseAudio {
                   'The utterance phase deadline was exceeded.',
                   _deadlines.ttsUtterance);
             },
-          )
-          .then<dynamic>(
-            (dynamic value) => completeOutcome(value),
-            onError: (Object error, StackTrace stackTrace) =>
-                failOutcome(error, stackTrace),
-          ));
-      if (callbackSignal != null) {
-        unawaited(callbackSignal.future.then<dynamic>(
-              (Object? message) => failOutcome(
-                  // The callback is delivered as sent; an empty payload is a
-                  // neutral speech failure, never an invented diagnosis.
-                  message ?? StateError('French speech failed.'),
-                  StackTrace.current),
-              onError: (Object error, StackTrace stackTrace) =>
-                  failOutcome(error, stackTrace),
-            ));
-      }
+          );
       // The outer catch owns staleness: an abandoned request drains any
       // failure quietly; an active failure invalidates its token and
       // rethrows the same error with its original stack trace.
-      final dynamic result = await outcome.future;
       // Superseded mid-utterance: do not act on the stale result.
       if (mine != _current) return;
 
@@ -276,13 +223,16 @@ final courseAudioProvider = Provider<CourseAudio>((ref) {
 /// Bounded [CoursePracticeSpeechSession] over [FrenchWordAudio].
 ///
 /// The adapter is constructed lazily — a `stop` or `dispose` with no
-/// utterance never initializes the TTS engine. Each session speaks at most
-/// one request at a time and is permanently single-use: after retirement,
-/// [speak] throws. Retirement is shared: every `stop`/`dispose` caller
-/// awaits the same outcome — success or the original cleanup failure — and
-/// that outcome is reached only after the pending raw pipeline has settled
-/// (success or failure), never on the mere settlement of a timed-out public
-/// future.
+/// utterance never initializes the TTS engine. The session is a genuine
+/// single-attempt object (approved alpha override, "Option 1"): [speak] is
+/// accepted exactly once per session instance — the attempt is permanently
+/// consumed before init/dispatch and even if the first attempt fails — so a
+/// second attempt can never inherit a predecessor's identity-free callback
+/// or an armed sink. After retirement, [speak] throws. Retirement is shared:
+/// every `stop`/`dispose` caller awaits the same outcome — success or the
+/// original cleanup failure — and that outcome is reached only after the
+/// pending raw pipeline has settled (success or failure), never on the mere
+/// settlement of a timed-out public future.
 final class FrenchPracticeSpeechSession implements CoursePracticeSpeechSession {
   FrenchPracticeSpeechSession(CourseAudioDeadlines deadlines)
       : _deadlines = deadlines {
@@ -294,24 +244,32 @@ final class FrenchPracticeSpeechSession implements CoursePracticeSpeechSession {
   /// The lazy adapter: constructed only by the first [speak].
   FrenchWordAudio? _audio;
   bool _retired = false;
+
+  /// The one-attempt guard (approved alpha override, "Option 1"): set at the
+  /// first [speak] before init/dispatch and never cleared — a failed first
+  /// attempt does not reopen the session.
+  bool _attempted = false;
   Future<void>? _retirement;
 
   @override
   Future<void> speak(String text) async {
-    // An `async` body so a retired session's throw is delivered as a failed
-    // returned future (the contract: "speak throws"), not a synchronous
-    // escape around a caller's `expect(..., throwsA(...))`.
+    // An `async` body so a retired/consumed session's throw is delivered as
+    // a failed returned future (the contract: "speak throws"), not a
+    // synchronous escape around a caller's `expect(..., throwsA(...))`.
     if (_retired) {
       throw StateError(
           'practice speech session is retired; construct a new session');
     }
+    if (_attempted) {
+      // A real one-attempt guard before init/dispatch: a second attempt is
+      // rejected — never re-dispatched against the same engine, where an
+      // identity-free callback or a replayed signal could fail it.
+      throw StateError(
+          'practice speech session is single-attempt and already consumed; '
+          'construct a new session for a new attempt');
+    }
+    _attempted = true;
     final FrenchWordAudio audio = _audio ??= FrenchWordAudio(_deadlines);
-    // R1 boundary: arm this isolated single-attempt session's callback sink
-    // before dispatch. It retires permanently with this single-use session
-    // (before any new owner), so a real inbound speech-error callback settles
-    // this single request — never a later owner's — with the original
-    // diagnostic.
-    audio.armSpeechErrorSink();
     final Future<void> speakFuture = audio.speak(text);
     // Observe quietly: an abandonment settlement (stop/dispose/replacement)
     // must never become an unhandled async failure.

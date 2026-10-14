@@ -1353,6 +1353,14 @@ void main() {
       expect(result.failure!.reason, CourseAudioFailureReason.completionTimeout,
           reason: 'missing completion is a completion failure, not a '
               'second startup allowance');
+      expect(result.failure!.cause, isA<PhaseTimeoutException>(),
+          reason: 'the owned floor expiry is the typed owned deadline '
+              '(onTimeout-generated), not a raw untyped timeout');
+      expect(
+          (result.failure!.cause as PhaseTimeoutException).phase,
+          CourseAudioFailureReason.completionTimeout,
+          reason: 'the completion floor is the expired phase, not an '
+              'inference');
       expect(elapsed, lessThan(230),
           reason: 'the completion bound is measured from the start dispatch, '
               'not re-armed after the acknowledgement');
@@ -2599,6 +2607,550 @@ void main() {
         const Duration(seconds: 13));
     });
   });
+
+  group('round 3 (F2): owned backstops typed, source timeouts conservative',
+      () {
+    test(
+        'a raw source utterance timeout before the facade allowance keeps '
+        'the original object, message and explicit stack, and stays '
+        'conservative',
+        () async {
+      final source = TimeoutException(
+          'source utterance timeout, not an owned deadline',
+          const Duration(seconds: 30));
+      final explicitStack = StackTrace.fromString(
+          'source-utterance-explicit-stack:fix3-f2a');
+      final facade = FrenchReferenceAudio(
+        loadCatalog:
+            () => Future<CourseAudioCatalog>.value(fixtureCatalogue()),
+        recordingFactory: () => FakeCourseRecordingSession(),
+        speechFactory: () => _ExplicitSpeechFailureSession(source, explicitStack),
+        deadlines: const CourseAudioDeadlines(
+          setup: Duration(seconds: 3),
+          cleanup: Duration(seconds: 3),
+          completionFloor: Duration(milliseconds: 50),
+          completionSlack: Duration(milliseconds: 80),
+          ttsUtterance: Duration(seconds: 3),
+        ),
+      );
+      Object? caught;
+      try {
+        await facade
+            .speak('quelques mots')
+            .timeout(const Duration(seconds: 2));
+      } on Object catch (error) {
+        caught = error;
+      }
+      expect(caught, isA<CourseAudioException>(),
+          reason: 'the source failure is surfaced through the legacy bridge');
+      final failure = (caught! as CourseAudioException).failure;
+      expect(failure.reason, CourseAudioFailureReason.unsupportedPlayback,
+          reason: 'a raw source timeout is the conservative bucket, never '
+              'an inferred expired ownership budget');
+      expect(identical(failure.cause, source), isTrue,
+          reason: 'the original TimeoutException object is preserved');
+      expect(
+          (failure.cause as TimeoutException).message,
+          'source utterance timeout, not an owned deadline',
+          reason: 'the original source message is preserved verbatim');
+      expect(identical(failure.stackTrace, explicitStack), isTrue,
+          reason: 'the explicitly supplied source stack is forwarded, not '
+              'merely present');
+    });
+
+    test('the facade speech backstop expiry is a typed owned deadline, never '
+        'a raw untyped timeout', () async {
+      final hold = Completer<void>();
+      final facade = FrenchReferenceAudio(
+        loadCatalog:
+            () => Future<CourseAudioCatalog>.value(fixtureCatalogue()),
+        recordingFactory: () => FakeCourseRecordingSession(),
+        speechFactory:
+            () => _ExplicitSpeechFailureSession(null, null, hold: hold.future),
+        deadlines: const CourseAudioDeadlines(
+          setup: Duration(milliseconds: 150),
+          cleanup: Duration(seconds: 3),
+          completionFloor: Duration(milliseconds: 50),
+          completionSlack: Duration(milliseconds: 80),
+          ttsUtterance: Duration(milliseconds: 200),
+        ),
+      );
+      Object? caught;
+      try {
+        await facade
+            .speak('quelques mots')
+            .timeout(const Duration(seconds: 2));
+      } on Object catch (error) {
+        caught = error;
+      }
+      expect(caught, isA<CourseAudioException>());
+      final failure = (caught! as CourseAudioException).failure;
+      expect(failure.reason, CourseAudioFailureReason.completionTimeout,
+          reason: 'the facade speech backstop expiry is a completion timeout');
+      expect(failure.cause, isA<PhaseTimeoutException>(),
+          reason: 'the backstop owns its deadline metadata (onTimeout '
+              'generated) instead of surfacing a raw, untyped timeout');
+      expect(
+          (failure.cause as PhaseTimeoutException).phase,
+          CourseAudioFailureReason.completionTimeout,
+          reason: 'the owned backstop is the phase, not an inference');
+      expect(failure.stackTrace, isNotNull,
+          reason: 'the owned backstop failure carries its stack trace');
+      hold.complete();
+      await pumpEventQueue();
+      await pumpEventQueue();
+    });
+
+    test('a raw source catalogue-load timeout before the setup allowance is '
+        'conservative, keeping the original object, message and stack',
+        () async {
+      final source =
+          TimeoutException('source load timeout', const Duration(seconds: 30));
+      final explicitStack =
+          StackTrace.fromString('source-load-explicit-stack:fix3-f2c');
+      final h = Harness(
+          loader: () =>
+              Future<CourseAudioCatalog>.error(source, explicitStack));
+      Object? caught;
+      try {
+        await h.facade
+            .speak('quelques mots')
+            .timeout(const Duration(seconds: 2));
+      } on Object catch (error) {
+        caught = error;
+      }
+      expect(caught, isA<CourseAudioException>(),
+          reason: 'a load failure is surfaced through the legacy bridge');
+      final failure = (caught! as CourseAudioException).failure;
+      expect(failure.reason, CourseAudioFailureReason.unsupportedPlayback,
+          reason: 'a raw source load timeout is conservative, never '
+              'relabelled as an expired start phase');
+      expect(identical(failure.cause, source), isTrue,
+          reason: 'the original object is preserved');
+      expect((failure.cause as TimeoutException).message, 'source load timeout',
+          reason: 'the original message is preserved');
+      expect(identical(failure.stackTrace, explicitStack), isTrue,
+          reason: 'the explicit source stack is forwarded, not merely present');
+      expect(h.speechCreations, 0,
+          reason: 'no TTS engine may be selected for a load failure');
+    });
+
+    test('a raw source prepare timeout before the setup allowance is '
+        'conservative, never an inferred startup phase', () async {
+      final session = recording();
+      final prepareHold = Completer<void>();
+      session.prepareGate = prepareHold.future;
+      final h = Harness(recordings: [session]);
+      final pending = h.facade.playReference('fr-word-tout');
+      await until(() => session.calls.contains('prepare'),
+          reason: 'prepare dispatch');
+      prepareHold.completeError(
+          TimeoutException('source prepare timeout',
+              const Duration(seconds: 30)));
+      final result = await pending.timeout(const Duration(seconds: 2));
+      expect(result.outcome, CourseAudioOutcome.failed);
+      final failure = result.failure!;
+      expect(failure.reason, CourseAudioFailureReason.unsupportedPlayback,
+          reason: 'a raw source timeout during prepare is conservative, '
+              'never an inferred expired setup phase');
+      expect(failure.cause, isA<TimeoutException>(),
+          reason: 'the original source failure is preserved');
+      expect(
+          (failure.cause as TimeoutException).message,
+          contains('source prepare timeout'));
+    });
+
+    test('a raw source start-ack timeout before the setup allowance is '
+        'conservative, never an inferred startup phase', () async {
+      final session = recording();
+      final startHold = Completer<void>();
+      session.startGate = startHold.future;
+      final h = Harness(recordings: [session]);
+      final pending = h.facade.playReference('fr-word-tout');
+      await until(() => session.calls.contains('start'), reason: 'dispatch');
+      await session.waitForStart();
+      startHold.completeError(TimeoutException('source ack timeout',
+          const Duration(seconds: 30)));
+      final result = await pending.timeout(const Duration(seconds: 2));
+      expect(result.outcome, CourseAudioOutcome.failed);
+      final failure = result.failure!;
+      expect(failure.reason, CourseAudioFailureReason.unsupportedPlayback,
+          reason: 'a raw source ack timeout is conservative, never an '
+              'inferred expired setup phase');
+      expect(failure.cause, isA<TimeoutException>(),
+          reason: 'the original source failure is preserved');
+      expect(
+          (failure.cause as TimeoutException).message,
+          contains('source ack timeout'));
+    });
+
+    test('a raw source terminal timeout before the completion floor is '
+        'conservative, never an inferred floor expiry', () async {
+      final session = recording();
+      final h = Harness(recordings: [session]);
+      final pending = h.facade.playReference('fr-word-tout');
+      await until(() => session.calls.contains('start'), reason: 'dispatch');
+      await session.waitForStart();
+      session.emitError(TimeoutException('source terminal timeout',
+          const Duration(seconds: 30)));
+      final result = await pending.timeout(const Duration(seconds: 2));
+      expect(result.outcome, CourseAudioOutcome.failed);
+      final failure = result.failure!;
+      expect(failure.reason, CourseAudioFailureReason.unsupportedPlayback,
+          reason: 'a raw source timeout event is conservative, never an '
+              'inferred expired completion floor');
+      expect(failure.cause, isA<TimeoutException>(),
+          reason: 'the original source failure is preserved');
+      expect(
+          (failure.cause as TimeoutException).message,
+          contains('source terminal timeout'));
+    });
+  });
+
+  group('round 3 (F1): successive facade sessions never cross-contaminate', () {
+    test(
+        'a predecessor-origin late callback cannot fail the successor, which '
+        'completes only on its own raw future and not before the '
+        'predecessor raw work quiesces',
+        () async {
+      const channel = MethodChannel('flutter_tts');
+      final binding = TestWidgetsFlutterBinding.instance;
+      final aGate = Completer<Object?>();
+      final bGate = Completer<Object?>();
+      final spoken = <String>[];
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+          (call) async {
+        if (call.method == 'isLanguageAvailable') return true;
+        if (call.method == 'speak') {
+          final Object? args = call.arguments;
+          final Object? text = args is String
+              ? args
+              : (args is Map ? args['text'] : null);
+          final String word = text?.toString() ?? '';
+          spoken.add(word);
+          if (word == 'premier') return aGate.future;
+          return bGate.future; // each raw utterance stays held (web shape)
+        }
+        if (call.method == 'stop') return 1;
+        return 1;
+      });
+      final facade = FrenchReferenceAudio(
+        loadCatalog:
+            () => Future<CourseAudioCatalog>.value(fixtureCatalogue()),
+        recordingFactory: () => FakeCourseRecordingSession(),
+        speechFactory: () => createFrenchPracticeSpeechSession(
+            deadlines: const CourseAudioDeadlines(
+                setup: Duration(milliseconds: 300),
+                ttsUtterance: Duration(milliseconds: 400))),
+        deadlines: const CourseAudioDeadlines(
+          setup: Duration(milliseconds: 300),
+          cleanup: Duration(seconds: 3),
+          completionFloor: Duration(milliseconds: 50),
+          completionSlack: Duration(milliseconds: 80),
+          ttsUtterance: Duration(milliseconds: 400),
+        ),
+      );
+      // A: held past its OWN utterance bound → A fails with its own typed
+      // bound, and its raw work is still held when the fence must run.
+      Object? aOutcome;
+      final aPending = facade.speak('premier');
+      unawaited(aPending.then<void>(
+          (Object? value) => aOutcome = 'completed',
+          onError: (Object error) => aOutcome = error));
+      await until(() => spoken.contains('premier'), reason: 'A dispatch');
+      final aSettle = Stopwatch()..start();
+      while (aOutcome == null &&
+          aSettle.elapsed < const Duration(seconds: 3)) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(aOutcome, isA<CourseAudioException>(),
+          reason: 'A fails on its own utterance bound');
+      expect((aOutcome! as CourseAudioException).failure.reason,
+          CourseAudioFailureReason.completionTimeout,
+          reason: 'A keeps its own typed owned-bound failure');
+      // B is issued while A's raw utterance is still held: no unsafe
+      // re-playback — B must wait until A's raw work quiesces.
+      Object? bOutcome;
+      final bPending = facade.speak('second');
+      unawaited(bPending.then<void>(
+          (Object? value) => bOutcome = 'completed',
+          onError: (Object error) => bOutcome = error));
+      await pumpEventQueue();
+      await pumpEventQueue();
+      expect(spoken.contains('second'), isFalse,
+          reason: 'the successor cannot dispatch while the predecessor raw '
+              'utterance is still held');
+      aGate.complete(null); // A's raw utterance settles (web completion)
+      await until(() => spoken.contains('second'),
+          reason: 'B dispatch only after A quiesced');
+      // A-origin late callback, delivered over the exact locked flutter_tts
+      // global path (identity-free: it may belong to A).
+      await binding.defaultBinaryMessenger.handlePlatformMessage(
+          'flutter_tts',
+          const StandardMethodCodec().encodeMethodCall(const MethodCall(
+              'speak.onError',
+              {'code': 'predecessor-failure',
+               'message': 'web speech failed'})),
+          (ByteData? reply) {});
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(bOutcome, isNull,
+          reason: 'a predecessor-origin callback must not settle the '
+              'successor request (Option 1: callbacks are never an outcome '
+              'source)');
+      // B completes only on its own actual raw future.
+      bGate.complete(null);
+      final bSettle = Stopwatch()..start();
+      while (bOutcome == null &&
+          bSettle.elapsed < const Duration(seconds: 3)) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(bOutcome, 'completed',
+          reason: 'the successor completes via its own actual raw future '
+              'and does not inherit the predecessor failure');
+      expect((aOutcome as CourseAudioException).failure.reason,
+          CourseAudioFailureReason.completionTimeout,
+          reason: 'the predecessor keeps its own terminal result');
+    });
+  });
+
+  group('round 3 (F3): held cleanup and disposal release cells', () {
+    test(
+        'stop with a held cleanup settles promptly as cancelled; the next '
+        'owner stays blocked on the pending raw fence and proceeds only on '
+        'the shared cleanup success',
+        () async {
+      final stale = recording();
+      final newer = recording();
+      final cleanupHold = Completer<void>();
+      stale.stopGate = cleanupHold.future;
+      var created = 0;
+      final facade = FrenchReferenceAudio(
+        loadCatalog:
+            () => Future<CourseAudioCatalog>.value(fixtureCatalogue()),
+        recordingFactory: () {
+          created++;
+          return created == 1 ? stale : newer;
+        },
+        speechFactory: () => FakeCourseSpeechSession(),
+        deadlines: const CourseAudioDeadlines(
+          setup: Duration(seconds: 3),
+          cleanup: Duration(seconds: 3),
+          completionFloor: Duration(milliseconds: 50),
+          completionSlack: Duration(milliseconds: 80),
+          ttsUtterance: Duration(milliseconds: 150),
+        ),
+      );
+      final pending = facade.playReference('fr-word-tout');
+      await until(() => stale.calls.contains('start'), reason: 'dispatch');
+      await stale.waitForStart();
+      var terminals = 0;
+      unawaited(pending.then<void>(
+          (CourseAudioResult _) => terminals++,
+          onError: (Object _) => terminals++));
+      await facade.stop();
+      final result = await pending.timeout(const Duration(seconds: 2));
+      expect(result.outcome, CourseAudioOutcome.cancelled,
+          reason: 'stop cancels the request promptly, before the held '
+              'cleanup settles — the raw fence is pending, not done');
+      // The pending raw fence: the next owner cannot be created or
+      // dispatched while the shared cleanup is still held.
+      final next = facade.playReference('fr-word-tout');
+      unawaited(next.then<void>(
+          (CourseAudioResult _) {}, onError: (Object _) {}));
+      await pumpEventQueue();
+      await pumpEventQueue();
+      expect(created, 1,
+          reason: 'the next recording is not created or dispatched while '
+              'the held cleanup is pending (the raw fence is pending)');
+      // Shared cleanup success: the fence releases and the next owner
+      // proceeds and completes.
+      cleanupHold.complete();
+      await until(
+          () => created == 2 && newer.calls.contains('start'),
+          reason: 'the next owner proceeds on the shared cleanup success');
+      newer.emitCompleted();
+      final nextResult = await next.timeout(const Duration(seconds: 2));
+      expect(nextResult.outcome, CourseAudioOutcome.completed,
+          reason: 'a successful shared cleanup lets the next owner play');
+      expect(terminals, 1,
+          reason: 'the stopped request published exactly one terminal');
+    });
+
+    test('stop with a failing held cleanup durably blocks the next owner '
+        'with the explicit cause and the exact forwarded stack', () async {
+      final stale = recording();
+      final newer = recording();
+      final cause = StateError('cleanup-failed');
+      final explicitStack =
+          StackTrace.fromString('cleanup-explicit-stack:fix3-f3b');
+      // Observe the planted failure at creation: it must never be an
+      // unhandled async error before (or regardless of) the shared
+      // retirement's await of it.
+      final gateError = Future<void>.error(cause, explicitStack);
+      unawaited(gateError.then<void>((_) {}, onError: (Object _) {}));
+      stale.stopGate = gateError;
+      var created = 0;
+      final facade = FrenchReferenceAudio(
+        loadCatalog:
+            () => Future<CourseAudioCatalog>.value(fixtureCatalogue()),
+        recordingFactory: () {
+          created++;
+          return created == 1 ? stale : newer;
+        },
+        speechFactory: () => FakeCourseSpeechSession(),
+        deadlines: const CourseAudioDeadlines(
+          setup: Duration(seconds: 3),
+          cleanup: Duration(seconds: 3),
+          completionFloor: Duration(milliseconds: 50),
+          completionSlack: Duration(milliseconds: 80),
+          ttsUtterance: Duration(milliseconds: 150),
+        ),
+      );
+      final pending = facade.playReference('fr-word-tout');
+      await until(() => stale.calls.contains('start'), reason: 'dispatch');
+      await stale.waitForStart();
+      var terminals = 0;
+      unawaited(pending.then<void>(
+          (CourseAudioResult _) => terminals++,
+          onError: (Object _) => terminals++));
+      await facade.stop();
+      final result = await pending.timeout(const Duration(seconds: 2));
+      expect(result.outcome, CourseAudioOutcome.cancelled,
+          reason: 'the prompt cancellation is not rewritten by the '
+              'subsequent cleanup failure');
+      Object? nextOutcome;
+      final next = facade.playReference('fr-word-tout');
+      unawaited(next.then<void>(
+          (CourseAudioResult _) {}, onError: (Object _) {}));
+      try {
+        nextOutcome = await next.timeout(const Duration(seconds: 2));
+      } on Object catch (error) {
+        nextOutcome = error;
+      }
+      expect(nextOutcome, isA<CourseAudioResult>(),
+          reason: 'the blocked replacement fails typed, not silently');
+      final failure = (nextOutcome as CourseAudioResult).failure!;
+      expect(failure.reason, CourseAudioFailureReason.cleanupFailed,
+          reason: 'a failed shared cleanup blocks the next owner durably');
+      expect(identical(failure.cause, cause), isTrue,
+          reason: 'the explicit cleanup failure cause is preserved');
+      expect(identical(failure.stackTrace, explicitStack), isTrue,
+          reason: 'the explicitly supplied cleanup stack is forwarded '
+              'exactly, not merely present');
+      expect(terminals, 1,
+          reason:
+              'no second terminal is published for the stopped request');
+    });
+
+    test('dispose with a held cleanup settles promptly as cancelled; no '
+        'late dispatch follows and exactly one terminal is published',
+        () async {
+      final stale = recording();
+      final cleanupHold = Completer<void>();
+      stale.stopGate = cleanupHold.future;
+      final facade = FrenchReferenceAudio(
+        loadCatalog:
+            () => Future<CourseAudioCatalog>.value(fixtureCatalogue()),
+        recordingFactory: () => stale,
+        speechFactory: () => FakeCourseSpeechSession(),
+        deadlines: const CourseAudioDeadlines(
+          setup: Duration(seconds: 3),
+          cleanup: Duration(seconds: 3),
+          completionFloor: Duration(milliseconds: 50),
+          completionSlack: Duration(milliseconds: 80),
+          ttsUtterance: Duration(milliseconds: 150),
+        ),
+      );
+      final pending = facade.playReference('fr-word-tout');
+      await until(() => stale.calls.contains('start'), reason: 'dispatch');
+      await stale.waitForStart();
+      var terminals = 0;
+      unawaited(pending.then<void>(
+          (CourseAudioResult _) => terminals++,
+          onError: (Object _) => terminals++));
+      await facade.dispose();
+      final result = await pending.timeout(const Duration(seconds: 2));
+      expect(result.outcome, CourseAudioOutcome.cancelled,
+          reason:
+              'disposal cancels the request promptly while the raw '
+                  'cleanup is fenced pending');
+      final callsAtDispose = stale.calls.length;
+      cleanupHold.complete(); // the held cleanup settles as a success
+      await pumpEventQueue();
+      await pumpEventQueue();
+      expect(stale.calls.length, callsAtDispose,
+          reason: 'no late dispatch follows once the disposal cleanup '
+              'settles');
+      expect(terminals, 1,
+          reason: 'no second terminal is published under disposal');
+      expect(
+          () => facade.playReference('fr-word-tout'),
+          throwsA(isA<StateError>()),
+          reason: 'a disposed facade cannot accept new requests');
+    });
+
+    test('dispose with a failing held cleanup keeps one prompt cancelled '
+        'terminal, no late dispatch, and the shared durable failure',
+        () async {
+      final stale = recording();
+      final cause = StateError('disposal-cleanup-failed');
+      final explicitStack =
+          StackTrace.fromString('disposal-explicit-stack:fix3-f3d');
+      // Observe the planted failure at creation: it must never be an
+      // unhandled async error before (or regardless of) the shared
+      // retirement's await of it.
+      final gateError = Future<void>.error(cause, explicitStack);
+      unawaited(gateError.then<void>((_) {}, onError: (Object _) {}));
+      stale.stopGate = gateError;
+      final facade = FrenchReferenceAudio(
+        loadCatalog:
+            () => Future<CourseAudioCatalog>.value(fixtureCatalogue()),
+        recordingFactory: () => stale,
+        speechFactory: () => FakeCourseSpeechSession(),
+        deadlines: const CourseAudioDeadlines(
+          setup: Duration(seconds: 3),
+          cleanup: Duration(seconds: 3),
+          completionFloor: Duration(milliseconds: 50),
+          completionSlack: Duration(milliseconds: 80),
+          ttsUtterance: Duration(milliseconds: 150),
+        ),
+      );
+      final pending = facade.playReference('fr-word-tout');
+      await until(() => stale.calls.contains('start'), reason: 'dispatch');
+      await stale.waitForStart();
+      var terminals = 0;
+      unawaited(pending.then<void>(
+          (CourseAudioResult _) => terminals++,
+          onError: (Object _) => terminals++));
+      await facade.dispose();
+      final result = await pending.timeout(const Duration(seconds: 2));
+      expect(result.outcome, CourseAudioOutcome.cancelled,
+          reason: 'disposal cancellation is prompt and is not rewritten by '
+              'the cleanup failure');
+      final callsAtDispose = stale.calls.length;
+      await pumpEventQueue();
+      await pumpEventQueue();
+      expect(stale.calls.length, callsAtDispose,
+          reason: 'no late dispatch follows under disposal');
+      expect(terminals, 1,
+          reason: 'no second terminal is published under disposal');
+      // The shared durable cleanup failure is observable by every
+      // retirement caller of the same session.
+      Object? sharedCaught;
+      try {
+        await stale.dispose();
+      } on Object catch (error) {
+        sharedCaught = error;
+      }
+      expect(identical(sharedCaught, cause), isTrue,
+          reason: 'every retirement caller of the same session shares the '
+              'durable cleanup failure');
+      expect(
+          () => facade.playReference('fr-word-tout'),
+          throwsA(isA<StateError>()),
+          reason: 'a disposed facade cannot accept new requests');
+    });
+  });
 }
 
 /// Awaits the held gate's future so its settlement side effects run.
@@ -2622,4 +3174,35 @@ final class _NativeRejectionLike {
   const _NativeRejectionLike({required this.message, required this.name});
   final String message;
   final String name;
+}
+
+/// A [CoursePracticeSpeechSession] double for the facade seam tests.
+///
+/// `speak` either returns [hold] (a held raw utterance, for the facade
+/// backstop test) or fails with an explicitly supplied cause and stack
+/// (for the raw source-timeout classification test). The explicit stack is
+/// the forwarding evidence: the facade must carry that exact stack on the
+/// stable failure, not merely a non-null one.
+final class _ExplicitSpeechFailureSession implements CoursePracticeSpeechSession {
+  const _ExplicitSpeechFailureSession(this.cause, this.stack, {this.hold});
+
+  final Object? cause;
+  final StackTrace? stack;
+  final Future<void>? hold;
+
+  @override
+  Future<void> speak(String text) {
+    final Future<void>? held = hold;
+    if (held != null) return held;
+    if (cause != null && stack != null) {
+      Error.throwWithStackTrace(cause!, stack!);
+    }
+    throw StateError('speech double: no failure supplied');
+  }
+
+  @override
+  Future<void> stop() async {}
+
+  @override
+  Future<void> dispose() async {}
 }

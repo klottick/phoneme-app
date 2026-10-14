@@ -25,6 +25,7 @@ import 'package:linguist/src/core/course/browser_rejection_boundary.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
 import 'package:linguist/src/core/course/course_audio_catalog.dart';
 import 'package:linguist/src/core/course/course_exercise.dart';
+import 'package:linguist/src/core/course/course_recording_backend.dart';
 import 'package:linguist/src/core/course/course_reference_audio.dart';
 
 import '../support/fake_course_recording_session.dart';
@@ -214,5 +215,74 @@ void main() {
       expect(result.failure!.stackTrace, isNotNull,
           reason: 'the failure carries a stack trace for diagnosis');
     });
+
+    // F3 (round 3) exact-stack forwarding at the browser facade boundary:
+    // an explicitly supplied source stack must be the stack carried by the
+    // stable failure — compared by identity, not merely asserted non-null.
+    // (A genuine DOMException rejection carries no synthetic Dart stack;
+    // this case supplies one explicitly through a pure-Dart session double
+    // to prove the facade's forwarding of whatever stack is given.)
+    test('the facade forwards an explicitly supplied source stack exactly',
+        () async {
+      final Object? cause = await _capturedRejection(
+          _domException('play() rejected', 'NotAllowedError'));
+      expect(cause, isNotNull);
+      final explicitStack =
+          StackTrace.fromString('browser-facade-explicit-stack:fix3-f3');
+      final facade = FrenchReferenceAudio(
+        loadCatalog: () => Future<CourseAudioCatalog>.value(_fixtureCatalogue()),
+        recordingFactory:
+            () => _ExplicitStackBrowserRecording(cause!, explicitStack),
+        speechFactory: () => FakeCourseSpeechSession(),
+        deadlines: const CourseAudioDeadlines(
+          setup: Duration(milliseconds: 150),
+          cleanup: Duration(milliseconds: 200),
+          completionFloor: Duration(milliseconds: 50),
+          completionSlack: Duration(milliseconds: 80),
+          ttsUtterance: Duration(milliseconds: 150),
+        ),
+      );
+      final result = await facade.playReference('fr-word-tout');
+      expect(result.outcome, CourseAudioOutcome.failed,
+          reason: 'the explicit start failure is a failed outcome, not '
+              'silence or success');
+      expect(result.failure!.reason,
+          CourseAudioFailureReason.userGestureRequired,
+          reason: 'the genuine browser rejection keeps its gesture '
+              'diagnosis');
+      expect(identical(result.failure!.cause, cause), isTrue,
+          reason: 'the original cause object is preserved');
+      expect(identical(result.failure!.stackTrace, explicitStack), isTrue,
+          reason: 'the explicitly supplied source stack is forwarded '
+              'exactly, not merely present');
+    });
   });
+}
+
+/// A minimal [CourseRecordingSession] double for the browser facade
+/// exact-stack test: `start` fails with the exact supplied cause (a genuine
+/// DOMException through toDart) and the explicitly supplied stack. Pure
+/// Dart — no plugin or device — executed only under the browser harness.
+final class _ExplicitStackBrowserRecording implements CourseRecordingSession {
+  const _ExplicitStackBrowserRecording(this.cause, this.stack);
+
+  final Object cause;
+  final StackTrace stack;
+
+  @override
+  Stream<CourseRecordingEvent> get events => const Stream.empty();
+
+  @override
+  Future<void> prepare(CourseAudioRecording recording) async {}
+
+  @override
+  Future<void> start() {
+    Error.throwWithStackTrace(cause, stack);
+  }
+
+  @override
+  Future<void> stop() async {}
+
+  @override
+  Future<void> dispose() async {}
 }

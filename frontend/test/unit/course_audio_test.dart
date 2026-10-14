@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
 
 void main() {
@@ -159,6 +160,97 @@ void main() {
             'diagnostic, not as a phase of this adapter');
     expect((caught! as PlatformException).message, contains('source-timed-out'),
         reason: 'the original source diagnostic is preserved');
+    // Round-3 honesty note (F2): this test is channel-TRANSPORT coverage —
+    // the mock handler's throw crosses the (mocked) MethodChannel, so the
+    // direct caller sees the source diagnostic wrapped in a Platform
+    // envelope. It preserves the envelope text but does NOT demonstrate raw
+    // object identity. Raw identity (object, message, source stack with no
+    // envelope) is demonstrated by the FlutterTts subclass seam tests below,
+    // where the source crosses the real adapter pipeline.
+  });
+
+  // F2 round 3 (coverage, not a new behavior RED): an injected FlutterTts
+  // subclass fails its own method with the EXACT supplied timeout object and
+  // stack — this proves the source crosses the REAL adapter pipeline (no
+  // MethodChannel envelope in between), preserving object, message and source
+  // stack. The channel-mock envelope tests above remain separate
+  // channel-transport coverage; they do not demonstrate raw identity.
+  test('F2: an injected source utterance timeout through the real adapter '
+      'pipeline is preserved by object, message and source stack', () async {
+    final source = TimeoutException(
+        'source utterance timeout, real pipeline',
+        const Duration(seconds: 30));
+    final explicitStack =
+        StackTrace.fromString('source-subclass-frame:fix3-f2-utterance');
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+        (call) async {
+      if (call.method == 'isLanguageAvailable') return true;
+      return 1;
+    });
+    final audio = FrenchWordAudio(
+        const CourseAudioDeadlines(
+            setup: Duration(seconds: 30),
+            ttsUtterance: Duration(seconds: 30)),
+        _SourceTimeoutTts('speak', source, explicitStack));
+    Object? caught;
+    StackTrace? caughtStack;
+    try {
+      await audio.speak('mot');
+    } on Object catch (error, errorStack) {
+      caught = error;
+      caughtStack = errorStack;
+    }
+    expect(identical(caught, source), isTrue,
+        reason: 'the source TimeoutException object is preserved by the real '
+            'adapter pipeline (no re-wrap, no channel envelope)');
+    expect(
+        (caught as TimeoutException).message,
+        'source utterance timeout, real pipeline',
+        reason: 'the original source message is preserved verbatim');
+    expect(caught, isNot(isA<PhaseTimeoutException>()),
+        reason: 'never relabelled as this adapter expired phase');
+    expect(caughtStack, isNotNull, reason: 'the failure carries a stack');
+    expect(caughtStack.toString(), contains('source-subclass-frame'),
+        reason: 'the explicitly supplied source stack is forwarded — the '
+            'source crossed the real pipeline, not a platform channel');
+  });
+
+  test('F2: an injected source setup timeout through the real adapter '
+      'pipeline is likewise preserved by object, message and stack',
+      () async {
+    final source = TimeoutException(
+        'source setup timeout, real pipeline', const Duration(seconds: 30));
+    final explicitStack =
+        StackTrace.fromString('source-setup-subclass-frame:fix3-f2');
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+        (call) async {
+      if (call.method == 'isLanguageAvailable') return true;
+      return 1;
+    });
+    final audio = FrenchWordAudio(
+        const CourseAudioDeadlines(
+            setup: Duration(seconds: 30),
+            ttsUtterance: Duration(seconds: 30)),
+        _SourceTimeoutTts('setLanguage', source, explicitStack));
+    Object? caught;
+    StackTrace? caughtStack;
+    try {
+      await audio.speak('mot');
+    } on Object catch (error, errorStack) {
+      caught = error;
+      caughtStack = errorStack;
+    }
+    expect(identical(caught, source), isTrue,
+        reason: 'the source setup timeout object is preserved by the real '
+            'adapter pipeline (no re-wrap, no channel envelope)');
+    expect(
+        (caught as TimeoutException).message,
+        'source setup timeout, real pipeline');
+    expect(caught, isNot(isA<PhaseTimeoutException>()),
+        reason: 'never relabelled as this adapter expired phase');
+    expect(caughtStack, isNotNull, reason: 'the failure carries a stack');
+    expect(caughtStack.toString(), contains('source-setup-subclass-frame'),
+        reason: 'the explicitly supplied source stack is forwarded');
   });
 
   testWidgets(
@@ -441,7 +533,8 @@ void main() {
     });
 
     test('R1: an uncorrelated stale speech-error callback is drained and does '
-        'not fail the newer direct request', () async {
+        'not fail the newer direct request (Option 1: such callbacks are '
+        'never an outcome source; they drain by the locked handler)', () async {
       final olderGate = Completer<Object?>();
       final newerGate = Completer<Object?>();
       final spoken = <String>[];
@@ -519,8 +612,73 @@ void main() {
           reason: 'quiescence settles once both raw utterances have settled');
     });
 
-    test('a real speech error fails the session speak and the shared '
-        'retirement stays fenced while the raw utterance is unresolved',
+    test('F1: a practice session is single-attempt: a second speak is '
+        'rejected before dispatch, permanently, even after the first '
+        'attempt fails', () async {
+      final firstGate = Completer<Object?>();
+      final retryGate = Completer<Object?>();
+      final spoken = <String>[];
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+          (call) async {
+        if (call.method == 'isLanguageAvailable') return true;
+        if (call.method == 'speak') {
+          final Object? args = call.arguments;
+          final Object? text = args is String
+              ? args
+              : (args is Map ? args['text'] : null);
+          final String word = text?.toString() ?? '';
+          spoken.add(word);
+          return word == 'premier' ? firstGate.future : retryGate.future;
+        }
+        return 1;
+      });
+      final session = createFrenchPracticeSpeechSession(
+          deadlines: const CourseAudioDeadlines(
+              setup: Duration(seconds: 30),
+              ttsUtterance: Duration(seconds: 30)));
+      final first = session.speak('premier');
+      unawaited(first.then<void>((Object? value) {},
+          onError: (Object error) {}));
+      final dispatch = Stopwatch()..start();
+      while (!spoken.contains('premier') &&
+          dispatch.elapsed < const Duration(seconds: 5)) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(spoken, ['premier'],
+          reason: 'the first attempt dispatches once');
+
+      // A second attempt on the same session must be rejected before
+      // init/dispatch, not rerouted.
+      final second = session.speak('second');
+      unawaited(second.then<void>((Object? value) {},
+          onError: (Object error) {}));
+      expect(spoken, ['premier'],
+          reason: 'a rejected retry must not dispatch a second utterance');
+
+      // The first attempt fails; the session stays permanently consumed.
+      firstGate.completeError(StateError('first-attempt-failed'));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      final retry = session.speak('retry');
+      unawaited(retry.then<void>((Object? value) {},
+          onError: (Object error) {}));
+      retryGate.complete(null); // release any baseline-dispatched utterance
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(spoken, ['premier'],
+          reason:
+              'a failed first attempt permanently consumes the single-'
+                  'attempt session; no further utterance dispatches');
+      await expectLater(second, throwsA(isA<StateError>()),
+          reason: 'the second attempt is rejected, not silently re-dispatched');
+      await expectLater(retry, throwsA(isA<StateError>()),
+          reason: 'a failed first attempt does not reopen the session');
+      await expectLater(session.dispose(), completes,
+          reason: 'retirement still settles the single-attempt session');
+    });
+
+    test('F1 (approved alpha override "Option 1"): a real speech-error '
+        'callback never settles the session speak while its raw utterance '
+        'is held; only the owned utterance bound fails it — a timeout may '
+        'fail, never count as playback — and the raw utterance stays fenced',
         () async {
       final gate = Completer<Object?>();
       var dispatched = false;
@@ -539,13 +697,30 @@ void main() {
               setup: Duration(milliseconds: 300),
               ttsUtterance: Duration(milliseconds: 600)));
       final pending = session.speak('mot');
-      unawaited(pending.then<void>((Object? value) {},
-          onError: (Object error) {}));
+      var settled = false;
+      Object? outcome;
+      unawaited(pending.then<void>(
+            (Object? value) {
+              outcome = 'completed';
+              settled = true;
+            },
+            onError: (Object error) {
+              outcome = error;
+              settled = true;
+            },
+          ));
       final stopwatch = Stopwatch()..start();
       while (!dispatched && stopwatch.elapsed < const Duration(seconds: 5)) {
         await Future<void>.delayed(Duration.zero);
       }
       expect(dispatched, isTrue, reason: 'the utterance must be dispatched');
+      // A real inbound speech-error callback, delivered through the exact
+      // locked flutter_tts global path (identity-free: it may belong to any
+      // engine). The binding user override (Option 1: "callback-only
+      // failures may timeout, not immediate error, and never completion")
+      // replaces the former prompt-callback settlement test: a callback may
+      // fail the request only by letting its OWN bounded grace window
+      // elapse, and it never completes it.
       await binding.defaultBinaryMessenger.handlePlatformMessage(
           'flutter_tts',
           const StandardMethodCodec().encodeMethodCall(const MethodCall(
@@ -553,23 +728,30 @@ void main() {
               {'code': 'speech-engine-failure',
                'message': 'web speech failed'})),
           (ByteData? reply) {});
-      Object? caught;
-      final delivery = Stopwatch()..start();
-      try {
-        await pending.timeout(const Duration(milliseconds: 400));
-      } on Object catch (error) {
-        caught = error;
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(settled, isFalse,
+          reason:
+              'a callback-only failure must not complete or fail the '
+                  'pending request immediately; only the raw method future '
+                      'or the owned bound may settle it');
+      // The owned utterance bound (600ms) is the unique failure source.
+      final settle = Stopwatch()..start();
+      while (!settled && settle.elapsed < const Duration(seconds: 3)) {
+        await Future<void>.delayed(Duration.zero);
       }
-      expect(caught, isNotNull,
-          reason: 'a real speech error must fail the active session speak');
-      expect(caught, isNot(isA<TimeoutException>()),
-          reason: 'the failure is the original diagnostic, not a timeout');
-      expect((caught! as Map)['code'], 'speech-engine-failure');
+      expect(settled, isTrue,
+          reason: 'the owned bound does fail the request');
+      expect(outcome, isA<PhaseTimeoutException>(),
+          reason:
+              'the failure is the typed owned deadline — never a callback '
+                  'diagnosis and never a completion (a timeout never counts '
+                      'as heard playback)');
       expect(
-          delivery.elapsed, lessThan(const Duration(milliseconds: 500)),
-          reason: 'delivery precedes the utterance bound');
+          (outcome! as PhaseTimeoutException).phase,
+          CourseAudioFailureReason.completionTimeout,
+          reason: 'the utterance bound expired, not an invented phase');
       // Retirement must fence the still-unresolved raw utterance.
-      final retirement = session.stop();
+      final retirement = session.dispose();
       var retired = false;
       unawaited(retirement.then<void>(
           (Object? value) => retired = true,
@@ -578,12 +760,13 @@ void main() {
       expect(retired, isFalse,
           reason:
               'the shared retirement must not declare quiescence while the '
-              'raw utterance is unresolved');
+                  'raw utterance is unresolved');
       gate.complete(null);
       await Future<void>.delayed(const Duration(milliseconds: 50));
       expect(retired, isTrue,
           reason: 'the fence releases once the raw utterance settles');
     });
+
 
     testWidgets('retirement fences a held utterance before quiescence',
         (tester) async {
@@ -705,4 +888,33 @@ void main() {
           reason: 'a failed setup leaves no held raw work for the fence');
     });
   });
+}
+
+/// A [FlutterTts] subclass for the F2 direct-pipeline identity tests: the
+/// designated method (`'speak'` or `'setLanguage'`) fails with the exact
+/// supplied cause and stack. All other methods keep the locked implementation
+/// (routing to the test channel mock), so the source crosses the REAL adapter
+/// pipeline with no MethodChannel envelope between it and the throw site.
+class _SourceTimeoutTts extends FlutterTts {
+  _SourceTimeoutTts(this.method, this.cause, this.stack);
+
+  final String method;
+  final Object cause;
+  final StackTrace stack;
+
+  @override
+  Future<dynamic> speak(String text, {bool focus = false}) async {
+    if (method == 'speak') {
+      Error.throwWithStackTrace(cause, stack);
+    }
+    return super.speak(text);
+  }
+
+  @override
+  Future<dynamic> setLanguage(String language) async {
+    if (method == 'setLanguage') {
+      Error.throwWithStackTrace(cause, stack);
+    }
+    return super.setLanguage(language);
+  }
 }
