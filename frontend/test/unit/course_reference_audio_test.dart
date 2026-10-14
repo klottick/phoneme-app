@@ -3177,19 +3177,64 @@ void main() {
       expect(cleanupHold.isCompleted, isFalse,
           reason: 'the prompt terminal is observed before the pending '
               'cleanup settles — the hold→failure transition is real');
-      final callsAtDispose = stale.calls.length;
+      // Repeated retirement WHILE the retirement gate is still pending:
+      // a second retirement caller of the same session must share the
+      // unresolved fence instead of returning early. Invoke it, attach
+      // both outcome observers immediately, pump, and assert it remains
+      // unsettled — a retirement that succeeded early here would still be
+      // allowed the stored error later and would slip through otherwise.
+      final Future<void> repeatedRetirement = stale.dispose();
+      var repeatSettled = false;
+      unawaited(
+          repeatedRetirement.then<void>((void _) {
+            repeatSettled = true;
+          }, onError: (Object _) {
+            repeatSettled = true;
+          }));
+      await pumpEventQueue();
+      await pumpEventQueue();
+      expect(cleanupHold.isCompleted, isFalse,
+          reason: 'the held gate is still pending when the repeated '
+              'retirement is observed');
+      expect(repeatSettled, isFalse,
+          reason: 'the repeated retirement shares the unresolved fence and '
+              'stays unsettled; it cannot succeed early before the gate '
+              'settles');
+      // Baseline call count taken AFTER the deliberate repeated call.
+      final callsAtHeldRepeat = stale.calls.length;
       // Release the held cleanup as a failure, on release.
       cleanupHold.completeError(cause, explicitStack);
       await pumpEventQueue();
       await pumpEventQueue();
-      expect(stale.calls.length, callsAtDispose,
+      expect(stale.calls.length, callsAtHeldRepeat,
           reason: 'no late dispatch follows once the failed cleanup '
               'settles under disposal');
       expect(terminals, 1,
           reason: 'no second terminal is published under disposal');
-      // The shared durable cleanup failure is observable by every
-      // retirement caller of the same session — with the exact released
-      // cause and the forwarded stack.
+      // The same already-observed repeated retirement, released with the
+      // failure, must settle to the shared durable failure with the exact
+      // released cause and the forwarded stack — the shared fence proven
+      // from a second retirement caller, not only the first one.
+      Object? repeatCaught;
+      StackTrace? repeatStack;
+      try {
+        await repeatedRetirement;
+      } on Object catch (error, stackTrace) {
+        repeatCaught = error;
+        repeatStack = stackTrace;
+      }
+      expect(repeatSettled, isTrue,
+          reason: 'the shared fence settles on release, so the repeated '
+              'retirement settles with it');
+      expect(identical(repeatCaught, cause), isTrue,
+          reason: 'the repeated retirement shares the durable cleanup '
+              'failure released at settlement — identical cause');
+      expect(identical(repeatStack, explicitStack), isTrue,
+          reason: 'the repeated retirement observes the same explicitly '
+              'supplied cleanup stack, not merely present');
+      // The shared durable cleanup failure is also observable by a
+      // later retirement caller — with the exact released cause and the
+      // forwarded stack.
       Object? sharedCaught;
       StackTrace? sharedStack;
       try {
