@@ -33,3 +33,7 @@ flutter:
   uses-material-design: true
   assets:
     - .env.example
+    - assets/audio/fr/manifest.json
+    - assets/audio/fr/provenance.json
+    - assets/audio/fr/words/
+    - assets/audio/fr/licenses/

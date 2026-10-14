@@ -1,10 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
-abstract class CourseAudio {
-  Future<void> speak(String word);
-  Future<void> stop();
-}
+import 'course_audio_contract.dart';
+
+export 'course_audio_contract.dart';
 
 /// French TTS adapter.
 ///
