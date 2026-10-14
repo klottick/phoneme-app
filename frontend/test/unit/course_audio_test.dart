@@ -270,6 +270,184 @@ void main() {
           reason: 'the abandoned utterance drains quietly');
     });
 
+    test('retirement rethrow preserves the original cleanup throw stack',
+        () async {
+      final platformError = PlatformException(code: 'stop-broken');
+      var stopCalls = 0;
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+          (call) async {
+        if (call.method == 'stop') {
+          stopCalls++;
+          if (stopCalls >= 2) throw platformError;
+          return 1;
+        }
+        if (call.method == 'isLanguageAvailable') return true;
+        if (call.method == 'speak') return null;
+        return 1;
+      });
+      final session = createFrenchPracticeSpeechSession();
+      await session.speak('mot');
+      Object? caught;
+      StackTrace? stack;
+      try {
+        await session.stop();
+      } on Object catch (error, errorStack) {
+        caught = error;
+        stack = errorStack;
+      }
+      expect(caught, isA<PlatformException>(),
+          reason: 'the original cleanup failure is the retirement cause');
+      expect(stack, isNotNull, reason: 'the rethrow carries a stack trace');
+      final String trace = stack.toString();
+      final String firstFrame =
+          trace.split('\n').first; // the original throw site, if preserved
+      expect(firstFrame, contains('package:flutter'),
+          reason:
+              'the platform-delivered error keeps its original boundary '
+              'stack instead of a session rethrow frame replacing it');
+      expect(firstFrame, isNot(contains('course_audio.dart')),
+          reason: 'a session rethrow must not become the leading frame');
+    });
+
+    test('a real inbound speech-error callback fails the active request '
+        'with the original diagnostic, not an utterance timeout', () async {
+      final gate = Completer<Object?>();
+      var dispatched = false;
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+          (call) async {
+        if (call.method == 'speak') {
+          dispatched = true;
+          // The locked web engine drops the utterance completer on a speech
+          // error: the raw utterance never settles — the error arrives only
+          // as the real 'speak.onError' method callback.
+          return gate.future;
+        }
+        if (call.method == 'isLanguageAvailable') return true;
+        return 1;
+      });
+      final audio = FrenchWordAudio(const CourseAudioDeadlines(
+          setup: Duration(milliseconds: 300),
+          ttsUtterance: Duration(milliseconds: 600)));
+      final pending = audio.speak('mot');
+      unawaited(pending.then<void>((Object? value) {},
+          onError: (Object error) {}));
+      final stopwatch = Stopwatch()..start();
+      while (!dispatched && stopwatch.elapsed < const Duration(seconds: 5)) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(dispatched, isTrue, reason: 'the utterance must be dispatched');
+      // The real incoming platform callback, through the plugin's channel
+      // machinery (the same path the locked web engine uses).
+      await binding.defaultBinaryMessenger.handlePlatformMessage(
+          'flutter_tts',
+          const StandardMethodCodec().encodeMethodCall(const MethodCall(
+              'speak.onError',
+              {'code': 'speech-engine-failure',
+               'message': 'web speech failed'})),
+          (ByteData? reply) {});
+      Object? caught;
+      final delivery = Stopwatch()..start();
+      try {
+        await pending.timeout(const Duration(milliseconds: 400));
+      } on Object catch (error) {
+        caught = error;
+      }
+      expect(caught, isNotNull,
+          reason: 'a real speech error must fail the active request');
+      expect(caught, isNot(isA<TimeoutException>()),
+          reason: 'delivery is the real speech error, not the '
+              'utterance bound expiring');
+      expect(caught, isA<Map>(),
+          reason: 'the original diagnostic travels through the '
+              'channel codec unchanged');
+      expect((caught! as Map)['code'], 'speech-engine-failure');
+      expect((caught as Map)['message'], 'web speech failed');
+      expect(
+          delivery.elapsed, lessThan(const Duration(milliseconds: 500)),
+          reason: 'delivery is prompt, independent of the utterance bound');
+      // The raw utterance remains unresolved: quiescence stays fenced.
+      var quiesced = false;
+      unawaited(audio.quiesce().then<void>(
+          (Object? value) => quiesced = true,
+          onError: (Object error) => quiesced = true));
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(quiesced, isFalse,
+          reason:
+              'an unresolved raw utterance must keep quiescence fenced; '
+              'neither the error callback nor a public timeout is '
+              'quiescence');
+      gate.complete(null); // settle the raw utterance (web completion)
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(quiesced, isTrue,
+          reason: 'quiescence settles once the raw utterance settles');
+    });
+
+    test('a real speech error fails the session speak and the shared '
+        'retirement stays fenced while the raw utterance is unresolved',
+        () async {
+      final gate = Completer<Object?>();
+      var dispatched = false;
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+          (call) async {
+        if (call.method == 'speak') {
+          dispatched = true;
+          return gate.future; // raw utterance stays unresolved (web shape)
+        }
+        if (call.method == 'stop') return 1;
+        if (call.method == 'isLanguageAvailable') return true;
+        return 1;
+      });
+      final session = createFrenchPracticeSpeechSession(
+          deadlines: const CourseAudioDeadlines(
+              setup: Duration(milliseconds: 300),
+              ttsUtterance: Duration(milliseconds: 600)));
+      final pending = session.speak('mot');
+      unawaited(pending.then<void>((Object? value) {},
+          onError: (Object error) {}));
+      final stopwatch = Stopwatch()..start();
+      while (!dispatched && stopwatch.elapsed < const Duration(seconds: 5)) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(dispatched, isTrue, reason: 'the utterance must be dispatched');
+      await binding.defaultBinaryMessenger.handlePlatformMessage(
+          'flutter_tts',
+          const StandardMethodCodec().encodeMethodCall(const MethodCall(
+              'speak.onError',
+              {'code': 'speech-engine-failure',
+               'message': 'web speech failed'})),
+          (ByteData? reply) {});
+      Object? caught;
+      final delivery = Stopwatch()..start();
+      try {
+        await pending.timeout(const Duration(milliseconds: 400));
+      } on Object catch (error) {
+        caught = error;
+      }
+      expect(caught, isNotNull,
+          reason: 'a real speech error must fail the active session speak');
+      expect(caught, isNot(isA<TimeoutException>()),
+          reason: 'the failure is the original diagnostic, not a timeout');
+      expect((caught! as Map)['code'], 'speech-engine-failure');
+      expect(
+          delivery.elapsed, lessThan(const Duration(milliseconds: 500)),
+          reason: 'delivery precedes the utterance bound');
+      // Retirement must fence the still-unresolved raw utterance.
+      final retirement = session.stop();
+      var retired = false;
+      unawaited(retirement.then<void>(
+          (Object? value) => retired = true,
+          onError: (Object error) => retired = true));
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(retired, isFalse,
+          reason:
+              'the shared retirement must not declare quiescence while the '
+              'raw utterance is unresolved');
+      gate.complete(null);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(retired, isTrue,
+          reason: 'the fence releases once the raw utterance settles');
+    });
+
     testWidgets('retirement fences a held utterance before quiescence',
         (tester) async {
       final gate = Completer<Object?>();

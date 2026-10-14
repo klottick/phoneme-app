@@ -10,6 +10,8 @@
 /// facade/speech-factory construction before the values are used.
 library;
 
+import 'dart:async';
+
 /// How a reference request may be used (alpha practice vs reviewed-only).
 enum CourseAudioUse { alphaPractice, reviewedOnly }
 
@@ -161,6 +163,32 @@ final class CourseAudioCancelledException implements Exception {
 
   @override
   String toString() => 'CourseAudioCancelledException()';
+}
+
+/// The canonical voice-unavailability diagnostic the practice-speech
+/// adapter throws when no French voice is installed. The classification
+/// recognizes this exact diagnostic (or a typed cause) — never a substring
+/// resemblance — so unrelated StateErrors stay generic.
+const String canonicalFrenchVoiceUnavailableMessage =
+    'Install a French voice in your device speech settings.';
+
+/// A bounded practice-speech pipeline phase whose allowance expired.
+///
+/// Stays a [TimeoutException], so existing `on TimeoutException` catchers
+/// and `isA<TimeoutException>()` expectations keep working, and carries the
+/// phase that expired so the caller classifies the failure from the typed
+/// cause instead of guessing which bounded phase timed out.
+final class PhaseTimeoutException extends TimeoutException {
+  PhaseTimeoutException(
+    this.phase, [
+    String? message,
+    Duration? duration,
+  ]) : super(message ?? 'Practice speech phase deadline.', duration);
+
+  /// Which phase's allowance expired:
+  /// [CourseAudioFailureReason.startupTimeout] for the setup phase,
+  /// [CourseAudioFailureReason.completionTimeout] for the utterance phase.
+  final CourseAudioFailureReason phase;
 }
 
 /// Injectable playback bounds. Defaults come from the approved spec; [validate]

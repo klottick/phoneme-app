@@ -34,18 +34,40 @@ export 'course_audio_contract.dart';
 /// Overlapping [speak] calls always converge on the newest request.
 /// [deadlines] bound the setup phase ([CourseAudioDeadlines.setup]) and the
 /// utterance ([CourseAudioDeadlines.ttsUtterance]); direct callers keep the
-/// tested quiet stale-cancellation semantics. [quiesce] settles once every
-/// dispatched raw platform operation has settled — the practice-session
-/// wrapper uses it to fence raw work before reporting quiescence.
+/// tested quiet stale-cancellation semantics.
+///
+/// A real speech-error platform callback is observed on the active utterance
+/// before its dispatch: the locked web engine drops the utterance completer
+/// on a speech error and reports only through that callback, so the request
+/// settles from whichever arrives first — utterance or callback — with the
+/// original diagnostic on either path. The unresolved raw utterance stays
+/// fenced for [quiesce].
+///
+/// [quiesce] settles once every dispatched raw platform operation has
+/// settled — the practice-session wrapper uses it to fence raw work before
+/// reporting quiescence.
 class FrenchWordAudio implements CourseAudio {
   FrenchWordAudio(
       [CourseAudioDeadlines deadlines = const CourseAudioDeadlines()])
       : _deadlines = deadlines {
     _deadlines.validate();
+    _tts.setErrorHandler(_onSpeechError);
   }
 
   final FlutterTts _tts = FlutterTts();
   final CourseAudioDeadlines _deadlines;
+
+  /// Sink for the active utterance's real speech-error callback. Replaced on
+  /// every utterance dispatch; a late event for an older utterance still
+  /// reaches its sink (and that request drains quietly).
+  Completer<Object?>? _speechErrorSignal;
+
+  void _onSpeechError(Object? message) {
+    final Completer<Object?>? signal = _speechErrorSignal;
+    if (signal != null && !signal.isCompleted) {
+      signal.complete(message);
+    }
+  }
 
   /// Raw platform operations dispatched and not yet settled, tracked
   /// separately from any bounded public future so retirement can fence them.
@@ -86,8 +108,7 @@ class FrenchWordAudio implements CourseAudio {
     _track(availability);
     if (await availability != true) {
       if (mine != _current) return;
-      throw StateError(
-          'Install a French voice in your device speech settings.');
+      throw StateError(canonicalFrenchVoiceUnavailableMessage);
     }
     if (mine != _current) return; // Abandoned before running setup.
 
@@ -119,12 +140,73 @@ class FrenchWordAudio implements CourseAudio {
     try {
       // The setup allowance bounds the whole setup phase; the utterance is
       // bounded by the existing 12-second allowance by default.
-      await _runSetup(mine).timeout(_deadlines.setup);
+      try {
+        await _runSetup(mine).timeout(_deadlines.setup);
+      } on TimeoutException catch (error, stackTrace) {
+        // Type the phase: the setup allowance expired before the utterance
+        // began. Direct callers still see a TimeoutException.
+        Error.throwWithStackTrace(
+            PhaseTimeoutException(
+                CourseAudioFailureReason.startupTimeout,
+                'The setup phase deadline was exceeded.',
+                error.duration),
+            stackTrace);
+      }
       if (mine != _current) return;
 
+      final Completer<Object?> signal = Completer<Object?>();
+      _speechErrorSignal = signal;
       final Future<dynamic> utterance = _tts.speak(word);
       _track(utterance);
-      final dynamic result = await utterance.timeout(_deadlines.ttsUtterance);
+      // The utterance and the real speech-error callback are independent
+      // settlements: the locked web engine drops the utterance completer on
+      // a speech error and reports only through the callback. Whichever
+      // arrives first settles the active request; the original diagnostic
+      // is preserved on either path, and the raw utterance stays tracked
+      // for quiescence.
+      final Completer<dynamic> outcome = Completer<dynamic>();
+      void completeOutcome(dynamic value) {
+        if (!outcome.isCompleted) {
+          outcome.complete(value);
+        }
+      }
+
+      void failOutcome(Object error, StackTrace stackTrace) {
+        if (!outcome.isCompleted) {
+          outcome.completeError(error, stackTrace);
+        }
+      }
+
+      unawaited(utterance.timeout(_deadlines.ttsUtterance).then<dynamic>(
+            (dynamic value) => completeOutcome(value),
+            onError: (Object error, StackTrace stackTrace) {
+              if (error is TimeoutException) {
+                // Type the phase: the utterance allowance expired. Direct
+                // callers can still catch a TimeoutException.
+                failOutcome(
+                    PhaseTimeoutException(
+                        CourseAudioFailureReason.completionTimeout,
+                        'The utterance phase deadline was exceeded.',
+                        error.duration),
+                    stackTrace);
+                return;
+              }
+              failOutcome(error, stackTrace);
+            },
+          ));
+      unawaited(signal.future.then<dynamic>(
+            (Object? message) => failOutcome(
+                // The callback is delivered as sent; an empty payload is a
+                // neutral speech failure, never an invented diagnosis.
+                message ?? StateError('French speech failed.'),
+                StackTrace.current),
+            onError: (Object error, StackTrace stackTrace) =>
+                failOutcome(error, stackTrace),
+          ));
+      // The outer catch owns staleness: an abandoned request drains any
+      // failure quietly; an active failure invalidates its token and
+      // rethrows the same error with its original stack trace.
+      final dynamic result = await outcome.future;
       // Superseded mid-utterance: do not act on the stale result.
       if (mine != _current) return;
 
@@ -237,18 +319,23 @@ final class FrenchPracticeSpeechSession implements CoursePracticeSpeechSession {
     // nothing to quiesce, and nothing is initialized to check.
     if (audio == null) return;
     Object? cleanupFailure;
+    StackTrace? cleanupStackTrace;
     try {
       // Invalidation plus the raw platform stop, both settling.
       await audio.stop();
       // Quiescence of every other dispatched raw operation (a held setup
       // phase or utterance), success or failure.
       await audio.quiesce();
-    } on Object catch (error) {
+    } on Object catch (error, stackTrace) {
       cleanupFailure = error;
+      cleanupStackTrace = stackTrace;
     }
     if (cleanupFailure != null) {
       // A failed retirement is shared by every caller and is never evidence
-      // of quiescence.
+      // of quiescence; the rethrow keeps the original throw site.
+      if (cleanupStackTrace != null) {
+        Error.throwWithStackTrace(cleanupFailure, cleanupStackTrace);
+      }
       throw cleanupFailure;
     }
   }

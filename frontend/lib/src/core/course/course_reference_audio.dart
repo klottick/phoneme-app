@@ -78,8 +78,9 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
   /// Retirements in flight (success or failure still to be learned).
   final List<Future<void>> _pendingRetirements = <Future<void>>[];
   /// Retirements that failed: durable, and a permanent block on admitting
-  /// another audible owner.
-  final List<Object> _retirementFailures = <Object>[];
+  /// another audible owner. Kept with their stack traces so the blocking
+  /// failure preserves its original throw site.
+  final List<_RetirementFailure> _retirementFailures = <_RetirementFailure>[];
 
   // -------------------------------------------------------------------
   // Ownership
@@ -124,9 +125,10 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
       (Object? value) {
         _pendingRetirements.remove(retirement);
       },
-      onError: (Object error) {
+      onError: (Object error, StackTrace stackTrace) {
         if (_pendingRetirements.remove(retirement)) {
-          _retirementFailures.add(error);
+          _retirementFailures
+              .add(_RetirementFailure(error, stackTrace));
         }
       },
     ));
@@ -138,9 +140,11 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
   /// the blocking failure, or null when quiescence is confirmed.
   Future<CourseAudioFailure?> _retirementBlocker() async {
     if (_retirementFailures.isNotEmpty) {
+      final _RetirementFailure failure = _retirementFailures.first;
       return CourseAudioFailure(
         reason: CourseAudioFailureReason.cleanupFailed,
-        cause: _retirementFailures.first,
+        cause: failure.error,
+        stackTrace: failure.stackTrace,
       );
     }
     if (_pendingRetirements.isEmpty) {
@@ -151,21 +155,25 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
     try {
       await Future.wait<void>(snapshot, eagerError: false)
           .timeout(_deadlines.cleanup);
-    } on TimeoutException catch (error) {
+    } on TimeoutException catch (error, stackTrace) {
       return CourseAudioFailure(
         reason: CourseAudioFailureReason.cleanupFailed,
         cause: error,
+        stackTrace: stackTrace,
       );
-    } on Object catch (error) {
+    } on Object catch (error, stackTrace) {
       return CourseAudioFailure(
         reason: CourseAudioFailureReason.cleanupFailed,
         cause: error,
+        stackTrace: stackTrace,
       );
     }
     if (_retirementFailures.isNotEmpty) {
+      final _RetirementFailure failure = _retirementFailures.first;
       return CourseAudioFailure(
         reason: CourseAudioFailureReason.cleanupFailed,
-        cause: _retirementFailures.first,
+        cause: failure.error,
+        stackTrace: failure.stackTrace,
       );
     }
     return null;
@@ -346,7 +354,7 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
           stackTrace: stackTrace,
         ),
       );
-    } on Object catch (error) {
+    } on Object catch (error, stackTrace) {
       if (!_owns(token)) {
         return CourseAudioResult.cancelled(referenceId: id);
       }
@@ -357,7 +365,7 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
       return CourseAudioResult.failed(
         referenceId: id,
         source: null,
-        failure: _classify(error, null, null),
+        failure: _classify(error, stackTrace, null),
       );
     }
     if (!_owns(token)) {
@@ -427,12 +435,32 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
     CourseAudioCatalog? catalog;
     try {
       catalog = await _loadedCatalogue();
-    } on Object {
-      // Legacy tolerance: the practice bridge must keep working when the
-      // catalogue cannot be read. An unreadable catalogue cannot prove
-      // coverage, so the exact text is spoken as practice speech — the
-      // legacy path. This is not a recording-failure substitution.
-      return _runSpeech(token, word, word);
+    } on TimeoutException catch (error, stackTrace) {
+      if (!_owns(token)) {
+        return CourseAudioResult.cancelled(referenceId: word);
+      }
+      return CourseAudioResult.failed(
+        referenceId: word,
+        source: null,
+        failure: CourseAudioFailure(
+          reason: CourseAudioFailureReason.startupTimeout,
+          cause: error,
+          stackTrace: stackTrace,
+        ),
+      );
+    } on Object catch (error, stackTrace) {
+      if (!_owns(token)) {
+        return CourseAudioResult.cancelled(referenceId: word);
+      }
+      // An active catalogue resolution failure (typed or generic) cannot
+      // establish coverage: it is surfaced for Retry, never papered over
+      // with a speech selection. The approved legacy speech path requires a
+      // successful resolution proving the text is uncovered/unrecorded.
+      final CourseAudioFailure failure = error is CourseAudioException
+          ? error.failure
+          : _classify(error, stackTrace, null);
+      return CourseAudioResult.failed(
+          referenceId: word, source: null, failure: failure);
     }
     if (!_owns(token)) {
       return CourseAudioResult.cancelled(referenceId: word);
@@ -458,6 +486,9 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
 
   Future<CourseAudioResult> _runSpeech(
       int token, String id, String text) async {
+    if (!_owns(token)) {
+      return CourseAudioResult.cancelled(referenceId: id);
+    }
     final CoursePracticeSpeechSession session;
     try {
       session = _speechFactory();
@@ -471,7 +502,23 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
         failure: _classify(error, stackTrace, CourseAudioSource.practiceTts),
       );
     }
+    // The factory callback may re-enter the facade (stop/replacement);
+    // a session adopted by a request that has lost ownership must be
+    // released, never dispatched and never retained.
+    if (!_owns(token)) {
+      await _releaseUnowned(session);
+      return CourseAudioResult.cancelled(referenceId: id);
+    }
     _activeSpeech = session;
+    if (!_owns(token)) {
+      // Lost after assignment: the engine is unadopted — retire it
+      // directly instead of dispatching under a newer identity.
+      if (identical(_activeSpeech, session)) {
+        _activeSpeech = null;
+      }
+      await _releaseUnowned(session);
+      return CourseAudioResult.cancelled(referenceId: id);
+    }
 
     final Future<void> speakFuture;
     try {
@@ -497,6 +544,18 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
     try {
       await speakFuture
           .timeout(_deadlines.setup + _deadlines.ttsUtterance);
+    } on PhaseTimeoutException catch (error, stackTrace) {
+      // The session typed the expired phase (setup or utterance); it must
+      // be classified from the typed cause, before the generic timeout
+      // clause can intercept the subtype.
+      if (!_owns(token)) {
+        return CourseAudioResult.cancelled(referenceId: id);
+      }
+      return CourseAudioResult.failed(
+        referenceId: id,
+        source: CourseAudioSource.practiceTts,
+        failure: _classify(error, stackTrace, CourseAudioSource.practiceTts),
+      );
     } on TimeoutException catch (error, stackTrace) {
       if (!_owns(token)) {
         return CourseAudioResult.cancelled(referenceId: id);
@@ -595,49 +654,83 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
       return CourseAudioResult.cancelled(referenceId: id);
     }
 
+    final Future<void> startAck;
     try {
-      await session.start().timeout(_deadlines.setup);
-    } on TimeoutException catch (error, stackTrace) {
-      events.cancel();
-      return _setupFailure(token, id, recording, error, stackTrace,
-          timedOut: true);
+      startAck = session.start();
     } on Object catch (error, stackTrace) {
       events.cancel();
       return _setupFailure(token, id, recording, error, stackTrace,
           timedOut: false);
     }
+    // The raw acknowledgment must be observed and fenced, whatever its
+    // settlement: a quiet observer keeps a late release from becoming an
+    // unhandled error, and the session fences it at retirement.
+    unawaited(startAck.then<void>((Object? value) {},
+        onError: (Object error) {}));
     if (!_owns(token)) {
       events.cancel();
       return CourseAudioResult.cancelled(referenceId: id);
     }
 
-    // Completion: only the session's actual completion event counts
-    // success; the applied bound is max(floor, duration + slack) after the
-    // resume dispatch. Elapsed time, stop, disposal, and timeout are not
-    // completion.
-    try {
-      await terminal.future
-          .timeout(_deadlines.recordingCompletion(recording.duration));
-    } on TimeoutException catch (error, stackTrace) {
-      events.cancel();
-      if (!_owns(token)) {
-        return CourseAudioResult.cancelled(referenceId: id);
+    // Completion coordination, armed at the resume dispatch (never re-armed
+    // after the acknowledgement): the applied bound is
+    // max(floor, duration + slack) from the start dispatch. Only the
+    // session's actual terminal event counts success; elapsed time, stop,
+    // disposal, and timeout are not completion. Whichever settles first —
+    // an actual terminal event, the dispatch-origin completion bound, or a
+    // start-ack settlement — publishes exactly one terminal; whatever
+    // arrives later (a late ack success or failure) is fenced, never an
+    // override.
+    final Completer<CourseAudioResult> public =
+        Completer<CourseAudioResult>();
+    void settleOnce(CourseAudioResult result) {
+      if (public.isCompleted) {
+        return;
       }
-      return CourseAudioResult.failed(
-        referenceId: id,
-        source: recording.source,
-        failure: CourseAudioFailure(
-          reason: CourseAudioFailureReason.completionTimeout,
-          cause: error,
-          stackTrace: stackTrace,
-        ),
-      );
+      if (!_owns(token)) {
+        public.complete(CourseAudioResult.cancelled(referenceId: id));
+        return;
+      }
+      public.complete(result);
     }
+
+    unawaited(terminal.future
+        .timeout(_deadlines.recordingCompletion(recording.duration))
+        .then<void>(
+          (CourseAudioResult result) => settleOnce(result),
+          onError: (Object error, StackTrace stackTrace) {
+            final CourseAudioFailure failure = error is TimeoutException
+                ? CourseAudioFailure(
+                    reason: CourseAudioFailureReason.completionTimeout,
+                    cause: error,
+                    stackTrace: stackTrace,
+                  )
+                : _classify(error, stackTrace, recording.source);
+            settleOnce(CourseAudioResult.failed(
+                referenceId: id, source: recording.source, failure: failure));
+          },
+        ));
+    unawaited(startAck.timeout(_deadlines.setup).then<void>(
+          (Object? value) {
+            // Acknowledgment success is not completion: the bound or an
+            // actual event decides.
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            final CourseAudioFailure failure = error is TimeoutException
+                ? CourseAudioFailure(
+                    reason: CourseAudioFailureReason.startupTimeout,
+                    cause: error,
+                    stackTrace: stackTrace,
+                  )
+                : _classify(error, stackTrace, recording.source);
+            settleOnce(CourseAudioResult.failed(
+                referenceId: id, source: recording.source, failure: failure));
+          },
+        ));
+
+    await public.future;
     events.cancel();
-    // The terminal holds the event's value (completed or a typed failure);
-    // a late event after this settle cannot double-record because the
-    // token is invalidated with this terminal.
-    return terminal.future;
+    return public.future;
   }
 
   CourseAudioResult _setupFailure(
@@ -685,6 +778,18 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
     return null;
   }
 
+  /// Releases a speech session that was created but never adopted (the
+  /// request lost ownership between creation and assignment). Its cleanup
+  /// must observe quietly: a never-adopted engine does not belong to the
+  /// adoption retirement gate and must not fail or block a newer owner.
+  Future<void> _releaseUnowned(CoursePracticeSpeechSession session) async {
+    try {
+      await session.dispose();
+    } on Object {
+      // Quiet: see above — an unadopted engine is not the owner's engine.
+    }
+  }
+
   /// Normalizes a failure for the *selected* source, preserving the
   /// diagnostic cause: recognizable browser gesture rejections and
   /// French-voice unavailability (TTS only) get their stable reasons;
@@ -697,6 +802,14 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
   ) {
     if (error is CourseAudioException) {
       return error.failure;
+    }
+    if (error is PhaseTimeoutException) {
+      // The adapter typed the expired phase; classify from it.
+      return CourseAudioFailure(
+        reason: error.phase,
+        cause: error,
+        stackTrace: stackTrace,
+      );
     }
     if (error is TimeoutException) {
       // A stray timeout (phase timeouts are classified at the boundary).
@@ -715,7 +828,7 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
     }
     if (selectedSource == CourseAudioSource.practiceTts &&
         error is StateError &&
-        error.toString().contains('French voice')) {
+        error.message == canonicalFrenchVoiceUnavailableMessage) {
       return CourseAudioFailure(
         reason: CourseAudioFailureReason.unavailableVoice,
         cause: error,
@@ -729,21 +842,22 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
     );
   }
 
-  /// Conservative recognition of browser autoplay/gesture rejection, the
-  /// standard `NotAllowedError` family. Actual platform behavior must be
-  /// verified on a real browser; this only stabilizes the classification.
+  /// Narrow recognition of a browser autoplay/gesture rejection: only the
+  /// standard DOM exception name delivered as a platform-exception *code*.
+  /// Substring inference (code or message) would relabel unrelated
+  /// failures as gesture requirements; message and code resemblance stay
+  /// generic. Actual platform behavior must be verified on a real browser
+  /// — this only stabilizes the classification.
   bool _isBrowserGestureRejection(Object error) {
-    if (error is! PlatformException) {
-      return false;
-    }
-    final String code = error.code.toLowerCase();
-    if (code.contains('notallowed') || code.contains('gesture')) {
-      return true;
-    }
-    final String message = (error.message ?? '').toLowerCase();
-    return message.contains('not allowed') ||
-        message.contains('user activation') ||
-        message.contains('user-activated') ||
-        message.contains('gesture');
+    return error is PlatformException && error.code == 'NotAllowedError';
   }
+}
+
+/// A failed retirement outcome: the error and the throw stack it arrived
+/// with, kept together so the durable blocker preserves both.
+final class _RetirementFailure {
+  const _RetirementFailure(this.error, this.stackTrace);
+
+  final Object error;
+  final StackTrace? stackTrace;
 }
