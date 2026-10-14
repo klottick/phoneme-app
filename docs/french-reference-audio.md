@@ -1,14 +1,28 @@
 # FR-02 — French word-audio candidates (pending review)
 
-**Status: candidate package, linguistic review PENDING.** This document is the
-rights/review handoff for the offline French word-audio candidate package. It
-is **not** runtime configuration: the production app does not import or load
-these artefacts for playback, and no default recording player exists for them
-yet (FR-03 Task 4 is pending). What does exist today: the `pubspec.yaml`
-asset registration and a metadata-only catalogue loader/credit view — viewing
-credits loads the bundled manifest, provenance and legal texts but never
-initialises an audio engine. Nothing here is linguistic sign-off, accent
-approval, or browser/iOS/Android playback approval.
+**Status: candidate package, linguistic review PENDING; alpha-practice
+playback wired (FR-03 Task 4, controller review pending).** This document is
+the rights/review handoff for the offline French word-audio candidate
+package. These 24 binaries remain **review-pending candidates**, and nothing
+in this document is linguistic sign-off, accent approval, or playback
+approval.
+
+FR-03 Task 4 (2026-10-14) wired the default playback path in **alpha
+practice**: the shared player serves the bundled unverified recording for
+every covered word first, and only uncovered legacy text may use device
+practice speech. Every listening and practice surface pins the exact
+disclosure `Alpha audio: recordings are unverified; device speech is
+practice-only.`, failed playbacks surface Retry/unavailable guidance only
+(never an install-voice instruction), and caller lifecycles (Stop, End
+Session, navigation, disposal) cancel in-flight playback with no heard mark,
+no unlock, no progress and no failure text. The recording-first selection
+policy, cancellation-vs-failure semantics, and the no-TTS-substitution rule
+on recording failure are covered by the Tasks 1–3 contracts plus the new
+provider and lifecycle tests. Still pending, unchanged:
+`catalogueStatus: "candidate"`, all 24 `review.status: "pending"` entries,
+the 35 live readiness items, and real browser/iOS/Android playback evidence
+(manual gate — see
+`docs/superpowers/research/2026-10-14-fr03-alpha-playback-verification.md`).
 
 ## What this package is
 
@@ -189,9 +203,18 @@ evidence inspection remains an independent acceptance check.
   `reviewedRecording`, and does not change default TTS behaviour. Playback
   (FR-03 Task 4) is still pending. No product or tooling dependencies were
   added by this step.
-- **Not yet done:** a default recording player, browser/iOS/Android playback
-  checks, and the reviewed-resource readiness promotion. The root `LICENSE`
-  (MIT, and its recorded Supabase-notice provenance concern) is untouched.
+- **Done (FR-03 Task 4, delivered 2026-10-14, controller review
+  pending):** the default recording player exists for alpha practice — the
+  shared provider (`courseReferenceAudioProvider`, with
+  `courseAudioProvider` serving that same one instance) is
+  recording-first, the four listening/practice surfaces pin the exact alpha
+  disclosure, and Stop/End Session/navigation/disposal retire in-flight
+  playback (cancellation is distinct from audio failure and never marks
+  heard, unlocks choices, books progress, or presents failure text). Still
+  **not done:** browser/iOS/Android real-playback checks and the
+  reviewed-resource readiness promotion.
+- The root `LICENSE` (MIT, and its recorded Supabase-notice provenance
+  concern) is untouched.
 
 ## Remaining gaps (explicitly outstanding)
 
@@ -201,6 +224,10 @@ evidence inspection remains an independent acceptance check.
 - Full FR-02 reviewed-audio delivery (linguistic sign-off on the hashed
   binaries, promotion policy revision, assessment suitability decision) is
   still outstanding.
+- Alpha-practice playback (FR-03 Task 4) is wired behind the exact
+  disclosure, but real browser/iOS/Android/device playback evidence and
+  linguistic review are still PENDING manual gates — not passed by the
+  automated provider/lifecycle tests.
 
 ## Review worksheet (BLANK — deliberately unfilled)
 
@@ -255,12 +282,24 @@ CC BY-SA 3.0" notice, which is insufficient for this 4.0 package), plus the
 metadata-only catalogue loader and legal-text view described above. Those do
 **not** constitute a player.
 
-FR-03 (later tasks) / release work still owns: a separately approved
-loader/player contract for **default recording playback** (Task 4, still
-pending — no player has shipped), real playback checks on browser/iOS/Android,
+FR-03 **Tasks 2–3 (done)** delivered the ownership-aware facade contract: one
+active request at a time, recording-first selection, `reviewedOnly` denial of
+every current pending candidate (no reviewed recording exists yet),
+distinct cancellation vs failure delivery, and recording failures that never
+silently substitute TTS.
+
+FR-03 **Task 4 (delivered 2026-10-14, controller review pending)** made that
+facade the default player for **alpha practice only**: covered words play
+the bundled unverified recording, only uncovered legacy text uses device
+practice speech, the four listening/practice surfaces pin the exact
+`Alpha audio: recordings are unverified; device speech is practice-only.`
+disclosure, a failed playback stays Retry-retryable (never
+"install a French voice"), and caller lifecycles retire in-flight playback
+without heard marks, unlocks, progress, or failure text. Real playback
+checks on browser/iOS/Android, the reviewed-resource readiness promotion,
 and app-terms/store/effective-DRM checks for the audio's licensed reuse (do
-not presume shipping resolves DRMs). It must not silently promote pending
-entries or clear readiness warnings on import.
+not presume shipping resolves DRMs) are **still pending**. Nothing in
+Task 4 promotes pending entries or clears readiness warnings.
 
 The app's code remains MIT under the root `LICENSE`; the audio is separately
 licensed under the CC licences above. Do not relabel third-party audio MIT.

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
@@ -24,6 +25,43 @@ class TestFrenchAudio implements CourseAudio {
 
   @override
   Future<void> stop() async {}
+}
+
+/// Held-cue boundary audio: [speak] stays open until [release] settles it
+/// (success or the given error), and [stop] retires the held request as a
+/// cancellation, like the shared player's stop semantics.
+class HeldCueAudio implements CourseAudio {
+  final List<String> spoken = <String>[];
+  int stops = 0;
+  Completer<Object?>? _pending;
+
+  @override
+  Future<void> speak(String word) {
+    spoken.add(word);
+    final Completer<Object?> settle = Completer<Object?>();
+    _pending = settle;
+    return settle.future.then((Object? _) {});
+  }
+
+  @override
+  Future<void> stop() {
+    stops++;
+    final Completer<Object?>? pending = _pending;
+    if (pending != null && !pending.isCompleted) {
+      pending.completeError(const CourseAudioCancelledException());
+    }
+    return Future<void>.value();
+  }
+
+  void release([Object? error]) {
+    final Completer<Object?>? pending = _pending;
+    if (pending == null || pending.isCompleted) return;
+    if (error == null) {
+      pending.complete();
+    } else {
+      pending.completeError(error);
+    }
+  }
 }
 
 void main() {
@@ -92,6 +130,61 @@ void main() {
     await tester.pump();
     expect(find.text('0 pts'), findsNothing);
     expect((await CourseProgressStore('en-fr').load())['evidence'], isEmpty);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+      'backgrounding during a held audio cue suppresses the late failure',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final board = SoundMatchEngine(random: Random(9));
+    SharedPreferences.setMockInitialValues({
+      'arcade.v1.en-fr.sound': jsonEncode({
+        'session': {'remaining': 60, 'round': 1, 'score': 0},
+        'board': board.toJson(),
+      })
+    });
+    final audio = HeldCueAudio();
+    await tester.pumpWidget(ProviderScope(
+        overrides: [courseAudioProvider.overrideWithValue(audio)],
+        child: const MaterialApp(home: ArcadeScreen(silent: false))));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Resume saved board'), 200);
+    await tester.tap(find.text('Resume saved board'));
+    await tester.pump(const Duration(seconds: 12));
+    await tester.pump();
+    expect(audio.spoken, isNotEmpty, reason: 'the cue must reach playback');
+    // Suspend: the arcade screen stops the shared audio and pauses the round.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pumpAndSettle();
+    expect(
+      audio.stops,
+      greaterThanOrEqualTo(1),
+      reason: 'suspending must stop in-flight audio',
+    );
+    // Resume the paused round: the cancelled cue must not be displayed as
+    // an audio failure, and it must never arm the bonus.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Resume'));
+    await tester.pump();
+    expect(
+      find.textContaining('Audio unavailable.'),
+      findsNothing,
+      reason: 'a cancelled cue is not an audio failure',
+    );
+    expect(
+      find.text('Which vowel did you hear? Your next match can earn +100.'),
+      findsNothing,
+      reason: 'a cancelled cue must not arm the bonus match',
+    );
+    final data = await CourseProgressStore('en-fr').load();
+    expect(
+      data['evidence'],
+      isEmpty,
+      reason: 'a cancelled cue never records listening evidence',
+    );
     await tester.pumpWidget(const SizedBox());
   });
 

@@ -205,6 +205,10 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
         _audioReady = true;
         _message = 'Which vowel did you hear? Your next match can earn +100.';
       });
+    } on CourseAudioCancelledException {
+      // A user/system stop (backgrounding, switching, disposal) cancelled
+      // the cue: it is not an audio failure, and it must never arm the
+      // bonus or be displayed as one.
     } catch (_) {
       if (mounted) {
         setState(() => _message =
@@ -370,6 +374,10 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
                               const Expanded(
                                   child: Text('Listen for the bonus sound')),
                             ]),
+                          if (!widget.silent)
+                            Text(alphaAudioDisclosure,
+                                textAlign: TextAlign.end,
+                                style: Theme.of(context).textTheme.bodySmall),
                           const SizedBox(height: 8),
                           if (widget.silent)
                             GestureDetector(

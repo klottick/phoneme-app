@@ -108,7 +108,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       '"Reload saved progress" to load the saved state.';
   static const String _audioErrorText =
       'The French audio could not be played. Tap "Listen to the word" to try '
-      'again.';
+      'again. '
+      'Alpha audio: recordings are unverified; device speech is practice-only.';
 
   LessonSection? _section;
   LessonSectionStore? _store;
@@ -427,6 +428,15 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     Object? failure;
     try {
       await audio.speak(word);
+    } on CourseAudioCancelledException {
+      // A user/system stop invalidates playback: quiet, retryable — it is
+      // neither a success (no fresh-hearing) nor an audio failure.
+      if (generation == _generation &&
+          playback == _playbackGeneration &&
+          mounted) {
+        setState(() => _busy = false);
+      }
+      return;
     } catch (error) {
       failure = error;
     }

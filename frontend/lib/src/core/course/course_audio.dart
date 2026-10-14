@@ -3,7 +3,10 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+import 'course_audio_catalog.dart';
 import 'course_audio_contract.dart';
+import 'course_recording_backend.dart';
+import 'course_reference_audio.dart';
 
 export 'course_audio_contract.dart';
 
@@ -212,12 +215,43 @@ class FrenchWordAudio implements CourseAudio {
   }
 }
 
-final courseAudioProvider = Provider<CourseAudio>((ref) {
-  final audio = FrenchWordAudio();
+/// The exact alpha audio disclosure shown on every listening and practice
+/// surface. One shared constant so no surface drifts from the wording: the
+/// bundled recordings are linguistically unverified alpha material, and
+/// device speech is practice-only.
+const String alphaAudioDisclosure =
+    'Alpha audio: recordings are unverified; device speech is practice-only.';
+
+/// The shared reference-audio player for the alpha. This provider [owns]
+/// the one [FrenchReferenceAudio] instance: construction is lazy (no
+/// catalogue load, no recording engine, no speech engine until a request
+/// selects one), covered words select the bundled unverified recordings
+/// first, only uncovered legacy text may fall back to practice speech, and
+/// provider disposal retires any active request idempotently.
+final courseReferenceAudioProvider = Provider<CourseReferenceAudio>((ref) {
+  final CourseAudioCatalogLoader loader =
+      ref.watch(courseAudioCatalogLoaderProvider);
+  final FrenchReferenceAudio audio = FrenchReferenceAudio(
+    loadCatalog: loader.load,
+    recordingFactory: createCourseRecordingSession,
+    speechFactory: createFrenchPracticeSpeechSession,
+    deadlines: const CourseAudioDeadlines(),
+  );
   ref.onDispose(() {
-    audio.stop().catchError((Object _) {});
+    unawaited(audio.dispose().catchError((Object _) {}));
   });
   return audio;
+});
+
+/// The existing legacy provider now serves the shared alpha player instead
+/// of a raw TTS adapter: `speak(word)` plays the bundled recording for
+/// covered words and keeps practice speech only for uncovered legacy text.
+/// The two-method [CourseAudio] contract is unchanged, so existing
+/// `implements CourseAudio` mocks and
+/// `courseAudioProvider.overrideWithValue(...)` overrides compile and run
+/// untouched.
+final courseAudioProvider = Provider<CourseAudio>((ref) {
+  return ref.watch(courseReferenceAudioProvider);
 });
 
 /// Bounded [CoursePracticeSpeechSession] over [FrenchWordAudio].

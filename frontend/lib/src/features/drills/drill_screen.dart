@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -19,6 +20,28 @@ class _DrillScreenState extends ConsumerState<DrillScreen> {
   int _correct = 0;
   bool _isPlaying = false;
   bool _heard = false;
+  CourseAudio? _audio;
+
+  /// Request-generation guard: a playback that is superseded (Stop control,
+  /// End Session, leaving the screen) must not publish its late settlement
+  /// over the current state — no heard mark, no unlock, no failure text.
+  int _playGeneration = 0;
+
+  @override
+  void dispose() {
+    _retireAudio();
+    super.dispose();
+  }
+
+  /// Retires in-flight shared playback: the current request loses ownership
+  /// (its late settlement is cancelled and ignored) and then stops.
+  void _retireAudio() {
+    _playGeneration++;
+    final CourseAudio? audio = _audio;
+    if (audio != null) {
+      unawaited(audio.stop().catchError((Object _) {}));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -60,6 +83,11 @@ class _DrillScreenState extends ConsumerState<DrillScreen> {
                 ),
                 const SizedBox(height: 8),
                 const Text('Listen and choose the word you hear.'),
+                const SizedBox(height: 4),
+                const Text(
+                  alphaAudioDisclosure,
+                  style: TextStyle(fontStyle: FontStyle.italic),
+                ),
                 const SizedBox(height: 16),
                 Row(
                   children: [
@@ -72,7 +100,7 @@ class _DrillScreenState extends ConsumerState<DrillScreen> {
                       icon: Icon(_isPlaying ? Icons.stop : Icons.play_arrow),
                       iconSize: 36,
                       tooltip: 'Play audio',
-                      onPressed: () => _playAudio(current),
+                      onPressed: () => _onPlayStop(current),
                     ),
                   ],
                 ),
@@ -109,22 +137,51 @@ class _DrillScreenState extends ConsumerState<DrillScreen> {
     );
   }
 
+  /// Play/Stop control: while a playback is held, the same control retires
+  /// it — the request loses ownership and its late settlement is ignored —
+  /// so a user stop never marks heard, unlocks the choices, or surfaces as
+  /// an audio failure.
+  Future<void> _onPlayStop(dynamic currentPair) async {
+    if (_isPlaying) {
+      _retireAudio();
+      if (mounted) {
+        setState(() {
+          _isPlaying = false;
+          _heard = false;
+        });
+      }
+      return;
+    }
+    await _playAudio(currentPair);
+  }
+
   Future<void> _playAudio(dynamic currentPair) async {
-    if (_isPlaying) return;
+    final int generation = ++_playGeneration;
     setState(() {
       _isPlaying = true;
       _heard = false;
     });
     try {
-      await ref.read(courseAudioProvider).speak(currentPair.wordA);
-      if (mounted) setState(() => _heard = true);
+      final CourseAudio audio = ref.read(courseAudioProvider);
+      // Captured for retirement: Stop, End Session, and disposal must be
+      // able to stop exactly this shared playback.
+      _audio = audio;
+      await audio.speak(currentPair.wordA);
+      if (mounted && generation == _playGeneration) {
+        setState(() => _heard = true);
+      }
+    } on CourseAudioCancelledException {
+      // Retired by the Stop control, End Session, or screen disposal: the
+      // request is no longer owned, so its settlement is ignored.
     } catch (_) {
-      if (mounted) {
+      if (mounted && generation == _playGeneration) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('French audio unavailable. Please retry.')));
       }
     } finally {
-      if (mounted) setState(() => _isPlaying = false);
+      if (mounted && generation == _playGeneration) {
+        setState(() => _isPlaying = false);
+      }
     }
   }
 
@@ -160,6 +217,10 @@ class _DrillScreenState extends ConsumerState<DrillScreen> {
   }
 
   Future<void> _endSession() async {
+    // Retire any in-flight playback before the screen exits, so a late
+    // settlement can never mark heard or unlock the choices.
+    _retireAudio();
+    setState(() => _isPlaying = false);
     await ref.read(streakServiceProvider).recordPractice();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
@@ -6,6 +7,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
+import 'package:linguist/src/core/course/course_audio.dart';
+import 'package:linguist/src/core/course/course_progress.dart';
 import 'package:linguist/src/features/arcade/arcade_screen.dart';
 import 'package:linguist/src/features/arcade/sound_match_engine.dart';
 
@@ -16,6 +19,43 @@ class FailablePreferences extends InMemorySharedPreferencesStore {
   Future<bool> setValue(String valueType, String key, Object value) {
     if (failWrites) return Future.value(false);
     return super.setValue(valueType, key, value);
+  }
+}
+
+/// Held-cue boundary audio: [speak] stays open until [release] settles it,
+/// and [stop] retires the held request as a cancellation, like the shared
+/// player's stop semantics.
+final class _HeldCueAudio implements CourseAudio {
+  final List<String> spoken = <String>[];
+  int stops = 0;
+  Completer<Object?>? _pending;
+
+  @override
+  Future<void> speak(String word) {
+    spoken.add(word);
+    final Completer<Object?> settle = Completer<Object?>();
+    _pending = settle;
+    return settle.future.then((Object? _) {});
+  }
+
+  @override
+  Future<void> stop() {
+    stops++;
+    final Completer<Object?>? pending = _pending;
+    if (pending != null && !pending.isCompleted) {
+      pending.completeError(const CourseAudioCancelledException());
+    }
+    return Future<void>.value();
+  }
+
+  void release([Object? error]) {
+    final Completer<Object?>? pending = _pending;
+    if (pending == null || pending.isCompleted) return;
+    if (error == null) {
+      pending.complete();
+    } else {
+      pending.completeError(error);
+    }
   }
 }
 
@@ -94,4 +134,64 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
   }
+
+  testWidgets(
+      'switching to Word Match during a held cue retires the round cleanly '
+      'and records no listening evidence', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final board = SoundMatchEngine(random: Random(9));
+    const checkpointPreference = 'arcade.v1.en-fr.sound';
+    final store = FailablePreferences({
+      'flutter.$checkpointPreference': jsonEncode({
+        'session': {'remaining': 60, 'round': 2, 'score': 50},
+        'board': board.toJson(),
+      })
+    });
+    SharedPreferencesStorePlatform.instance = store;
+    addTearDown(() => SharedPreferences.setMockInitialValues({}));
+    final router = GoRouter(initialLocation: '/arcade/sound', routes: [
+      GoRoute(
+          path: '/arcade/sound',
+          builder: (_, __) => const ArcadeScreen(silent: false)),
+      GoRoute(
+          path: '/arcade/word',
+          builder: (_, __) => const ArcadeScreen(silent: true)),
+    ]);
+    addTearDown(router.dispose);
+    final audio = _HeldCueAudio();
+    await tester.pumpWidget(ProviderScope(
+        overrides: [courseAudioProvider.overrideWithValue(audio)],
+        child: MaterialApp.router(routerConfig: router)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Resume saved board'));
+    await tester.pump(const Duration(seconds: 12));
+    await tester.pump();
+    expect(audio.spoken, isNotEmpty,
+        reason: 'the cue must reach playback before the switch');
+    // Switch away while the cue is still held: the save must land on the
+    // captured owner and the round must not arm its bonus.
+    await tester.tap(find.text('Play without audio: Word Match'));
+    await tester.pumpAndSettle();
+    expect(router.routeInformationProvider.value.uri.path, '/arcade/word',
+        reason: 'the switch must succeed even with a held cue');
+    final prefs = await SharedPreferences.getInstance();
+    final saved =
+        jsonDecode(prefs.getString(checkpointPreference)!) as Map<String, dynamic>;
+    expect(
+        (saved['session'] as Map<String, dynamic>)['score'],
+        greaterThanOrEqualTo(50),
+        reason: 'the round checkpoint must be saved');
+    // The held cue settles late: quiet, no evidence, no leaked exception.
+    audio.release();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    final data = await CourseProgressStore('en-fr').load();
+    expect(
+      data['evidence'],
+      isEmpty,
+      reason: 'a cue cancelled by navigation must not record evidence',
+    );
+    await tester.pumpWidget(const SizedBox());
+  });
 }
