@@ -3,9 +3,12 @@
 **Status: candidate package, linguistic review PENDING.** This document is the
 rights/review handoff for the offline French word-audio candidate package. It
 is **not** runtime configuration: the production app does not import or load
-these artefacts, and no player, asset registration or catalogue loader exists
-for them. Nothing here is linguistic sign-off, accent approval, or
-browser/iOS/Android playback approval.
+these artefacts for playback, and no default recording player exists for them
+yet (FR-03 Task 4 is pending). What does exist today: the `pubspec.yaml`
+asset registration and a metadata-only catalogue loader/credit view — viewing
+credits loads the bundled manifest, provenance and legal texts but never
+initialises an audio engine. Nothing here is linguistic sign-off, accent
+approval, or browser/iOS/Android playback approval.
 
 ## What this package is
 
@@ -163,7 +166,7 @@ technical/metadata rules — **not** that its licence assertions are true, not
 that the speech is correct, and not playback approval. Manual per-file
 evidence inspection remains an independent acceptance check.
 
-## Candidate format and non-registration
+## Candidate format and registration status
 
 - `frontend/assets/audio/fr/manifest.json` — `schemaVersion: 1`,
   `catalogueStatus: "candidate"`, `language: "fr"`, 24 ordered entries
@@ -177,10 +180,18 @@ evidence inspection remains an independent acceptance check.
   `frenchAudioResources` is **not** populated from this manifest, no entry is
   set to `reviewedRecording`, and all 35 production readiness items (including
   the 24 missing-reviewed word recordings) remain as they were.
-- No `pubspec.yaml` registration, no player, no runtime catalogue loader, no
-  new enum or public API; no product or tooling dependencies were added; the
-  root `LICENSE` (MIT, and its recorded Supabase-notice provenance concern) is
-  untouched.
+- **FR-03 Task 1 (done):** the assets are now registered in `pubspec.yaml`
+  (manifest, provenance, `words/`, `licenses/`), and a metadata-only catalogue
+  loader plus an in-app credit view read them. That loader validates the
+  pending schema and credit associations, coalesces/concurrent-loads, and serves
+  the bundled licence legal texts. It performs **no playback**: it does not
+  select a source for a player, does not switch any resource to
+  `reviewedRecording`, and does not change default TTS behaviour. Playback
+  (FR-03 Task 4) is still pending. No product or tooling dependencies were
+  added by this step.
+- **Not yet done:** a default recording player, browser/iOS/Android playback
+  checks, and the reviewed-resource readiness promotion. The root `LICENSE`
+  (MIT, and its recorded Supabase-notice provenance concern) is untouched.
 
 ## Remaining gaps (explicitly outstanding)
 
@@ -236,14 +247,20 @@ evidence. None of those has occurred.
 
 FR-03 receives: these candidate IDs/paths/hashes/format and rights metadata,
 this guide, and the explicit warning that the assets are **not approved
-runtime references**. FR-03 (or release work) owns: a separately approved
-loader/player contract, `pubspec.yaml` asset registration, **accurate
-in-app credits** (the existing settings credits cite generic Wikipedia
-audio under CC BY-SA 3.0 and are insufficient for this 4.0 package), real
-playback checks on browser/iOS/Android, and app-terms/store/effective-DRM
-checks for the audio's licensed reuse (do not presume shipping resolves DRMs).
-It must not silently promote pending entries or clear readiness warnings on
-import.
+runtime references**.
+
+FR-03 **Task 1 (done)** delivered the `pubspec.yaml` asset registration and the
+accurate in-app credits (replacing the generic "Wikipedia audio under
+CC BY-SA 3.0" notice, which is insufficient for this 4.0 package), plus the
+metadata-only catalogue loader and legal-text view described above. Those do
+**not** constitute a player.
+
+FR-03 (later tasks) / release work still owns: a separately approved
+loader/player contract for **default recording playback** (Task 4, still
+pending — no player has shipped), real playback checks on browser/iOS/Android,
+and app-terms/store/effective-DRM checks for the audio's licensed reuse (do
+not presume shipping resolves DRMs). It must not silently promote pending
+entries or clear readiness warnings on import.
 
 The app's code remains MIT under the root `LICENSE`; the audio is separately
 licensed under the CC licences above. Do not relabel third-party audio MIT.

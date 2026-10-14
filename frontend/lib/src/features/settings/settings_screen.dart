@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers/app_providers.dart';
 
 import '../../core/theme/theme_controller.dart';
+import 'french_audio_credits.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -88,9 +89,10 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                   SizedBox(height: 8),
                   Text('• IPA data: ipa-dict (MIT)'),
-                  Text('• Audio: Wikipedia (CC BY-SA 3.0)'),
                   Text('• Backend: Supabase'),
                   Text('• Frontend: Flutter'),
+                  SizedBox(height: 12),
+                  FrenchAudioCredits(),
                   SizedBox(height: 16),
                   Text(
                     'License: MIT',
