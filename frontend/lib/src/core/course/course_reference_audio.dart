@@ -1,0 +1,927 @@
+/// FR-03 Task 3: ownership-aware reference facade and bounded practice
+/// speech over the published Task 1–2 contracts.
+///
+/// [FrenchReferenceAudio] coordinates one active reference request at a time
+/// on an ownership token: a newer request, [stop], or [dispose] invalidates
+/// the current ownership *synchronously* before any platform work, and the
+/// invalidated request's terminal is exactly one `cancelled` result —
+/// delivered promptly, never after a raw settlement, and never twice.
+///
+/// Selection policy:
+/// * Unknown reference IDs fail (`unknownReference`) and never become
+///   text-derived TTS.
+/// * `reviewedOnly` denies every current pending candidate (and TTS) before
+///   any engine factory is called.
+/// * A declared but unrecorded word is `missingAsset`; a recorded normal
+///   with a requested slow take is `unavailableVariant`. Explicit
+///   `allowPracticeTts` (alpha practice only) permits TTS of the exact
+///   authored text — and only then.
+/// * A declared recording, once selected, is the source even if it fails:
+///   recording failures never silently substitute TTS.
+///
+/// Deadlines are injected and validated at construction; the applied bounds
+/// are `setup` for catalogue load, preparation, and start, `recordingCompletion`
+/// for playback, `setup + ttsUtterance` as the facade's total speech
+/// allowance (a speech timeout is therefore a completion-timeout failure),
+/// and `cleanup` for the next-owner retirement gate. Timeouts never establish
+/// quiescence: a retirement that cannot settle within the cleanup allowance
+/// fails the replacement (`cleanupFailed`) rather than overlapping audio, and
+/// a retirement that fails durably blocks new audible ownership with its
+/// original cause.
+///
+/// The legacy [CourseAudio] bridge resolves `speak` only for Completed:
+/// Failed raises [CourseAudioException], Cancelled raises the distinct
+/// [CourseAudioCancelledException] so success continuations cannot mark the
+/// word heard.
+library;
+
+import 'dart:async';
+
+import 'package:flutter/services.dart' show PlatformException;
+
+import 'browser_rejection_boundary.dart';
+import 'course_audio_catalog.dart';
+import 'course_audio_contract.dart';
+import 'course_exercise.dart';
+import 'course_recording_backend.dart';
+
+final class FrenchReferenceAudio implements CourseReferenceAudio {
+  FrenchReferenceAudio({
+    required Future<CourseAudioCatalog> Function() loadCatalog,
+    required CourseRecordingSession Function() recordingFactory,
+    required CoursePracticeSpeechSession Function() speechFactory,
+    CourseAudioDeadlines deadlines = const CourseAudioDeadlines(),
+  })  : _loadCatalog = loadCatalog,
+        _recordingFactory = recordingFactory,
+        _speechFactory = speechFactory,
+        _deadlines = deadlines {
+    deadlines.validate();
+  }
+
+  final Future<CourseAudioCatalog> Function() _loadCatalog;
+  final CourseRecordingSession Function() _recordingFactory;
+  final CoursePracticeSpeechSession Function() _speechFactory;
+  final CourseAudioDeadlines _deadlines;
+
+  /// Monotonically increasing ownership token; every terminal, stop, or
+  /// new request invalidates the current one.
+  int _owner = 0;
+  bool _disposed = false;
+
+  /// The active engine of the current request (at most one of each).
+  CourseRecordingSession? _activeRecording;
+  CoursePracticeSpeechSession? _activeSpeech;
+
+  /// The current request's terminal completer (at most one unsettled).
+  Completer<CourseAudioResult>? _pending;
+  String? _pendingId;
+
+  /// Retirements in flight (success or failure still to be learned).
+  final List<Future<void>> _pendingRetirements = <Future<void>>[];
+  /// Retirements that failed: durable, and a permanent block on admitting
+  /// another audible owner. Kept with their stack traces so the blocking
+  /// failure preserves its original throw site.
+  final List<_RetirementFailure> _retirementFailures = <_RetirementFailure>[];
+
+  // -------------------------------------------------------------------
+  // Ownership
+  // -------------------------------------------------------------------
+
+  bool _owns(int token) => token == _owner && !_disposed;
+
+  void _requireUsable() {
+    if (_disposed) {
+      throw StateError(
+          'FrenchReferenceAudio is disposed; construct a new instance');
+    }
+  }
+
+  /// Invalidates the current ownership synchronously: the pending request
+  /// (if any) receives its one `cancelled` terminal now, and the active
+  /// engine — if any — is retired (its outcome is tracked).
+  void _invalidate() {
+    final Completer<CourseAudioResult>? pending = _pending;
+    final String? id = _pendingId;
+    _pending = null;
+    _pendingId = null;
+    _owner++;
+    final CourseRecordingSession? recording = _activeRecording;
+    _activeRecording = null;
+    if (recording != null) {
+      _trackRetirement(recording.stop());
+    }
+    final CoursePracticeSpeechSession? speechSession = _activeSpeech;
+    _activeSpeech = null;
+    if (speechSession != null) {
+      _trackRetirement(speechSession.dispose());
+    }
+    if (pending != null && !pending.isCompleted) {
+      pending.complete(CourseAudioResult.cancelled(referenceId: id));
+    }
+  }
+
+  void _trackRetirement(Future<void> retirement) {
+    _pendingRetirements.add(retirement);
+    unawaited(retirement.then<void>(
+      (Object? value) {
+        _pendingRetirements.remove(retirement);
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (_pendingRetirements.remove(retirement)) {
+          _retirementFailures
+              .add(_RetirementFailure(error, stackTrace));
+        }
+      },
+    ));
+  }
+
+  /// The next-owner gate: a failed retirement blocks immediately and
+  /// durably; a pending retirement is awaited up to the cleanup allowance,
+  /// after which the replacement fails rather than overlap audio. Returns
+  /// the blocking failure, or null when quiescence is confirmed.
+  Future<CourseAudioFailure?> _retirementBlocker() async {
+    if (_retirementFailures.isNotEmpty) {
+      final _RetirementFailure failure = _retirementFailures.first;
+      return CourseAudioFailure(
+        reason: CourseAudioFailureReason.cleanupFailed,
+        cause: failure.error,
+        stackTrace: failure.stackTrace,
+      );
+    }
+    if (_pendingRetirements.isEmpty) {
+      return null;
+    }
+    final List<Future<void>> snapshot =
+        List<Future<void>>.of(_pendingRetirements);
+    try {
+      await Future.wait<void>(snapshot, eagerError: false).timeout(
+            _deadlines.cleanup,
+            onTimeout: () {
+              // The facade owns this deadline: its expiry is the typed owned
+              // cleanup failure (created on onTimeout).
+              throw PhaseTimeoutException(
+                  CourseAudioFailureReason.cleanupFailed,
+                  'The cleanup deadline was exceeded.',
+                  _deadlines.cleanup);
+            },
+          );
+    } on Object catch (error, stackTrace) {
+      // Any retirement failure (the owned deadline above, or a source
+      // failure of the session's cleanup) blocks the next owner as a
+      // durable cleanup failure with its original cause and stack.
+      return CourseAudioFailure(
+        reason: CourseAudioFailureReason.cleanupFailed,
+        cause: error,
+        stackTrace: stackTrace,
+      );
+    }
+    if (_retirementFailures.isNotEmpty) {
+      final _RetirementFailure failure = _retirementFailures.first;
+      return CourseAudioFailure(
+        reason: CourseAudioFailureReason.cleanupFailed,
+        cause: failure.error,
+        stackTrace: failure.stackTrace,
+      );
+    }
+    return null;
+  }
+
+  // -------------------------------------------------------------------
+  // Registration (one terminal exactly)
+  // -------------------------------------------------------------------
+
+  /// Registers [run] as the current request. The core encodes all failures
+  /// as values and never throws; the defensive error path keeps the
+  /// terminal honest regardless.
+  Future<CourseAudioResult> _register(
+    int token,
+    String id,
+    Future<CourseAudioResult> run,
+  ) {
+    final Completer<CourseAudioResult> completer =
+        Completer<CourseAudioResult>();
+    _pending = completer;
+    _pendingId = id;
+    unawaited(run.then(
+      (CourseAudioResult result) {
+        if (token != _owner) {
+          return; // Superseded: its `cancelled` terminal was already given.
+        }
+        // This terminal is final: no later stale event may act on it.
+        _owner++;
+        if (_pending == completer) {
+          _pending = null;
+          _pendingId = null;
+        }
+        if (!completer.isCompleted) {
+          completer.complete(result);
+        }
+        // Release/retire the engine still owned by this (now retired)
+        // request; a superseded engine was already retired in _invalidate.
+        final CourseRecordingSession? recording = _activeRecording;
+        _activeRecording = null;
+        if (recording != null) {
+          _trackRetirement(recording.stop());
+        }
+        final CoursePracticeSpeechSession? speechSession = _activeSpeech;
+        _activeSpeech = null;
+        if (speechSession != null) {
+          _trackRetirement(speechSession.dispose());
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (token != _owner) {
+          return;
+        }
+        _owner++;
+        if (_pending == completer) {
+          _pending = null;
+          _pendingId = null;
+        }
+        if (!completer.isCompleted) {
+          completer.complete(CourseAudioResult.failed(
+            referenceId: id,
+            source: null,
+            failure: CourseAudioFailure(
+              reason: CourseAudioFailureReason.unsupportedPlayback,
+              cause: error,
+              stackTrace: stackTrace,
+            ),
+          ));
+        }
+      },
+    ));
+    return completer.future;
+  }
+
+  // -------------------------------------------------------------------
+  // Public API
+  // -------------------------------------------------------------------
+
+  @override
+  Future<CourseAudioResult> playReference(
+    String referenceId, {
+    CourseAudioUse use = CourseAudioUse.alphaPractice,
+    CourseAudioVariant variant = CourseAudioVariant.normal,
+    bool allowPracticeTts = false,
+  }) {
+    _requireUsable();
+    _invalidate(); // a newer request supersedes the current ownership
+    final int token = _owner;
+    return _register(
+      token,
+      referenceId,
+      _corePlay(token, referenceId, use, variant, allowPracticeTts),
+    );
+  }
+
+  @override
+  Future<void> speak(String word) {
+    _requireUsable();
+    _invalidate();
+    final int token = _owner;
+    final Future<CourseAudioResult> terminal =
+        _register(token, word, _coreSpeak(token, word));
+    // Legacy bridge: resolve only for Completed; everything else must be
+    // visible to the caller's error handling — never a quiet completion.
+    final Future<void> delivery = terminal.then<void>(
+        (CourseAudioResult result) {
+      if (result.outcome == CourseAudioOutcome.completed) {
+        return;
+      }
+      if (result.outcome == CourseAudioOutcome.cancelled) {
+        throw const CourseAudioCancelledException();
+      }
+      throw CourseAudioException(result.failure!);
+    });
+    // A synchronous observer guarantees this delivery failure is "handled"
+    // at the moment it is recorded, even when a caller's listener attaches
+    // across an event boundary (zone unhandled-error reporting); every
+    // caller listener still receives the exact exception itself — verified
+    // A/B against an unobserved bridge.
+    unawaited(delivery.then<void>(
+        (Object? value) {}, onError: (Object error) {}));
+    return delivery;
+  }
+
+  @override
+  Future<void> stop() {
+    if (_disposed) {
+      return Future<void>.value();
+    }
+    // Prompt cancellation: ownership is invalidated now; the retirement
+    // outcome is tracked for the next owner, not awaited here.
+    _invalidate();
+    return Future<void>.value();
+  }
+
+  @override
+  Future<void> dispose() {
+    if (_disposed) {
+      return Future<void>.value();
+    }
+    _disposed = true;
+    _invalidate();
+    return Future<void>.value();
+  }
+
+  // -------------------------------------------------------------------
+  // Request cores (all failures encoded; never throw)
+  // -------------------------------------------------------------------
+
+  Future<CourseAudioResult> _corePlay(
+    int token,
+    String id,
+    CourseAudioUse use,
+    CourseAudioVariant variant,
+    bool allowPracticeTts,
+  ) async {
+    final CourseAudioFailure? blocker = await _retirementBlocker();
+    if (blocker != null) {
+      return CourseAudioResult.failed(
+          referenceId: id, source: null, failure: blocker);
+    }
+    if (!_owns(token)) {
+      return CourseAudioResult.cancelled(referenceId: id);
+    }
+
+    CourseAudioCatalog catalog;
+    try {
+      catalog = await _loadedCatalogue();
+    } on PhaseTimeoutException catch (error, stackTrace) {
+      // The facade's OWN setup deadline for the load expired: _loadedCatalogue
+      // created the typed phase on onTimeout, so the owned expiry is an
+      // inferred start timeout with typed metadata — not a raw untyped one.
+      if (!_owns(token)) {
+        return CourseAudioResult.cancelled(referenceId: id);
+      }
+      return CourseAudioResult.failed(
+        referenceId: id,
+        source: null,
+        failure: CourseAudioFailure(
+          reason: CourseAudioFailureReason.startupTimeout,
+          cause: error,
+          stackTrace: stackTrace,
+        ),
+      );
+    } on Object catch (error, stackTrace) {
+      // A raw source load failure — including a source TimeoutException that
+      // settled before the owned allowance — is conservatively classified
+      // by _classify, never relabelled as an expired owned phase.
+      if (!_owns(token)) {
+        return CourseAudioResult.cancelled(referenceId: id);
+      }
+      if (error is CourseAudioException) {
+        return CourseAudioResult.failed(
+            referenceId: id, source: null, failure: error.failure);
+      }
+      return CourseAudioResult.failed(
+        referenceId: id,
+        source: null,
+        failure: _classify(error, stackTrace, null),
+      );
+    }
+    if (!_owns(token)) {
+      return CourseAudioResult.cancelled(referenceId: id);
+    }
+
+    final CourseAudioReference? reference = catalog.referenceById(id);
+    if (reference == null) {
+      return CourseAudioResult.failed(
+        referenceId: id,
+        source: null,
+        failure: const CourseAudioFailure(
+          reason: CourseAudioFailureReason.unknownReference,
+        ),
+      );
+    }
+    final CourseAudioEntry? entry = _entryFor(catalog, reference);
+    final CourseAudioRecording? recording = entry?.recordings[variant];
+
+    if (use == CourseAudioUse.reviewedOnly) {
+      // A source gate evaluated before any engine exists. Current shipped
+      // recordings are all pending candidates; no reviewed recording
+      // currently exists, so this always denies.
+      if (recording != null &&
+          recording.source == CourseAudioSource.reviewedRecording) {
+        return _runRecording(token, id, recording);
+      }
+      return CourseAudioResult.failed(
+        referenceId: id,
+        source: recording?.source,
+        failure: const CourseAudioFailure(
+          reason: CourseAudioFailureReason.unreviewedSource,
+        ),
+      );
+    }
+
+    if (recording == null) {
+      if (allowPracticeTts) {
+        // Explicit practice fallback: speak the exact authored text.
+        return _runSpeech(token, id, reference.spokenText);
+      }
+      final CourseAudioFailureReason reason = (variant ==
+              CourseAudioVariant.slow &&
+          entry != null)
+          ? CourseAudioFailureReason.unavailableVariant
+          : CourseAudioFailureReason.missingAsset;
+      return CourseAudioResult.failed(
+        referenceId: id,
+        source: null,
+        failure: CourseAudioFailure(reason: reason),
+      );
+    }
+
+    return _runRecording(token, id, recording);
+  }
+
+  Future<CourseAudioResult> _coreSpeak(int token, String word) async {
+    final CourseAudioFailure? blocker = await _retirementBlocker();
+    if (blocker != null) {
+      return CourseAudioResult.failed(
+          referenceId: word, source: null, failure: blocker);
+    }
+    if (!_owns(token)) {
+      return CourseAudioResult.cancelled(referenceId: word);
+    }
+
+    CourseAudioCatalog? catalog;
+    try {
+      catalog = await _loadedCatalogue();
+    } on PhaseTimeoutException catch (error, stackTrace) {
+      // The facade's OWN setup deadline for the load expired: _loadedCatalogue
+      // created the typed phase on onTimeout, so the owned expiry is an
+      // inferred start timeout with typed metadata — not a raw untyped one.
+      if (!_owns(token)) {
+        return CourseAudioResult.cancelled(referenceId: word);
+      }
+      return CourseAudioResult.failed(
+        referenceId: word,
+        source: null,
+        failure: CourseAudioFailure(
+          reason: CourseAudioFailureReason.startupTimeout,
+          cause: error,
+          stackTrace: stackTrace,
+        ),
+      );
+    } on Object catch (error, stackTrace) {
+      // A raw source load failure — including a source TimeoutException that
+      // settled before the owned allowance — is conservatively classified
+      // by _classify, never relabelled as an expired owned phase.
+      if (!_owns(token)) {
+        return CourseAudioResult.cancelled(referenceId: word);
+      }
+      // An active catalogue resolution failure (typed or generic) cannot
+      // establish coverage: it is surfaced for Retry, never papered over
+      // with a speech selection. The approved legacy speech path requires a
+      // successful resolution proving the text is uncovered/unrecorded.
+      final CourseAudioFailure failure = error is CourseAudioException
+          ? error.failure
+          : _classify(error, stackTrace, null);
+      return CourseAudioResult.failed(
+          referenceId: word, source: null, failure: failure);
+    }
+    if (!_owns(token)) {
+      return CourseAudioResult.cancelled(referenceId: word);
+    }
+
+    final CourseAudioReference? reference = catalog.wordReferenceByText(word);
+    if (reference == null) {
+      // Unmapped legacy text: practice speech of the exact text.
+      return _runSpeech(token, word, word);
+    }
+    final CourseAudioEntry? entry = _entryFor(catalog, reference);
+    final CourseAudioRecording? recording =
+        entry?.recordings[CourseAudioVariant.normal];
+    if (recording == null) {
+      // A declared word without a bundled recording: practice speech of the
+      // exact authored text.
+      return _runSpeech(token, word, reference.spokenText);
+    }
+    // Covered words play the bundled recording by default; a failure of a
+    // declared recording is a typed failure, never a TTS substitution.
+    return _runRecording(token, word, recording);
+  }
+
+  Future<CourseAudioResult> _runSpeech(
+      int token, String id, String text) async {
+    if (!_owns(token)) {
+      return CourseAudioResult.cancelled(referenceId: id);
+    }
+    final CoursePracticeSpeechSession session;
+    try {
+      session = _speechFactory();
+    } on Object catch (error, stackTrace) {
+      if (!_owns(token)) {
+        return CourseAudioResult.cancelled(referenceId: id);
+      }
+      return CourseAudioResult.failed(
+        referenceId: id,
+        source: CourseAudioSource.practiceTts,
+        failure: _classify(error, stackTrace, CourseAudioSource.practiceTts),
+      );
+    }
+    // The factory callback may re-enter the facade (stop/replacement);
+    // a session adopted by a request that has lost ownership must be
+    // released, never dispatched and never retained.
+    if (!_owns(token)) {
+      await _releaseUnowned(session);
+      return CourseAudioResult.cancelled(referenceId: id);
+    }
+    _activeSpeech = session;
+    if (!_owns(token)) {
+      // Lost after assignment: the engine is unadopted — retire it
+      // directly instead of dispatching under a newer identity.
+      if (identical(_activeSpeech, session)) {
+        _activeSpeech = null;
+      }
+      await _releaseUnowned(session);
+      return CourseAudioResult.cancelled(referenceId: id);
+    }
+
+    final Future<void> speakFuture;
+    try {
+      speakFuture = session.speak(text);
+    } on Object catch (error, stackTrace) {
+      if (!_owns(token)) {
+        return CourseAudioResult.cancelled(referenceId: id);
+      }
+      return CourseAudioResult.failed(
+        referenceId: id,
+        source: CourseAudioSource.practiceTts,
+        failure: _classify(error, stackTrace, CourseAudioSource.practiceTts),
+      );
+    }
+    // The facade can lose this request after dispatch (stop, replacement,
+    // dispose): an abandonment settlement must drain quietly.
+    unawaited(speakFuture.then<void>((Object? value) {},
+        onError: (Object error) {}));
+
+    // The total facade speech allowance (setup + utterance). A well-behaved
+    // session reports its own phase timeout first; the facade's bound is
+    // the backstop and, as its OWN deadline, creates the typed completion
+    // phase on onTimeout instead of surfacing a raw untyped timeout.
+    try {
+      await speakFuture.timeout(
+            _deadlines.setup + _deadlines.ttsUtterance,
+            onTimeout: () {
+              throw PhaseTimeoutException(
+                  CourseAudioFailureReason.completionTimeout,
+                  'The practice-speech deadline was exceeded.',
+                  _deadlines.setup + _deadlines.ttsUtterance);
+            },
+          );
+    } on PhaseTimeoutException catch (error, stackTrace) {
+      // The session typed the expired phase (setup or utterance) or the
+      // facade backstop created its own typed expiry; either way it is
+      // classified from the typed cause, before the generic clause that
+      // conservatively classifies raw source timeouts.
+      if (!_owns(token)) {
+        return CourseAudioResult.cancelled(referenceId: id);
+      }
+      return CourseAudioResult.failed(
+        referenceId: id,
+        source: CourseAudioSource.practiceTts,
+        failure: _classify(error, stackTrace, CourseAudioSource.practiceTts),
+      );
+    } on Object catch (error, stackTrace) {
+      // A raw source failure (including a source TimeoutException that
+      // settled before the owned allowance) is conservatively classified.
+      if (!_owns(token)) {
+        return CourseAudioResult.cancelled(referenceId: id);
+      }
+      return CourseAudioResult.failed(
+        referenceId: id,
+        source: CourseAudioSource.practiceTts,
+        failure: _classify(error, stackTrace, CourseAudioSource.practiceTts),
+      );
+    }
+    if (!_owns(token)) {
+      return CourseAudioResult.cancelled(referenceId: id);
+    }
+    return CourseAudioResult.completed(
+      referenceId: id,
+      source: CourseAudioSource.practiceTts,
+    );
+  }
+
+  Future<CourseAudioResult> _runRecording(
+      int token, String id, CourseAudioRecording recording) async {
+    final CourseRecordingSession session;
+    try {
+      session = _recordingFactory();
+    } on Object catch (error, stackTrace) {
+      if (!_owns(token)) {
+        return CourseAudioResult.cancelled(referenceId: id);
+      }
+      return CourseAudioResult.failed(
+        referenceId: id,
+        source: recording.source,
+        failure: _classify(error, stackTrace, recording.source),
+      );
+    }
+    _activeRecording = session;
+
+    final Completer<CourseAudioResult> terminal =
+        Completer<CourseAudioResult>();
+    late final StreamSubscription<CourseRecordingEvent> events;
+    // Event observation is attached before any dispatch, per the contract:
+    // the session's terminal events must be observable for every outcome.
+    events = session.events.listen(
+      (CourseRecordingEvent event) {
+        if (!_owns(token)) {
+          return; // Stale identity: the event must not act.
+        }
+        if (event != CourseRecordingEvent.completed) {
+          return;
+        }
+        if (!terminal.isCompleted) {
+          terminal.complete(CourseAudioResult.completed(
+              referenceId: id, source: recording.source));
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (!_owns(token)) {
+          return;
+        }
+        if (!terminal.isCompleted) {
+          terminal.complete(CourseAudioResult.failed(
+            referenceId: id,
+            source: recording.source,
+            failure:
+                _classify(error, stackTrace, recording.source),
+          ));
+        }
+      },
+    );
+
+    try {
+      await session.prepare(recording).timeout(
+            _deadlines.setup,
+            onTimeout: () {
+              // The facade owns this setup deadline: its expiry is the typed
+              // owned startup phase (created on onTimeout).
+              throw PhaseTimeoutException(
+                  CourseAudioFailureReason.startupTimeout,
+                  'The prepare setup deadline was exceeded.',
+                  _deadlines.setup);
+            },
+          );
+    } on PhaseTimeoutException catch (error, stackTrace) {
+      // The facade's own setup allowance expired (typed owned deadline).
+      events.cancel();
+      return _setupFailure(token, id, recording, error, stackTrace,
+          timedOut: true);
+    } on Object catch (error, stackTrace) {
+      // A raw source prepare failure — including a source TimeoutException
+      // that settled before the owned allowance — is conservatively
+      // classified; no expired owned phase is pretended.
+      events.cancel();
+      return _setupFailure(token, id, recording, error, stackTrace,
+          timedOut: false);
+    }
+    if (!_owns(token)) {
+      events.cancel();
+      return CourseAudioResult.cancelled(referenceId: id);
+    }
+
+    final Future<void> startAck;
+    try {
+      startAck = session.start();
+    } on Object catch (error, stackTrace) {
+      events.cancel();
+      return _setupFailure(token, id, recording, error, stackTrace,
+          timedOut: false);
+    }
+    // The raw acknowledgment must be observed and fenced, whatever its
+    // settlement: a quiet observer keeps a late release from becoming an
+    // unhandled error, and the session fences it at retirement.
+    unawaited(startAck.then<void>((Object? value) {},
+        onError: (Object error) {}));
+    if (!_owns(token)) {
+      events.cancel();
+      return CourseAudioResult.cancelled(referenceId: id);
+    }
+
+    // Completion coordination, armed at the resume dispatch (never re-armed
+    // after the acknowledgement): the applied bound is
+    // max(floor, duration + slack) from the start dispatch. Only the
+    // session's actual terminal event counts success; elapsed time, stop,
+    // disposal, and timeout are not completion. Whichever settles first —
+    // an actual terminal event, the dispatch-origin completion bound, or a
+    // start-ack settlement — publishes exactly one terminal; whatever
+    // arrives later (a late ack success or failure) is fenced, never an
+    // override.
+    final Completer<CourseAudioResult> public =
+        Completer<CourseAudioResult>();
+    void settleOnce(CourseAudioResult result) {
+      if (public.isCompleted) {
+        return;
+      }
+      if (!_owns(token)) {
+        public.complete(CourseAudioResult.cancelled(referenceId: id));
+        return;
+      }
+      public.complete(result);
+    }
+
+    unawaited(terminal.future.timeout(
+          _deadlines.recordingCompletion(recording.duration),
+          onTimeout: () {
+            // The facade owns this completion floor: its expiry is the typed
+            // owned completion phase (created on onTimeout).
+            throw PhaseTimeoutException(
+                CourseAudioFailureReason.completionTimeout,
+                'The recording completion deadline was exceeded.',
+                _deadlines.recordingCompletion(recording.duration));
+          },
+        ).then<void>(
+          (CourseAudioResult result) => settleOnce(result),
+          onError: (Object error, StackTrace stackTrace) {
+            // The owned floor's typed expiry classifies as completionTimeout
+            // from its phase; a raw source timeout (settled before the
+            // floor) classifies conservatively; no inference either way.
+            final CourseAudioFailure failure =
+                _classify(error, stackTrace, recording.source);
+            settleOnce(CourseAudioResult.failed(
+                referenceId: id, source: recording.source, failure: failure));
+          },
+        ));
+    unawaited(startAck.timeout(
+          _deadlines.setup,
+          onTimeout: () {
+            // The facade owns this acknowledgement bound: its expiry is the
+            // typed owned startup phase (created on onTimeout).
+            throw PhaseTimeoutException(
+                CourseAudioFailureReason.startupTimeout,
+                'The start-acknowledgement setup deadline was exceeded.',
+                _deadlines.setup);
+          },
+        ).then<void>(
+          (Object? value) {
+            // Acknowledgment success is not completion: the bound or an
+            // actual event decides.
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            // The owned bound's typed expiry classifies as startupTimeout
+            // from its phase; a raw source timeout sets conservatively.
+            final CourseAudioFailure failure =
+                _classify(error, stackTrace, recording.source);
+            settleOnce(CourseAudioResult.failed(
+                referenceId: id, source: recording.source, failure: failure));
+          },
+        ));
+
+    await public.future;
+    events.cancel();
+    return public.future;
+  }
+
+  CourseAudioResult _setupFailure(
+    int token,
+    String id,
+    CourseAudioRecording recording,
+    Object error,
+    StackTrace? stackTrace, {
+    required bool timedOut,
+  }) {
+    if (!_owns(token)) {
+      return CourseAudioResult.cancelled(referenceId: id);
+    }
+    final CourseAudioFailure failure = timedOut
+        ? CourseAudioFailure(
+            reason: CourseAudioFailureReason.startupTimeout,
+            cause: error,
+            stackTrace: stackTrace,
+          )
+        : _classify(error, stackTrace, recording.source);
+    return CourseAudioResult.failed(
+        referenceId: id, source: recording.source, failure: failure);
+  }
+
+  // -------------------------------------------------------------------
+  // Helpers
+  // -------------------------------------------------------------------
+
+  /// Loads the catalogue within the setup allowance, with a quiet observer
+  /// so an invalidated load never leaves an unhandled settlement. The owned
+  /// allowance expiry creates the typed startup phase on onTimeout; a raw
+  /// source load failure — including a source TimeoutException that settles
+  /// first — passes through unchanged for the caller's classification.
+  Future<CourseAudioCatalog> _loadedCatalogue() {
+    final Future<CourseAudioCatalog> load = _loadCatalog();
+    unawaited(
+        load.then<void>((Object? value) {}, onError: (Object error) {}));
+    return load.timeout(
+      _deadlines.setup,
+      onTimeout: () {
+        throw PhaseTimeoutException(
+            CourseAudioFailureReason.startupTimeout,
+            'The catalogue load deadline was exceeded.',
+            _deadlines.setup);
+      },
+    );
+  }
+
+  CourseAudioEntry? _entryFor(
+      CourseAudioCatalog catalog, CourseAudioReference reference) {
+    for (final CourseAudioEntry entry in catalog.entries) {
+      if (entry.reference.id == reference.id) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  /// Releases a speech session that was created but never adopted (the
+  /// request lost ownership between creation and assignment). Its cleanup
+  /// must observe quietly: a never-adopted engine does not belong to the
+  /// adoption retirement gate and must not fail or block a newer owner.
+  Future<void> _releaseUnowned(CoursePracticeSpeechSession session) async {
+    try {
+      await session.dispose();
+    } on Object {
+      // Quiet: see above — an unadopted engine is not the owner's engine.
+    }
+  }
+
+  /// Normalizes a failure for the *selected* source, preserving the
+  /// diagnostic cause: recognizable browser gesture rejections and
+  /// French-voice unavailability (TTS only) get their stable reasons;
+  /// everything else stays generic — unknown causes never become invented
+  /// voice or permission diagnoses.
+  CourseAudioFailure _classify(
+    Object error,
+    StackTrace? stackTrace,
+    CourseAudioSource? selectedSource,
+  ) {
+    if (error is CourseAudioException) {
+      return error.failure;
+    }
+    if (error is PhaseTimeoutException) {
+      // The adapter typed the expired phase; classify from it.
+      return CourseAudioFailure(
+        reason: error.phase,
+        cause: error,
+        stackTrace: stackTrace,
+      );
+    }
+    if (error is TimeoutException) {
+      // A RAW source timeout (owned-phase expiries are typed PhaseTimeout
+      // exceptions, classified above). It settled before any owned allowance
+      // and must not be relabelled as an expired owned phase: it stays in
+      // the conservative bucket with its original object, message and stack.
+      return CourseAudioFailure(
+        reason: CourseAudioFailureReason.unsupportedPlayback,
+        cause: error,
+        stackTrace: stackTrace,
+      );
+    }
+    if (_isBrowserGestureRejection(error)) {
+      return CourseAudioFailure(
+        reason: CourseAudioFailureReason.userGestureRequired,
+        cause: error,
+        stackTrace: stackTrace,
+      );
+    }
+    if (selectedSource == CourseAudioSource.practiceTts &&
+        error is StateError &&
+        error.message == canonicalFrenchVoiceUnavailableMessage) {
+      return CourseAudioFailure(
+        reason: CourseAudioFailureReason.unavailableVoice,
+        cause: error,
+        stackTrace: stackTrace,
+      );
+    }
+    return CourseAudioFailure(
+      reason: CourseAudioFailureReason.unsupportedPlayback,
+      cause: error,
+      stackTrace: stackTrace,
+    );
+  }
+
+  /// Narrow recognition of a browser autoplay/gesture rejection: the exact
+  /// standard DOM exception name delivered either as a platform-exception
+  /// *code* (the exact PlatformException transport path, still supported)
+  /// or as the exact DOM name of an untranslated source-shaped rejection
+  /// recognized at the platform boundary [isBrowserAutoplayRejection].
+  /// Substring inference (code, message, or source shape) would relabel
+  /// unrelated failures as gesture requirements; code, message and shape
+  /// resemblance that is not this exact name stay generic. Recognition only
+  /// relabels the reason — the original cause and stack are always
+  /// retained. Actual platform behavior must be verified on a real browser
+  /// — this only stabilizes the classification.
+  bool _isBrowserGestureRejection(Object error) {
+    return (error is PlatformException && error.code == 'NotAllowedError') ||
+        isBrowserAutoplayRejection(error);
+  }
+}
+
+/// A failed retirement outcome: the error and the throw stack it arrived
+/// with, kept together so the durable blocker preserves both.
+final class _RetirementFailure {
+  const _RetirementFailure(this.error, this.stackTrace);
+
+  final Object error;
+  final StackTrace? stackTrace;
+}

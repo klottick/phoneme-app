@@ -10,6 +10,8 @@
 /// facade/speech-factory construction before the values are used.
 library;
 
+import 'dart:async';
+
 /// How a reference request may be used (alpha practice vs reviewed-only).
 enum CourseAudioUse { alphaPractice, reviewedOnly }
 
@@ -46,6 +48,30 @@ enum CourseAudioFailureReason {
 abstract class CourseAudio {
   Future<void> speak(String word);
   Future<void> stop();
+}
+
+/// A bounded practice-speech session over the French TTS engine (Task 3).
+///
+/// The session wraps raw platform work: [speak] runs the setup/utterance
+/// pipeline with bounded allowances, while [stop] and [dispose] establish
+/// quiescence of every dispatched raw operation — settlement of a timed-out
+/// public future is never quiescence. A session is permanently single-use:
+/// after retirement, [speak] throws. Constructing a session never
+/// initializes the TTS engine.
+abstract interface class CoursePracticeSpeechSession {
+  /// Speaks [text]; resolves on actual utterance completion and throws the
+  /// original cause on failure (voice unavailability, platform error,
+  /// bounded setup or utterance).
+  Future<void> speak(String text);
+
+  /// Retires the session: invalidates in-flight work and establishes raw
+  /// quiescence. Every repeated caller awaits the same shared retirement
+  /// outcome, including its failure.
+  Future<void> stop();
+
+  /// Permanently releases the session; idempotent and shares the same
+  /// retirement outcome as [stop].
+  Future<void> dispose();
 }
 
 /// Typed reference-player interface, added alongside the legacy
@@ -137,6 +163,32 @@ final class CourseAudioCancelledException implements Exception {
 
   @override
   String toString() => 'CourseAudioCancelledException()';
+}
+
+/// The canonical voice-unavailability diagnostic the practice-speech
+/// adapter throws when no French voice is installed. The classification
+/// recognizes this exact diagnostic (or a typed cause) — never a substring
+/// resemblance — so unrelated StateErrors stay generic.
+const String canonicalFrenchVoiceUnavailableMessage =
+    'Install a French voice in your device speech settings.';
+
+/// A bounded practice-speech pipeline phase whose allowance expired.
+///
+/// Stays a [TimeoutException], so existing `on TimeoutException` catchers
+/// and `isA<TimeoutException>()` expectations keep working, and carries the
+/// phase that expired so the caller classifies the failure from the typed
+/// cause instead of guessing which bounded phase timed out.
+final class PhaseTimeoutException extends TimeoutException {
+  PhaseTimeoutException(
+    this.phase, [
+    String? message,
+    Duration? duration,
+  ]) : super(message ?? 'Practice speech phase deadline.', duration);
+
+  /// Which phase's allowance expired:
+  /// [CourseAudioFailureReason.startupTimeout] for the setup phase,
+  /// [CourseAudioFailureReason.completionTimeout] for the utterance phase.
+  final CourseAudioFailureReason phase;
 }
 
 /// Injectable playback bounds. Defaults come from the approved spec; [validate]
