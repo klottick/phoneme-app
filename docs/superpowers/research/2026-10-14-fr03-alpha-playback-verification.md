@@ -2,7 +2,10 @@
 
 **Date:** 2026-10-14
 **Branch:** `feat/fr03-recording-first-alpha` (base `f6250d7`, published
-`origin/main`; PR opened against `main`, merge pending controller review)
+`origin/main`)
+**Worker HEAD:** `ee15875`
+**PR:** https://github.com/klottick/phoneme-app/pull/29 — opened against
+`main`; merge pending controller review
 **Purpose:** record exactly what was verified by automation this task, what
 was not, and where the remaining manual/browser/native/linguistic evidence
 must come from. No gate in the PENDING section below has passing evidence.
