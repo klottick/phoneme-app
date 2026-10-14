@@ -48,6 +48,30 @@ abstract class CourseAudio {
   Future<void> stop();
 }
 
+/// A bounded practice-speech session over the French TTS engine (Task 3).
+///
+/// The session wraps raw platform work: [speak] runs the setup/utterance
+/// pipeline with bounded allowances, while [stop] and [dispose] establish
+/// quiescence of every dispatched raw operation — settlement of a timed-out
+/// public future is never quiescence. A session is permanently single-use:
+/// after retirement, [speak] throws. Constructing a session never
+/// initializes the TTS engine.
+abstract interface class CoursePracticeSpeechSession {
+  /// Speaks [text]; resolves on actual utterance completion and throws the
+  /// original cause on failure (voice unavailability, platform error,
+  /// bounded setup or utterance).
+  Future<void> speak(String text);
+
+  /// Retires the session: invalidates in-flight work and establishes raw
+  /// quiescence. Every repeated caller awaits the same shared retirement
+  /// outcome, including its failure.
+  Future<void> stop();
+
+  /// Permanently releases the session; idempotent and shares the same
+  /// retirement outcome as [stop].
+  Future<void> dispose();
+}
+
 /// Typed reference-player interface, added alongside the legacy
 /// [CourseAudio] rather than adding required methods to every existing
 /// implementation.
