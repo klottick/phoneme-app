@@ -1930,8 +1930,8 @@ void main() {
     });
 
     test(
-        'a real session utterance-phase expiry through the facade keeps '
-        'the typed completion-timeout cause and stack',
+        'a real session utterance-phase expiry through the facade preserves '
+        'the EXACT cause and stack the real session boundary produced',
         () async {
       const channel = MethodChannel('flutter_tts');
       final binding = TestWidgetsFlutterBinding.instance;
@@ -1944,14 +1944,24 @@ void main() {
         if (call.method == 'isLanguageAvailable') return true;
         return 1;
       });
+      // Observe the ACTUAL createFrenchPracticeSpeechSession result at the
+      // facade's speechFactory seam: the recorder records the exact cause
+      // and stack of the real session's failed `speak` future and forwards
+      // that same settlement by identity (same future, no re-throw), so it
+      // cannot replace the diagnostic. It only observes and passes the real
+      // failure through — it never manufactures one.
+      final observed = _ObservedPracticeSpeechSession(
+        createFrenchPracticeSpeechSession(
+          deadlines: const CourseAudioDeadlines(
+              setup: Duration(milliseconds: 100),
+              ttsUtterance: Duration(milliseconds: 150)),
+        ),
+      );
       final facade = FrenchReferenceAudio(
         loadCatalog: () =>
             Future<CourseAudioCatalog>.value(fixtureCatalogue()),
         recordingFactory: () => FakeCourseRecordingSession(),
-        speechFactory: () => createFrenchPracticeSpeechSession(
-            deadlines: const CourseAudioDeadlines(
-                setup: Duration(milliseconds: 100),
-                ttsUtterance: Duration(milliseconds: 150))),
+        speechFactory: () => observed,
         // The facade backstop (setup + utterance = 450ms) outlives the
         // session's own phases (setup 100ms + utterance 150ms), so the
         // session-typed expiry wins over the facade's backstop
@@ -1974,6 +1984,12 @@ void main() {
       }
       expect(caught, isA<CourseAudioException>(),
           reason: 'the failure is surfaced through the legacy bridge');
+      expect(observed.speakDispatches, 1,
+          reason: 'the ACTUAL practice session ran exactly once at the '
+              'real session-to-facade boundary (not a recording double)');
+      expect(observed.observedCause, isA<PhaseTimeoutException>(),
+          reason: 'the session boundary delivered its typed utterance-phase '
+              'expiry as the exact cause');
       final failure = (caught! as CourseAudioException).failure;
       expect(failure.reason, CourseAudioFailureReason.completionTimeout,
           reason: 'the expired utterance phase classifies as a completion '
@@ -1985,8 +2001,13 @@ void main() {
           (failure.cause! as PhaseTimeoutException).phase,
           CourseAudioFailureReason.completionTimeout,
           reason: 'the typed phase is the utterance phase');
-      expect(failure.stackTrace, isNotNull,
-          reason: 'the stable failure carries a stack trace for diagnosis');
+      expect(identical(failure.cause, observed.observedCause), isTrue,
+          reason: 'the facade preserves the SAME cause object the real '
+              'session boundary produced — no replacement between the '
+              'session and the facade');
+      expect(identical(failure.stackTrace, observed.observedStack), isTrue,
+          reason: 'the facade forwards the real session boundary stack '
+              'exactly (identical, not merely non-null)');
       gate.complete(null); // release the held raw utterance (fence hygiene)
       await pumpEventQueue();
       await pumpEventQueue();
@@ -2976,19 +2997,20 @@ void main() {
           reason: 'the stopped request published exactly one terminal');
     });
 
-    test('stop with a failing held cleanup durably blocks the next owner '
-        'with the explicit cause and the exact forwarded stack', () async {
+    test('stop with a held cleanup that fails on release settles the '
+        'prompt as cancelled, holds the replacement on the pending fence, '
+        'then durably blocks it with the exact released cause and stack',
+        () async {
       final stale = recording();
       final newer = recording();
       final cause = StateError('cleanup-failed');
       final explicitStack =
-          StackTrace.fromString('cleanup-explicit-stack:fix3-f3b');
-      // Observe the planted failure at creation: it must never be an
-      // unhandled async error before (or regardless of) the shared
-      // retirement's await of it.
-      final gateError = Future<void>.error(cause, explicitStack);
-      unawaited(gateError.then<void>((_) {}, onError: (Object _) {}));
-      stale.stopGate = gateError;
+          StackTrace.fromString('cleanup-explicit-stack:fix4-f3a');
+      // A REAL pending cleanup: the shared retirement is held on this
+      // completer and fails only when released below — the hold→failure
+      // transition is what is proven, not an already-failed gate.
+      final cleanupHold = Completer<void>();
+      stale.stopGate = cleanupHold.future;
       var created = 0;
       final facade = FrenchReferenceAudio(
         loadCatalog:
@@ -3016,12 +3038,31 @@ void main() {
       await facade.stop();
       final result = await pending.timeout(const Duration(seconds: 2));
       expect(result.outcome, CourseAudioOutcome.cancelled,
-          reason: 'the prompt cancellation is not rewritten by the '
-              'subsequent cleanup failure');
-      Object? nextOutcome;
+          reason: 'stop cancels the request promptly while the shared '
+              'cleanup is still pending — a held, not pre-failed, fence');
+      expect(cleanupHold.isCompleted, isFalse,
+          reason: 'the prompt terminal is observed before the pending '
+              'cleanup settles — the hold→failure transition is real');
+      expect(stale.calls.contains('stop'), isTrue,
+          reason: 'retirement has started and captured the pending gate');
+      // Replacement issued while held: blocked on the pending shared fence —
+      // neither settled, nor created, nor dispatched.
       final next = facade.playReference('fr-word-tout');
+      var nextSettled = false;
       unawaited(next.then<void>(
-          (CourseAudioResult _) {}, onError: (Object _) {}));
+          (CourseAudioResult _) => nextSettled = true,
+          onError: (Object _) => nextSettled = true));
+      await pumpEventQueue();
+      await pumpEventQueue();
+      expect(nextSettled, isFalse,
+          reason: 'the replacement stays held on the pending shared '
+              'cleanup — it does not settle before the failure is released');
+      expect(created, 1,
+          reason: 'the next recording is not created or dispatched while '
+              'the held cleanup is pending (the raw fence is pending)');
+      // Release the held cleanup as a failure, on release.
+      cleanupHold.completeError(cause, explicitStack);
+      Object? nextOutcome;
       try {
         nextOutcome = await next.timeout(const Duration(seconds: 2));
       } on Object catch (error) {
@@ -3033,10 +3074,16 @@ void main() {
       expect(failure.reason, CourseAudioFailureReason.cleanupFailed,
           reason: 'a failed shared cleanup blocks the next owner durably');
       expect(identical(failure.cause, cause), isTrue,
-          reason: 'the explicit cleanup failure cause is preserved');
+          reason: 'the explicit cleanup failure cause released at gate '
+              'settlement is preserved exactly');
       expect(identical(failure.stackTrace, explicitStack), isTrue,
           reason: 'the explicitly supplied cleanup stack is forwarded '
-              'exactly, not merely present');
+              'exactly from the pending release, not merely present');
+      expect(created, 1,
+          reason: 'no replacement recording is created after the failed '
+              'release');
+      expect(newer.calls, isEmpty,
+          reason: 'no replacement dispatch after the failed release');
       expect(terminals, 1,
           reason:
               'no second terminal is published for the stopped request');
@@ -3089,19 +3136,19 @@ void main() {
           reason: 'a disposed facade cannot accept new requests');
     });
 
-    test('dispose with a failing held cleanup keeps one prompt cancelled '
-        'terminal, no late dispatch, and the shared durable failure',
+    test('dispose with a held cleanup that fails on release keeps one '
+        'prompt cancelled terminal, no late dispatch, and a shared durable '
+        'failure with the exact released cause and forwarded stack',
         () async {
       final stale = recording();
       final cause = StateError('disposal-cleanup-failed');
       final explicitStack =
-          StackTrace.fromString('disposal-explicit-stack:fix3-f3d');
-      // Observe the planted failure at creation: it must never be an
-      // unhandled async error before (or regardless of) the shared
-      // retirement's await of it.
-      final gateError = Future<void>.error(cause, explicitStack);
-      unawaited(gateError.then<void>((_) {}, onError: (Object _) {}));
-      stale.stopGate = gateError;
+          StackTrace.fromString('disposal-explicit-stack:fix4-f3d');
+      // A REAL pending cleanup: the shared retirement is held on this
+      // completer and fails only when released below — the hold→failure
+      // transition is proven, not an already-failed gate.
+      final cleanupHold = Completer<void>();
+      stale.stopGate = cleanupHold.future;
       final facade = FrenchReferenceAudio(
         loadCatalog:
             () => Future<CourseAudioCatalog>.value(fixtureCatalogue()),
@@ -3125,26 +3172,38 @@ void main() {
       await facade.dispose();
       final result = await pending.timeout(const Duration(seconds: 2));
       expect(result.outcome, CourseAudioOutcome.cancelled,
-          reason: 'disposal cancellation is prompt and is not rewritten by '
-              'the cleanup failure');
+          reason: 'disposal cancellation is prompt while the held cleanup '
+              'is still pending');
+      expect(cleanupHold.isCompleted, isFalse,
+          reason: 'the prompt terminal is observed before the pending '
+              'cleanup settles — the hold→failure transition is real');
       final callsAtDispose = stale.calls.length;
+      // Release the held cleanup as a failure, on release.
+      cleanupHold.completeError(cause, explicitStack);
       await pumpEventQueue();
       await pumpEventQueue();
       expect(stale.calls.length, callsAtDispose,
-          reason: 'no late dispatch follows under disposal');
+          reason: 'no late dispatch follows once the failed cleanup '
+              'settles under disposal');
       expect(terminals, 1,
           reason: 'no second terminal is published under disposal');
       // The shared durable cleanup failure is observable by every
-      // retirement caller of the same session.
+      // retirement caller of the same session — with the exact released
+      // cause and the forwarded stack.
       Object? sharedCaught;
+      StackTrace? sharedStack;
       try {
         await stale.dispose();
-      } on Object catch (error) {
+      } on Object catch (error, stackTrace) {
         sharedCaught = error;
+        sharedStack = stackTrace;
       }
       expect(identical(sharedCaught, cause), isTrue,
           reason: 'every retirement caller of the same session shares the '
-              'durable cleanup failure');
+              'durable cleanup failure released at settlement');
+      expect(identical(sharedStack, explicitStack), isTrue,
+          reason: 'the explicitly supplied cleanup stack is shared exactly '
+              'across retirement callers, not merely present');
       expect(
           () => facade.playReference('fr-word-tout'),
           throwsA(isA<StateError>()),
@@ -3205,4 +3264,47 @@ final class _ExplicitSpeechFailureSession implements CoursePracticeSpeechSession
 
   @override
   Future<void> dispose() async {}
+}
+
+/// A transparent facade-seam recorder for the REAL practice session: it
+/// wraps the actual [createFrenchPracticeSpeechSession] result, records the
+/// exact cause and stack of the real session's failed `speak` future at the
+/// session boundary, and forwards that same settlement by identity (the
+/// SAME future, no re-throw) — so it cannot replace the diagnostic. Unlike
+/// [_ExplicitSpeechFailureSession], it never manufactures a failure; it
+/// only observes the real one and passes it through to the facade.
+final class _ObservedPracticeSpeechSession
+    implements CoursePracticeSpeechSession {
+  _ObservedPracticeSpeechSession(this._session);
+
+  final CoursePracticeSpeechSession _session;
+
+  /// The exact cause the real session's failed `speak` future delivered.
+  Object? observedCause;
+
+  /// The stack the real session's failed `speak` future delivered with it.
+  StackTrace? observedStack;
+
+  /// Number of `speak` attempts forwarded to the real session.
+  int speakDispatches = 0;
+
+  @override
+  Future<void> speak(String text) {
+    speakDispatches++;
+    final Future<void> real = _session.speak(text);
+    unawaited(real.then<void>(
+      (Object? value) {},
+      onError: (Object error, StackTrace stackTrace) {
+        observedCause = error;
+        observedStack = stackTrace;
+      },
+    ));
+    return real;
+  }
+
+  @override
+  Future<void> stop() => _session.stop();
+
+  @override
+  Future<void> dispose() => _session.dispose();
 }
