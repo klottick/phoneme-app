@@ -121,6 +121,70 @@ Future<void> _expectRawInvalidCatalogue(
   );
 }
 
+/// Asserts that `CourseAudioCatalog.fromJson` itself rejects the mutated
+/// fixture with a typed `invalidCatalogue` diagnostic — not a leaked Dart
+/// type error and not a normalization only visible through the loader.
+Future<void> _expectFactoryInvalid(
+  void Function(
+    Map<String, dynamic> manifest,
+    Map<String, dynamic> provenance,
+  ) mutate,
+) async {
+  final Map<String, dynamic> manifest = jsonDecode(jsonEncode(_realManifest()));
+  final Map<String, dynamic> provenance =
+      jsonDecode(jsonEncode(_realProvenance()));
+  mutate(manifest, provenance);
+  expect(
+    () => CourseAudioCatalog.fromJson(
+      manifest,
+      provenance,
+      references: List.of(frenchCurriculum.audioReferences),
+    ),
+    throwsA(isA<CourseAudioException>().having(
+          (CourseAudioException e) => e.failure.reason,
+          'failure.reason',
+          CourseAudioFailureReason.invalidCatalogue,
+        )),
+  );
+}
+
+Matcher get _invalidCatalogueMatcher =>
+    throwsA(isA<CourseAudioException>().having(
+          (CourseAudioException e) => e.failure.reason,
+          'failure.reason',
+          CourseAudioFailureReason.invalidCatalogue,
+        ));
+
+/// Test-only entry for injected construction fixtures (missing coverage,
+/// mixed kinds, immutability, association).
+CourseAudioEntry _injectedEntry(CourseAudioReference reference) =>
+    CourseAudioEntry(
+      reference: reference,
+      recordings: <CourseAudioVariant, CourseAudioRecording>{
+        CourseAudioVariant.normal: CourseAudioRecording(
+          assetKey: 'assets/audio/fr/words/${reference.spokenText}.wav',
+          byteLength: 66836,
+          duration: const Duration(milliseconds: 757),
+          source: CourseAudioSource.unverifiedRecording,
+        ),
+      },
+      credit: CourseAudioCredit(
+        referenceId: reference.id,
+        spokenText: reference.spokenText,
+        creator: 'LoquaxFR',
+        sourceUrl:
+            'https://commons.wikimedia.org/wiki/File:LL-Q150_(fra)-LoquaxFR-tout.wav',
+        auditedRevisionUrl:
+            'https://commons.wikimedia.org/w/index.php?title=File&oldid=1',
+        licenseId: 'CC-BY-SA-4.0',
+        licenseUrl: 'https://creativecommons.org/licenses/by-sa/4.0/',
+        licenseTextAssetKey: 'assets/audio/fr/licenses/CC-BY-SA-4.0.txt',
+        attribution: 'Injected test credit',
+        notices: const ['injected notice'],
+        unchanged: true,
+      ),
+    );
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final references = frenchCurriculum.audioReferences;
@@ -268,6 +332,29 @@ void main() {
       expect(shared.manifestReads, 1);
       expect(shared.provenanceReads, 1);
     });
+
+    test('malformed JSON keeps the decode failure as the diagnostic cause',
+        () async {
+      final malformed = CourseAudioCatalogLoader(
+        bundle: _CountingBundle(files: {
+          _manifestKey: '{ "schemaVersion": not-json ',
+          _provenanceKey:
+              File('assets/audio/fr/provenance.json').readAsStringSync(),
+        }),
+        references: references,
+      );
+      late final CourseAudioException caught;
+      try {
+        await malformed.load();
+        fail('the malformed JSON load must throw');
+      } on CourseAudioException catch (error) {
+        caught = error;
+      }
+      expect(caught.failure.reason, CourseAudioFailureReason.invalidCatalogue);
+      expect(caught.failure.cause, isA<FormatException>(),
+          reason: 'the actual JSON decode failure must be retained');
+      expect(caught.failure.stackTrace, isNotNull);
+    });
   });
 
   group('metadata validation (pending schema)', () {
@@ -330,44 +417,78 @@ void main() {
     });
 
     test('rejects duplicate reference IDs', () async {
-      final Map<String, dynamic> duplicate =
-          jsonDecode(jsonEncode(_entry(_realManifest(), 0)));
+      // Start from the accepted two-entry fixture [tout, rouge]: paths and
+      // provenance associations stay distinct and valid. The only mutation
+      // is the identity of the second entry, which reuses the first
+      // reference id — the identity rejection cannot be masked by an
+      // asset-path or coverage rejection.
       await _expectInvalidCatalogue((manifest, provenance) {
-        _entries(manifest)[1] = duplicate;
+        final entries = _entries(manifest);
+        entries.removeRange(2, entries.length);
+        (entries[1] as Map<String, dynamic>)['id'] =
+            (entries[0] as Map<String, dynamic>)['id'];
       }, references: [
         CourseAudioReference(
             id: 'fr-word-tout',
             kind: AudioReferenceKind.word,
             spokenText: 'tout'),
         CourseAudioReference(
-            id: 'fr-word-tout',
+            id: 'fr-word-tout', // same identity as the first reference
             kind: AudioReferenceKind.word,
-            spokenText: 'tout'),
+            spokenText: 'rouge'),
       ]);
     });
 
     test('rejects duplicate asset paths', () async {
-      Map<String, dynamic> clone(String id, String text) {
-        final entry = jsonDecode(jsonEncode(_entry(_realManifest(), 0)))
-            as Map<String, dynamic>;
-        entry['id'] = id;
-        entry['spokenText'] = text;
-        entry['assetPath'] = 'frontend/assets/audio/fr/words/$text.wav';
-        return entry;
-      }
-
+      // Start from the accepted two-entry fixture [tout, rouge]: ids,
+      // spoken texts and provenance associations stay valid and distinct.
+      // The only mutation is the second entry reusing the first asset path —
+      // the path rejection cannot be masked by an identity rejection.
       await _expectInvalidCatalogue((manifest, provenance) {
-        final first = clone('fr-word-a', 'a');
-        final second = clone('fr-word-b', 'b');
+        final entries = _entries(manifest);
+        entries.removeRange(2, entries.length);
+        final first = entries[0] as Map<String, dynamic>;
+        final second = entries[1] as Map<String, dynamic>;
         second['assetPath'] = first['assetPath'];
-        _entries(manifest)[0] = first;
-        _entries(manifest)[1] = second;
       }, references: [
         CourseAudioReference(
-            id: 'fr-word-a', kind: AudioReferenceKind.word, spokenText: 'a'),
+            id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'tout'),
         CourseAudioReference(
-            id: 'fr-word-b', kind: AudioReferenceKind.word, spokenText: 'b'),
+            id: 'fr-word-rouge', kind: AudioReferenceKind.word, spokenText: 'rouge'),
       ]);
+    });
+
+    test('rejects non-positive declared byte lengths', () async {
+      await _expectInvalidCatalogue((manifest, provenance) {
+        _entry(manifest, 0)['byteLength'] = 0;
+      });
+      await _expectInvalidCatalogue((manifest, provenance) {
+        _entry(manifest, 0)['byteLength'] = -1;
+      });
+    });
+
+    test('rejects any speaker qualification other than unverified', () async {
+      await _expectInvalidCatalogue((manifest, provenance) {
+        (_entry(manifest, 0)['speaker'] as Map<String, dynamic>)[
+                'qualificationStatus'] = 'certified';
+      });
+    });
+
+    test('rejects a missing or empty speaker source name', () async {
+      // A missing name on one side used to bypass the creator-consistency
+      // check whenever the other side was missing too.
+      await _expectInvalidCatalogue((manifest, provenance) {
+        (_entry(manifest, 0)['speaker'] as Map<String, dynamic>)['sourceName'] =
+            null;
+        ((provenance['entries'] as List<dynamic>)[0] as Map<String, dynamic>)[
+                'sourceSpeaker'] = null;
+      });
+      await _expectInvalidCatalogue((manifest, provenance) {
+        (_entry(manifest, 0)['speaker'] as Map<String, dynamic>)['sourceName'] =
+            '';
+        ((provenance['entries'] as List<dynamic>)[0] as Map<String, dynamic>)[
+                'sourceSpeaker'] = '';
+      });
     });
 
     test('rejects unsafe and remote asset paths', () async {
@@ -476,6 +597,132 @@ void main() {
         entries[0] = entries[1];
         entries[1] = first;
       });
+    });
+
+    test('the JSON factory itself rejects wrong-typed metadata', () async {
+      // Direct factory calls: each wrong-typed value must surface as the
+      // contract's typed `invalidCatalogue` diagnostic, never as an
+      // uncaught Dart cast error.
+      await _expectFactoryInvalid((manifest, provenance) {
+        (_entries(manifest)[0] as Map<String, dynamic>)['id'] = 42;
+      });
+      await _expectFactoryInvalid((manifest, provenance) {
+        (_entry(manifest, 0)['license'] as Map<String, dynamic>)['spdxId'] = 42;
+      });
+      await _expectFactoryInvalid((manifest, provenance) {
+        (_entry(manifest, 0)['license'] as Map<String, dynamic>)['url'] =
+            42;
+      });
+      await _expectFactoryInvalid((manifest, provenance) {
+        (_entry(manifest, 0)['license'] as Map<String, dynamic>)['textPath'] =
+            42;
+      });
+      await _expectFactoryInvalid((manifest, provenance) {
+        ((provenance['entries'] as List<dynamic>)[0] as Map<String, dynamic>)[
+                'sourcePageUrl'] = 42;
+      });
+      await _expectFactoryInvalid((manifest, provenance) {
+        ((provenance['entries'] as List<dynamic>)[0] as Map<String, dynamic>)[
+                'descriptionRevisionUrl'] = 42;
+      });
+    });
+  });
+
+  group('injected catalogue construction (policy fixtures)', () {
+    test('accepts references without recordings (missing coverage)', () {
+      final reference = CourseAudioReference(
+          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'tout');
+      final catalog =
+          CourseAudioCatalog(references: [reference], entries: const []);
+      expect(catalog.references, [reference]);
+      expect(catalog.entries, isEmpty);
+      expect(catalog.referenceById('fr-word-tout'), same(reference));
+      expect(catalog.wordReferenceByText('tout'), same(reference));
+      expect(
+          catalog.recordingFor('fr-word-tout', CourseAudioVariant.normal),
+          isNull);
+    });
+
+    test('accepts mixed reference kinds sharing the word text exactly', () {
+      final word = CourseAudioReference(
+          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'tout');
+      final sentence = CourseAudioReference(
+          id: 'fr-sent-tout',
+          kind: AudioReferenceKind.sentence,
+          spokenText: 'tout');
+      final catalog =
+          CourseAudioCatalog(references: [word, sentence], entries: const []);
+      expect(catalog.references.length, 2);
+      expect(catalog.referenceById('fr-sent-tout'), same(sentence));
+      // The text index resolves to the word reference, not the sentence.
+      expect(catalog.wordReferenceByText('tout'), same(word));
+    });
+
+    test('returns defensive immutable copies of the injected collections',
+        () {
+      final refs = <CourseAudioReference>[
+        CourseAudioReference(
+            id: 'fr-word-a', kind: AudioReferenceKind.word, spokenText: 'a'),
+        CourseAudioReference(
+            id: 'fr-word-b', kind: AudioReferenceKind.word, spokenText: 'b'),
+      ];
+      final entryA = _injectedEntry(refs[0]);
+      final catalog =
+          CourseAudioCatalog(references: refs, entries: <CourseAudioEntry>[
+        entryA,
+      ]);
+      // Mutating the caller's lists after construction has no effect...
+      refs.add(CourseAudioReference(
+          id: 'fr-word-c', kind: AudioReferenceKind.word, spokenText: 'c'));
+      expect(catalog.references.length, 2);
+      // ...and the catalog exposes no mutable collections.
+      expect(() => catalog.references.add(refs.last), throwsUnsupportedError);
+      expect(() => catalog.entries.add(entryA), throwsUnsupportedError);
+      expect(() => catalog.entries.removeAt(0), throwsUnsupportedError);
+      expect(
+          () => catalog.entries[0].recordings[CourseAudioVariant.slow] =
+              entryA.recordings[CourseAudioVariant.normal]!,
+          throwsUnsupportedError);
+    });
+
+    test('rejects duplicate reference ids', () {
+      final a = CourseAudioReference(
+          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'tout');
+      final b = CourseAudioReference(
+          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'rouge');
+      expect(
+        () => CourseAudioCatalog(references: [a, b], entries: const []),
+        _invalidCatalogueMatcher,
+      );
+    });
+
+    test('rejects two word identities sharing the same exact text', () {
+      final a = CourseAudioReference(
+          id: 'fr-word-tout-a', kind: AudioReferenceKind.word, spokenText: 'tout');
+      final b = CourseAudioReference(
+          id: 'fr-word-tout-b', kind: AudioReferenceKind.word, spokenText: 'tout');
+      expect(
+        () => CourseAudioCatalog(references: [a, b], entries: const []),
+        _invalidCatalogueMatcher,
+      );
+    });
+
+    test('rejects entries whose reference is missing or repeated', () {
+      final a = CourseAudioReference(
+          id: 'fr-word-a', kind: AudioReferenceKind.word, spokenText: 'a');
+      final b = CourseAudioReference(
+          id: 'fr-word-b', kind: AudioReferenceKind.word, spokenText: 'b');
+      final entryA = _injectedEntry(a);
+      expect(
+        () => CourseAudioCatalog(
+            references: [a], entries: <CourseAudioEntry>[_injectedEntry(b)]),
+        _invalidCatalogueMatcher,
+      );
+      expect(
+        () => CourseAudioCatalog(
+            references: [a], entries: <CourseAudioEntry>[entryA, entryA]),
+        _invalidCatalogueMatcher,
+      );
     });
   });
 

@@ -71,8 +71,8 @@ final class CourseAudioEntry {
 /// The bundled, validated pending-reference catalogue.
 ///
 /// Indices are built over the immutable, unique references/entries. Text
-/// lookup is exact (byte-for-byte Unicode) equality; no alternate slugs,
-/// case-folding, or derived identifiers are used.
+/// lookup is exact (byte-for-byte Unicode) equality over `word` references
+/// only; no alternate slugs, case-folding, or derived identifiers are used.
 final class CourseAudioCatalog {
   CourseAudioCatalog._({
     required this.references,
@@ -81,9 +81,51 @@ final class CourseAudioCatalog {
           for (final CourseAudioReference reference in references) reference.id: reference,
         },
         _byText = {
+          // Only word identities participate in the text index; a sound or
+          // sentence sharing a word's exact text never displaces it.
           for (final CourseAudioReference reference in references)
-            reference.spokenText: reference,
+            if (reference.kind == AudioReferenceKind.word)
+              reference.spokenText: reference,
         };
+
+  /// A shared, independently injected catalogue.
+  ///
+  /// [references] and [entries] are defensively copied so the caller's
+  /// collections cannot mutate the catalogue afterwards, and the exposed
+  /// lists are unmodifiable. A reference may represent a missing recording
+  /// (no matching entry) and future reference kinds may be mixed in, so
+  /// policy tests do not need the shipped manifest. Reference identities
+  /// must be unique exactly as authored; two `word` identities may not share
+  /// an exact spoken text (that would make word lookup arbitrary); and each
+  /// entry must pair with a reference that appears at most once. Throws a
+  /// [CourseAudioException] with
+  /// [CourseAudioFailureReason.invalidCatalogue] on any violation.
+  factory CourseAudioCatalog({
+    required List<CourseAudioReference> references,
+    required List<CourseAudioEntry> entries,
+  }) {
+    _validateReferences(references);
+    final Set<String> referenceIds = <String>{};
+    for (final CourseAudioReference reference in references) {
+      referenceIds.add(reference.id);
+    }
+    final Set<String> entryReferenceIds = <String>{};
+    for (final CourseAudioEntry entry in entries) {
+      if (!referenceIds.contains(entry.reference.id)) {
+        throw _invalid(
+            'every entry needs a matching reference; '
+            '"${entry.reference.id}" is unknown');
+      }
+      if (!entryReferenceIds.add(entry.reference.id)) {
+        throw _invalid('each reference may own one entry; '
+            '"${entry.reference.id}" repeats');
+      }
+    }
+    return CourseAudioCatalog._(
+      references: List<CourseAudioReference>.unmodifiable(references),
+      entries: List<CourseAudioEntry>.unmodifiable(entries),
+    );
+  }
 
   /// Validates the current pending-schema [manifest] against the supplied
   /// [references] (in authored order) and cross-checks the [provenance]
@@ -94,6 +136,7 @@ final class CourseAudioCatalog {
     Map<String, dynamic> provenance, {
     required List<CourseAudioReference> references,
   }) {
+    _validateReferences(references);
     _validateRoot(manifest, 'catalogue manifest');
 
     final Object? rawEntries = manifest['entries'];
@@ -120,7 +163,7 @@ final class CourseAudioCatalog {
       }
       final CourseAudioReference reference = references[i];
 
-      final String? id = rawEntry['id'] as String?;
+      final Object? id = rawEntry['id'];
       if (id != reference.id) {
         throw _invalid(
             'manifest.entries[$i].id is "$id" but the authored reference is '
@@ -144,14 +187,6 @@ final class CourseAudioCatalog {
         provenanceById,
         seenAssetKeys,
       ));
-    }
-
-    // Unique reference IDs guard against an injected duplicate reference list.
-    final Set<String> referenceIds = <String>{};
-    for (final CourseAudioReference reference in references) {
-      if (!referenceIds.add(reference.id)) {
-        throw _invalid('reference ids must be unique; duplicate id found');
-      }
     }
 
     return CourseAudioCatalog._(
@@ -195,6 +230,27 @@ final class CourseAudioCatalog {
         reason: CourseAudioFailureReason.invalidCatalogue,
         cause: StateError(message),
       ));
+
+  /// Reference-level invariants shared by the public constructor and the
+  /// strict JSON loader: unique identities and unique exact word texts.
+  /// Checked before any per-entry work so an identity violation is never
+  /// masked by an unrelated entry rejection.
+  static void _validateReferences(List<CourseAudioReference> references) {
+    final Set<String> seenIds = <String>{};
+    final Set<String> seenWordTexts = <String>{};
+    for (final CourseAudioReference reference in references) {
+      if (!seenIds.add(reference.id)) {
+        throw _invalid(
+            'reference ids must be unique; "${reference.id}" repeats');
+      }
+      if (reference.kind == AudioReferenceKind.word &&
+          !seenWordTexts.add(reference.spokenText)) {
+        throw _invalid(
+            'word references must have unique spoken text; '
+            '"${reference.spokenText}" repeats');
+      }
+    }
+  }
 
   static void _validateRoot(Map<String, dynamic> manifest, String label) {
     final Object? schemaVersion = manifest['schemaVersion'];
@@ -251,7 +307,9 @@ final class CourseAudioCatalog {
     final Object? sha256 = entry['sha256'];
     if (sha256 is! String) throw _invalid('entry.sha256 must be a string');
     final Object? byteLength = entry['byteLength'];
-    if (byteLength is! int) throw _invalid('entry.byteLength must be an int');
+    if (byteLength is! int || byteLength <= 0) {
+      throw _invalid('entry.byteLength must be a positive integer');
+    }
 
     final Object? rawAudio = entry['audio'];
     if (rawAudio is! Map<String, dynamic>) {
@@ -270,6 +328,8 @@ final class CourseAudioCatalog {
     if (entry['speaker'] is! Map<String, dynamic>) {
       throw _invalid('entry.speaker must be a JSON object');
     }
+    final String speakerName =
+        _validatedSpeaker(entry['speaker'] as Map<String, dynamic>);
     final Object? rawChanges = entry['changes'];
     if (rawChanges is! List) throw _invalid('entry.changes must be a list');
 
@@ -302,7 +362,7 @@ final class CourseAudioCatalog {
     }
     final CourseAudioCredit credit = _buildCredit(entry, license, licenseId,
         licenseUrl, licenseTextKey, attribution, notices, record,
-        reference.spokenText);
+        reference, speakerName);
 
     // --- recordings (normal only; slow must be separately recorded) -----
     final CourseAudioRecording normal = CourseAudioRecording(
@@ -387,6 +447,20 @@ final class CourseAudioCatalog {
     _validatedDuration(audio['durationSeconds']);
   }
 
+  /// The pending schema requires a nonempty source name and the current
+  /// unverified qualification; any other value would be an upgraded claim.
+  static String _validatedSpeaker(Map<String, dynamic> speaker) {
+    final Object? name = speaker['sourceName'];
+    if (name is! String || name.isEmpty) {
+      throw _invalid('entry.speaker.sourceName must be a non-empty string');
+    }
+    if (speaker['qualificationStatus'] != 'unverified') {
+      throw _invalid(
+          'entry.speaker.qualificationStatus must stay "unverified"');
+    }
+    return name;
+  }
+
   static void _validatePendingReview(Map<String, dynamic> review) {
     if (review['status'] != 'pending') {
       throw _invalid('review.status must stay "pending"');
@@ -404,8 +478,8 @@ final class CourseAudioCatalog {
   }
 
   static String _validatedLicenseId(Object? raw) {
-    final String? id = raw as String?;
-    if (id == null) throw _invalid('license.spdxId must be a string');
+    if (raw is! String) throw _invalid('license.spdxId must be a string');
+    final String id = raw;
     const Set<String> allowed = {'CC-BY-SA-4.0', 'CC-BY-4.0'};
     if (!allowed.contains(id)) {
       throw _invalid('license.spdxId "$id" is not a current pending licence');
@@ -414,10 +488,10 @@ final class CourseAudioCatalog {
   }
 
   static String _validatedLicenseUrl(Object? raw, String licenseId) {
-    final String? url = raw as String?;
-    if (url == null) {
+    if (raw is! String) {
       throw _invalid('license.url must be a string');
     }
+    final String url = raw;
     final Map<String, String> expected = {
       'CC-BY-SA-4.0': 'https://creativecommons.org/licenses/by-sa/4.0/',
       'CC-BY-4.0': 'https://creativecommons.org/licenses/by/4.0/',
@@ -430,8 +504,8 @@ final class CourseAudioCatalog {
   }
 
   static String _validatedLicenseTextPath(Object? raw, String licenseId) {
-    final String? path = raw as String?;
-    if (path == null) throw _invalid('license.textPath must be a string');
+    if (raw is! String) throw _invalid('license.textPath must be a string');
+    final String path = raw;
     if (path.contains('://') || path.contains('..') || path.startsWith('/')) {
       throw _invalid('license.textPath must be a packaged asset path');
     }
@@ -474,20 +548,22 @@ final class CourseAudioCatalog {
     String attribution,
     List<String> notices,
     Map<String, dynamic> provenance,
-    String spokenText,
+    CourseAudioReference reference,
+    String speakerName,
   ) {
     // The provenance record must agree with the entry and the manifest
     // licence; any drift is an association error, not a silent fallback.
     final Object? transcription = provenance['sourceTranscription'];
-    if (transcription != spokenText) {
+    if (transcription != reference.spokenText) {
       throw _invalid('provenance.sourceTranscription must equal the spoken '
-          'text "$spokenText"');
+          'text "${reference.spokenText}"');
     }
-    final Object? speaker = (entry['speaker'] as Map<String, dynamic>)['sourceName'];
-    final Object? sourceSpeaker = provenance['sourceSpeaker'];
-    if (sourceSpeaker != speaker) {
-      throw _invalid(
-          'provenance.sourceSpeaker must match the entry speaker');
+    // [speakerName] is a required non-empty string (see [_validatedSpeaker],
+    // called by the caller), so this consistency check always applies: a
+    // missing provenance speaker can no longer slip past a missing entry
+    // speaker.
+    if (provenance['sourceSpeaker'] != speakerName) {
+      throw _invalid('provenance.sourceSpeaker must match the entry speaker');
     }
     final Object? provenanceSha = provenance['sha256'];
     final Object? entrySha = entry['sha256'];
@@ -499,7 +575,7 @@ final class CourseAudioCatalog {
         provenance, licenseId, licenseUrl, attribution, notices);
 
     final String creator = _validatedCreator(provenance['creditedCreators'],
-        speaker);
+        speakerName);
 
     final bool unchanged =
         (entry['changes'] as List).isEmpty;
@@ -510,8 +586,8 @@ final class CourseAudioCatalog {
     final String? provenanceCaveat = _archiveCaveatIfArchived(provenance);
 
     return CourseAudioCredit(
-      referenceId: entry['id'] as String,
-      spokenText: spokenText,
+      referenceId: reference.id,
+      spokenText: reference.spokenText,
       creator: creator,
       sourceUrl: _validatedHttpUrl(provenance['sourcePageUrl']),
       auditedRevisionUrl: _validatedHttpUrl(provenance['descriptionRevisionUrl']),
@@ -544,11 +620,10 @@ final class CourseAudioCatalog {
   }
 
   static String _validatedHttpUrl(Object? raw) {
-    final String? url = raw as String?;
-    if (url == null || !url.startsWith('https://')) {
+    if (raw is! String || !raw.startsWith('https://')) {
       throw _invalid('source/licence URLs must be https');
     }
-    return url;
+    return raw;
   }
 
   static void _validateLicenseEvidence(
@@ -673,11 +748,13 @@ final class CourseAudioCatalogLoader {
       try {
         manifestJson = jsonDecode(manifestRaw);
         provenanceJson = jsonDecode(provenanceRaw);
-      } on FormatException {
+      } on FormatException catch (error, stackTrace) {
+        // Keep the actual JSON decode failure as the diagnostic cause
+        // instead of replacing it with a generic message.
         throw CourseAudioException(CourseAudioFailure(
           reason: CourseAudioFailureReason.invalidCatalogue,
-          cause: StateError('manifest/provenance is not valid JSON'),
-          stackTrace: StackTrace.current,
+          cause: error,
+          stackTrace: stackTrace,
         ));
       }
       if (manifestJson is! Map<String, dynamic> ||
