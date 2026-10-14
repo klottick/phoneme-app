@@ -11,9 +11,9 @@ through the existing `audioplayers` dependency, a reference-ID contract, no sile
 TTS substitution after recording errors, real completion, safe cancellation,
 accurate credits, regression tests and honest platform limitations.
 
-**This written spec awaits user review.** No product implementation is authorized
-by writing it. After written-spec approval, prepare a separate implementation
-plan for user review and execution selection.
+**The user approved this written spec at commit `71e1be8` on 2026-10-14.**
+Product implementation still requires a separate implementation plan for user
+review and confirmation of the preserved execution method.
 
 ## Explicit alpha scope override
 
