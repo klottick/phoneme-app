@@ -1033,6 +1033,14 @@ void main() {
           throwsArgumentError);
     }
   });
+
+  test('activity slot rejects a no-op cursor receipt', () {
+    final unchanged = SlotCursor(generation: 1, sequence: 2, revision: 3);
+    expect(
+      () => _receiptSlot(before: unchanged, after: unchanged),
+      throwsArgumentError,
+    );
+  });
 }
 
 ActivitySlot _receiptSlot(

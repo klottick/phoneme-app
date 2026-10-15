@@ -64,6 +64,16 @@ void main() {
 
   void start() => apply(StartLearningRun(options: RunOptions()), 1);
 
+  LearningCommand prepare(LearningAction action, int token) => engine.prepare(
+        state: state,
+        authGeneration: 0,
+        activityId: activity,
+        action: action,
+        token: tokenFor(token),
+        submittedAt: fixedTime.add(Duration(seconds: token)),
+        random: _NoDrawRandom(),
+      );
+
   test('first start and restart keep sequence monotone and reset run revision',
       () {
     final first = apply(StartLearningRun(options: RunOptions()), 1).slot;
@@ -145,6 +155,89 @@ void main() {
     expect(originalSession.attemptCount, 0);
     expect(state.activities[activity]!.cursor, original.cursor);
     expect(state.history, isEmpty);
+  });
+
+  test('prepare rejects illegal discovery advance and review as typed commands',
+      () {
+    start();
+    final originalSlot = state.activities[activity]!;
+    final originalSession =
+        (originalSlot.snapshot as DiscoveryCheckpoint).session.toJson();
+
+    expect(
+      () => prepare(const AdvanceLesson(), 20),
+      throwsA(isA<LearningInvalidCommandException>()),
+    );
+    expect(
+      () => prepare(const ReviewDiscoveryMistakes(), 21),
+      throwsA(isA<LearningInvalidCommandException>()),
+    );
+    expect(state.activities[activity]!.cursor, originalSlot.cursor);
+    expect(
+      (state.activities[activity]!.snapshot as DiscoveryCheckpoint)
+          .session
+          .toJson(),
+      originalSession,
+    );
+    expect(state.history, isEmpty);
+    expect(state.activities[activity]!.exposures, isEmpty);
+  });
+
+  test('prepare rejects review at debrief when there are no mistakes', () {
+    start();
+    for (var i = 0; i < frenchUySection.items.length; i++) {
+      answerAndAdvance(i + 30);
+    }
+    final originalSlot = state.activities[activity]!;
+    final originalSession =
+        (originalSlot.snapshot as DiscoveryCheckpoint).session.toJson();
+    expect(
+      () => prepare(const ReviewDiscoveryMistakes(), 50),
+      throwsA(isA<LearningInvalidCommandException>()),
+    );
+    expect(state.activities[activity]!.cursor, originalSlot.cursor);
+    expect(
+      (state.activities[activity]!.snapshot as DiscoveryCheckpoint)
+          .session
+          .toJson(),
+      originalSession,
+    );
+    expect(state.history, hasLength(frenchUySection.items.length));
+  });
+
+  test('prepare keeps legal discovery advance and mistake review candidates',
+      () {
+    start();
+    apply(
+      ChooseSound(
+        selectedSound: 'y',
+        audioSource: AttemptAudioSource.practiceSpeech,
+      ),
+      22,
+    );
+    final beforeAdvance = state.activities[activity]!;
+    final advance = prepare(const AdvanceLesson(), 23);
+    expect(
+      (advance.candidate as DiscoveryCheckpoint).session.position,
+      1,
+    );
+    expect(
+      (beforeAdvance.snapshot as DiscoveryCheckpoint).session.position,
+      0,
+    );
+    apply(const AdvanceLesson(), 24);
+
+    for (var i = 1; i < frenchUySection.items.length; i++) {
+      answerAndAdvance(i + 40, correct: true);
+    }
+    final beforeReview = state.activities[activity]!;
+    final review = prepare(const ReviewDiscoveryMistakes(), 60);
+    final candidate = (review.candidate as DiscoveryCheckpoint).session;
+    expect(candidate.round, 2);
+    expect(candidate.queue, ['tout']);
+    final saved = (beforeReview.snapshot as DiscoveryCheckpoint).session;
+    expect(saved.phase, LessonSectionPhase.debrief);
+    expect(saved.round, 1);
   });
 
   test('discovery evidence derives canonical content from registry', () {

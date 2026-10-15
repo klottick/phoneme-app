@@ -55,10 +55,18 @@ LessonMutation transitionLesson({
           ),
         );
       case AdvanceLesson():
-        session.advance();
+        try {
+          session.advance();
+        } on StateError catch (error) {
+          throw LearningInvalidCommandException(error);
+        }
         return LessonMutation(snapshot: DiscoveryCheckpoint(session: session));
       case ReviewDiscoveryMistakes():
-        session.reviewMistakes();
+        try {
+          session.reviewMistakes();
+        } on StateError catch (error) {
+          throw LearningInvalidCommandException(error);
+        }
         return LessonMutation(snapshot: DiscoveryCheckpoint(session: session));
       case _:
         throw const LearningInvalidCommandException();
