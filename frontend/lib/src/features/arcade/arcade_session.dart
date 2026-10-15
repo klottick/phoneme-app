@@ -1,9 +1,26 @@
+import '../../core/course/course_learning_checkpoint.dart';
+
 class ArcadeSession {
+  ArcadeSession();
+
+  ArcadeSession.fromState(ArcadeClockState state)
+      : remaining = state.remaining,
+        round = state.round,
+        score = state.score,
+        paused = state.paused;
+
   int remaining = 60;
   int round = 1;
   int score = 0;
   bool paused = false;
   bool get roundOver => remaining == 0;
+
+  ArcadeClockState snapshot() => ArcadeClockState(
+        remaining: remaining,
+        round: round,
+        score: score,
+        paused: paused,
+      );
   void elapse(int seconds) {
     if (!paused && !roundOver) remaining = (remaining - seconds).clamp(0, 60);
   }
