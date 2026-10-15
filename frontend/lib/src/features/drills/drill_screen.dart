@@ -21,6 +21,7 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
   int _correct = 0;
   bool _isPlaying = false;
   bool _heard = false;
+  bool _ending = false;
   CourseAudio? _audio;
 
   /// Request-generation guard: a playback that is superseded (Stop control,
@@ -132,7 +133,7 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
                       icon: Icon(_isPlaying ? Icons.stop : Icons.play_arrow),
                       iconSize: 36,
                       tooltip: 'Play audio',
-                      onPressed: () => _onPlayStop(current),
+                      onPressed: _ending ? null : () => _onPlayStop(current),
                     ),
                   ],
                 ),
@@ -143,7 +144,7 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
                     child: SizedBox(
                       width: double.infinity,
                       child: FilledButton.tonal(
-                        onPressed: _heard && !_isPlaying
+                        onPressed: !_ending && _heard && !_isPlaying
                             ? () =>
                                 _handleAnswer(option, current.wordA, current)
                             : null,
@@ -154,7 +155,7 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
                 const Spacer(),
                 Center(
                   child: TextButton(
-                    onPressed: _endSession,
+                    onPressed: _ending ? null : _endSession,
                     child: const Text('End Session'),
                   ),
                 ),
@@ -174,6 +175,7 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
   /// so a user stop never marks heard, unlocks the choices, or surfaces as
   /// an audio failure.
   Future<void> _onPlayStop(dynamic currentPair) async {
+    if (_ending) return;
     if (_isPlaying) {
       _retireAudio();
       if (mounted) {
@@ -188,6 +190,7 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
   }
 
   Future<void> _playAudio(dynamic currentPair) async {
+    if (_ending) return;
     final int generation = ++_playGeneration;
     setState(() {
       _isPlaying = true;
@@ -222,6 +225,7 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
     String correct,
     dynamic currentPair,
   ) async {
+    if (_ending || !_heard || _isPlaying) return;
     final isCorrect = selected == correct;
     if (isCorrect) {
       _correct++;
@@ -249,11 +253,21 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
   }
 
   Future<void> _endSession() async {
+    if (_ending) return;
+    setState(() {
+      _ending = true;
+      _heard = false;
+      _isPlaying = false;
+    });
     // Retire any in-flight playback before the screen exits, so a late
     // settlement can never mark heard or unlock the choices.
     _retireAudio();
-    setState(() => _isPlaying = false);
-    await ref.read(streakServiceProvider).recordPractice();
+    try {
+      await ref.read(streakServiceProvider).recordPractice();
+    } catch (_) {
+      if (mounted) setState(() => _ending = false);
+      return;
+    }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

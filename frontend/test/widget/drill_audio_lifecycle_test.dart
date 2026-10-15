@@ -29,6 +29,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/models/minimal_pair.dart';
 import 'package:linguist/src/core/providers/app_providers.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
+import 'package:linguist/src/core/course/course_progress.dart';
+import 'package:linguist/src/core/services/streak_service.dart';
 import 'package:linguist/src/features/drills/drill_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -48,8 +50,8 @@ final class CancellingCueAudio implements CourseAudio {
     final Completer<Object?> settle = Completer<Object?>();
     _pending = settle;
     final Future<void> delivery = settle.future.then((Object? _) {});
-    unawaited(delivery.then<void>(
-        (Object? value) {}, onError: (Object error) {}));
+    unawaited(
+        delivery.then<void>((Object? value) {}, onError: (Object error) {}));
     return delivery;
   }
 
@@ -109,8 +111,8 @@ final class HeldCueAudio implements CourseAudio {
     final HeldCue cue = HeldCue(settle);
     cues.add(cue);
     final Future<void> delivery = settle.future.then((Object? _) {});
-    unawaited(delivery.then<void>(
-        (Object? value) {}, onError: (Object error) {}));
+    unawaited(
+        delivery.then<void>((Object? value) {}, onError: (Object error) {}));
     return delivery;
   }
 
@@ -120,6 +122,50 @@ final class HeldCueAudio implements CourseAudio {
     // really — that is the stale-settlement shape callers must survive.
     stops++;
     return Future<void>.value();
+  }
+}
+
+/// One held persistence call of [HeldStreakService]: the future really
+/// stays pending until [release] settles it — with success or a genuine
+/// error. The quiet observer is attached at creation, BEFORE any release
+/// can settle with an error.
+final class HeldRelease {
+  final Completer<void> _settle = Completer<void>();
+
+  HeldRelease() {
+    unawaited(
+        _settle.future.then<void>((void value) {}, onError: (Object error) {}));
+  }
+
+  bool get held => !_settle.isCompleted;
+
+  Future<void> get future => _settle.future;
+
+  void release([Object? error]) {
+    if (_settle.isCompleted) return;
+    if (error == null) {
+      _settle.complete();
+    } else {
+      _settle.completeError(error);
+    }
+  }
+}
+
+/// Streak-persistence boundary for the End-Session guard (R2): each
+/// `recordPractice` call is genuinely HELD until its [HeldRelease] is
+/// settled, so the screen's await window is deterministic and observable.
+/// No production [StreakService] API change — only the existing
+/// `streakServiceProvider` override seam is used.
+class HeldStreakService extends StreakService {
+  final List<HeldRelease> releases = <HeldRelease>[];
+
+  int get recordCalls => releases.length;
+
+  @override
+  Future<void> recordPractice() {
+    final HeldRelease release = HeldRelease();
+    releases.add(release);
+    return release.future;
   }
 }
 
@@ -229,7 +275,8 @@ void main() {
     );
   });
 
-  testWidgets('Stop retires in-flight playback; a really released stale '
+  testWidgets(
+      'Stop retires in-flight playback; a really released stale '
       'error of the old request cannot surface over the newer held one',
       (WidgetTester tester) async {
     final HeldCueAudio audio = HeldCueAudio();
@@ -283,7 +330,8 @@ void main() {
     expect(optionEnabled(tester, 'roue'), isTrue);
   });
 
-  testWidgets('a stale SUCCESS of a retired request during a newer held '
+  testWidgets(
+      'a stale SUCCESS of a retired request during a newer held '
       'attempt cannot unlock', (WidgetTester tester) async {
     final HeldCueAudio audio = HeldCueAudio();
     final DrillHarness harness =
@@ -393,15 +441,15 @@ void main() {
     StateError('late engine failure'),
   ];
   for (final Object? outcome in leaveOutcomes) {
-    testWidgets('leaving the drill retires in-flight audio and a really '
+    testWidgets(
+        'leaving the drill retires in-flight audio and a really '
         'late ${outcome == null ? 'success' : 'error'} settlement stays quiet',
         (WidgetTester tester) async {
       final HeldCueAudio audio = HeldCueAudio();
       final navigator = GlobalKey<NavigatorState>();
       await tester.pumpWidget(ProviderScope(
         overrides: <Override>[
-          minimalPairsProvider
-              .overrideWith((ref) => Future.value(drillPairs)),
+          minimalPairsProvider.overrideWith((ref) => Future.value(drillPairs)),
           courseAudioProvider.overrideWithValue(audio),
         ],
         child: MaterialApp(
@@ -438,14 +486,14 @@ void main() {
     });
   }
 
-  testWidgets('leaving the drill after a realistic cancellation stays '
+  testWidgets(
+      'leaving the drill after a realistic cancellation stays '
       'quiet', (WidgetTester tester) async {
     final CancellingCueAudio audio = CancellingCueAudio();
     final navigator = GlobalKey<NavigatorState>();
     await tester.pumpWidget(ProviderScope(
       overrides: <Override>[
-        minimalPairsProvider
-            .overrideWith((ref) => Future.value(drillPairs)),
+        minimalPairsProvider.overrideWith((ref) => Future.value(drillPairs)),
         courseAudioProvider.overrideWithValue(audio),
       ],
       child: MaterialApp(
@@ -475,7 +523,8 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('app suspension retires a held playback: stopped, retryable, '
+  testWidgets(
+      'app suspension retires a held playback: stopped, retryable, '
       'and stale success during a newer attempt cannot unlock',
       (WidgetTester tester) async {
     final HeldCueAudio audio = HeldCueAudio();
@@ -527,7 +576,8 @@ void main() {
     expect(optionEnabled(tester, 'roue'), isTrue);
   });
 
-  testWidgets('a stale error after suspension cannot publish failure '
+  testWidgets(
+      'a stale error after suspension cannot publish failure '
       'feedback over a newer held attempt', (WidgetTester tester) async {
     final HeldCueAudio audio = HeldCueAudio();
     final DrillHarness harness =
@@ -563,5 +613,233 @@ void main() {
     audio.cues[1].release();
     await settle(tester);
     expect(optionEnabled(tester, 'roue'), isTrue);
+  });
+
+  // ---------- R2 (fix round 2): the synchronous single-shot ending state ----------
+
+  Future<GlobalKey<NavigatorState>> pumpDrillRoute(
+    WidgetTester tester,
+    HeldCueAudio audio,
+    HeldStreakService streak,
+  ) async {
+    final navigator = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(ProviderScope(
+      overrides: <Override>[
+        minimalPairsProvider.overrideWith((ref) => Future.value(drillPairs)),
+        courseAudioProvider.overrideWithValue(audio),
+        streakServiceProvider.overrideWithValue(streak),
+      ],
+      child: MaterialApp(
+        navigatorKey: navigator,
+        home: Builder(builder: (BuildContext context) {
+          return TextButton(
+            onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<Widget>(builder: (_) => const DrillScreen())),
+            child: const Text('Open drill'),
+          );
+        }),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open drill'));
+    await tester.pumpAndSettle(); // route transition before interacting
+    return navigator;
+  }
+
+  testWidgets(
+      'End Session: while the persistence await is genuinely held, '
+      'no new play/answer/End is admitted and a late A SUCCESS stays stale',
+      (WidgetTester tester) async {
+    final HeldCueAudio audio = HeldCueAudio();
+    final HeldStreakService streak = HeldStreakService();
+    await pumpDrillRoute(tester, audio, streak);
+    // Start request A and hold it, then End the session.
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await settle(tester);
+    expect(audio.spoken, <String>['roue']);
+    await tester.tap(find.text('End Session'));
+    await settle(tester);
+    expect(streak.recordCalls, 1,
+        reason: 'a user end books the streak exactly once');
+    expect(streak.releases[0].held, isTrue,
+        reason: 'the persistence await is genuinely held for this test');
+    // Held across frames: no banner, no exit, and the screen must admit
+    // NO new work (R2).
+    await tester.pump();
+    await tester.pump();
+    expect(find.textContaining('Session complete'), findsNothing,
+        reason: 'no completion banner may appear while the await is held');
+    expect(find.text('Open drill'), findsNothing,
+        reason: 'no exit may happen while the await is held');
+    // A really late SUCCESS of the retired A during ending stays stale.
+    audio.cues[0].release();
+    await settle(tester);
+    expect(optionEnabled(tester, 'roue'), isFalse,
+        reason: 'a late success during ending must not unlock the choices');
+    // New Play is rejected: no B dispatch.
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await settle(tester);
+    expect(audio.spoken, <String>['roue'],
+        reason: 'ending must reject a new playback request (no B dispatch)');
+    // Answers stay blocked: no new evidence.
+    final data = await CourseProgressStore('en-fr').load();
+    expect(data['evidence'], isEmpty,
+        reason: 'no answer may land while ending');
+    // End re-entry is rejected: no duplicate booking.
+    await tester.tap(find.text('End Session'));
+    await settle(tester);
+    expect(streak.recordCalls, 1,
+        reason: 'no duplicate end operation while the first is in flight');
+    // Now release the persistence: exactly one banner, one exit, one booking.
+    streak.releases[0].release();
+    await tester.pump();
+    await tester.pump();
+    expect(find.textContaining('Session complete'), findsOneWidget,
+        reason: 'the successful end shows its banner');
+    await tester.pumpAndSettle();
+    expect(find.text('Open drill'), findsOneWidget,
+        reason: 'the successful end exits exactly once (real route)');
+    expect(streak.recordCalls, 1, reason: 'exactly one booking');
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+      'End Session: a late A ERROR during ending stays silent and '
+      'the exit is still governed by the persistence outcome',
+      (WidgetTester tester) async {
+    final HeldCueAudio audio = HeldCueAudio();
+    final HeldStreakService streak = HeldStreakService();
+    await pumpDrillRoute(tester, audio, streak);
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await settle(tester);
+    await tester.tap(find.text('End Session'));
+    await settle(tester);
+    expect(streak.recordCalls, 1);
+    // The old request settles with a REAL engine error while ending.
+    audio.cues[0].release(StateError('late engine failure'));
+    await settle(tester);
+    expect(find.text('French audio unavailable. Please retry.'), findsNothing,
+        reason: 'a stale error of the retired request must not surface');
+    expect(find.textContaining('Session complete'), findsNothing,
+        reason: 'a late failure is not a successful end');
+    expect(find.text('Open drill'), findsNothing,
+        reason: 'a late failure must not exit the session');
+    expect(optionEnabled(tester, 'roue'), isFalse,
+        reason: 'a stale error must not unlock the choices');
+    // The persistence release is what ends the session — success exits once.
+    streak.releases[0].release();
+    await tester.pump();
+    await tester.pump();
+    expect(find.textContaining('Session complete'), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(find.text('Open drill'), findsOneWidget);
+    expect(streak.recordCalls, 1);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+      'End Session after a completed listen: hearing is cleared '
+      'synchronously and cached callbacks cannot re-enter',
+      (WidgetTester tester) async {
+    final HeldCueAudio audio = HeldCueAudio();
+    final HeldStreakService streak = HeldStreakService();
+    await pumpDrillRoute(tester, audio, streak);
+    // A real completion first: the choices are unlocked (heard).
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await settle(tester);
+    audio.cues[0].release();
+    await settle(tester);
+    expect(optionEnabled(tester, 'roue'), isTrue,
+        reason: 'a real completion unlocks the choices');
+    // End the session while the persistence await is held.
+    await tester.tap(find.text('End Session'));
+    await settle(tester);
+    expect(streak.recordCalls, 1);
+    await tester.pump();
+    expect(optionEnabled(tester, 'roue'), isFalse,
+        reason: 'ending clears hearing BEFORE the persistence await: an '
+            'already-heard item must not remain answerable');
+    // The cached answer callback (admitted before the rebuild) cannot record.
+    await tester.tap(find.text('roue'));
+    await settle(tester);
+    final data = await CourseProgressStore('en-fr').load();
+    expect(data['evidence'], isEmpty,
+        reason: 'a cached answer callback must not record during ending');
+    // Cached Play / End callbacks cannot re-enter either.
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await settle(tester);
+    expect(audio.spoken, <String>['roue'],
+        reason: 'a cached Play callback must not start a new request');
+    await tester.tap(find.text('End Session'));
+    await settle(tester);
+    expect(streak.recordCalls, 1,
+        reason: 'a cached End callback must not double-book');
+    // Release: one banner, one exit.
+    streak.releases[0].release();
+    await tester.pump();
+    await tester.pump();
+    expect(find.textContaining('Session complete'), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(find.text('Open drill'), findsOneWidget);
+    expect(streak.recordCalls, 1);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+      'a failed persistence is a deliberate retryable state: no '
+      'exit, no automatic retry, and one successful retry exits once',
+      (WidgetTester tester) async {
+    final HeldCueAudio audio = HeldCueAudio();
+    final HeldStreakService streak = HeldStreakService();
+    await pumpDrillRoute(tester, audio, streak);
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await settle(tester);
+    await tester.tap(find.text('End Session'));
+    await settle(tester);
+    expect(streak.recordCalls, 1);
+    expect(streak.releases[0].held, isTrue);
+    // Release the persistence with a REAL failure (observers attached in
+    // the double at creation): it must be handled, not unhandled.
+    streak.releases[0].release(StateError('storage failed'));
+    await settle(tester);
+    expect(find.textContaining('Session complete'), findsNothing,
+        reason: 'a failed booking must not show the completion banner');
+    expect(find.text('Open drill'), findsNothing,
+        reason: 'a failed booking must not exit the session');
+    expect(
+        tester
+            .widget<TextButton>(find.ancestor(
+                of: find.text('End Session'),
+                matching: find.byType(TextButton)))
+            .onPressed,
+        isNotNull,
+        reason: 'the failure clears the ending into a retryable state');
+    expect(optionEnabled(tester, 'roue'), isFalse,
+        reason: 'hearing stays false in the retryable state');
+    expect(tester.takeException(), isNull,
+        reason: 'the failed write is handled, never an unhandled error');
+    await tester.pump();
+    await tester.pump();
+    expect(streak.recordCalls, 1,
+        reason: 'no automatic retry after a failed write');
+    // An explicit retry may book again; release it successfully.
+    await tester.tap(find.text('End Session'));
+    await settle(tester);
+    expect(streak.recordCalls, 2,
+        reason: 'an explicit retry books the streak again');
+    expect(streak.releases[1].held, isTrue);
+    streak.releases[1].release();
+    await tester.pump();
+    await tester.pump();
+    expect(find.textContaining('Session complete'), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(find.text('Open drill'), findsOneWidget,
+        reason: 'exactly one exit, on the successful booking');
+    expect(streak.recordCalls, 2, reason: 'no further bookings');
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
   });
 }

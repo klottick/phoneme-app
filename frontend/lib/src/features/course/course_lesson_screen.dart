@@ -22,6 +22,7 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
     with WidgetsBindingObserver {
   int _index = 0;
   bool _heard = false, _busy = false, _answered = false, _recording = false;
+  bool _audioBusy = false;
   String _feedback = '';
   String? _recordingPath;
   RecordingService? _recorder;
@@ -80,16 +81,18 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
   /// auto-replays the retired request.
   void _retireForBackground() {
     final CourseAudio? audio = _audio;
-    if (audio == null && !_busy) return;
+    if (audio == null && !_audioBusy) return;
     _listenGeneration++;
     _audio = null;
     if (audio != null) {
       unawaited(audio.stop().catchError((Object _) {}));
     }
+    final bool retiredAudioBusy = _audioBusy;
+    _audioBusy = false;
     if (mounted) {
       setState(() {
         _heard = false;
-        if (!_recording) {
+        if (retiredAudioBusy) {
           _busy = false;
         }
       });
@@ -110,7 +113,9 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
   }
 
   Future<void> _listen() async {
+    if (_busy || _recording) return;
     final int generation = ++_listenGeneration;
+    _audioBusy = true;
     setState(() {
       _busy = true;
       _heard = false;
@@ -132,6 +137,7 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
       }
     } finally {
       if (mounted && generation == _listenGeneration) {
+        _audioBusy = false;
         setState(() => _busy = false);
       }
     }
@@ -157,12 +163,14 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
   }
 
   Future<void> _record() {
+    if (_busy || !_answered) return Future<void>.value();
     final operation = _toggleRecording();
     _recordingOperation = operation;
     return operation;
   }
 
   Future<void> _toggleRecording() async {
+    if (_busy || !_answered) return;
     // The lesson owns this recorder. Delayed cleanup must never stop a recorder
     // that another screen obtained from the shared application provider.
     final recorder = _recorder ??= RecordingService();
@@ -206,6 +214,7 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
   }
 
   Future<void> _next() async {
+    if (_busy || _recording) return;
     if (_index < _lesson.words.length - 1) {
       // A new word owns the next listen request: the previous one's late
       // settlement must not publish over this state.
