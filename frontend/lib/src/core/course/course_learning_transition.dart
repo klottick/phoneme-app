@@ -5,7 +5,11 @@ import 'course_learning_checkpoint.dart';
 import 'course_learning_command.dart';
 import 'course_learning_codec.dart';
 import 'course_learning_error.dart';
+import 'course_learning_game_transition.dart';
 import 'course_learning_lesson_transition.dart';
+import 'course_learning_random.dart';
+import '../../features/arcade/sound_match_engine.dart';
+import '../../features/arcade/word_match_engine.dart';
 import 'course_learning_registry.dart';
 import 'course_learning_state.dart';
 import 'course_skill_summary.dart';
@@ -48,7 +52,8 @@ class LearningTransitionEngine {
     required Random random,
   }) {
     final definition = registry.require(activityId);
-    _requireLessonOrDrill(definition);
+    final isGame = _isGame(definition);
+    if (!isGame) _requireLessonOrDrill(definition);
     final slot = state.activities[activityId];
     final expected =
         slot?.cursor ?? SlotCursor(generation: 0, sequence: 0, revision: 0);
@@ -59,11 +64,13 @@ class LearningTransitionEngine {
       }
       _validateActiveSlot(definition, slot);
     }
+    final recording = RecordingLearningRandom(random);
     final mutation = _applyAction(
       definition: definition,
       slot: slot,
       action: action,
       token: token,
+      random: isGame ? recording : random,
     );
     return LearningCommand(
       scope: state.scope,
@@ -73,7 +80,7 @@ class LearningTransitionEngine {
       token: token,
       submittedAt: submittedAt,
       action: action,
-      draws: const [],
+      draws: isGame ? recording.draws : const [],
       candidate: mutation.snapshot,
       feedback: mutation.feedback,
     );
@@ -85,23 +92,40 @@ class LearningTransitionEngine {
     required DateTime committedAt,
   }) {
     try {
-      if (command.scope != state.scope || command.draws.isNotEmpty) {
+      final definition = registry.require(command.activityId);
+      final isGame = _isGame(definition);
+      if (command.scope != state.scope ||
+          (!isGame && command.draws.isNotEmpty)) {
         throw const LearningInvalidCommandException();
       }
-      final replay = prepare(
-        state: state,
-        authGeneration: command.authGeneration,
-        activityId: command.activityId,
+      final slotBefore = state.activities[command.activityId];
+      final replayRandom =
+          isGame ? ReplayLearningRandom(command.draws) : _NoRandom();
+      final mutationForCheck = _applyAction(
+        definition: definition,
+        slot: slotBefore,
         action: command.action,
         token: command.token,
+        random: replayRandom,
+      );
+      if (replayRandom is ReplayLearningRandom) replayRandom.requireExhausted();
+      final replay = LearningCommand(
+        scope: state.scope,
+        authGeneration: command.authGeneration,
+        activityId: command.activityId,
+        expected: slotBefore?.cursor ??
+            SlotCursor(generation: 0, sequence: 0, revision: 0),
+        token: command.token,
         submittedAt: command.submittedAt,
-        random: _NoRandom(),
+        action: command.action,
+        draws: command.draws,
+        candidate: mutationForCheck.snapshot,
+        feedback: mutationForCheck.feedback,
       );
       const codec = LearningDocumentCodec();
       if (codec.canonicalCommand(replay) != codec.canonicalCommand(command)) {
         throw const LearningInvalidCommandException();
       }
-      final definition = registry.require(command.activityId);
       final beforeSlot = state.activities[command.activityId];
       final predecessor = beforeSlot?.cursor ??
           SlotCursor(generation: 0, sequence: 0, revision: 0);
@@ -118,17 +142,13 @@ class LearningTransitionEngine {
               revision: predecessor.revision + 1,
             );
       final commitOrdinal = state.commitOrdinal + 1;
-      final mutation = _applyAction(
-        definition: definition,
-        slot: beforeSlot,
-        action: command.action,
-        token: command.token,
-      );
+      final mutation = mutationForCheck;
       final exposures = _exposuresFor(
         slot: beforeSlot,
         definition: definition,
         action: command.action,
         item: mutation.answerItem,
+        gameEvidence: mutation.gameEvidence,
       );
       final slot = ActivitySlot(
         activityId: definition.id,
@@ -167,6 +187,28 @@ class LearningTransitionEngine {
         attempts.add(attempt);
         _updateMistakes(mistakes, attempt);
       }
+      for (var i = 0; i < mutation.gameEvidence.length; i++) {
+        final evidence = mutation.gameEvidence[i];
+        final attempt = _gameAttempt(
+          state: state,
+          definition: definition,
+          slot: slot,
+          evidence: evidence,
+          action: command.action,
+          submittedAt: command.submittedAt,
+          committedAt: committedAt,
+          commitOrdinal: commitOrdinal,
+          index: i,
+          priorSameItemInBatch: mutation.gameEvidence
+              .take(i)
+              .where((prior) =>
+                  prior.item.id == evidence.item.id &&
+                  prior.target == evidence.target)
+              .length,
+        );
+        attempts.add(attempt);
+        _updateMistakes(mistakes, attempt);
+      }
       final summaries = addAttemptCounts(state.summaries, attempts);
       final completions = _nextCompletions(
         state: state,
@@ -175,13 +217,21 @@ class LearningTransitionEngine {
         action: command.action,
         committedAt: committedAt,
       );
+      final bestScores = Map<String, int>.of(state.bestScores);
+      if (slot.snapshot
+          case SoundGameCheckpoint(:final clock) ||
+              WordGameCheckpoint(:final clock)) {
+        final key = definition.id;
+        final score = clock.score;
+        if (score > (bestScores[key] ?? 0)) bestScores[key] = score;
+      }
       return LearningTransition(
         slot: slot,
         attempts: attempts,
         mistakes: mistakes,
         summaries: summaries,
         completions: completions,
-        bestScores: state.bestScores,
+        bestScores: bestScores,
       );
     } on LearningContentChangedException {
       rethrow;
@@ -197,8 +247,22 @@ class LearningTransitionEngine {
     required ActivitySlot? slot,
     required LearningAction action,
     required String token,
+    required Random random,
   }) {
     if (action case StartLearningRun(:final options)) {
+      if (_isGame(definition)) {
+        final game = CourseLearningGameTransition(registry).apply(
+          definition: definition,
+          slot: slot,
+          action: action,
+          random: random,
+        );
+        return _Mutation(
+          snapshot: game.snapshot,
+          feedback: game.feedback,
+          gameEvidence: game.evidence,
+        );
+      }
       final sessionId = token;
       final ActivitySnapshot snapshot = switch (definition.kind) {
         LearningActivityKind.discovery => DiscoveryCheckpoint(
@@ -218,7 +282,9 @@ class LearningTransitionEngine {
             correct: 0,
             ended: false,
           ),
-        _ => throw const LearningInvalidCommandException(),
+        LearningActivityKind.soundGame ||
+        LearningActivityKind.wordGame =>
+          throw const LearningInvalidCommandException(),
       };
       return _Mutation(snapshot: snapshot);
     }
@@ -226,6 +292,25 @@ class LearningTransitionEngine {
     if (slot.contentRevision != definition.contentRevision ||
         slot.kind != definition.kind) {
       throw const LearningContentChangedException();
+    }
+
+    if (_isGame(definition) && action is ObserveAssistance) {
+      _validateAssistance(definition, action);
+      return _Mutation(snapshot: slot.snapshot);
+    }
+
+    if (_isGame(definition)) {
+      final game = CourseLearningGameTransition(registry).apply(
+        definition: definition,
+        slot: slot,
+        action: action,
+        random: random,
+      );
+      return _Mutation(
+        snapshot: game.snapshot,
+        feedback: game.feedback,
+        gameEvidence: game.evidence,
+      );
     }
 
     if (definition.kind == LearningActivityKind.discovery ||
@@ -323,6 +408,7 @@ class LearningTransitionEngine {
     required LearningActivityDefinition definition,
     required LearningAction action,
     required LearningSourceItem? item,
+    required List<GameAnswerEvidence> gameEvidence,
   }) {
     final out =
         Map<ItemContextKey, ItemExposure>.of(slot?.exposures ?? const {});
@@ -384,6 +470,41 @@ class LearningTransitionEngine {
           assistance: old.assistance,
         );
       }
+    }
+    if (slot?.kind == LearningActivityKind.wordGame &&
+        action is LinkWordTiles &&
+        (slot!.snapshot as WordGameCheckpoint).board.moves < 4) {
+      for (final evidence in gameEvidence) {
+        final context = ItemContextKey(
+            itemId: evidence.item.id, targetSound: evidence.target);
+        final old = out[context] ??
+            ItemExposure(presentations: 0, assistance: const {});
+        out[context] = ItemExposure(
+          presentations: old.presentations,
+          assistance: {...old.assistance, AssistanceFlag.graphemeHint},
+        );
+      }
+    }
+    for (final evidence
+        in gameEvidence.where((evidence) => !evidence.correct)) {
+      final context = ItemContextKey(
+          itemId: evidence.item.id, targetSound: evidence.target);
+      final old =
+          out[context] ?? ItemExposure(presentations: 0, assistance: const {});
+      out[context] = ItemExposure(
+        presentations: old.presentations,
+        assistance: {...old.assistance, AssistanceFlag.answerRevealed},
+      );
+    }
+    for (final evidence in gameEvidence) {
+      final context = ItemContextKey(
+          itemId: evidence.item.id, targetSound: evidence.target);
+      final old =
+          out[context] ?? ItemExposure(presentations: 0, assistance: const {});
+      out[context] = ItemExposure(
+        presentations: old.presentations + 1,
+        assistance: old.assistance,
+      );
     }
     return out;
   }
@@ -538,6 +659,15 @@ class LearningTransitionEngine {
           AssistanceFlag.graphemeHint,
           AssistanceFlag.answerRevealed,
         },
+      LearningActivityKind.wordGame => const {
+          AssistanceFlag.explanationVisible,
+          AssistanceFlag.graphemeHint,
+          AssistanceFlag.answerRevealed,
+        },
+      LearningActivityKind.soundGame => const {
+          AssistanceFlag.explanationVisible,
+          AssistanceFlag.answerRevealed,
+        },
       _ => const <AssistanceFlag>{},
     };
     if (action.items.isEmpty ||
@@ -548,7 +678,7 @@ class LearningTransitionEngine {
     for (final context in action.items) {
       final item = definition.items.where((item) => item.id == context.itemId);
       if (item.length != 1 ||
-          !item.single.targetSounds.contains(context.targetSound)) {
+          !_validContextTarget(definition, item.single, context.targetSound)) {
         throw const LearningInvalidCommandException();
       }
     }
@@ -560,7 +690,8 @@ class LearningTransitionEngine {
       final sources =
           definition.items.where((item) => item.id == context.itemId);
       if (sources.length != 1 ||
-          !sources.single.targetSounds.contains(context.targetSound)) {
+          !_validContextTarget(
+              definition, sources.single, context.targetSound)) {
         throw const LearningInvalidCommandException();
       }
     }
@@ -614,6 +745,12 @@ class LearningTransitionEngine {
             (ended && index > pairIds.length)) {
           throw const LearningInvalidCommandException();
         }
+      case SoundGameCheckpoint(:final board)
+          when definition.kind == LearningActivityKind.soundGame:
+        SoundMatchEngine.fromState(board, random: _NoRandom());
+      case WordGameCheckpoint(:final board)
+          when definition.kind == LearningActivityKind.wordGame:
+        WordMatchEngine.fromState(board, random: _NoRandom());
       case SoundGameCheckpoint() || WordGameCheckpoint():
         throw const LearningInvalidCommandException();
     }
@@ -632,6 +769,84 @@ class LearningTransitionEngine {
       throw const LearningInvalidCommandException();
     }
   }
+
+  bool _isGame(LearningActivityDefinition definition) =>
+      definition.kind == LearningActivityKind.soundGame ||
+      definition.kind == LearningActivityKind.wordGame;
+
+  bool _validContextTarget(LearningActivityDefinition definition,
+          LearningSourceItem item, String target) =>
+      definition.kind == LearningActivityKind.wordGame
+          ? WordMatchEngine.targets.contains(target)
+          : item.targetSounds.contains(target);
+
+  CourseAttempt _gameAttempt({
+    required CourseLearningState state,
+    required LearningActivityDefinition definition,
+    required ActivitySlot slot,
+    required GameAnswerEvidence evidence,
+    required LearningAction action,
+    required DateTime submittedAt,
+    required DateTime committedAt,
+    required int commitOrdinal,
+    required int index,
+    required int priorSameItemInBatch,
+  }) {
+    final context =
+        ItemContextKey(itemId: evidence.item.id, targetSound: evidence.target);
+    final prior = state.activities[definition.id]?.exposures[context] ??
+        ItemExposure(presentations: 0, assistance: const {});
+    final assistance = <AssistanceFlag>{...prior.assistance};
+    if (definition.kind == LearningActivityKind.wordGame &&
+        action is LinkWordTiles &&
+        (state.activities[definition.id]!.snapshot as WordGameCheckpoint)
+                .board
+                .moves <
+            4) {
+      assistance.add(AssistanceFlag.graphemeHint);
+    }
+    final occurrence = prior.presentations + priorSameItemInBatch + 1;
+    final answer = definition.kind == LearningActivityKind.wordGame
+        ? WordTileAnswer(
+            wordId: evidence.item.id,
+            tileIndex: evidence.tileIndex,
+            targetSound: evidence.target,
+            expectedMembership: evidence.expectedMembership,
+          )
+        : SoundCueAnswer(
+            selectedFamily: evidence.selected,
+            wordId: evidence.item.id,
+            expectedFamily: evidence.target,
+          );
+    return CourseAttempt(
+      scope: state.scope,
+      submissionId:
+          '${state.scope.storageKey}.${definition.id}.${slot.cursor.generation}.${slot.cursor.sequence}.${slot.latestReceipt.token}.a$index',
+      activityId: definition.id,
+      runGeneration: slot.cursor.generation,
+      commandSequence: slot.cursor.sequence,
+      batchIndex: index,
+      itemId: evidence.item.id,
+      itemOccurrence: occurrence,
+      contentRevision: definition.contentRevision,
+      commitOrdinal: commitOrdinal,
+      answeredAt: submittedAt,
+      committedAt: committedAt,
+      skill: definition.kind == LearningActivityKind.wordGame
+          ? LearningSkill.spelling
+          : LearningSkill.listening,
+      targetSounds: [evidence.target],
+      answer: answer,
+      origin: AttemptOrigin.game,
+      presentation: occurrence == 1
+          ? AttemptPresentation.firstInRun
+          : AttemptPresentation.repeatInRun,
+      assistance: assistance,
+      contentState: evidence.item.contentState,
+      audioSource: evidence.audioSource,
+      correct: evidence.correct,
+    );
+  }
 }
 
 bool _sameOrder(List<String> first, List<String> second) {
@@ -643,16 +858,18 @@ bool _sameOrder(List<String> first, List<String> second) {
 }
 
 class _Mutation {
-  const _Mutation({
+  _Mutation({
     required this.snapshot,
     this.answerItem,
     this.selectedChoice,
     this.feedback = const LearningFeedback.none(),
-  });
+    List<GameAnswerEvidence> gameEvidence = const [],
+  }) : gameEvidence = List.unmodifiable(gameEvidence);
   final ActivitySnapshot snapshot;
   final LearningSourceItem? answerItem;
   final String? selectedChoice;
   final LearningFeedback feedback;
+  final List<GameAnswerEvidence> gameEvidence;
 }
 
 class _NoRandom implements Random {

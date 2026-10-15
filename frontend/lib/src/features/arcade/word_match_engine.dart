@@ -1,5 +1,6 @@
 import 'dart:math';
 import '../../core/course/french_course.dart';
+import '../../core/course/course_learning_checkpoint.dart';
 
 class WordMove {
   const WordMove(this.accepted, this.points, this.evidence, this.message);
@@ -13,6 +14,34 @@ class WordMatchEngine {
   WordMatchEngine({Random? random}) : random = random ?? Random() {
     refill();
   }
+
+  WordMatchEngine.fromState(WordBoardState state, {required this.random})
+      : target = state.target,
+        moves = state.moves,
+        combo = state.combo {
+    if (!targets.contains(state.target) ||
+        state.moves % 4 == 0 &&
+            state.target != targets[(state.moves ~/ 4) % 2] ||
+        state.moves % 4 != 0 &&
+            state.target !=
+                targets[((state.moves - state.moves % 4) ~/ 4) % 2] ||
+        state.combo > state.moves ||
+        state.obstacles.isEmpty ||
+        state.obstacles.length > 2 ||
+        state.board
+            .any((word) => !pool.any((candidate) => candidate.text == word)) ||
+        state.stars.intersection(state.obstacles).isNotEmpty) {
+      throw const FormatException('Invalid word board state');
+    }
+    board.addAll(state.board);
+    stars.addAll(state.stars);
+    obstacles
+      ..clear()
+      ..addAll(state.obstacles);
+    if (findChain().isEmpty) {
+      throw const FormatException('Word board has no valid chain');
+    }
+  }
   final Random random;
   final List<String> board = [];
   String target = 'u';
@@ -23,6 +52,15 @@ class WordMatchEngine {
   static const targets = ['u', 'y'];
   List<CourseWord> get pool =>
       frenchWords.where((w) => targets.any(w.contains)).toList();
+
+  WordBoardState snapshot() => WordBoardState(
+        board: board,
+        target: target,
+        moves: moves,
+        combo: combo,
+        stars: stars,
+        obstacles: obstacles,
+      );
 
   bool adjacent(int a, int b) =>
       a != b &&

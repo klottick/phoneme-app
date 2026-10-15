@@ -716,19 +716,21 @@ void main() {
     expect(state.completions, isEmpty);
   });
 
-  test('game actions remain invalid until the game transition task', () {
-    expect(
-      () => engine.prepare(
-        state: state,
-        authGeneration: 0,
-        activityId: 'arcade:sound',
-        action: StartLearningRun(options: RunOptions()),
-        token: tokenFor(134),
-        submittedAt: fixedTime,
-        random: _NoDrawRandom(),
-      ),
-      throwsA(isA<LearningInvalidCommandException>()),
+  test('game start prepares a paused typed checkpoint with recorded draws', () {
+    final command = engine.prepare(
+      state: state,
+      authGeneration: 0,
+      activityId: 'arcade:sound',
+      action: StartLearningRun(options: RunOptions()),
+      token: tokenFor(134),
+      submittedAt: fixedTime,
+      random: Random(134),
     );
+    final candidate = command.candidate as SoundGameCheckpoint;
+    expect(candidate.board.board, hasLength(36));
+    expect(candidate.clock.remaining, 60);
+    expect(candidate.clock.paused, isTrue);
+    expect(command.draws, isNotEmpty);
   });
 
   test('content mismatch requires explicit new run', () {

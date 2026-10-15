@@ -1,4 +1,5 @@
 import 'dart:math';
+import '../../core/course/course_learning_checkpoint.dart';
 
 class SoundMove {
   const SoundMove(this.accepted, this.points, this.families, this.cascades);
@@ -11,10 +12,24 @@ class SoundMatchEngine {
   SoundMatchEngine({Random? random}) : random = random ?? Random() {
     shuffle();
   }
+
+  SoundMatchEngine.fromState(SoundBoardState state, {required this.random}) {
+    if (state.board.any((family) => !families.contains(family))) {
+      throw const FormatException('Invalid sound board state');
+    }
+    board.addAll(state.board);
+    stars.addAll(state.stars);
+    if (matches().isNotEmpty || legalMoves().isEmpty) {
+      throw const FormatException('Sound board is unsettled or unplayable');
+    }
+  }
+
   final Random random;
   static const families = ['u', 'y', 'i', 'o'];
   final List<String> board = [];
   final Set<int> stars = {};
+
+  SoundBoardState snapshot() => SoundBoardState(board: board, stars: stars);
   bool adjacent(int a, int b) =>
       a >= 0 &&
       b >= 0 &&

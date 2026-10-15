@@ -6,6 +6,8 @@ import 'package:linguist/src/core/course/course_progress.dart';
 import 'package:linguist/src/features/arcade/word_match_engine.dart';
 import 'package:linguist/src/features/arcade/sound_match_engine.dart';
 import 'package:linguist/src/features/arcade/arcade_session.dart';
+import 'package:linguist/src/core/course/course_learning_checkpoint.dart';
+import 'package:linguist/src/core/course/course_learning_random.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -84,6 +86,59 @@ void main() {
     sound.swap(move.$1, move.$2);
     final restoredSound = SoundMatchEngine()..restore(sound.toJson());
     expect(restoredSound.toJson(), sound.toJson());
+  });
+
+  test('typed arcade snapshots restore strictly without consuming random draws',
+      () {
+    final word = WordMatchEngine(random: Random(30));
+    final wordState = word.snapshot();
+    final wordRandom = RecordingLearningRandom(Random(31));
+    final restoredWord =
+        WordMatchEngine.fromState(wordState, random: wordRandom);
+    expect(wordRandom.draws, isEmpty);
+    expect(restoredWord.snapshot().board, wordState.board);
+    expect(restoredWord.snapshot().target, wordState.target);
+    expect(restoredWord.snapshot().stars, wordState.stars);
+    final detachedWord = word.snapshot();
+    word.board[0] = word.board[0] == 'tout' ? 'tu' : 'tout';
+    expect(detachedWord.board, wordState.board);
+
+    final sound = SoundMatchEngine(random: Random(32));
+    final soundState = sound.snapshot();
+    final soundRandom = RecordingLearningRandom(Random(33));
+    final restoredSound =
+        SoundMatchEngine.fromState(soundState, random: soundRandom);
+    expect(soundRandom.draws, isEmpty);
+    expect(restoredSound.snapshot().board, soundState.board);
+    expect(restoredSound.snapshot().stars, soundState.stars);
+    final clock = ArcadeSession()..paused = true;
+    clock.score = 140;
+    final clockState = clock.snapshot();
+    final restoredClock = ArcadeSession.fromState(clockState);
+    expect(restoredClock.snapshot().remaining, clockState.remaining);
+    expect(restoredClock.snapshot().round, clockState.round);
+    expect(restoredClock.snapshot().score, clockState.score);
+    expect(restoredClock.snapshot().paused, isTrue);
+  });
+
+  test(
+      'typed game restore rejects invalid special positions instead of filtering',
+      () {
+    final word = WordMatchEngine(random: Random(34));
+    expect(
+      () => WordMatchEngine.fromState(
+        WordBoardState(
+          board: word.board,
+          target: word.target,
+          moves: word.moves,
+          combo: word.combo,
+          stars: const {16},
+          obstacles: word.obstacles,
+        ),
+        random: Random(35),
+      ),
+      throwsArgumentError,
+    );
   });
 
   test('invalid saved boards are rejected rather than indexing corrupt data',
