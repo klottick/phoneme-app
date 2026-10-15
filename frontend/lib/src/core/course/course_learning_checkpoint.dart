@@ -1,5 +1,32 @@
 import 'lesson_section_session.dart';
 
+const int _maxSafeInteger = 9007199254740991;
+
+int _bounded(int value, String name, {int minimum = 0, int? maximum}) {
+  if (value < minimum || value > (maximum ?? _maxSafeInteger)) {
+    throw ArgumentError.value(value, name, 'Out of supported range.');
+  }
+  return value;
+}
+
+List<String> _board(List<String> board, int size) {
+  final copy = List<String>.of(board);
+  if (copy.length != size || copy.any((value) => value.trim().isEmpty)) {
+    throw ArgumentError.value(
+        board, 'board', 'Must contain $size nonblank entries.');
+  }
+  return List.unmodifiable(copy);
+}
+
+Set<int> _boardPositions(Set<int> positions, int size, String name) {
+  final copy = Set<int>.of(positions);
+  if (copy.any((value) => value < 0 || value >= size)) {
+    throw ArgumentError.value(
+        positions, name, 'Positions must be within the board.');
+  }
+  return Set.unmodifiable(copy);
+}
+
 sealed class ActivitySnapshot {
   const ActivitySnapshot();
 }
@@ -37,13 +64,13 @@ class DrillCheckpoint extends ActivitySnapshot {
 
 class ArcadeClockState {
   ArcadeClockState(
-      {required this.remaining,
-      required this.round,
-      required this.score,
-      required this.paused}) {
-    if (remaining < 0 || remaining > 60 || round < 1 || score < 0)
-      throw ArgumentError('Invalid arcade clock values');
-  }
+      {required int remaining,
+      required int round,
+      required int score,
+      required this.paused})
+      : remaining = _bounded(remaining, 'remaining', maximum: 60),
+        round = _bounded(round, 'round', minimum: 1),
+        score = _bounded(score, 'score');
   final int remaining;
   final int round;
   final int score;
@@ -52,11 +79,8 @@ class ArcadeClockState {
 
 class SoundBoardState {
   SoundBoardState({required List<String> board, required Set<int> stars})
-      : board = List.unmodifiable(board),
-        stars = Set.unmodifiable(stars) {
-    if (this.board.length != 36)
-      throw ArgumentError.value(board, 'board', 'Must contain 36 entries');
-  }
+      : board = _board(board, 36),
+        stars = _boardPositions(stars, 36, 'stars');
   final List<String> board;
   final Set<int> stars;
 }
@@ -64,16 +88,20 @@ class SoundBoardState {
 class WordBoardState {
   WordBoardState(
       {required List<String> board,
-      required this.target,
-      required this.moves,
-      required this.combo,
+      required String target,
+      required int moves,
+      required int combo,
       required Set<int> stars,
       required Set<int> obstacles})
-      : board = List.unmodifiable(board),
-        stars = Set.unmodifiable(stars),
-        obstacles = Set.unmodifiable(obstacles) {
-    if (this.board.length != 16 || moves < 0 || combo < 0)
-      throw ArgumentError('Invalid word board values');
+      : board = _board(board, 16),
+        target = _requiredTarget(target),
+        moves = _bounded(moves, 'moves'),
+        combo = _bounded(combo, 'combo'),
+        stars = _boardPositions(stars, 16, 'stars'),
+        obstacles = _boardPositions(obstacles, 16, 'obstacles') {
+    if (this.stars.intersection(this.obstacles).isNotEmpty) {
+      throw ArgumentError('Stars and obstacles cannot occupy the same tile.');
+    }
   }
   final List<String> board;
   final String target;
@@ -81,6 +109,13 @@ class WordBoardState {
   final int combo;
   final Set<int> stars;
   final Set<int> obstacles;
+}
+
+String _requiredTarget(String value) {
+  if (value.trim().isEmpty) {
+    throw ArgumentError.value(value, 'target', 'Must not be blank.');
+  }
+  return value;
 }
 
 class SoundGameCheckpoint extends ActivitySnapshot {

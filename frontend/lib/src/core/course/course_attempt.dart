@@ -28,8 +28,18 @@ enum LearningActivityKind {
 }
 
 String _required(String value, String name) {
-  if (value.trim().isEmpty)
+  if (value.trim().isEmpty) {
     throw ArgumentError.value(value, name, 'Must not be blank.');
+  }
+  return value;
+}
+
+const int _maxSafeInteger = 9007199254740991;
+
+int _counter(int value, String name, {int minimum = 0}) {
+  if (value < minimum || value > _maxSafeInteger) {
+    throw ArgumentError.value(value, name, 'Out of supported range.');
+  }
   return value;
 }
 
@@ -59,15 +69,18 @@ class LearningScope {
   }
 
   @override
-  bool operator ==(Object o) =>
-      o is LearningScope && courseId == o.courseId && owner == o.owner;
+  bool operator ==(Object other) =>
+      other is LearningScope &&
+      courseId == other.courseId &&
+      owner == other.owner;
   @override
   int get hashCode => Object.hash(courseId, owner);
 }
 
 class LearningAuthScope {
-  const LearningAuthScope(
-      {required this.owner, required this.generation, required this.ready});
+  LearningAuthScope(
+      {required this.owner, required int generation, required this.ready})
+      : generation = _counter(generation, 'generation');
   final LearningOwner owner;
   final int generation;
   final bool ready;
@@ -82,7 +95,8 @@ class SoundChoiceAnswer extends AttemptAnswer {
       {required this.selectedSound,
       required List<String> choices,
       required this.expectedSound})
-      : choices = List.unmodifiable(choices);
+      : choices =
+            _answerChoices(choices, selectedSound, expectedSound, 'sound');
   final String selectedSound;
   final List<String> choices;
   final String expectedSound;
@@ -94,7 +108,7 @@ class DrillChoiceAnswer extends AttemptAnswer {
       required this.pairId,
       required List<String> choices,
       required this.expectedWord})
-      : choices = List.unmodifiable(choices);
+      : choices = _answerChoices(choices, selectedWord, expectedWord, 'word');
   final String selectedWord;
   final String pairId;
   final List<String> choices;
@@ -102,21 +116,29 @@ class DrillChoiceAnswer extends AttemptAnswer {
 }
 
 class SoundCueAnswer extends AttemptAnswer {
-  const SoundCueAnswer(
+  SoundCueAnswer(
       {required this.selectedFamily,
       required this.wordId,
-      required this.expectedFamily});
+      required this.expectedFamily}) {
+    _required(selectedFamily, 'selectedFamily');
+    _required(wordId, 'wordId');
+    _required(expectedFamily, 'expectedFamily');
+  }
   final String selectedFamily;
   final String wordId;
   final String expectedFamily;
 }
 
 class WordTileAnswer extends AttemptAnswer {
-  const WordTileAnswer(
+  WordTileAnswer(
       {required this.wordId,
       required this.tileIndex,
       required this.targetSound,
-      required this.expectedMembership});
+      required this.expectedMembership}) {
+    _required(wordId, 'wordId');
+    _counter(tileIndex, 'tileIndex', minimum: 0);
+    _required(targetSound, 'targetSound');
+  }
   final String wordId;
   final int tileIndex;
   final String targetSound;
@@ -126,15 +148,15 @@ class WordTileAnswer extends AttemptAnswer {
 class CourseAttempt {
   CourseAttempt(
       {required this.scope,
-      required this.submissionId,
-      required this.activityId,
-      required this.runGeneration,
-      required this.commandSequence,
-      required this.batchIndex,
-      required this.itemId,
-      required this.itemOccurrence,
-      required this.contentRevision,
-      required this.commitOrdinal,
+      required String submissionId,
+      required String activityId,
+      required int runGeneration,
+      required int commandSequence,
+      required int batchIndex,
+      required String itemId,
+      required int itemOccurrence,
+      required int contentRevision,
+      required int commitOrdinal,
       required this.answeredAt,
       required this.committedAt,
       required this.skill,
@@ -146,8 +168,24 @@ class CourseAttempt {
       required this.contentState,
       required this.audioSource,
       required this.correct})
-      : targetSounds = List.unmodifiable(targetSounds),
-        assistance = Set.unmodifiable(assistance);
+      : submissionId = _required(submissionId, 'submissionId'),
+        activityId = _required(activityId, 'activityId'),
+        runGeneration = _counter(runGeneration, 'runGeneration', minimum: 1),
+        commandSequence =
+            _counter(commandSequence, 'commandSequence', minimum: 1),
+        batchIndex = _counter(batchIndex, 'batchIndex'),
+        itemId = _required(itemId, 'itemId'),
+        itemOccurrence = _counter(itemOccurrence, 'itemOccurrence', minimum: 1),
+        contentRevision =
+            _counter(contentRevision, 'contentRevision', minimum: 1),
+        commitOrdinal = _counter(commitOrdinal, 'commitOrdinal', minimum: 1),
+        targetSounds = _uniqueStrings(targetSounds, 'targetSounds'),
+        assistance = Set.unmodifiable(assistance) {
+    if (committedAt.isBefore(answeredAt)) {
+      throw ArgumentError.value(
+          committedAt, 'committedAt', 'Must not precede answeredAt.');
+    }
+  }
   final LearningScope scope;
   final String submissionId;
   final String activityId;
@@ -169,4 +207,24 @@ class CourseAttempt {
   final AttemptContentState contentState;
   final AttemptAudioSource audioSource;
   final bool correct;
+}
+
+List<String> _answerChoices(
+    List<String> choices, String selected, String expected, String name) {
+  final copy = _uniqueStrings(choices, 'choices');
+  if (copy.isEmpty || !copy.contains(selected) || !copy.contains(expected)) {
+    throw ArgumentError.value(choices, 'choices',
+        'Must uniquely contain selected and expected $name.');
+  }
+  return copy;
+}
+
+List<String> _uniqueStrings(List<String> values, String name) {
+  final copy = List<String>.of(values);
+  if (copy.any((value) => value.trim().isEmpty) ||
+      copy.toSet().length != copy.length) {
+    throw ArgumentError.value(
+        values, name, 'Values must be nonblank and unique.');
+  }
+  return List.unmodifiable(copy);
 }

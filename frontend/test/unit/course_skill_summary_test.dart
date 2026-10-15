@@ -29,4 +29,39 @@ void main() {
     expect(previous[key]!.total, 1);
     expect(buckets[key]!.correct, 0);
   });
+
+  test('first and retry attempts create distinct presentation buckets', () {
+    final buckets = addAttemptCounts({}, [
+      sampleAttempt(),
+      sampleAttempt(
+          correct: true,
+          presentation: AttemptPresentation.repeatInRun,
+          sequence: 2),
+    ]);
+    expect(buckets.values.map((c) => c.total).reduce((a, b) => a + b), 2);
+    expect(buckets.keys.map((k) => k.presentation).toSet(), {
+      AttemptPresentation.firstInRun,
+      AttemptPresentation.repeatInRun,
+    });
+  });
+
+  test('summary keys ignore assistance insertion order and counts validate',
+      () {
+    final first = SummaryKey(
+        sound: 's',
+        skill: LearningSkill.listening,
+        origin: AttemptOrigin.practice,
+        presentation: AttemptPresentation.firstInRun,
+        assistance: {AssistanceFlag.graphemeHint, AssistanceFlag.afterDebrief});
+    final second = SummaryKey(
+        sound: 's',
+        skill: LearningSkill.listening,
+        origin: AttemptOrigin.practice,
+        presentation: AttemptPresentation.firstInRun,
+        assistance: {AssistanceFlag.afterDebrief, AssistanceFlag.graphemeHint});
+    expect(first, second);
+    expect(first.hashCode, second.hashCode);
+    expect(() => SkillCount(total: 1, correct: 2), throwsArgumentError);
+    expect(() => SkillCount(total: -1, correct: 0), throwsArgumentError);
+  });
 }

@@ -2,6 +2,7 @@ import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_learning_checkpoint.dart';
 import 'package:linguist/src/core/course/course_learning_command.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
+import 'package:linguist/src/core/course/lesson_section_session.dart';
 
 final guestScope =
     LearningScope(courseId: 'en-fr', owner: LearningOwner.guest());
@@ -112,3 +113,22 @@ LearningCommand sampleCommand(
             clock: ArcadeClockState(
                 remaining: 60, round: 1, score: 0, paused: true)),
         feedback: const LearningFeedback.none());
+
+ActivitySlot sampleActivitySlot() => ActivitySlot(
+      activityId: 'lesson:sample',
+      kind: LearningActivityKind.discovery,
+      contentRevision: 1,
+      cursor: const SlotCursor(generation: 1, sequence: 1, revision: 1),
+      options: RunOptions(),
+      snapshot: DiscoveryCheckpoint(
+          session: LessonSectionSession(
+              itemIds: const ['item'], sessionId: 'sample-session')),
+      exposures: const {},
+      latestReceipt: const CommandReceipt(
+        token: 'AAAAAAAAAAAAAAAAAAAAAA',
+        canonicalCommand: 'sample',
+        before: SlotCursor(generation: 1, sequence: 0, revision: 0),
+        after: SlotCursor(generation: 1, sequence: 1, revision: 1),
+        commitOrdinal: 1,
+      ),
+    );

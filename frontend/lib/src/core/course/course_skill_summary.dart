@@ -2,35 +2,47 @@ import 'course_attempt.dart';
 
 class SummaryKey {
   SummaryKey(
-      {required this.sound,
+      {required String sound,
       required this.skill,
       required this.origin,
       required this.presentation,
       required Set<AssistanceFlag> assistance})
-      : assistance = Set.unmodifiable(assistance);
+      : sound = _summaryText(sound),
+        assistance = Set.unmodifiable(assistance);
   final String sound;
   final LearningSkill skill;
   final AttemptOrigin origin;
   final AttemptPresentation presentation;
   final Set<AssistanceFlag> assistance;
   @override
-  bool operator ==(Object o) =>
-      o is SummaryKey &&
-      sound == o.sound &&
-      skill == o.skill &&
-      origin == o.origin &&
-      presentation == o.presentation &&
-      assistance.length == o.assistance.length &&
-      assistance.containsAll(o.assistance);
+  bool operator ==(Object other) =>
+      other is SummaryKey &&
+      sound == other.sound &&
+      skill == other.skill &&
+      origin == other.origin &&
+      presentation == other.presentation &&
+      assistance.length == other.assistance.length &&
+      assistance.containsAll(other.assistance);
   @override
   int get hashCode => Object.hash(sound, skill, origin, presentation,
       Object.hashAll(assistance.map((e) => e.index).toList()..sort()));
 }
 
+String _summaryText(String value) {
+  if (value.trim().isEmpty) {
+    throw ArgumentError.value(value, 'sound', 'Must not be blank.');
+  }
+  return value;
+}
+
 class SkillCount {
   SkillCount({required this.total, required this.correct}) {
-    if (total < 0 || correct < 0 || correct > total)
+    if (total < 0 ||
+        total > 9007199254740991 ||
+        correct < 0 ||
+        correct > total) {
       throw ArgumentError('Invalid skill count');
+    }
   }
   final int total;
   final int correct;
