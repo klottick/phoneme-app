@@ -753,23 +753,51 @@ void main() {
     await settle(tester);
     expect(optionEnabled(tester, 'roue'), isTrue,
         reason: 'a real completion unlocks the choices');
+    final IconButton playButton = tester.widget<IconButton>(find.ancestor(
+        of: find.byIcon(Icons.play_arrow), matching: find.byType(IconButton)));
+    final void Function()? cachedPlay = playButton.onPressed;
+    final FilledButton answerButton = tester.widget<FilledButton>(find.ancestor(
+        of: find.text('roue'), matching: find.byType(FilledButton)));
+    final void Function()? cachedAnswer = answerButton.onPressed;
+    final TextButton endButton = tester.widget<TextButton>(find.ancestor(
+        of: find.text('End Session'), matching: find.byType(TextButton)));
+    final void Function()? cachedEnd = endButton.onPressed;
+    expect(cachedPlay, isNotNull);
+    expect(cachedAnswer, isNotNull);
+    expect(cachedEnd, isNotNull);
     // End the session while the persistence await is held.
-    await tester.tap(find.text('End Session'));
+    cachedEnd!();
+    // Invoke the callbacks captured from the enabled pre-ending frame before
+    // allowing the setState above to rebuild disabled controls.
+    cachedPlay!();
+    cachedAnswer!();
+    cachedEnd();
     await settle(tester);
-    expect(streak.recordCalls, 1);
-    await tester.pump();
+    expect(audio.spoken, <String>['roue'],
+        reason: 'cached Play cannot dispatch B before the next frame');
+    expect(find.text('Item 1'), findsOneWidget);
+    expect(find.text('0 / 1'), findsOneWidget,
+        reason: 'cached answer cannot change item score');
+    expect(streak.recordCalls, 1,
+        reason: 'cached End cannot book twice before the next frame');
     expect(optionEnabled(tester, 'roue'), isFalse,
         reason: 'ending clears hearing BEFORE the persistence await: an '
             'already-heard item must not remain answerable');
-    // The cached answer callback (admitted before the rebuild) cannot record.
-    await tester.tap(find.text('roue'));
-    await settle(tester);
+    // Saved enabled callbacks remain stale even after one or more frames.
+    cachedPlay();
+    cachedAnswer();
+    cachedEnd();
+    await tester.pump();
+    await tester.pump();
     final data = await CourseProgressStore('en-fr').load();
     expect(data['evidence'], isEmpty,
         reason: 'a cached answer callback must not record during ending');
-    // Cached Play / End callbacks cannot re-enter either.
-    await tester.tap(find.byIcon(Icons.play_arrow));
-    await settle(tester);
+    // Repeated pre-ending callbacks across frames remain rejected.
+    cachedPlay();
+    cachedAnswer();
+    cachedEnd();
+    await tester.pump();
+    await tester.pump();
     expect(audio.spoken, <String>['roue'],
         reason: 'a cached Play callback must not start a new request');
     await tester.tap(find.text('End Session'));

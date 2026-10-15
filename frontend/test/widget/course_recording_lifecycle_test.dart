@@ -6,13 +6,37 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
 import 'package:linguist/src/features/course/course_lesson_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 
 class _LessonAudio implements CourseAudio {
+  final List<String> spoken = <String>[];
+
   @override
-  Future<void> speak(String word) async {}
+  Future<void> speak(String word) async {
+    spoken.add(word);
+  }
 
   @override
   Future<void> stop() async {}
+}
+
+class _HeldFinishPreferences extends InMemorySharedPreferencesStore {
+  _HeldFinishPreferences() : super.withData(const <String, Object>{});
+
+  final Completer<bool> finishWrite = Completer<bool>();
+  int finishWrites = 0;
+
+  @override
+  Future<bool> setValue(String valueType, String key, Object value) async {
+    if (key == 'flutter.course.v1.en-fr' &&
+        value is String &&
+        value.contains('"en-fr-vowels"')) {
+      finishWrites++;
+      if (!finishWrite.isCompleted) await finishWrite.future;
+    }
+    return super.setValue(valueType, key, value);
+  }
 }
 
 void main() {
@@ -460,5 +484,158 @@ void main() {
             .onPressed,
         isNotNull,
         reason: 'after the failure the record control is retryable again');
+  });
+
+  testWidgets(
+      'suspension during held Finish persistence preserves save-owned busy '
+      'and cached actions cannot start duplicate work', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    SharedPreferences.setMockInitialValues(const <String, Object>{});
+    final preferences = _HeldFinishPreferences();
+    SharedPreferencesStorePlatform.instance = preferences;
+
+    const pathChannel = MethodChannel('plugins.flutter.io/path_provider');
+    const recordChannel = MethodChannel('com.llfbandit.record/messages');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    var directoryRequests = 0;
+    var permissionRequests = 0;
+    final eventChannels = <MethodChannel>[];
+    messenger.setMockMethodCallHandler(pathChannel, (call) async {
+      directoryRequests++;
+      return '/tmp/opencode';
+    });
+    messenger.setMockMethodCallHandler(recordChannel, (call) async {
+      final id = (call.arguments as Map)['recorderId'] as String;
+      switch (call.method) {
+        case 'create':
+          final events = MethodChannel('com.llfbandit.record/events/$id');
+          eventChannels.add(events);
+          messenger.setMockMethodCallHandler(events, (call) async => null);
+          return null;
+        case 'hasPermission':
+          permissionRequests++;
+          return false;
+        case 'dispose':
+          return null;
+        default:
+          throw StateError('Unexpected recorder operation: ${call.method}');
+      }
+    });
+    addTearDown(() async {
+      if (!preferences.finishWrite.isCompleted) {
+        preferences.finishWrite.complete(true);
+      }
+      messenger.setMockMethodCallHandler(pathChannel, null);
+      messenger.setMockMethodCallHandler(recordChannel, null);
+      for (final events in eventChannels) {
+        messenger.setMockMethodCallHandler(events, null);
+      }
+      await SharedPreferences.getInstance();
+    });
+
+    final audio = _LessonAudio();
+    final navigator = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(ProviderScope(
+      overrides: <Override>[courseAudioProvider.overrideWithValue(audio)],
+      child: MaterialApp(
+        navigatorKey: navigator,
+        home: Scaffold(
+          body: Builder(builder: (context) {
+            return TextButton(
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) =>
+                      const CourseLessonScreen(lessonId: 'en-fr-vowels'))),
+              child: const Text('Open lesson'),
+            );
+          }),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('Open lesson'));
+    await tester.pumpAndSettle();
+
+    for (var item = 0; item < 4; item++) {
+      final sound = <String>['i', 'o', 'i', 'o'][item];
+      await tester.scrollUntilVisible(find.text('Listen to French word'), -200);
+      await tester.tap(find.text('Listen to French word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/$sound/'));
+      await tester.pumpAndSettle();
+      if (item < 3) {
+        await tester.scrollUntilVisible(find.text('Next word'), 200);
+        await tester.tap(find.text('Next word'));
+        await tester.pumpAndSettle();
+      }
+    }
+
+    await tester.scrollUntilVisible(find.text('Record yourself'), 200);
+    final FilledButton listenButton = tester.widget<FilledButton>(find.ancestor(
+        of: find.byIcon(Icons.volume_up), matching: find.byType(FilledButton)));
+    final OutlinedButton recordButton = tester.widget<OutlinedButton>(
+        find.ancestor(
+            of: find.text('Record yourself'),
+            matching: find.byType(OutlinedButton)));
+    final FilledButton finishButton = tester.widget<FilledButton>(find.ancestor(
+        of: find.text('Finish'), matching: find.byType(FilledButton)));
+    final void Function()? cachedListen = listenButton.onPressed;
+    final void Function()? cachedRecord = recordButton.onPressed;
+    final void Function()? cachedFinish = finishButton.onPressed;
+    expect(cachedListen, isNotNull);
+    expect(cachedRecord, isNotNull);
+    expect(cachedFinish, isNotNull);
+    final spokenBeforeFinish = List<String>.of(audio.spoken);
+
+    // Enter the real last-item Finish save and verify the underlying
+    // preferences write remains pending across frames.
+    cachedFinish!();
+    await tester.pump();
+    await tester.pump();
+    expect(preferences.finishWrites, 1,
+        reason: 'Finish reaches the actual held completion persistence write');
+    expect(preferences.finishWrite.isCompleted, isFalse);
+
+    // Saved enabled callbacks are invoked before and after lifecycle frames;
+    // no control repaint is relied on for admission safety.
+    cachedListen!();
+    cachedRecord!();
+    cachedFinish();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    cachedListen();
+    cachedRecord();
+    cachedFinish();
+    await tester.pump();
+
+    expect(audio.spoken, spokenBeforeFinish,
+        reason: 'save-owned busy rejects cached Listen through suspension');
+    expect(directoryRequests, 0,
+        reason: 'save-owned busy rejects cached Record through suspension');
+    expect(permissionRequests, 0);
+    expect(preferences.finishWrites, 1,
+        reason: 'cached Finish cannot dispatch another completion write');
+    expect(find.text('Open lesson'), findsNothing,
+        reason: 'the held original save cannot exit before release');
+    final listenAfterSuspend = tester.widget<FilledButton>(find.ancestor(
+        of: find.byIcon(Icons.volume_up), matching: find.byType(FilledButton)));
+    final recordAfterSuspend = tester.widget<OutlinedButton>(find.ancestor(
+        of: find.text('Record yourself'),
+        matching: find.byType(OutlinedButton)));
+    final finishAfterSuspend = tester.widget<FilledButton>(find.ancestor(
+        of: find.text('Finish'), matching: find.byType(FilledButton)));
+    expect(listenAfterSuspend.onPressed, isNull);
+    expect(recordAfterSuspend.onPressed, isNull);
+    expect(finishAfterSuspend.onPressed, isNull);
+
+    preferences.finishWrite.complete(true);
+    await tester.pumpAndSettle();
+    expect(preferences.finishWrites, 1,
+        reason: 'the original Finish write completes exactly once');
+    expect(find.text('Open lesson'), findsOneWidget,
+        reason: 'successful persistence exits the lesson exactly once');
+    expect(tester.takeException(), isNull);
   });
 }
