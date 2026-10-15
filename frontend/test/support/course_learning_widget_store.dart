@@ -44,6 +44,10 @@ class CourseLearningWidgetStore implements CourseLearningStore {
   Object? submitFailure;
   Completer<void>? loadGate;
   Completer<void>? submitGate;
+  Future<CourseLearningState> Function(int call)? loadHandler;
+  final Map<Type, Completer<void>> actionGates = {};
+  final Set<Type> failingActions = {};
+  final Map<Type, Object> actionFailures = {};
   int loadCalls = 0;
   int retryLoadCalls = 0;
   int prepareCalls = 0;
@@ -80,6 +84,18 @@ class CourseLearningWidgetStore implements CourseLearningStore {
       after: cursor,
       commitOrdinal: sequence,
     );
+    final aliases = LearningRegistry.french()
+        .require('lesson:en-fr-u-y')
+        .items
+        .where((item) => session.latestAnswers.containsKey(item.sessionAlias))
+        .toList();
+    final exposures = <ItemContextKey, ItemExposure>{
+      for (final item in aliases)
+        ItemContextKey(
+          itemId: item.id,
+          targetSound: item.targetSounds.single,
+        ): ItemExposure(presentations: 1, assistance: const {}),
+    };
     final slot = ActivitySlot(
       activityId: 'lesson:en-fr-u-y',
       kind: LearningActivityKind.discovery,
@@ -87,7 +103,7 @@ class CourseLearningWidgetStore implements CourseLearningStore {
       cursor: cursor,
       options: RunOptions(policy: session.policy),
       snapshot: DiscoveryCheckpoint(session: session),
-      exposures: previous?.exposures ?? const {},
+      exposures: {...?previous?.exposures, ...exposures},
       latestReceipt: receipt,
     );
     _state = CourseLearningState(
@@ -112,6 +128,8 @@ class CourseLearningWidgetStore implements CourseLearningStore {
   @override
   Future<CourseLearningState> load() async {
     loadCalls++;
+    final handler = loadHandler;
+    if (handler != null) return handler(loadCalls);
     await loadGate?.future;
     if (failLoad) {
       throw loadFailure ?? const LearningUnavailableException();
@@ -152,9 +170,15 @@ class CourseLearningWidgetStore implements CourseLearningStore {
   Future<LearningCommit> submit(LearningCommand command) async {
     submitCalls++;
     submitted.add(command);
+    await actionGates[command.action.runtimeType]?.future;
     await submitGate?.future;
-    if (failSubmit || submitFailure != null) {
-      throw submitFailure ?? const LearningSaveException();
+    if (failSubmit ||
+        failingActions.contains(command.action.runtimeType) ||
+        submitFailure != null ||
+        actionFailures.containsKey(command.action.runtimeType)) {
+      throw actionFailures[command.action.runtimeType] ??
+          submitFailure ??
+          const LearningSaveException();
     }
     final currentSlot = _state.activities[command.activityId];
     if (currentSlot?.latestReceipt.token == command.token) {
@@ -167,6 +191,12 @@ class CourseLearningWidgetStore implements CourseLearningStore {
         slot: currentSlot,
         duplicate: true,
       );
+    }
+    if (currentSlot != null &&
+        (currentSlot.cursor.generation != command.expected.generation ||
+            currentSlot.cursor.sequence != command.expected.sequence ||
+            currentSlot.cursor.revision != command.expected.revision)) {
+      throw const LearningConflictException();
     }
     final transition = _transitions.evaluate(
       state: _state,
