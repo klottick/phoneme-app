@@ -59,10 +59,15 @@ final learningCloudTransportProvider = Provider<LearningCloudTransport?>((ref) {
   return client == null ? null : SupabaseLearningCloudTransport(client);
 });
 
+final _courseLearningStateRevisionProvider = StateProvider<int>((ref) => 0);
+
 final courseLearningStoreProvider = Provider<CourseLearningStore>((ref) {
+  var isAlive = true;
+  ref.onDispose(() => isAlive = false);
   final identity = ref.watch(learningAuthScopeProvider
       .select((auth) => (owner: auth.owner, generation: auth.generation)));
   final tracker = ref.read(learningAuthScopeProvider.notifier);
+  final stateRevision = ref.read(_courseLearningStateRevisionProvider.notifier);
   final persistence = ref.watch(learningPersistenceProvider);
   final registry = ref.watch(learningRegistryProvider);
   final cloud = ref.watch(learningCloudTransportProvider);
@@ -78,7 +83,20 @@ final courseLearningStoreProvider = Provider<CourseLearningStore>((ref) {
       clock: () => DateTime.now().toUtc(),
       newToken: _newToken,
       random: Random.secure(),
-      onCommitted: () => ref.invalidate(courseLearningStateProvider));
+      onCommitted: () {
+        if (!isAlive) return;
+        final current = tracker.current;
+        if (current.owner != identity.owner ||
+            current.generation != identity.generation ||
+            _backendOwner() != identity.owner) {
+          return;
+        }
+        try {
+          stateRevision.state++;
+        } catch (_) {
+          // Notification is best-effort and never changes a durable commit.
+        }
+      });
 });
 
 String _newToken() => _base64UrlToken();
@@ -91,5 +109,6 @@ String _base64UrlToken() {
 
 final FutureProvider<CourseLearningState> courseLearningStateProvider =
     FutureProvider<CourseLearningState>((ref) {
+  ref.watch(_courseLearningStateRevisionProvider);
   return ref.watch(courseLearningStoreProvider).load();
 });

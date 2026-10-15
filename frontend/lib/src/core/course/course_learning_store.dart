@@ -223,7 +223,14 @@ class CourseLearningRepository implements CourseLearningStore {
         }
         _committed = next;
         _committedRaw = encoded;
-        onCommitted?.call();
+        // Persistence has committed. Observer failures cannot turn that durable
+        // acknowledgment into an apparent save failure or prompt a duplicate.
+        try {
+          onCommitted?.call();
+        } catch (_) {
+          // Commit notifications are best-effort; storage failures above remain
+          // visible to the caller through the normal rollback path.
+        }
         return LearningCommit(
             state: next, slot: transition.slot, duplicate: false);
       });
