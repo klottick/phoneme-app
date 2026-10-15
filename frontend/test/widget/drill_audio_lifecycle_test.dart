@@ -22,6 +22,7 @@
 // actually delivered a late settlement.
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -33,9 +34,11 @@ import 'package:linguist/src/core/course/course_progress.dart';
 import 'package:linguist/src/core/services/streak_service.dart';
 import 'package:linguist/src/features/drills/drill_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 
 const String alphaDisclosure =
     'Alpha audio: recordings are unverified; device speech is practice-only.';
+const bool baselineI2Control = bool.fromEnvironment('FR03_I2_BASELINE_CONTROL');
 
 /// Realistic prompt cancellation: [stop] invalidates the held request now
 /// (the facade hands the caller its cancellation terminal).
@@ -148,6 +151,24 @@ final class HeldRelease {
     } else {
       _settle.completeError(error);
     }
+  }
+}
+
+final class HeldAnswerPreferences extends InMemorySharedPreferencesStore {
+  HeldAnswerPreferences() : super.withData(const <String, Object>{}) {
+    unawaited(write.future.then<void>((_) {}, onError: (Object _) {}));
+  }
+
+  final Completer<bool> write = Completer<bool>();
+  int answerWrites = 0;
+
+  @override
+  Future<bool> setValue(String valueType, String key, Object value) async {
+    if (key == 'flutter.course.v1.en-fr' && value is String) {
+      answerWrites++;
+      await write.future;
+    }
+    return super.setValue(valueType, key, value);
   }
 }
 
@@ -310,6 +331,148 @@ void main() {
     audio.cues.last.release();
     await settle(tester);
     expect(optionEnabled(tester, 'tu'), isTrue);
+  });
+
+  for (final bool releaseReplayBeforeSave in <bool>[true, false]) {
+    testWidgets(
+        'held answer write rejects replay; late completion ${releaseReplayBeforeSave ? 'before' : 'after'} save cannot unlock B',
+        (WidgetTester tester) async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final HeldAnswerPreferences preferences = HeldAnswerPreferences();
+      SharedPreferencesStorePlatform.instance = preferences;
+      addTearDown(() async {
+        if (!preferences.write.isCompleted) preferences.write.complete(true);
+        await Future<void>.delayed(Duration.zero);
+      });
+      final HeldCueAudio audio = HeldCueAudio();
+      await DrillHarness(GlobalKey<NavigatorState>(), audio).pump(tester);
+      await tester.tap(find.byIcon(Icons.play_arrow));
+      await settle(tester);
+      audio.cues[0].release();
+      await settle(tester);
+
+      final IconButton play =
+          tester.widget<IconButton>(find.byType(IconButton));
+      final FilledButton answer = tester.widget<FilledButton>(find.ancestor(
+          of: find.text('roue'), matching: find.byType(FilledButton)));
+      final VoidCallback savedPlay = play.onPressed!;
+      final VoidCallback savedAnswer = answer.onPressed!;
+      savedAnswer();
+      await tester.pump();
+      expect(preferences.answerWrites, 1,
+          reason: 'answer must reach and hold the real preferences store');
+
+      for (int frame = 0; frame < 3; frame++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        await tester.tap(find.byIcon(Icons.play_arrow));
+        await tester.tap(find.text('roue'));
+        savedPlay();
+        if (!baselineI2Control) savedAnswer();
+      }
+      // Leave one late replay active in the baseline mutation; normal code
+      // rejects this saved callback while answer ownership is reserved.
+      if (baselineI2Control) savedPlay();
+      if (!baselineI2Control) {
+        expect(audio.cues, hasLength(1),
+            reason: 'cached Play is rejected while the write is held');
+        expect(preferences.answerWrites, 1,
+            reason: 'cached answer cannot issue a duplicate write');
+      } else {
+        expect(audio.cues.length, greaterThan(1),
+            reason: 'negative control confirms baseline admits replay');
+      }
+      expect(find.text('Item 1'), findsOneWidget,
+          reason: 'item A cannot advance before save completion');
+      expect(await preferences.getAll(),
+          isNot(contains('flutter.course.v1.en-fr')),
+          reason: 'held write must not publish new answer evidence');
+
+      // On fixed code no second cue exists. On the original baseline, this
+      // releases the admitted replay at the selected side of the save.
+      if (audio.cues.length > 1 && releaseReplayBeforeSave) {
+        for (final HeldCue replay in audio.cues.skip(1)) {
+          replay.release();
+        }
+        await settle(tester);
+        if (baselineI2Control) {
+          expect(optionEnabled(tester, 'roue'), isTrue,
+              reason:
+                  'baseline replay completion must mark A heard before save');
+        }
+      }
+      preferences.write.complete(true);
+      await settle(tester);
+      expect(find.text('Item 2'), findsOneWidget);
+      if (audio.cues.length > 1 && !releaseReplayBeforeSave) {
+        for (final HeldCue replay in audio.cues.skip(1)) {
+          replay.release();
+        }
+        await settle(tester);
+      }
+      expect(optionEnabled(tester, 'tu'), isFalse,
+          reason: 'stale A completion must not unlock B');
+      expect(preferences.answerWrites, 1);
+      final Map<String, dynamic> saved = jsonDecode(
+          (await preferences.getAll())['flutter.course.v1.en-fr']!
+              as String) as Map<String, dynamic>;
+      final Map<String, dynamic> evidence =
+          saved['evidence'] as Map<String, dynamic>;
+      expect((evidence['listening:u'] as Map)['attempts'], 1,
+          reason: 'only the submitted A answer is persisted');
+      expect(evidence, isNot(contains('listening:y')),
+          reason: 'stale A audio cannot create B answer evidence');
+      await tester.tap(find.byIcon(Icons.play_arrow));
+      await settle(tester);
+      expect(audio.spoken.last, 'tu');
+      audio.cues.last.release();
+      await settle(tester);
+      expect(optionEnabled(tester, 'tu'), isTrue,
+          reason: 'only a completed fresh B listen unlocks B');
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
+  testWidgets(
+      'held answer-write failure releases ownership without retry or false unlock',
+      (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final HeldAnswerPreferences preferences = HeldAnswerPreferences();
+    SharedPreferencesStorePlatform.instance = preferences;
+    addTearDown(() async {
+      if (!preferences.write.isCompleted) preferences.write.complete(true);
+      await Future<void>.delayed(Duration.zero);
+    });
+    final HeldCueAudio audio = HeldCueAudio();
+    await DrillHarness(GlobalKey<NavigatorState>(), audio).pump(tester);
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await settle(tester);
+    audio.cues[0].release();
+    await settle(tester);
+    final FilledButton answer = tester.widget<FilledButton>(find.ancestor(
+        of: find.text('roue'), matching: find.byType(FilledButton)));
+    answer.onPressed!();
+    await tester.pump();
+    expect(preferences.answerWrites, 1);
+    preferences.write
+        .completeError(StateError('injected preference write failure'));
+    await settle(tester);
+    expect(tester.takeException(), isNull,
+        reason: 'write failure must be handled by the screen');
+    expect(find.text('Item 1'), findsOneWidget);
+    expect(optionEnabled(tester, 'roue'), isFalse,
+        reason: 'failed save leaves hearing false');
+    expect(preferences.answerWrites, 1,
+        reason: 'failure must not trigger automatic retry');
+    expect(find.text('Could not save your answer. Please try again.'),
+        findsOneWidget);
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await settle(tester);
+    expect(audio.spoken, <String>['roue', 'roue'],
+        reason: 'ownership is released for deliberate retry');
+    audio.cues.last.release();
+    await settle(tester);
+    expect(optionEnabled(tester, 'roue'), isTrue);
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets(

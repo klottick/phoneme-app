@@ -135,9 +135,9 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
                       icon: Icon(_isPlaying ? Icons.stop : Icons.play_arrow),
                       iconSize: 36,
                       tooltip: 'Play audio',
-                       onPressed: _ending || _answerTransition
-                           ? null
-                           : () => _onPlayStop(current, itemIndex),
+                      onPressed: _ending || _answerTransition
+                          ? null
+                          : () => _onPlayStop(current, itemIndex),
                     ),
                   ],
                 ),
@@ -148,8 +148,12 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
                     child: SizedBox(
                       width: double.infinity,
                       child: FilledButton.tonal(
-                        onPressed: !_ending && !_answerTransition && _heard && !_isPlaying
-                            ? () => _handleAnswer(option, current.wordA, current, itemIndex)
+                        onPressed: !_ending &&
+                                !_answerTransition &&
+                                _heard &&
+                                !_isPlaying
+                            ? () => _handleAnswer(
+                                option, current.wordA, current, itemIndex)
                             : null,
                         child: Text(option, textAlign: TextAlign.center),
                       ),
@@ -229,7 +233,13 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
     dynamic currentPair,
     int itemIndex,
   ) async {
-    if (_ending || _answerTransition || _index != itemIndex || !_heard || _isPlaying) return;
+    if (_ending ||
+        _answerTransition ||
+        _index != itemIndex ||
+        !_heard ||
+        _isPlaying) {
+      return;
+    }
     _answerTransition = true;
     ++_playGeneration;
     final int answeringIndex = _index;
