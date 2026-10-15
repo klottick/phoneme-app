@@ -1,3 +1,5 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'course_attempt.dart';
 import 'course_learning_command.dart';
 import 'course_learning_state.dart';
@@ -5,6 +7,40 @@ import 'course_learning_transition.dart';
 
 abstract class LearningCloudTransport {
   Future<void> send(List<SupportedCloudEvent> events);
+}
+
+class SupabaseLearningCloudTransport implements LearningCloudTransport {
+  SupabaseLearningCloudTransport(this.client);
+  final SupabaseClient client;
+
+  @override
+  Future<void> send(List<SupportedCloudEvent> events) async {
+    if (events.isEmpty) return;
+    await client.rpc('record_course_events', params: {
+      'events': events.map(_legacyEvent).toList(growable: false),
+    });
+  }
+
+  Map<String, Object?> _legacyEvent(SupportedCloudEvent event) => {
+        'id': event.id,
+        'user_id': event.userId,
+        'course_id': event.courseId,
+        ...switch (event.payload) {
+          final CloudAnswer x => {
+              'kind': 'answer',
+              'sound': x.sound,
+              'skill': x.skill.name,
+              'correct': x.correct,
+              'activity': x.activity,
+            },
+          final CloudLesson x => {'kind': 'lesson', 'lesson_id': x.lessonId},
+          final CloudScore x => {
+              'kind': 'score',
+              'game': x.game,
+              'score': x.score
+            },
+        }
+      };
 }
 
 enum SupportedSyncStatus { guest, synced, pending, ownerChanged }
@@ -137,6 +173,7 @@ class SupportedProgressSync {
     required this.authGeneration,
     required this.transport,
     required this.readPending,
+    this.knownPendingCount,
     required this.acknowledge,
     required this.isCurrent,
   });
@@ -144,6 +181,10 @@ class SupportedProgressSync {
   final int authGeneration;
   final LearningCloudTransport transport;
   final Future<List<SupportedCloudEvent>> Function() readPending;
+
+  /// Count from the last successfully loaded/committed snapshot, without
+  /// attempting a storage read that may be quarantined after failed rollback.
+  final int Function()? knownPendingCount;
   final Future<void> Function(Set<String> ids) acknowledge;
   final bool Function() isCurrent;
   static final Map<String, Future<SupportedSyncResult>> _running = {};
@@ -159,9 +200,65 @@ class SupportedProgressSync {
     return result;
   }
 
-  Future<SupportedSyncResult> _run() async => SupportedSyncResult(
-      status: isCurrent()
-          ? SupportedSyncStatus.pending
-          : SupportedSyncStatus.ownerChanged,
-      remainingEvents: (await readPending()).length);
+  Future<SupportedSyncResult> _run() async {
+    var pending = await readPending();
+    if (pending.isEmpty) {
+      return const SupportedSyncResult(
+          status: SupportedSyncStatus.pending, remainingEvents: 0);
+    }
+    if (!isCurrent()) {
+      return SupportedSyncResult(
+          status: SupportedSyncStatus.ownerChanged,
+          remainingEvents: pending.length);
+    }
+    final unsentIds = pending.map((event) => event.id).toSet();
+    while (unsentIds.isNotEmpty) {
+      if (!isCurrent()) {
+        pending = await readPending();
+        return SupportedSyncResult(
+            status: SupportedSyncStatus.ownerChanged,
+            remainingEvents: pending.length);
+      }
+      final batch = pending
+          .where((event) => unsentIds.contains(event.id))
+          .take(100)
+          .toList(growable: false);
+      if (batch.isEmpty) break;
+      try {
+        await transport.send(batch);
+      } catch (_) {
+        pending = await readPending();
+        return SupportedSyncResult(
+            status: SupportedSyncStatus.pending,
+            remainingEvents: pending.length);
+      }
+      if (!isCurrent()) {
+        pending = await readPending();
+        return SupportedSyncResult(
+            status: SupportedSyncStatus.ownerChanged,
+            remainingEvents: pending.length);
+      }
+      try {
+        await acknowledge(batch.map((event) => event.id).toSet());
+      } catch (_) {
+        final knownCount = knownPendingCount;
+        if (knownCount != null) {
+          return SupportedSyncResult(
+              status: SupportedSyncStatus.pending,
+              remainingEvents: knownCount());
+        }
+        pending = await readPending();
+        return SupportedSyncResult(
+            status: SupportedSyncStatus.pending,
+            remainingEvents: pending.length);
+      }
+      unsentIds.removeAll(batch.map((event) => event.id));
+      pending = await readPending();
+    }
+    return SupportedSyncResult(
+        status: pending.isEmpty
+            ? SupportedSyncStatus.synced
+            : SupportedSyncStatus.pending,
+        remainingEvents: pending.length);
+  }
 }

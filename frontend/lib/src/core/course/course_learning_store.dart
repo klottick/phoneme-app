@@ -41,6 +41,7 @@ class CourseLearningRepository implements CourseLearningStore {
     required this.newToken,
     required this.random,
     this.cloud,
+    this.onCommitted,
     this.historyLimit = 2000,
   }) {
     if (historyLimit < 1) {
@@ -56,6 +57,7 @@ class CourseLearningRepository implements CourseLearningStore {
   final LearningPersistence persistence;
   final LearningTransitionEngine transitions;
   final LearningCloudTransport? cloud;
+  final void Function()? onCommitted;
   final DateTime Function() clock;
   final String Function() newToken;
   final Random random;
@@ -221,31 +223,100 @@ class CourseLearningRepository implements CourseLearningStore {
         }
         _committed = next;
         _committedRaw = encoded;
+        // Persistence has committed. Observer failures cannot turn that durable
+        // acknowledgment into an apparent save failure or prompt a duplicate.
+        try {
+          onCommitted?.call();
+        } catch (_) {
+          // Commit notifications are best-effort; storage failures above remain
+          // visible to the caller through the normal rollback path.
+        }
         return LearningCommit(
             state: next, slot: transition.slot, duplicate: false);
       });
 
   @override
-  Future<SupportedSyncResult> sync() =>
+  Future<SupportedSyncResult> sync() async {
+    final state = await _coordinator.run(scope.storageKey, () async {
+      _ensureAvailable();
+      return _loadCommitted();
+    });
+    if (scope.owner.isGuest) {
+      return const SupportedSyncResult(
+          status: SupportedSyncStatus.guest, remainingEvents: 0);
+    }
+    if (!_isCurrent()) {
+      return SupportedSyncResult(
+          status: SupportedSyncStatus.ownerChanged,
+          remainingEvents: state.pending.length);
+    }
+    if (state.pending.isEmpty) {
+      return const SupportedSyncResult(
+          status: SupportedSyncStatus.synced, remainingEvents: 0);
+    }
+    if (cloud == null) {
+      return SupportedSyncResult(
+          status: SupportedSyncStatus.pending,
+          remainingEvents: state.pending.length);
+    }
+    return SupportedProgressSync(
+      scope: scope,
+      authGeneration: authGeneration,
+      transport: cloud!,
+      isCurrent: _isCurrent,
+      readPending: () => _coordinator.run(scope.storageKey, () async {
+        _ensureAvailable();
+        return (await _loadCommitted()).pending;
+      }),
+      // Unlike readPending, this is deliberately count-only and reads only the
+      // latest known committed snapshot, so a quarantined scope remains blocked
+      // while sync can still report its retained event count.
+      knownPendingCount: () =>
+          _committed?.pending.length ?? state.pending.length,
+      acknowledge: _acknowledge,
+    ).run();
+  }
+
+  Future<void> _acknowledge(Set<String> ids) =>
       _coordinator.run(scope.storageKey, () async {
         _ensureAvailable();
-        final state = await _loadCommitted();
-        if (scope.owner.isGuest) {
-          return const SupportedSyncResult(
-              status: SupportedSyncStatus.guest, remainingEvents: 0);
+        final current = await _loadCommitted();
+        _checkAuth();
+        final pending = current.pending
+            .where((event) => !ids.contains(event.id))
+            .toList(growable: false);
+        if (pending.length == current.pending.length) return;
+        final next = CourseLearningState(
+            scope: scope,
+            revision: current.revision + 1,
+            commitOrdinal: current.commitOrdinal,
+            history: current.history,
+            activities: current.activities,
+            mistakes: current.mistakes,
+            summaries: current.summaries,
+            completions: current.completions,
+            bestScores: current.bestScores,
+            pending: pending);
+        final encoded = _codec.encode(next);
+        _checkAuth();
+        try {
+          await persistence.write(scope.storageKey, encoded);
+        } catch (error) {
+          try {
+            await persistence.restore(scope.storageKey, _committedRaw);
+            await persistence.reload();
+            final restored = await persistence.read(scope.storageKey);
+            if (restored != _committedRaw) {
+              throw StateError('rollback mismatch');
+            }
+          } catch (_) {
+            _coordinator.blocked.add(scope.storageKey);
+            _coordinator.known[scope.storageKey] = _committedRaw;
+          }
+          throw LearningSaveException(error);
         }
-        if (!_isCurrent()) {
-          return SupportedSyncResult(
-              status: SupportedSyncStatus.ownerChanged,
-              remainingEvents: state.pending.length);
-        }
-        if (cloud == null || state.pending.isNotEmpty) {
-          return SupportedSyncResult(
-              status: SupportedSyncStatus.pending,
-              remainingEvents: state.pending.length);
-        }
-        return const SupportedSyncResult(
-            status: SupportedSyncStatus.synced, remainingEvents: 0);
+        _committed = next;
+        _committedRaw = encoded;
       });
 
   Future<CourseLearningState> _loadCommitted() async {
