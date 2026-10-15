@@ -103,3 +103,17 @@ but both calls returned `Monthly quota exceeded`. Fallback references consulted:
 - PR against GitHub `main`: <https://github.com/klottick/phoneme-app/pull/36>
   (open; no GitHub checks or reviews reported at initial publication). Do not
   merge from this worker.
+
+## Fix round 1/5
+
+Addressed independent review finding Important I1 in
+[`task-5-fix-1-report.md`](task-5-fix-1-report.md). Durable commits now treat
+observer notification as best-effort; provider state refresh uses a lifecycle
+safe revision notifier, with liveness plus captured owner/generation/backend
+checks so stale old-store completion cannot refresh a successor owner.
+
+- Commit: `ee2c2c632ec9ef5eab5dfe32280393057c63f1c6`
+- Verification: focused sync/provider + Task 4 safety suite 42 passed; full
+  suite 1006 passed; analyzer clean; `git diff --check` clean.
+- Remaining gates: live Supabase service verification and independent scoped
+  re-review; PR #36 stays open and is not merged by this worker.
