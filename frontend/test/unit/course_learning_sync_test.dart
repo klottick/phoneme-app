@@ -8,6 +8,7 @@ import 'package:http/testing.dart';
 import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_learning_persistence.dart';
 import 'package:linguist/src/core/course/course_learning_command.dart';
+import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/course/course_learning_registry.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/course_learning_store.dart';
@@ -36,6 +37,7 @@ class _MemoryPersistence implements LearningPersistence {
   final Map<String, String> documents = {};
   bool failNextWrite = false;
   bool holdNextWrite = false;
+  bool failRestore = false;
   Completer<void>? writeEntered;
   Completer<bool>? writeGate;
   @override
@@ -56,6 +58,7 @@ class _MemoryPersistence implements LearningPersistence {
 
   @override
   Future<void> restore(String key, String? lastCommitted) async {
+    if (failRestore) throw StateError('restore unavailable');
     if (lastCommitted == null) {
       documents.remove(key);
     } else {
@@ -239,6 +242,56 @@ void main() {
     final result = await syncing;
     expect(result.remainingEvents, 1);
     expect((await store.load()).pending.map((e) => e.id), ['event-2']);
+  });
+
+  test(
+      'failed ack rollback reports committed count and quarantines until repair',
+      () async {
+    final persistence = _MemoryPersistence();
+    persistence.documents[scope.storageKey] =
+        const LearningDocumentCodec().encode(stateWith([event(1)]));
+    final transport = _RecordingTransport()
+      ..entered = Completer<void>()
+      ..release = Completer<void>();
+    final store = repository(persistence, transport);
+    final syncing = store.sync();
+    await transport.entered!.future;
+
+    // Model another valid committed event arriving while the cloud request is
+    // outstanding. Ack must merge against this latest committed image.
+    const codec = LearningDocumentCodec();
+    final latest =
+        codec.decode(persistence.documents[scope.storageKey]!, scope);
+    persistence.documents[scope.storageKey] = codec.encode(stateWith(
+        [...latest.pending, event(2)],
+        revision: latest.revision + 1));
+    persistence
+      ..failNextWrite = true
+      ..failRestore = true;
+    transport.release!.complete();
+
+    final result = await syncing;
+
+    expect(result.status, SupportedSyncStatus.pending);
+    expect(result.remainingEvents, 2);
+    expect(persistence.documents[scope.storageKey], isNotNull);
+    await expectLater(
+        store.load(), throwsA(isA<LearningUnavailableException>()));
+    final callsAfterFailure = transport.batches.length;
+    await expectLater(
+        store.sync(), throwsA(isA<LearningUnavailableException>()));
+    expect(transport.batches, hasLength(callsAfterFailure));
+
+    persistence.failRestore = false;
+    final repaired = await store.retryLoad();
+    expect(repaired.pending.map((e) => e.id), ['event-1', 'event-2']);
+    transport
+      ..entered = null
+      ..release = null;
+    final retry = await store.sync();
+    expect(transport.batches.last.map((e) => e.id), ['event-1', 'event-2']);
+    expect(retry.status, SupportedSyncStatus.synced);
+    expect(retry.remainingEvents, 0);
   });
 
   test('sync coalesces same scope but isolates guest and another account',

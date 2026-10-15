@@ -117,3 +117,18 @@ checks so stale old-store completion cannot refresh a successor owner.
   suite 1006 passed; analyzer clean; `git diff --check` clean.
 - Remaining gates: live Supabase service verification and independent scoped
   re-review; PR #36 stays open and is not merged by this worker.
+
+## Fix round 2/5
+
+Addressed controller finding C1 in
+[`task-5-fix-2-report.md`](task-5-fix-2-report.md). If acknowledgment persistence
+and its rollback both fail, sync now returns `pending` with the exact count from
+the last known committed snapshot without reading through the blocked scope.
+Normal pending reads still enforce quarantine; only `retryLoad` may verify and
+repair the committed image before sends resume.
+
+- Commit: pending publication in existing PR #36 branch.
+- Verification: focused sync/provider + Task 4 suite 44 passed; full suite 1007
+  passed; analyzer clean; diff check clean.
+- Remaining gates: independent scoped re-review and live Supabase service
+  verification; no merge performed.

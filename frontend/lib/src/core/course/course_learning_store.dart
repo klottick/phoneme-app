@@ -268,6 +268,11 @@ class CourseLearningRepository implements CourseLearningStore {
         _ensureAvailable();
         return (await _loadCommitted()).pending;
       }),
+      // Unlike readPending, this is deliberately count-only and reads only the
+      // latest known committed snapshot, so a quarantined scope remains blocked
+      // while sync can still report its retained event count.
+      knownPendingCount: () =>
+          _committed?.pending.length ?? state.pending.length,
       acknowledge: _acknowledge,
     ).run();
   }

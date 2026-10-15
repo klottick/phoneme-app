@@ -173,6 +173,7 @@ class SupportedProgressSync {
     required this.authGeneration,
     required this.transport,
     required this.readPending,
+    this.knownPendingCount,
     required this.acknowledge,
     required this.isCurrent,
   });
@@ -180,6 +181,10 @@ class SupportedProgressSync {
   final int authGeneration;
   final LearningCloudTransport transport;
   final Future<List<SupportedCloudEvent>> Function() readPending;
+
+  /// Count from the last successfully loaded/committed snapshot, without
+  /// attempting a storage read that may be quarantined after failed rollback.
+  final int Function()? knownPendingCount;
   final Future<void> Function(Set<String> ids) acknowledge;
   final bool Function() isCurrent;
   static final Map<String, Future<SupportedSyncResult>> _running = {};
@@ -236,6 +241,12 @@ class SupportedProgressSync {
       try {
         await acknowledge(batch.map((event) => event.id).toSet());
       } catch (_) {
+        final knownCount = knownPendingCount;
+        if (knownCount != null) {
+          return SupportedSyncResult(
+              status: SupportedSyncStatus.pending,
+              remainingEvents: knownCount());
+        }
         pending = await readPending();
         return SupportedSyncResult(
             status: SupportedSyncStatus.pending,
