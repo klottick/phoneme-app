@@ -125,6 +125,60 @@ void main() {
     expect(prefs.getString(key), committedImage);
   });
 
+  test('separate real preferences adapters merge preloaded peer commits',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    addTearDown(() => SharedPreferences.setMockInitialValues({}));
+    final owner = LearningOwner.account('independent-adapters');
+    final scope = LearningScope(courseId: 'en-fr', owner: owner);
+    final auth = LearningAuthScope(owner: owner, generation: 0, ready: true);
+    var token = 0;
+    CourseLearningRepository make(LearningPersistence persistence) =>
+        CourseLearningRepository(
+            scope: scope,
+            authGeneration: 0,
+            currentAuth: () => auth,
+            backendOwner: () => owner,
+            persistence: persistence,
+            transitions: LearningTransitionEngine(LearningRegistry.french()),
+            clock: () => fixedTime,
+            newToken: () => tokenFor(++token),
+            random: Random(3));
+    final firstAdapter = PreferencesLearningPersistence();
+    final peerAdapter = PreferencesLearningPersistence();
+    final first = make(firstAdapter);
+    final peer = make(peerAdapter);
+    final firstInitial = await first.load();
+    final peerInitial = await peer.load();
+    final peerStart = peer.prepare(
+        state: peerInitial,
+        activityId: 'lesson:en-fr-vowels',
+        action: StartLearningRun(options: RunOptions()));
+    final started = await first.submit(first.prepare(
+        state: firstInitial,
+        activityId: 'lesson:en-fr-u-y',
+        action: StartLearningRun(options: RunOptions())));
+    final expected = LearningTransitionEngine(LearningRegistry.french())
+        .registry
+        .require('lesson:en-fr-u-y')
+        .items
+        .first
+        .expectedChoice!;
+    await first.submit(first.prepare(
+        state: started.state,
+        activityId: 'lesson:en-fr-u-y',
+        action: ChooseSound(
+            selectedSound: expected == 'u' ? 'y' : 'u',
+            audioSource: AttemptAudioSource.pendingRecording)));
+    final observed = await peer.load();
+    expect(observed.activities.containsKey('lesson:en-fr-u-y'), isTrue);
+    expect(observed.history, hasLength(1));
+    final merged = await peer.submit(peerStart);
+    expect(merged.state.activities.keys,
+        containsAll(['lesson:en-fr-u-y', 'lesson:en-fr-vowels']));
+    expect(merged.state.history, hasLength(1));
+  });
+
   test('backend owner mismatch and queued A to B to A generation change reject',
       () async {
     final persistence = FakeLearningPersistence();

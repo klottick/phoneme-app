@@ -64,21 +64,12 @@ class CourseLearningRepository implements CourseLearningStore {
   static const _codec = LearningDocumentCodec();
   String? _committedRaw;
   CourseLearningState? _committed;
-  bool _loaded = false;
 
   @override
   Future<CourseLearningState> load() =>
       _coordinator.run(scope.storageKey, () async {
         _ensureAvailable();
-        if (_loaded) return _committed!;
-        final raw = await persistence.read(scope.storageKey);
-        final state = raw == null
-            ? CourseLearningState.empty(scope)
-            : _codec.decode(raw, scope);
-        _committedRaw = raw;
-        _committed = state;
-        _loaded = true;
-        return state;
+        return _loadCommitted();
       });
 
   @override
@@ -97,10 +88,8 @@ class CourseLearningRepository implements CourseLearningStore {
           _committed = reread == null
               ? CourseLearningState.empty(scope)
               : _codec.decode(reread, scope);
-          _loaded = true;
           return _committed!;
         }
-        _loaded = false;
         return _loadCommitted();
       });
 
@@ -232,7 +221,6 @@ class CourseLearningRepository implements CourseLearningStore {
         }
         _committed = next;
         _committedRaw = encoded;
-        _loaded = true;
         return LearningCommit(
             state: next, slot: transition.slot, duplicate: false);
       });
@@ -261,14 +249,16 @@ class CourseLearningRepository implements CourseLearningStore {
       });
 
   Future<CourseLearningState> _loadCommitted() async {
-    if (_loaded) return _committed!;
+    // Repository instances may have been preloaded before another instance
+    // committed. Refresh the adapter's cache/image inside the process-wide
+    // coordinator before using this document as a merge base.
+    await persistence.reload();
     final raw = await persistence.read(scope.storageKey);
     final state = raw == null
         ? CourseLearningState.empty(scope)
         : _codec.decode(raw, scope);
     _committedRaw = raw;
     _committed = state;
-    _loaded = true;
     return state;
   }
 

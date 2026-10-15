@@ -75,7 +75,9 @@ void main() {
     final duplicate = await store.submit(command);
     expect(duplicate.duplicate, isTrue);
     expect(duplicate.state.revision, first.state.revision);
-    expect(duplicate.slot.cursor, same(first.slot.cursor));
+    expect(duplicate.slot.cursor.generation, first.slot.cursor.generation);
+    expect(duplicate.slot.cursor.sequence, first.slot.cursor.sequence);
+    expect(duplicate.slot.cursor.revision, first.slot.cursor.revision);
   });
 
   test('different token at same next sequence conflicts', () async {
@@ -340,6 +342,115 @@ void main() {
             transition: withScore,
             command: asActivity('arcade:unknown')),
         isEmpty);
+  });
+
+  test('preloaded peer load sees another repository latest committed image',
+      () async {
+    owner = LearningOwner.account('peer-load');
+    auth = LearningAuthScope(owner: owner, generation: 9, ready: true);
+    store = repository();
+    final peer = repository();
+    final firstLoaded = await store.load();
+    await peer.load();
+    final started = await store.submit(store.prepare(
+        state: firstLoaded,
+        activityId: activity,
+        action: StartLearningRun(options: RunOptions())));
+    final expected =
+        engine.registry.require(activity).items.first.expectedChoice!;
+    final answered = await store.submit(store.prepare(
+        state: started.state,
+        activityId: activity,
+        action: ChooseSound(
+            selectedSound: expected == 'u' ? 'y' : 'u',
+            audioSource: AttemptAudioSource.pendingRecording)));
+    final peerImage = await peer.load();
+    expect(peerImage.revision, answered.state.revision);
+    expect(peerImage.history, hasLength(1));
+    expect(peerImage.mistakes, hasLength(1));
+    expect(peerImage.pending, hasLength(1));
+  });
+
+  test('preloaded peer commit merges its unrelated activity over latest state',
+      () async {
+    owner = LearningOwner.account('peer-submit');
+    auth = LearningAuthScope(owner: owner, generation: 10, ready: true);
+    store = repository();
+    final peer = repository();
+    final aInitial = await store.load();
+    final bInitial = await peer.load();
+    final bCommand = peer.prepare(
+        state: bInitial,
+        activityId: 'lesson:en-fr-vowels',
+        action: StartLearningRun(options: RunOptions()));
+    final aStarted = await store.submit(store.prepare(
+        state: aInitial,
+        activityId: activity,
+        action: StartLearningRun(options: RunOptions())));
+    final expected =
+        engine.registry.require(activity).items.first.expectedChoice!;
+    final aCommitted = await store.submit(store.prepare(
+        state: aStarted.state,
+        activityId: activity,
+        action: ChooseSound(
+            selectedSound: expected == 'u' ? 'y' : 'u',
+            audioSource: AttemptAudioSource.pendingRecording)));
+    final peerCommit = await peer.submit(bCommand);
+    expect(peerCommit.state.activities.keys,
+        containsAll([activity, 'lesson:en-fr-vowels']));
+    expect(peerCommit.state.revision, aCommitted.state.revision + 1);
+    expect(peerCommit.state.history, hasLength(1));
+    expect(peerCommit.state.summaries.values.single.total, 1);
+    expect(peerCommit.state.mistakes, hasLength(1));
+    expect(peerCommit.state.pending, hasLength(1));
+  });
+
+  test('preloaded same-slot contender conflicts instead of overwriting',
+      () async {
+    final initial = await store.load();
+    final peer = repository();
+    final peerInitial = await peer.load();
+    final competing = peer.prepare(
+        state: peerInitial,
+        activityId: activity,
+        action: StartLearningRun(options: RunOptions()));
+    final winner = store.prepare(
+        state: initial,
+        activityId: activity,
+        action: StartLearningRun(options: RunOptions()));
+    await store.submit(winner);
+    await expectLater(
+        peer.submit(competing), throwsA(isA<LearningConflictException>()));
+    expect((await store.load()).activities[activity]!.cursor.generation, 1);
+  });
+
+  test('preloaded peer duplicate retry returns current state and slot',
+      () async {
+    final initial = await store.load();
+    final peer = repository();
+    await peer.load();
+    final started = await store.submit(store.prepare(
+        state: initial,
+        activityId: activity,
+        action: StartLearningRun(options: RunOptions())));
+    final expected =
+        engine.registry.require(activity).items.first.expectedChoice!;
+    final answer = store.prepare(
+        state: started.state,
+        activityId: activity,
+        action: ChooseSound(
+            selectedSound: expected == 'u' ? 'y' : 'u',
+            audioSource: AttemptAudioSource.pendingRecording));
+    final answerCommit = await store.submit(answer);
+    final advanced = await store.submit(store.prepare(
+        state: answerCommit.state,
+        activityId: activity,
+        action: const AdvanceLesson()));
+    final retry = await peer.submit(answer);
+    expect(retry.duplicate, isTrue);
+    expect(retry.state.revision, advanced.state.revision);
+    expect(retry.slot.cursor.sequence, advanced.slot.cursor.sequence);
+    expect(retry.state.activities.keys, contains(activity));
   });
 
   test('rejected optimistic write is invisible to a queued reader', () async {
