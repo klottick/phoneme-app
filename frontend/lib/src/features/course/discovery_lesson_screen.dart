@@ -494,15 +494,9 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       });
     }
     Object? failure;
+    LearningCommit? committed;
     try {
-      final LearningCommit commit = await owner.submit(command);
-      _learningState = commit.state;
-      if (commit.slot.snapshot case DiscoveryCheckpoint(:final session)) {
-        if (command.action is! AdvanceLesson &&
-            command.action is! ReviewDiscoveryMistakes) {
-          _session = session;
-        }
-      }
+      committed = await owner.submit(command);
     } catch (error) {
       failure = error;
     }
@@ -541,6 +535,14 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
         _conflictError = null;
       });
       return;
+    }
+    final LearningCommit commit = committed!;
+    _learningState = commit.state;
+    if (commit.slot.snapshot case DiscoveryCheckpoint(:final session)) {
+      if (command.action is! AdvanceLesson &&
+          command.action is! ReviewDiscoveryMistakes) {
+        _session = session;
+      }
     }
     setState(() {
       _busy = false;

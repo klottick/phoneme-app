@@ -145,6 +145,44 @@ void main() {
         reason: 'the original A generation cannot publish after A→B→A');
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets('late departed owner commit cannot seed the new owner command',
+      (tester) async {
+    final a = CourseLearningWidgetStore();
+    final b = CourseLearningWidgetStore();
+    final currentStore = StateProvider<CourseLearningWidgetStore>((_) => a);
+    final container = ProviderContainer(overrides: [
+      courseLearningStoreProvider
+          .overrideWith((ref) => ref.watch(currentStore)),
+      courseAudioProvider.overrideWithValue(_SilentAudio()),
+    ]);
+    addTearDown(container.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: const MaterialApp(
+        home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    a.submitGate = Completer<void>();
+    await tester.tap(find.text('Listen to the word'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('/u/'));
+    await tester.pump();
+    container.read(currentStore.notifier).state = b;
+    await tester.pumpAndSettle();
+    a.submitGate!.complete();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Listen to the word'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('/u/'));
+    await tester.pumpAndSettle();
+    expect(find.text('Reload saved progress'), findsNothing,
+        reason: 'the active owner prepares from its own loaded state');
+    expect(b.committedState.history, hasLength(1));
+    await tester.pumpWidget(const SizedBox());
+  });
 }
 
 class _SilentAudio implements CourseAudio {
