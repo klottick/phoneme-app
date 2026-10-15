@@ -98,6 +98,24 @@ class ActivitySlot {
         contentRevision =
             _count(contentRevision, 'contentRevision', minimum: 1),
         exposures = Map.unmodifiable(exposures) {
+    final before = latestReceipt.before;
+    final after = latestReceipt.after;
+    final absentPredecessor =
+        before.generation == 0 && before.sequence == 0 && before.revision == 0;
+    final continuation = before.generation > 0 &&
+        before.sequence > 0 &&
+        after.generation == before.generation &&
+        after.sequence == before.sequence + 1 &&
+        after.revision == before.revision + 1;
+    final restart = before.generation > 0 &&
+        before.sequence > 0 &&
+        after.generation == before.generation + 1 &&
+        after.sequence == before.sequence + 1 &&
+        after.revision == 0;
+    final initialStart = absentPredecessor &&
+        after.generation == 1 &&
+        after.sequence == 1 &&
+        after.revision == 0;
     final snapshotMatchesKind = switch (kind) {
       LearningActivityKind.discovery => snapshot is DiscoveryCheckpoint,
       LearningActivityKind.legacyLesson => snapshot is LegacyLessonCheckpoint,
@@ -106,8 +124,8 @@ class ActivitySlot {
       LearningActivityKind.wordGame => snapshot is WordGameCheckpoint,
     };
     if (!snapshotMatchesKind ||
-        cursor.generation < 0 ||
-        cursor.sequence < 0 ||
+        cursor.generation < 1 ||
+        cursor.sequence < 1 ||
         cursor.revision < 0 ||
         cursor.generation > _maxSafeInteger ||
         cursor.sequence > _maxSafeInteger ||
@@ -116,9 +134,7 @@ class ActivitySlot {
         latestReceipt.canonicalCommand.trim().isEmpty ||
         latestReceipt.commitOrdinal < 1 ||
         latestReceipt.commitOrdinal > _maxSafeInteger ||
-        latestReceipt.after.generation != latestReceipt.before.generation ||
-        latestReceipt.after.sequence != latestReceipt.before.sequence + 1 ||
-        latestReceipt.after.revision != latestReceipt.before.revision + 1 ||
+        !(continuation || restart || initialStart) ||
         latestReceipt.after.generation != cursor.generation ||
         latestReceipt.after.sequence != cursor.sequence ||
         latestReceipt.after.revision != cursor.revision ||

@@ -2,6 +2,7 @@ import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_learning_checkpoint.dart';
 import 'package:linguist/src/core/course/course_learning_command.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
+import 'package:linguist/src/core/course/course_learning_transition.dart';
 import 'package:linguist/src/core/course/lesson_section_session.dart';
 
 final guestScope =
@@ -118,7 +119,7 @@ ActivitySlot sampleActivitySlot() => ActivitySlot(
       activityId: 'lesson:sample',
       kind: LearningActivityKind.discovery,
       contentRevision: 1,
-      cursor: SlotCursor(generation: 1, sequence: 1, revision: 1),
+      cursor: SlotCursor(generation: 1, sequence: 2, revision: 1),
       options: RunOptions(),
       snapshot: DiscoveryCheckpoint(
           session: LessonSectionSession(
@@ -127,8 +128,38 @@ ActivitySlot sampleActivitySlot() => ActivitySlot(
       latestReceipt: CommandReceipt(
         token: 'AAAAAAAAAAAAAAAAAAAAAA',
         canonicalCommand: 'sample',
-        before: SlotCursor(generation: 1, sequence: 0, revision: 0),
-        after: SlotCursor(generation: 1, sequence: 1, revision: 1),
+        before: SlotCursor(generation: 1, sequence: 1, revision: 0),
+        after: SlotCursor(generation: 1, sequence: 2, revision: 1),
         commitOrdinal: 1,
       ),
     );
+
+/// Applies a pure transition to an in-memory state for scenario tests only.
+/// This deliberately models no persistence, pruning, or concurrency behavior.
+CourseLearningState stateAfter(
+    CourseLearningState state, LearningTransition transition) {
+  final slot = transition.slot;
+  final history = List<AttemptBatch>.of(state.history);
+  if (transition.attempts.isNotEmpty) {
+    history.add(AttemptBatch(
+      activityId: slot.activityId,
+      generation: slot.cursor.generation,
+      sequence: slot.cursor.sequence,
+      token: slot.latestReceipt.token,
+      canonicalCommand: slot.latestReceipt.canonicalCommand,
+      attempts: transition.attempts,
+    ));
+  }
+  return CourseLearningState(
+    scope: state.scope,
+    revision: state.revision + 1,
+    commitOrdinal: state.commitOrdinal + 1,
+    history: history,
+    activities: {...state.activities, slot.activityId: slot},
+    mistakes: transition.mistakes,
+    summaries: transition.summaries,
+    completions: transition.completions,
+    bestScores: transition.bestScores,
+    pending: state.pending,
+  );
+}
