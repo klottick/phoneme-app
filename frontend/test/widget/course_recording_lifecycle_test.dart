@@ -5,9 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
+import 'package:linguist/src/core/course/course_learning_command.dart';
+import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/features/course/course_lesson_screen.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
+import '../support/course_learning_widget_store.dart';
 
 class _LessonAudio implements CourseAudio {
   final List<String> spoken = <String>[];
@@ -19,24 +20,6 @@ class _LessonAudio implements CourseAudio {
 
   @override
   Future<void> stop() async {}
-}
-
-class _HeldFinishPreferences extends InMemorySharedPreferencesStore {
-  _HeldFinishPreferences() : super.withData(const <String, Object>{});
-
-  final Completer<bool> finishWrite = Completer<bool>();
-  int finishWrites = 0;
-
-  @override
-  Future<bool> setValue(String valueType, String key, Object value) async {
-    if (key == 'flutter.course.v1.en-fr' &&
-        value is String &&
-        value.contains('"en-fr-vowels"')) {
-      finishWrites++;
-      if (!finishWrite.isCompleted) await finishWrite.future;
-    }
-    return super.setValue(valueType, key, value);
-  }
 }
 
 void main() {
@@ -119,7 +102,11 @@ void main() {
 
       final navigator = GlobalKey<NavigatorState>();
       await tester.pumpWidget(ProviderScope(
-        overrides: [courseAudioProvider.overrideWithValue(_LessonAudio())],
+        overrides: [
+          courseAudioProvider.overrideWithValue(_LessonAudio()),
+          courseLearningStoreProvider
+              .overrideWithValue(CourseLearningWidgetStore()),
+        ],
         child: MaterialApp(
           navigatorKey: navigator,
           home: Scaffold(
@@ -246,7 +233,9 @@ void main() {
       final navigator = GlobalKey<NavigatorState>();
       await tester.pumpWidget(ProviderScope(
         overrides: <Override>[
-          courseAudioProvider.overrideWithValue(_LessonAudio())
+          courseAudioProvider.overrideWithValue(_LessonAudio()),
+          courseLearningStoreProvider
+              .overrideWithValue(CourseLearningWidgetStore()),
         ],
         child: MaterialApp(
           navigatorKey: navigator,
@@ -411,7 +400,9 @@ void main() {
     final navigator = GlobalKey<NavigatorState>();
     await tester.pumpWidget(ProviderScope(
         overrides: <Override>[
-          courseAudioProvider.overrideWithValue(_LessonAudio())
+          courseAudioProvider.overrideWithValue(_LessonAudio()),
+          courseLearningStoreProvider
+              .overrideWithValue(CourseLearningWidgetStore()),
         ],
         child: MaterialApp(
           navigatorKey: navigator,
@@ -491,9 +482,9 @@ void main() {
       'and cached actions cannot start duplicate work', (tester) async {
     await tester.binding.setSurfaceSize(const Size(800, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    SharedPreferences.setMockInitialValues(const <String, Object>{});
-    final preferences = _HeldFinishPreferences();
-    SharedPreferencesStorePlatform.instance = preferences;
+    final finishGate = Completer<void>();
+    final store = CourseLearningWidgetStore()
+      ..actionGates[FinishLearningActivity] = finishGate;
 
     const pathChannel = MethodChannel('plugins.flutter.io/path_provider');
     const recordChannel = MethodChannel('com.llfbandit.record/messages');
@@ -524,21 +515,21 @@ void main() {
       }
     });
     addTearDown(() async {
-      if (!preferences.finishWrite.isCompleted) {
-        preferences.finishWrite.complete(true);
-      }
+      if (!finishGate.isCompleted) finishGate.complete();
       messenger.setMockMethodCallHandler(pathChannel, null);
       messenger.setMockMethodCallHandler(recordChannel, null);
       for (final events in eventChannels) {
         messenger.setMockMethodCallHandler(events, null);
       }
-      await SharedPreferences.getInstance();
     });
 
     final audio = _LessonAudio();
     final navigator = GlobalKey<NavigatorState>();
     await tester.pumpWidget(ProviderScope(
-      overrides: <Override>[courseAudioProvider.overrideWithValue(audio)],
+      overrides: <Override>[
+        courseAudioProvider.overrideWithValue(audio),
+        courseLearningStoreProvider.overrideWithValue(store),
+      ],
       child: MaterialApp(
         navigatorKey: navigator,
         home: Scaffold(
@@ -588,13 +579,16 @@ void main() {
     final spokenBeforeFinish = List<String>.of(audio.spoken);
 
     // Enter the real last-item Finish save and verify the underlying
-    // preferences write remains pending across frames.
+    // typed completion command remains pending across frames.
     cachedFinish!();
     await tester.pump();
     await tester.pump();
-    expect(preferences.finishWrites, 1,
-        reason: 'Finish reaches the actual held completion persistence write');
-    expect(preferences.finishWrite.isCompleted, isFalse);
+    expect(
+        store.submitted
+            .where((command) => command.action is FinishLearningActivity),
+        hasLength(1),
+        reason: 'Finish reaches the held typed commit');
+    expect(finishGate.isCompleted, isFalse);
 
     // Saved enabled callbacks are invoked before and after lifecycle frames;
     // no control repaint is relied on for admission safety.
@@ -615,7 +609,10 @@ void main() {
     expect(directoryRequests, 0,
         reason: 'save-owned busy rejects cached Record through suspension');
     expect(permissionRequests, 0);
-    expect(preferences.finishWrites, 1,
+    expect(
+        store.submitted
+            .where((command) => command.action is FinishLearningActivity),
+        hasLength(1),
         reason: 'cached Finish cannot dispatch another completion write');
     expect(find.text('Open lesson'), findsNothing,
         reason: 'the held original save cannot exit before release');
@@ -630,9 +627,12 @@ void main() {
     expect(recordAfterSuspend.onPressed, isNull);
     expect(finishAfterSuspend.onPressed, isNull);
 
-    preferences.finishWrite.complete(true);
+    finishGate.complete();
     await tester.pumpAndSettle();
-    expect(preferences.finishWrites, 1,
+    expect(
+        store.submitted
+            .where((command) => command.action is FinishLearningActivity),
+        hasLength(1),
         reason: 'the original Finish write completes exactly once');
     expect(find.text('Open lesson'), findsOneWidget,
         reason: 'successful persistence exits the lesson exactly once');

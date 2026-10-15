@@ -30,8 +30,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
+import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/features/course/course_lesson_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../support/course_learning_widget_store.dart';
 
 const String alphaDisclosure =
     'Alpha audio: recordings are unverified; device speech is practice-only.';
@@ -59,8 +61,8 @@ final class CancellingCueAudio implements CourseAudio, CueAudioProbe {
     final Completer<Object?> settle = Completer<Object?>();
     _pending = settle;
     final Future<void> delivery = settle.future.then((Object? _) {});
-    unawaited(delivery.then<void>(
-        (Object? value) {}, onError: (Object error) {}));
+    unawaited(
+        delivery.then<void>((Object? value) {}, onError: (Object error) {}));
     return delivery;
   }
 
@@ -126,8 +128,8 @@ final class HeldCueAudio implements CourseAudio, CueAudioProbe {
     // Quiet observer: a late error release must never become an unhandled
     // async failure, regardless of how soon (or never) the caller is
     // listening.
-    unawaited(delivery.then<void>(
-        (Object? value) {}, onError: (Object error) {}));
+    unawaited(
+        delivery.then<void>((Object? value) {}, onError: (Object error) {}));
     return delivery;
   }
 
@@ -162,7 +164,11 @@ Future<CourseAudio> openLesson(
   CourseAudio audio,
 ) async {
   await tester.pumpWidget(ProviderScope(
-    overrides: <Override>[courseAudioProvider.overrideWithValue(audio)],
+    overrides: <Override>[
+      courseAudioProvider.overrideWithValue(audio),
+      courseLearningStoreProvider
+          .overrideWithValue(CourseLearningWidgetStore()),
+    ],
     child: MaterialApp(
       navigatorKey: navigator,
       home: const CourseLessonScreen(lessonId: 'en-fr-vowels'),
@@ -248,7 +254,8 @@ void main() {
     expect(answerEnabled(tester, 'i'), isTrue);
   });
 
-  testWidgets('a realistically cancelled playback is silent: no failure '
+  testWidgets(
+      'a realistically cancelled playback is silent: no failure '
       'feedback, still retryable', (WidgetTester tester) async {
     final CancellingCueAudio fake = CancellingCueAudio();
     await openLesson(tester, GlobalKey<NavigatorState>(), fake);
@@ -283,7 +290,8 @@ void main() {
     expect(answerEnabled(tester, 'i'), isTrue);
   });
 
-  testWidgets('app suspension retires a held playback: stopped, retryable, '
+  testWidgets(
+      'app suspension retires a held playback: stopped, retryable, '
       'and a stale success during a newer held request cannot unlock',
       (WidgetTester tester) async {
     final HeldCueAudio fake = HeldCueAudio();
@@ -347,7 +355,8 @@ void main() {
     );
   });
 
-  testWidgets('a stale error after suspension cannot publish failure '
+  testWidgets(
+      'a stale error after suspension cannot publish failure '
       'feedback or unlock', (WidgetTester tester) async {
     final HeldCueAudio fake = HeldCueAudio();
     await openLesson(tester, GlobalKey<NavigatorState>(), fake);
@@ -388,29 +397,37 @@ void main() {
     expect(answerEnabled(tester, 'i'), isTrue);
   });
 
-  final List<(Object?, CueFactory, String)> lateCases = <(Object?, CueFactory, String)>[
+  final List<(Object?, CueFactory, String)> lateCases =
+      <(Object?, CueFactory, String)>[
     (null, () => HeldCueAudio(), 'success'),
     (StateError('late engine failure'), () => HeldCueAudio(), 'error'),
-    (const CourseAudioCancelledException(), () => CancellingCueAudio(),
-        'cancellation'),
+    (
+      const CourseAudioCancelledException(),
+      () => CancellingCueAudio(),
+      'cancellation'
+    ),
   ];
-  for (final (Object? lateError,
-          CueFactory makeFake,
-          String label)
+  for (final (Object? lateError, CueFactory makeFake, String label)
       in lateCases) {
-    testWidgets('a late $label settlement after leaving the lesson '
+    testWidgets(
+        'a late $label settlement after leaving the lesson '
         'settles quietly', (WidgetTester tester) async {
       final navigator = GlobalKey<NavigatorState>();
       final CueAudioProbe fake = makeFake();
       await tester.pumpWidget(ProviderScope(
-        overrides: <Override>[courseAudioProvider.overrideWithValue(fake)],
+        overrides: <Override>[
+          courseAudioProvider.overrideWithValue(fake),
+          courseLearningStoreProvider
+              .overrideWithValue(CourseLearningWidgetStore()),
+        ],
         child: MaterialApp(
           navigatorKey: navigator,
           home: Builder(builder: (BuildContext context) {
             return TextButton(
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute<
-                  Widget>(builder: (_) => const CourseLessonScreen(
-                      lessonId: 'en-fr-vowels'))),
+              onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<Widget>(
+                      builder: (_) =>
+                          const CourseLessonScreen(lessonId: 'en-fr-vowels'))),
               child: const Text('Open lesson'),
             );
           }),

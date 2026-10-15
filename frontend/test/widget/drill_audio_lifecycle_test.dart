@@ -2,7 +2,7 @@
 // (shared) player.
 //
 // Screen-level behavior over the REAL [DrillScreen]. The first drill pair
-// uses the unmapped drill word `roue`, so the practice-speech fallback path
+// uses the authored drill word `tu`, so the reviewed-recording pending path
 // is the one under test: the surface must never present it as a reviewed or
 // human recording — the exact alpha disclosure says device speech is
 // practice-only.
@@ -22,7 +22,6 @@
 // actually delivered a late settlement.
 
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,11 +29,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/models/minimal_pair.dart';
 import 'package:linguist/src/core/providers/app_providers.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
-import 'package:linguist/src/core/course/course_progress.dart';
+import 'package:linguist/src/core/course/course_learning_command.dart';
+import 'package:linguist/src/core/course/course_learning_providers.dart';
+import 'package:linguist/src/core/course/course_learning_registry.dart';
 import 'package:linguist/src/core/services/streak_service.dart';
 import 'package:linguist/src/features/drills/drill_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
+import '../support/course_learning_widget_store.dart';
 
 const String alphaDisclosure =
     'Alpha audio: recordings are unverified; device speech is practice-only.';
@@ -154,24 +155,6 @@ final class HeldRelease {
   }
 }
 
-final class HeldAnswerPreferences extends InMemorySharedPreferencesStore {
-  HeldAnswerPreferences() : super.withData(const <String, Object>{}) {
-    unawaited(write.future.then<void>((_) {}, onError: (Object _) {}));
-  }
-
-  final Completer<bool> write = Completer<bool>();
-  int answerWrites = 0;
-
-  @override
-  Future<bool> setValue(String valueType, String key, Object value) async {
-    if (key == 'flutter.course.v1.en-fr' && value is String) {
-      answerWrites++;
-      await write.future;
-    }
-    return super.setValue(valueType, key, value);
-  }
-}
-
 /// Streak-persistence boundary for the End-Session guard (R2): each
 /// `recordPractice` call is genuinely HELD until its [HeldRelease] is
 /// settled, so the screen's await window is deterministic and observable.
@@ -195,32 +178,22 @@ Future<void> settle(WidgetTester tester) async {
   await tester.pump();
 }
 
-const List<MinimalPair> drillPairs = <MinimalPair>[
-  MinimalPair(
-      id: 'test-roue-rue',
-      wordA: 'roue',
-      wordB: 'rue',
-      phonemeA: '/u/',
-      phonemeB: '/y/'),
-  MinimalPair(
-      id: 'test-tu-tout',
-      wordA: 'tu',
-      wordB: 'tout',
-      phonemeA: '/y/',
-      phonemeB: '/u/'),
-];
+final List<MinimalPair> drillPairs = frenchDrillPairs;
 
 class DrillHarness {
-  DrillHarness(this.navigator, this.audio);
+  DrillHarness(this.navigator, this.audio, {CourseLearningWidgetStore? store})
+      : store = store ?? CourseLearningWidgetStore();
 
   final GlobalKey<NavigatorState> navigator;
   final CourseAudio audio;
+  final CourseLearningWidgetStore store;
 
   Future<void> pump(WidgetTester tester) async {
     await tester.pumpWidget(ProviderScope(
       overrides: <Override>[
         minimalPairsProvider.overrideWith((ref) => Future.value(drillPairs)),
         courseAudioProvider.overrideWithValue(audio),
+        courseLearningStoreProvider.overrideWithValue(store),
       ],
       child: MaterialApp(
         navigatorKey: navigator,
@@ -245,14 +218,12 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues(<String, Object>{}));
 
   testWidgets(
-      'the drill pins the exact alpha disclosure and never claims a '
-      'reviewed or human recording for the unmapped practice speech',
+      'the drill pins the exact alpha disclosure and does not claim reviewed audio',
       (WidgetTester tester) async {
     final DrillHarness harness =
         DrillHarness(GlobalKey<NavigatorState>(), HeldCueAudio());
     await harness.pump(tester);
-    // 'roue' is item 1: unmapped, so the practice-speech fallback is the
-    // path under test.
+    // The typed registry's first canonical item is `tu`.
     expect(find.text('Item 1'), findsOneWidget);
     expect(
       find.text(alphaDisclosure),
@@ -262,7 +233,7 @@ void main() {
     expect(
       find.textContaining('human recording'),
       findsNothing,
-      reason: 'device speech must never be presented as a human recording',
+      reason: 'pending reference audio must not be presented as reviewed',
     );
     expect(
       find.textContaining('reviewed recording'),
@@ -280,17 +251,17 @@ void main() {
     await harness.pump(tester);
     await tester.tap(find.byIcon(Icons.play_arrow));
     await settle(tester);
-    expect(audio.spoken, <String>['roue']);
+    expect(audio.spoken, <String>['tu']);
     expect(find.byIcon(Icons.stop), findsOneWidget);
     expect(
-      optionEnabled(tester, 'roue'),
+      optionEnabled(tester, 'tu'),
       isFalse,
       reason: 'a held playback must not unlock the choices',
     );
     audio.cues[0].release();
     await settle(tester);
     expect(
-      optionEnabled(tester, 'roue'),
+      optionEnabled(tester, 'tu'),
       isTrue,
       reason: 'an actual completion unlocks the choices',
     );
@@ -309,43 +280,40 @@ void main() {
     await settle(tester);
     final IconButton play = tester.widget<IconButton>(find.byType(IconButton));
     final FilledButton answer = tester.widget<FilledButton>(find.ancestor(
-        of: find.text('roue'), matching: find.byType(FilledButton)));
+        of: find.text('tu'), matching: find.byType(FilledButton)));
     final VoidCallback savedPlay = play.onPressed!;
     final VoidCallback savedAnswer = answer.onPressed!;
 
     savedAnswer();
     savedPlay();
-    expect(audio.spoken, <String>['roue'],
+    expect(audio.spoken, <String>['tu'],
         reason: 'the answer transition must own A before persistence yields');
     await settle(tester);
     expect(find.text('Item 2'), findsOneWidget);
     savedPlay();
     await settle(tester);
-    expect(audio.spoken, <String>['roue'],
+    expect(audio.spoken, <String>['tu'],
         reason: 'a stale A callback cannot replay over B');
-    expect(optionEnabled(tester, 'tu'), isFalse,
+    expect(optionEnabled(tester, 'rue'), isFalse,
         reason: 'B requires its own completed listen');
     await tester.tap(find.byIcon(Icons.play_arrow));
     await settle(tester);
-    expect(audio.spoken, <String>['roue', 'tu']);
+    expect(audio.spoken, <String>['tu', 'rue']);
     audio.cues.last.release();
     await settle(tester);
-    expect(optionEnabled(tester, 'tu'), isTrue);
+    expect(optionEnabled(tester, 'rue'), isTrue);
   });
 
   for (final bool releaseReplayBeforeSave in <bool>[true, false]) {
     testWidgets(
         'held answer write rejects replay; late completion ${releaseReplayBeforeSave ? 'before' : 'after'} save cannot unlock B',
         (WidgetTester tester) async {
-      SharedPreferences.setMockInitialValues(<String, Object>{});
-      final HeldAnswerPreferences preferences = HeldAnswerPreferences();
-      SharedPreferencesStorePlatform.instance = preferences;
-      addTearDown(() async {
-        if (!preferences.write.isCompleted) preferences.write.complete(true);
-        await Future<void>.delayed(Duration.zero);
-      });
+      final answerGate = Completer<void>();
+      final store = CourseLearningWidgetStore()
+        ..actionGates[ChooseDrillWord] = answerGate;
       final HeldCueAudio audio = HeldCueAudio();
-      await DrillHarness(GlobalKey<NavigatorState>(), audio).pump(tester);
+      await DrillHarness(GlobalKey<NavigatorState>(), audio, store: store)
+          .pump(tester);
       await tester.tap(find.byIcon(Icons.play_arrow));
       await settle(tester);
       audio.cues[0].release();
@@ -354,18 +322,20 @@ void main() {
       final IconButton play =
           tester.widget<IconButton>(find.byType(IconButton));
       final FilledButton answer = tester.widget<FilledButton>(find.ancestor(
-          of: find.text('roue'), matching: find.byType(FilledButton)));
+          of: find.text('tu'), matching: find.byType(FilledButton)));
       final VoidCallback savedPlay = play.onPressed!;
       final VoidCallback savedAnswer = answer.onPressed!;
       savedAnswer();
       await tester.pump();
-      expect(preferences.answerWrites, 1,
-          reason: 'answer must reach and hold the real preferences store');
+      expect(
+          store.submitted.where((command) => command.action is ChooseDrillWord),
+          hasLength(1),
+          reason: 'answer must reach and hold the typed store');
 
       for (int frame = 0; frame < 3; frame++) {
         await tester.pump(const Duration(milliseconds: 16));
         await tester.tap(find.byIcon(Icons.play_arrow));
-        await tester.tap(find.text('roue'));
+        await tester.tap(find.text('tu'));
         savedPlay();
         if (!baselineI2Control) savedAnswer();
       }
@@ -374,8 +344,11 @@ void main() {
       if (baselineI2Control) savedPlay();
       if (!baselineI2Control) {
         expect(audio.cues, hasLength(1),
-            reason: 'cached Play is rejected while the write is held');
-        expect(preferences.answerWrites, 1,
+            reason: 'cached Play is rejected while the commit is held');
+        expect(
+            store.submitted
+                .where((command) => command.action is ChooseDrillWord),
+            hasLength(1),
             reason: 'cached answer cannot issue a duplicate write');
       } else {
         expect(audio.cues.length, greaterThan(1),
@@ -383,9 +356,8 @@ void main() {
       }
       expect(find.text('Item 1'), findsOneWidget,
           reason: 'item A cannot advance before save completion');
-      expect(await preferences.getAll(),
-          isNot(contains('flutter.course.v1.en-fr')),
-          reason: 'held write must not publish new answer evidence');
+      expect(store.committedState.history, isEmpty,
+          reason: 'held commit must not publish new answer evidence');
 
       // On fixed code no second cue exists. On the original baseline, this
       // releases the admitted replay at the selected side of the save.
@@ -395,12 +367,12 @@ void main() {
         }
         await settle(tester);
         if (baselineI2Control) {
-          expect(optionEnabled(tester, 'roue'), isTrue,
+          expect(optionEnabled(tester, 'tu'), isTrue,
               reason:
                   'baseline replay completion must mark A heard before save');
         }
       }
-      preferences.write.complete(true);
+      answerGate.complete();
       await settle(tester);
       expect(find.text('Item 2'), findsOneWidget);
       if (audio.cues.length > 1 && !releaseReplayBeforeSave) {
@@ -409,69 +381,57 @@ void main() {
         }
         await settle(tester);
       }
-      expect(optionEnabled(tester, 'tu'), isFalse,
+      expect(optionEnabled(tester, 'rue'), isFalse,
           reason: 'stale A completion must not unlock B');
-      expect(preferences.answerWrites, 1);
-      final Map<String, dynamic> saved = jsonDecode(
-          (await preferences.getAll())['flutter.course.v1.en-fr']!
-              as String) as Map<String, dynamic>;
-      final Map<String, dynamic> evidence =
-          saved['evidence'] as Map<String, dynamic>;
-      expect((evidence['listening:u'] as Map)['attempts'], 1,
+      expect(
+          store.submitted.where((command) => command.action is ChooseDrillWord),
+          hasLength(1));
+      expect(store.committedState.history.single.attempts, hasLength(1),
           reason: 'only the submitted A answer is persisted');
-      expect(evidence, isNot(contains('listening:y')),
-          reason: 'stale A audio cannot create B answer evidence');
       await tester.tap(find.byIcon(Icons.play_arrow));
       await settle(tester);
-      expect(audio.spoken.last, 'tu');
+      expect(audio.spoken.last, 'rue');
       audio.cues.last.release();
       await settle(tester);
-      expect(optionEnabled(tester, 'tu'), isTrue,
+      expect(optionEnabled(tester, 'rue'), isTrue,
           reason: 'only a completed fresh B listen unlocks B');
       await tester.pumpWidget(const SizedBox());
     });
   }
 
   testWidgets(
-      'held answer-write failure releases ownership without retry or false unlock',
+      'failed answer keeps the frozen item and Retry commits once without replay',
       (WidgetTester tester) async {
-    SharedPreferences.setMockInitialValues(<String, Object>{});
-    final HeldAnswerPreferences preferences = HeldAnswerPreferences();
-    SharedPreferencesStorePlatform.instance = preferences;
-    addTearDown(() async {
-      if (!preferences.write.isCompleted) preferences.write.complete(true);
-      await Future<void>.delayed(Duration.zero);
-    });
+    final store = CourseLearningWidgetStore()
+      ..failingActions.add(ChooseDrillWord);
     final HeldCueAudio audio = HeldCueAudio();
-    await DrillHarness(GlobalKey<NavigatorState>(), audio).pump(tester);
+    await DrillHarness(GlobalKey<NavigatorState>(), audio, store: store)
+        .pump(tester);
     await tester.tap(find.byIcon(Icons.play_arrow));
     await settle(tester);
     audio.cues[0].release();
     await settle(tester);
     final FilledButton answer = tester.widget<FilledButton>(find.ancestor(
-        of: find.text('roue'), matching: find.byType(FilledButton)));
+        of: find.text('tu'), matching: find.byType(FilledButton)));
     answer.onPressed!();
     await tester.pump();
-    expect(preferences.answerWrites, 1);
-    preferences.write
-        .completeError(StateError('injected preference write failure'));
     await settle(tester);
     expect(tester.takeException(), isNull,
         reason: 'write failure must be handled by the screen');
     expect(find.text('Item 1'), findsOneWidget);
-    expect(optionEnabled(tester, 'roue'), isFalse,
+    expect(optionEnabled(tester, 'tu'), isFalse,
         reason: 'failed save leaves hearing false');
-    expect(preferences.answerWrites, 1,
-        reason: 'failure must not trigger automatic retry');
-    expect(find.text('Could not save your answer. Please try again.'),
+    expect(find.textContaining('Could not save your answer. Please try again.'),
         findsOneWidget);
-    await tester.tap(find.byIcon(Icons.play_arrow));
+    expect(find.text('Retry saving'), findsOneWidget);
+    final failed = store.submitted.last;
+    store.failingActions.clear();
+    await tester.tap(find.text('Retry saving'));
     await settle(tester);
-    expect(audio.spoken, <String>['roue', 'roue'],
-        reason: 'ownership is released for deliberate retry');
-    audio.cues.last.release();
-    await settle(tester);
-    expect(optionEnabled(tester, 'roue'), isTrue);
+    expect(store.submitted.last, same(failed));
+    expect(store.committedState.history.single.attempts, hasLength(1));
+    expect(audio.spoken, <String>['tu']);
+    expect(find.text('Item 2'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -485,7 +445,7 @@ void main() {
     await harness.pump(tester);
     await tester.tap(find.byIcon(Icons.play_arrow));
     await settle(tester);
-    expect(audio.spoken, <String>['roue']);
+    expect(audio.spoken, <String>['tu']);
     // The Stop control retires the held request (recorded stop).
     await tester.tap(find.byIcon(Icons.stop));
     await settle(tester);
@@ -499,7 +459,7 @@ void main() {
       findsNothing,
       reason: 'a user stop must not surface as an audio failure',
     );
-    expect(optionEnabled(tester, 'roue'), isFalse);
+    expect(optionEnabled(tester, 'tu'), isFalse);
     // Retry is open after a stop: a newer request is now held.
     await tester.tap(find.byIcon(Icons.play_arrow));
     await settle(tester);
@@ -521,13 +481,13 @@ void main() {
       reason: 'a stale error must not end the newer held playback',
     );
     expect(
-      optionEnabled(tester, 'roue'),
+      optionEnabled(tester, 'tu'),
       isFalse,
       reason: 'a stale settlement must never mark audio heard',
     );
     audio.cues[1].release();
     await settle(tester);
-    expect(optionEnabled(tester, 'roue'), isTrue);
+    expect(optionEnabled(tester, 'tu'), isTrue);
   });
 
   testWidgets(
@@ -549,7 +509,7 @@ void main() {
     audio.cues[0].release();
     await settle(tester);
     expect(
-      optionEnabled(tester, 'roue'),
+      optionEnabled(tester, 'tu'),
       isFalse,
       reason: 'a stale success must not unlock the choices',
     );
@@ -557,7 +517,7 @@ void main() {
         reason: 'a stale success must not end the newer held playback');
     audio.cues[1].release();
     await settle(tester);
-    expect(optionEnabled(tester, 'roue'), isTrue);
+    expect(optionEnabled(tester, 'tu'), isTrue);
   });
 
   testWidgets(
@@ -577,7 +537,7 @@ void main() {
       reason: 'a failed practice speech stays retryable',
     );
     expect(
-      optionEnabled(tester, 'roue'),
+      optionEnabled(tester, 'tu'),
       isFalse,
       reason: 'a failed playback must not unlock the choices',
     );
@@ -593,7 +553,7 @@ void main() {
     expect(audio.spoken, hasLength(2));
     audio.cues[1].release();
     await settle(tester);
-    expect(optionEnabled(tester, 'roue'), isTrue);
+    expect(optionEnabled(tester, 'tu'), isTrue);
   });
 
   final List<Object?> endOutcomes = <Object?>[
@@ -651,6 +611,8 @@ void main() {
         overrides: <Override>[
           minimalPairsProvider.overrideWith((ref) => Future.value(drillPairs)),
           courseAudioProvider.overrideWithValue(audio),
+          courseLearningStoreProvider
+              .overrideWithValue(CourseLearningWidgetStore()),
         ],
         child: MaterialApp(
           navigatorKey: navigator,
@@ -669,7 +631,7 @@ void main() {
       await tester.pumpAndSettle(); // route transition before interacting
       await tester.tap(find.byIcon(Icons.play_arrow));
       await settle(tester);
-      expect(audio.spoken, <String>['roue']);
+      expect(audio.spoken, <String>['tu']);
       navigator.currentState!.pop();
       await tester.pumpAndSettle(); // disposal needs the full transition
       expect(
@@ -695,6 +657,8 @@ void main() {
       overrides: <Override>[
         minimalPairsProvider.overrideWith((ref) => Future.value(drillPairs)),
         courseAudioProvider.overrideWithValue(audio),
+        courseLearningStoreProvider
+            .overrideWithValue(CourseLearningWidgetStore()),
       ],
       child: MaterialApp(
         navigatorKey: navigator,
@@ -712,7 +676,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.play_arrow));
     await settle(tester);
-    expect(audio.spoken, <String>['roue']);
+    expect(audio.spoken, <String>['tu']);
     navigator.currentState!.pop();
     await tester.pumpAndSettle();
     expect(audio.stops, greaterThanOrEqualTo(1));
@@ -744,12 +708,12 @@ void main() {
     );
     expect(find.byIcon(Icons.play_arrow), findsOneWidget,
         reason: 'the retired request must not look like an active playback');
-    expect(optionEnabled(tester, 'roue'), isFalse);
+    expect(optionEnabled(tester, 'tu'), isFalse);
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await settle(tester);
     expect(
-      optionEnabled(tester, 'roue'),
+      optionEnabled(tester, 'tu'),
       isFalse,
       reason: 'resuming must require a fresh listen, never auto-replay',
     );
@@ -765,7 +729,7 @@ void main() {
     audio.cues[0].release();
     await settle(tester);
     expect(
-      optionEnabled(tester, 'roue'),
+      optionEnabled(tester, 'tu'),
       isFalse,
       reason: 'a stale success must not unlock the choices',
     );
@@ -773,7 +737,7 @@ void main() {
         reason: 'a stale success must not end the newer held playback');
     audio.cues[1].release();
     await settle(tester);
-    expect(optionEnabled(tester, 'roue'), isTrue);
+    expect(optionEnabled(tester, 'tu'), isTrue);
   });
 
   testWidgets(
@@ -809,10 +773,10 @@ void main() {
       findsOneWidget,
       reason: 'a stale error must not end the newer held playback',
     );
-    expect(optionEnabled(tester, 'roue'), isFalse);
+    expect(optionEnabled(tester, 'tu'), isFalse);
     audio.cues[1].release();
     await settle(tester);
-    expect(optionEnabled(tester, 'roue'), isTrue);
+    expect(optionEnabled(tester, 'tu'), isTrue);
   });
 
   // ---------- R2 (fix round 2): the synchronous single-shot ending state ----------
@@ -821,6 +785,7 @@ void main() {
     WidgetTester tester,
     HeldCueAudio audio,
     HeldStreakService streak,
+    CourseLearningWidgetStore store,
   ) async {
     final navigator = GlobalKey<NavigatorState>();
     await tester.pumpWidget(ProviderScope(
@@ -828,6 +793,7 @@ void main() {
         minimalPairsProvider.overrideWith((ref) => Future.value(drillPairs)),
         courseAudioProvider.overrideWithValue(audio),
         streakServiceProvider.overrideWithValue(streak),
+        courseLearningStoreProvider.overrideWithValue(store),
       ],
       child: MaterialApp(
         navigatorKey: navigator,
@@ -852,11 +818,12 @@ void main() {
       (WidgetTester tester) async {
     final HeldCueAudio audio = HeldCueAudio();
     final HeldStreakService streak = HeldStreakService();
-    await pumpDrillRoute(tester, audio, streak);
+    final store = CourseLearningWidgetStore();
+    await pumpDrillRoute(tester, audio, streak, store);
     // Start request A and hold it, then End the session.
     await tester.tap(find.byIcon(Icons.play_arrow));
     await settle(tester);
-    expect(audio.spoken, <String>['roue']);
+    expect(audio.spoken, <String>['tu']);
     await tester.tap(find.text('End Session'));
     await settle(tester);
     expect(streak.recordCalls, 1,
@@ -874,16 +841,15 @@ void main() {
     // A really late SUCCESS of the retired A during ending stays stale.
     audio.cues[0].release();
     await settle(tester);
-    expect(optionEnabled(tester, 'roue'), isFalse,
+    expect(optionEnabled(tester, 'tu'), isFalse,
         reason: 'a late success during ending must not unlock the choices');
     // New Play is rejected: no B dispatch.
     await tester.tap(find.byIcon(Icons.play_arrow));
     await settle(tester);
-    expect(audio.spoken, <String>['roue'],
+    expect(audio.spoken, <String>['tu'],
         reason: 'ending must reject a new playback request (no B dispatch)');
     // Answers stay blocked: no new evidence.
-    final data = await CourseProgressStore('en-fr').load();
-    expect(data['evidence'], isEmpty,
+    expect(store.committedState.history, isEmpty,
         reason: 'no answer may land while ending');
     // End re-entry is rejected: no duplicate booking.
     await tester.tap(find.text('End Session'));
@@ -910,7 +876,8 @@ void main() {
       (WidgetTester tester) async {
     final HeldCueAudio audio = HeldCueAudio();
     final HeldStreakService streak = HeldStreakService();
-    await pumpDrillRoute(tester, audio, streak);
+    final store = CourseLearningWidgetStore();
+    await pumpDrillRoute(tester, audio, streak, store);
     await tester.tap(find.byIcon(Icons.play_arrow));
     await settle(tester);
     await tester.tap(find.text('End Session'));
@@ -925,7 +892,7 @@ void main() {
         reason: 'a late failure is not a successful end');
     expect(find.text('Open drill'), findsNothing,
         reason: 'a late failure must not exit the session');
-    expect(optionEnabled(tester, 'roue'), isFalse,
+    expect(optionEnabled(tester, 'tu'), isFalse,
         reason: 'a stale error must not unlock the choices');
     // The persistence release is what ends the session — success exits once.
     streak.releases[0].release();
@@ -945,19 +912,20 @@ void main() {
       (WidgetTester tester) async {
     final HeldCueAudio audio = HeldCueAudio();
     final HeldStreakService streak = HeldStreakService();
-    await pumpDrillRoute(tester, audio, streak);
+    final store = CourseLearningWidgetStore();
+    await pumpDrillRoute(tester, audio, streak, store);
     // A real completion first: the choices are unlocked (heard).
     await tester.tap(find.byIcon(Icons.play_arrow));
     await settle(tester);
     audio.cues[0].release();
     await settle(tester);
-    expect(optionEnabled(tester, 'roue'), isTrue,
+    expect(optionEnabled(tester, 'tu'), isTrue,
         reason: 'a real completion unlocks the choices');
     final IconButton playButton = tester.widget<IconButton>(find.ancestor(
         of: find.byIcon(Icons.play_arrow), matching: find.byType(IconButton)));
     final void Function()? cachedPlay = playButton.onPressed;
     final FilledButton answerButton = tester.widget<FilledButton>(find.ancestor(
-        of: find.text('roue'), matching: find.byType(FilledButton)));
+        of: find.text('tu'), matching: find.byType(FilledButton)));
     final void Function()? cachedAnswer = answerButton.onPressed;
     final TextButton endButton = tester.widget<TextButton>(find.ancestor(
         of: find.text('End Session'), matching: find.byType(TextButton)));
@@ -973,14 +941,14 @@ void main() {
     cachedAnswer!();
     cachedEnd();
     await settle(tester);
-    expect(audio.spoken, <String>['roue'],
+    expect(audio.spoken, <String>['tu'],
         reason: 'cached Play cannot dispatch B before the next frame');
     expect(find.text('Item 1'), findsOneWidget);
     expect(find.text('0 / 1'), findsOneWidget,
         reason: 'cached answer cannot change item score');
     expect(streak.recordCalls, 1,
         reason: 'cached End cannot book twice before the next frame');
-    expect(optionEnabled(tester, 'roue'), isFalse,
+    expect(optionEnabled(tester, 'tu'), isFalse,
         reason: 'ending clears hearing BEFORE the persistence await: an '
             'already-heard item must not remain answerable');
     // Saved enabled callbacks remain stale even after one or more frames.
@@ -989,8 +957,7 @@ void main() {
     cachedEnd();
     await tester.pump();
     await tester.pump();
-    final data = await CourseProgressStore('en-fr').load();
-    expect(data['evidence'], isEmpty,
+    expect(store.committedState.history, isEmpty,
         reason: 'a cached answer callback must not record during ending');
     // Repeated pre-ending callbacks across frames remain rejected.
     cachedPlay();
@@ -998,7 +965,7 @@ void main() {
     cachedEnd();
     await tester.pump();
     await tester.pump();
-    expect(audio.spoken, <String>['roue'],
+    expect(audio.spoken, <String>['tu'],
         reason: 'a cached Play callback must not start a new request');
     await tester.tap(find.text('End Session'));
     await settle(tester);
@@ -1022,7 +989,8 @@ void main() {
       (WidgetTester tester) async {
     final HeldCueAudio audio = HeldCueAudio();
     final HeldStreakService streak = HeldStreakService();
-    await pumpDrillRoute(tester, audio, streak);
+    final store = CourseLearningWidgetStore();
+    await pumpDrillRoute(tester, audio, streak, store);
     await tester.tap(find.byIcon(Icons.play_arrow));
     await settle(tester);
     await tester.tap(find.text('End Session'));
@@ -1045,7 +1013,7 @@ void main() {
             .onPressed,
         isNotNull,
         reason: 'the failure clears the ending into a retryable state');
-    expect(optionEnabled(tester, 'roue'), isFalse,
+    expect(optionEnabled(tester, 'tu'), isFalse,
         reason: 'hearing stays false in the retryable state');
     expect(tester.takeException(), isNull,
         reason: 'the failed write is handled, never an unhandled error');
