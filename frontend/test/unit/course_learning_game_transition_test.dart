@@ -332,7 +332,7 @@ void main() {
         cue: HeardSoundCue(
           wordId: word.id,
           targetSound: target,
-          audioSource: AttemptAudioSource.practiceSpeech,
+          audioSource: AttemptAudioSource.pendingRecording,
         ),
       ),
       token: _tokenFor(82),
@@ -480,6 +480,73 @@ void main() {
             .attempts,
         isEmpty);
   });
+
+  test('covered cue rejects forged practice speech provenance', () {
+    final state = _start(engine, 'arcade:sound', 293).$1;
+    final board =
+        (state.activities['arcade:sound']!.snapshot as SoundGameCheckpoint)
+            .board;
+    final game = SoundMatchEngine.fromState(board, random: Random(294));
+    final move = game.legalMoves().firstWhere(
+        (move) => _swapFamilies(board.board, move.$1, move.$2).length == 1);
+    final target = _swapFamilies(board.board, move.$1, move.$2).single;
+    final word = LearningRegistry.french()
+        .require('arcade:sound')
+        .items
+        .firstWhere((item) => wordByText(item.id).contains(target));
+    final command = engine.prepare(
+      state: state,
+      authGeneration: 0,
+      activityId: 'arcade:sound',
+      action: SwapSoundTiles(
+        first: move.$1,
+        second: move.$2,
+        cue: HeardSoundCue(
+          wordId: word.id,
+          targetSound: target,
+          audioSource: AttemptAudioSource.practiceSpeech,
+        ),
+      ),
+      token: _tokenFor(295),
+      submittedAt: fixedTime,
+      random: Random(294),
+    );
+    final result =
+        engine.evaluate(state: state, command: command, committedAt: fixedTime);
+    expect(result.attempts, isEmpty);
+    expect(command.feedback.bonus, 0);
+  });
+
+  for (final activityId in ['arcade:sound', 'arcade:word']) {
+    test('$activityId rejects negative elapsed before a move', () {
+      final started = _start(engine, activityId, 296).$1;
+      final checkpoint = engine.prepare(
+        state: started,
+        authGeneration: 0,
+        activityId: activityId,
+        action: CheckpointArcade(elapsedSeconds: 10, paused: true),
+        token: _tokenFor(297),
+        submittedAt: fixedTime,
+        random: Random(297),
+      );
+      final elapsed = engine.evaluate(
+          state: started, command: checkpoint, committedAt: fixedTime);
+      final partiallyElapsed = stateAfter(started, elapsed);
+      expect(
+        () => activityId == 'arcade:sound'
+            ? SwapSoundTiles(first: 0, second: 1, elapsedSeconds: -1)
+            : LinkWordTiles(indices: const [0, 1, 2], elapsedSeconds: -1),
+        throwsArgumentError,
+      );
+      final remaining =
+          switch (partiallyElapsed.activities[activityId]!.snapshot) {
+        SoundGameCheckpoint(:final clock) => clock.remaining,
+        WordGameCheckpoint(:final clock) => clock.remaining,
+        _ => -1,
+      };
+      expect(remaining, 50);
+    });
+  }
 
   test('clock elapsed is applied before a move and timeout awards no points',
       () {

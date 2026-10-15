@@ -102,7 +102,7 @@ void main() {
     apply(
         ChooseSound(
           selectedSound: selected,
-          audioSource: AttemptAudioSource.practiceSpeech,
+          audioSource: AttemptAudioSource.pendingRecording,
         ),
         token);
     if ((state.activities[activity]!.snapshot as DiscoveryCheckpoint)
@@ -122,7 +122,7 @@ void main() {
         activityId: activity,
         action: ChooseSound(
           selectedSound: 'not-a-choice',
-          audioSource: AttemptAudioSource.practiceSpeech,
+          audioSource: AttemptAudioSource.pendingRecording,
         ),
         token: tokenFor(2),
         submittedAt: fixedTime,
@@ -145,7 +145,7 @@ void main() {
       activityId: activity,
       action: ChooseSound(
         selectedSound: 'u',
-        audioSource: AttemptAudioSource.practiceSpeech,
+        audioSource: AttemptAudioSource.pendingRecording,
       ),
       token: tokenFor(19),
       submittedAt: fixedTime,
@@ -211,7 +211,7 @@ void main() {
     apply(
       ChooseSound(
         selectedSound: 'y',
-        audioSource: AttemptAudioSource.practiceSpeech,
+        audioSource: AttemptAudioSource.pendingRecording,
       ),
       22,
     );
@@ -246,7 +246,7 @@ void main() {
     final submitted = apply(
         ChooseSound(
           selectedSound: 'u',
-          audioSource: AttemptAudioSource.practiceSpeech,
+          audioSource: AttemptAudioSource.pendingRecording,
         ),
         210);
     final attempt = submitted.attempts.single;
@@ -262,7 +262,7 @@ void main() {
     expect(before.activities[activity]!.exposures, isEmpty);
   });
 
-  test('assistance context and audio source cannot invent evidence metadata',
+  test('assistance context cannot invent evidence metadata',
       () {
     start();
     expect(
@@ -280,23 +280,89 @@ void main() {
       ),
       throwsA(isA<LearningInvalidCommandException>()),
     );
+    expect(state.activities[activity]!.exposures, isEmpty);
+    expect(state.history, isEmpty);
+  });
+
+  test('lesson and drill preserve authored pending-recording provenance', () {
+    start();
+    final item = engine.registry.require(activity).items.first;
+    final lessonAttempt = apply(
+      ChooseSound(
+        selectedSound: item.expectedChoice!,
+        audioSource: AttemptAudioSource.pendingRecording,
+      ),
+      212,
+    );
+    expect(lessonAttempt.attempts.single.audioSource,
+        AttemptAudioSource.pendingRecording);
+
+    state = CourseLearningState.empty(guestScope);
+    start();
     expect(
       () => engine.prepare(
         state: state,
         authGeneration: 0,
         activityId: activity,
         action: ChooseSound(
-          selectedSound: 'u',
-          audioSource: AttemptAudioSource.pendingRecording,
+          selectedSound: item.expectedChoice!,
+          audioSource: AttemptAudioSource.practiceSpeech,
         ),
-        token: tokenFor(212),
+        token: tokenFor(213),
         submittedAt: fixedTime,
         random: _NoDrawRandom(),
       ),
       throwsA(isA<LearningInvalidCommandException>()),
     );
-    expect(state.activities[activity]!.exposures, isEmpty);
-    expect(state.history, isEmpty);
+
+    const legacy = 'lesson:en-fr-vowels';
+    state = CourseLearningState.empty(guestScope);
+    applyTo(legacy, StartLearningRun(options: RunOptions()), 213);
+    final legacyItem = engine.registry.require(legacy).items.first;
+    final legacyAttempt = applyTo(
+      legacy,
+      ChooseSound(
+        selectedSound: legacyItem.expectedChoice!,
+        audioSource: AttemptAudioSource.pendingRecording,
+      ),
+      214,
+    );
+    expect(legacyAttempt.attempts.single.audioSource,
+        AttemptAudioSource.pendingRecording);
+
+    const drill = 'drill:minimal-pairs';
+    state = CourseLearningState.empty(guestScope);
+    applyTo(drill, StartLearningRun(options: RunOptions()), 213);
+    final drillItem = engine.registry.require(drill).items.first;
+    final drillAttempt = applyTo(
+      drill,
+      ChooseDrillWord(
+        selectedWord: drillItem.audioText!,
+        audioSource: AttemptAudioSource.pendingRecording,
+      ),
+      215,
+    );
+    expect(drillAttempt.attempts.single.itemId, drillItem.id);
+    expect(drillAttempt.attempts.single.audioSource,
+        AttemptAudioSource.pendingRecording);
+
+    state = CourseLearningState.empty(guestScope);
+    applyTo(drill, StartLearningRun(options: RunOptions()), 216);
+    expect(
+      () => engine.prepare(
+        state: state,
+        authGeneration: 0,
+        activityId: drill,
+        action: ChooseDrillWord(
+          selectedWord: drillItem.audioText!,
+          audioSource: AttemptAudioSource.practiceSpeech,
+        ),
+        token: tokenFor(217),
+        submittedAt: fixedTime,
+        random: _NoDrawRandom(),
+      ),
+      throwsA(isA<LearningInvalidCommandException>()),
+    );
   });
 
   test('lesson feedback retains the current discovery and legacy messages', () {
@@ -307,7 +373,7 @@ void main() {
       activityId: activity,
       action: ChooseSound(
         selectedSound: 'y',
-        audioSource: AttemptAudioSource.practiceSpeech,
+        audioSource: AttemptAudioSource.pendingRecording,
       ),
       token: tokenFor(213),
       submittedAt: fixedTime,
@@ -323,7 +389,7 @@ void main() {
       activityId: legacy,
       action: ChooseSound(
         selectedSound: 'i',
-        audioSource: AttemptAudioSource.practiceSpeech,
+        audioSource: AttemptAudioSource.pendingRecording,
       ),
       token: tokenFor(215),
       submittedAt: fixedTime,
@@ -336,7 +402,7 @@ void main() {
       activityId: legacy,
       action: ChooseSound(
         selectedSound: 'o',
-        audioSource: AttemptAudioSource.practiceSpeech,
+        audioSource: AttemptAudioSource.pendingRecording,
       ),
       token: tokenFor(216),
       submittedAt: fixedTime,
@@ -472,7 +538,7 @@ void main() {
       legacy,
       ChooseSound(
         selectedSound: 'i',
-        audioSource: AttemptAudioSource.practiceSpeech,
+        audioSource: AttemptAudioSource.pendingRecording,
       ),
       81,
     );
@@ -522,7 +588,7 @@ void main() {
         legacy,
         ChooseSound(
           selectedSound: 'i',
-          audioSource: AttemptAudioSource.practiceSpeech,
+          audioSource: AttemptAudioSource.pendingRecording,
         ),
         92);
     expect(answer.attempts.single.assistance,
@@ -539,7 +605,7 @@ void main() {
       legacy,
       ChooseSound(
         selectedSound: 'u',
-        audioSource: AttemptAudioSource.practiceSpeech,
+        audioSource: AttemptAudioSource.pendingRecording,
       ),
       94,
     );
@@ -584,7 +650,7 @@ void main() {
     final firstWrong = apply(
       ChooseSound(
         selectedSound: 'y',
-        audioSource: AttemptAudioSource.practiceSpeech,
+        audioSource: AttemptAudioSource.pendingRecording,
       ),
       2,
     );
@@ -666,7 +732,7 @@ void main() {
         legacy,
         ChooseSound(
           selectedSound: selected,
-          audioSource: AttemptAudioSource.practiceSpeech,
+          audioSource: AttemptAudioSource.pendingRecording,
         ),
         141 + i,
       );
@@ -692,7 +758,7 @@ void main() {
       drill,
       ChooseDrillWord(
         selectedWord: 'tout',
-        audioSource: AttemptAudioSource.practiceSpeech,
+        audioSource: AttemptAudioSource.pendingRecording,
       ),
       131,
     );
@@ -704,7 +770,7 @@ void main() {
       drill,
       ChooseDrillWord(
         selectedWord: 'rue',
-        audioSource: AttemptAudioSource.practiceSpeech,
+        audioSource: AttemptAudioSource.pendingRecording,
       ),
       132,
     );
@@ -765,7 +831,7 @@ void main() {
             activityId: activity,
             action: ChooseSound(
                 selectedSound: 'u',
-                audioSource: AttemptAudioSource.practiceSpeech),
+                audioSource: AttemptAudioSource.pendingRecording),
             token: tokenFor(99),
             submittedAt: fixedTime,
             random: _NoDrawRandom()),
@@ -784,7 +850,8 @@ void main() {
         authGeneration: 0,
         activityId: activity,
         action: ChooseSound(
-            selectedSound: 'u', audioSource: AttemptAudioSource.practiceSpeech),
+            selectedSound: 'u',
+            audioSource: AttemptAudioSource.pendingRecording),
         token: tokenFor(201),
         submittedAt: fixedTime,
         random: _NoDrawRandom());

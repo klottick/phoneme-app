@@ -8,7 +8,6 @@ import 'course_learning_command.dart';
 import 'course_learning_error.dart';
 import 'course_learning_registry.dart';
 import 'course_learning_state.dart';
-import 'course_content_validator.dart';
 import 'french_course.dart';
 
 class GameAnswerEvidence {
@@ -170,17 +169,18 @@ class CourseLearningGameTransition {
         ),
       );
     }
+    final cueItem = cue == null ? null : _authoredItem(definition, cue.wordId);
     final qualifies = cue != null &&
         move.families.length == 1 &&
         preMoveFamilies.contains(cue.targetSound) &&
-        cue.audioSource == _authoredAudioSource(cue.wordId) &&
-        _authoredItem(definition, cue.wordId) != null &&
+        cueItem != null &&
+        cue.audioSource == authoredAudioSource(cueItem) &&
         wordByText(cue.wordId).contains(cue.targetSound);
     final evidence = <GameAnswerEvidence>[];
     var bonus = 0;
     var suffix = '';
     if (qualifies) {
-      final item = _authoredItem(definition, cue.wordId)!;
+      final item = cueItem;
       final answerFamily = move.families.single;
       final correct = answerFamily == cue.targetSound;
       if (correct) bonus = 100;
@@ -288,17 +288,11 @@ class CourseLearningGameTransition {
     return matches.single;
   }
 
-  AttemptAudioSource _authoredAudioSource(String wordId) {
-    if (!frenchAudioResources.containsKey('fr-word-$wordId') ||
-        frenchAudioResources['fr-word-$wordId'] !=
-            AudioResourceStatus.practiceTts) {
-      return AttemptAudioSource.notApplicable;
-    }
-    return AttemptAudioSource.practiceSpeech;
-  }
-
   ArcadeClockState _beforeMove(ArcadeClockState clock, int elapsed) {
-    if (clock.paused || clock.remaining == 0 || elapsed >= clock.remaining) {
+    if (clock.paused ||
+        clock.remaining == 0 ||
+        elapsed < 0 ||
+        elapsed >= clock.remaining) {
       throw const LearningInvalidCommandException();
     }
     return ArcadeClockState(

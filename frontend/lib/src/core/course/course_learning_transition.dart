@@ -335,14 +335,16 @@ class LearningTransitionEngine {
         _validateAssistance(definition, action);
         return _Mutation(snapshot: slot.snapshot);
       }
-      if (action case ChooseSound(:final audioSource)) {
-        _requirePracticeSpeech(audioSource);
-      }
       final changed = transitionLesson(
         definition: definition,
         snapshot: slot.snapshot,
         action: action,
       );
+      if (action case ChooseSound(:final audioSource)) {
+        final item = changed.answerItem;
+        if (item == null) throw const LearningInvalidCommandException();
+        _requireAuthoredAudioSource(item, audioSource);
+      }
       return _Mutation(
         snapshot: changed.snapshot,
         answerItem: changed.answerItem,
@@ -364,7 +366,7 @@ class LearningTransitionEngine {
           if (!item.choices.contains(selectedWord)) {
             throw const LearningInvalidCommandException();
           }
-          _requirePracticeSpeech(audioSource);
+          _requireAuthoredAudioSource(item, audioSource);
           final correct = selectedWord == item.expectedChoice;
           return _Mutation(
             snapshot: DrillCheckpoint(
@@ -756,8 +758,9 @@ class LearningTransitionEngine {
     }
   }
 
-  void _requirePracticeSpeech(AttemptAudioSource source) {
-    if (source != AttemptAudioSource.practiceSpeech) {
+  void _requireAuthoredAudioSource(
+      LearningSourceItem item, AttemptAudioSource source) {
+    if (source != authoredAudioSource(item)) {
       throw const LearningInvalidCommandException();
     }
   }

@@ -1,5 +1,6 @@
 import '../models/minimal_pair.dart';
 import 'course_attempt.dart';
+import 'course_exercise.dart';
 import 'course_learning_error.dart';
 import 'french_course.dart';
 import 'lesson_section.dart';
@@ -44,6 +45,20 @@ class LearningSourceItem {
   final String? expectedChoice;
   final List<String> targetSounds;
   final AttemptContentState contentState;
+}
+
+/// The source permitted by the authored text and the current curriculum's
+/// exact reference identities. This is metadata policy only: it does not
+/// assert that playback succeeded.
+AttemptAudioSource? authoredAudioSource(LearningSourceItem item) {
+  final text = item.audioText;
+  if (text == null || text.isEmpty) return null;
+  final covered = frenchCurriculum.audioReferences.any((reference) =>
+      reference.kind == AudioReferenceKind.word &&
+      reference.spokenText == text);
+  return covered
+      ? AttemptAudioSource.pendingRecording
+      : AttemptAudioSource.practiceSpeech;
 }
 
 class LearningActivityDefinition {
