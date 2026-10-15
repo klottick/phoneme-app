@@ -131,7 +131,8 @@ Each `CourseAttempt` stores:
 - Exercise/answer kind, target phoneme(s), skill dimension, selected answer and
   the expected answer snapshot used for evaluation.
 - Origin (`practice` or `game`), presentation (`firstInRun` or `repeatInRun`),
-  and assistance flags (`explanationVisible`, `afterDebrief`, `answerRevealed`).
+  and assistance flags (`explanationVisible`, `graphemeHint`, `afterDebrief`,
+  `answerRevealed`).
   An empty flag set means no tracked in-app assistance, not proof of an unseen
   item or independent performance outside the app.
 - Objectively evaluated correct/incorrect result. Source content/review state
@@ -144,6 +145,15 @@ Assistance flags may coexist. Existing explanation-first lessons start with
 for affected items. Discovery review after its debrief sets `afterDebrief`.
 Track assistance already displayed in the run; closing a reference or retrying
 a save must not relabel the attempt as unassisted. No new teaching help is added.
+
+For existing arcade UI, displaying its quick sound preview sets
+`explanationVisible` for subsequent game attempts. Word Match's first-four-move
+grapheme highlighting sets `graphemeHint` for affected words/targets, and its
+wrong-chain word/IPA feedback sets `answerRevealed` for subsequent attempts on
+that word/target. Sound Match's corrective cue feedback likewise marks the
+affected cue word/target for subsequent attempts. Do not retroactively mark the
+just-submitted attempt assisted by feedback shown only afterward. Retain these
+exposures in the run checkpoint without changing the existing game UI.
 
 Use a sealed answer payload with the current task shapes:
 
@@ -289,8 +299,12 @@ run revision and canonical receipt for the most recent command. Each prepared
 command also has a unique opaque operation token, frozen before its first
 submission and reused on Retry. Two screens competing for the same next
 sequence have different tokens: the loser gets a conflict, rather than being
-misidentified as a mutated duplicate. Reusing one token with changed input is
-an invalid submission. Recent answer batches retain a canonical full-command
+misidentified as a mutated duplicate. Callers must generate unique tokens;
+the store verifies payload identity only where a receipt/proof remains retained,
+not through an unbounded global token registry. Changing the input of a retained
+command identity is invalid. After its proof is pruned, the sequence/generation
+high-watermark still rejects replay as stale/conflicting without asserting that
+the payload was verified. Recent answer batches retain a canonical full-command
 fingerprint to prove their identities while their attempts remain retained.
 Submission IDs derive from owner/course/activity/generation/sequence/token plus
 the batch member index, using an unambiguous encoding; they are not regenerated
