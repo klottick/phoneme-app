@@ -27,6 +27,24 @@ void main() {
             selectedSound: '', choices: const ['s'], expectedSound: 's'),
         throwsArgumentError);
     expect(
+        () => WordTileAnswer(
+            wordId: 'w',
+            tileIndex: 16,
+            targetSound: 's',
+            expectedMembership: true),
+        throwsArgumentError);
+    expect(() => SlotCursor(generation: -1, sequence: 0, revision: 0),
+        throwsArgumentError);
+    expect(
+        () => CommandReceipt(
+            token: 'invalid',
+            canonicalCommand: 'command',
+            before: SlotCursor(generation: 1, sequence: 0, revision: 0),
+            after: SlotCursor(generation: 1, sequence: 1, revision: 1),
+            commitOrdinal: 1),
+        throwsArgumentError);
+    expect(() => RandomDraw(upperBound: 0, value: 0), throwsArgumentError);
+    expect(
         () => CourseAttempt(
               scope: guestScope,
               submissionId: '',
@@ -166,7 +184,7 @@ void main() {
   });
 
   test('command and state detach submitted collections', () {
-    final draws = <RandomDraw>[const RandomDraw(upperBound: 3, value: 1)];
+    final draws = <RandomDraw>[RandomDraw(upperBound: 3, value: 1)];
     final command = sampleCommand(draws: draws);
     draws.clear();
     expect(command.draws, hasLength(1));

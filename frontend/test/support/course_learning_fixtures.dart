@@ -102,7 +102,7 @@ LearningCommand sampleCommand(
         scope: guestScope,
         authGeneration: 0,
         activityId: 'arcade:sound',
-        expected: const SlotCursor(generation: 1, sequence: 0, revision: 0),
+        expected: SlotCursor(generation: 1, sequence: 0, revision: 0),
         token: tokenFor(1),
         submittedAt: fixedTime,
         action: const ContinueArcadeRound(),
@@ -118,13 +118,13 @@ ActivitySlot sampleActivitySlot() => ActivitySlot(
       activityId: 'lesson:sample',
       kind: LearningActivityKind.discovery,
       contentRevision: 1,
-      cursor: const SlotCursor(generation: 1, sequence: 1, revision: 1),
+      cursor: SlotCursor(generation: 1, sequence: 1, revision: 1),
       options: RunOptions(),
       snapshot: DiscoveryCheckpoint(
           session: LessonSectionSession(
               itemIds: const ['item'], sessionId: 'sample-session')),
       exposures: const {},
-      latestReceipt: const CommandReceipt(
+      latestReceipt: CommandReceipt(
         token: 'AAAAAAAAAAAAAAAAAAAAAA',
         canonicalCommand: 'sample',
         before: SlotCursor(generation: 1, sequence: 0, revision: 0),

@@ -29,10 +29,14 @@ String _validToken(String value) {
 }
 
 class SlotCursor {
-  const SlotCursor(
+  SlotCursor(
       {required this.generation,
       required this.sequence,
-      required this.revision});
+      required this.revision}) {
+    _count(generation, 'generation');
+    _count(sequence, 'sequence');
+    _count(revision, 'revision');
+  }
   final int generation, sequence, revision;
 }
 
@@ -65,12 +69,16 @@ class RunOptions {
 }
 
 class CommandReceipt {
-  const CommandReceipt(
+  CommandReceipt(
       {required this.token,
       required this.canonicalCommand,
       required this.before,
       required this.after,
-      required this.commitOrdinal});
+      required this.commitOrdinal}) {
+    _validToken(token);
+    _nonblank(canonicalCommand, 'canonicalCommand');
+    _count(commitOrdinal, 'commitOrdinal', minimum: 1);
+  }
   final String token, canonicalCommand;
   final SlotCursor before, after;
   final int commitOrdinal;

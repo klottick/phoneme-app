@@ -3,11 +3,14 @@ import 'course_learning_checkpoint.dart';
 import 'course_learning_state.dart';
 
 class RandomDraw {
-  const RandomDraw({required this.upperBound, required this.value})
-      : assert(upperBound > 0 &&
-            value >= 0 &&
-            value < upperBound &&
-            upperBound <= 9007199254740991);
+  RandomDraw({required this.upperBound, required this.value}) {
+    if (upperBound < 1 ||
+        upperBound > 9007199254740991 ||
+        value < 0 ||
+        value >= upperBound) {
+      throw ArgumentError('Random draw must be within its upper bound.');
+    }
+  }
   final int upperBound, value;
 }
 

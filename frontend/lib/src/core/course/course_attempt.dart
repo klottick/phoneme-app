@@ -137,6 +137,10 @@ class WordTileAnswer extends AttemptAnswer {
       required this.expectedMembership}) {
     _required(wordId, 'wordId');
     _counter(tileIndex, 'tileIndex', minimum: 0);
+    if (tileIndex >= 16) {
+      throw ArgumentError.value(
+          tileIndex, 'tileIndex', 'Must be a word-board position.');
+    }
     _required(targetSound, 'targetSound');
   }
   final String wordId;
