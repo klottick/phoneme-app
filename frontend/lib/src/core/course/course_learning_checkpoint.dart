@@ -89,6 +89,8 @@ class SoundBoardState {
   final Set<int> stars;
 }
 
+/// Typed Word Match board. Stars and obstacles may overlap: the existing
+/// engine can respawn an obstacle onto a star after a successful chain.
 class WordBoardState {
   WordBoardState(
       {required List<String> board,
@@ -102,11 +104,7 @@ class WordBoardState {
         moves = _bounded(moves, 'moves'),
         combo = _bounded(combo, 'combo'),
         stars = _boardPositions(stars, 16, 'stars'),
-        obstacles = _boardPositions(obstacles, 16, 'obstacles') {
-    if (this.stars.intersection(this.obstacles).isNotEmpty) {
-      throw ArgumentError('Stars and obstacles cannot occupy the same tile.');
-    }
-  }
+        obstacles = _boardPositions(obstacles, 16, 'obstacles');
   final List<String> board;
   final String target;
   final int moves;

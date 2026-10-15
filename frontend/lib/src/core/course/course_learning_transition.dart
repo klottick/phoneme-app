@@ -147,6 +147,7 @@ class LearningTransitionEngine {
         slot: beforeSlot,
         definition: definition,
         action: command.action,
+        snapshot: mutation.snapshot,
         item: mutation.answerItem,
         gameEvidence: mutation.gameEvidence,
       );
@@ -409,6 +410,7 @@ class LearningTransitionEngine {
     required ActivitySlot? slot,
     required LearningActivityDefinition definition,
     required LearningAction action,
+    required ActivitySnapshot snapshot,
     required LearningSourceItem? item,
     required List<GameAnswerEvidence> gameEvidence,
   }) {
@@ -427,6 +429,7 @@ class LearningTransitionEngine {
           }
         }
       }
+      _recordVisibleWordHints(out, definition, snapshot);
       return out;
     }
     if (action is ObserveAssistance) {
@@ -487,6 +490,7 @@ class LearningTransitionEngine {
         );
       }
     }
+    _recordVisibleWordHints(out, definition, snapshot);
     for (final evidence
         in gameEvidence.where((evidence) => !evidence.correct)) {
       final context = ItemContextKey(
@@ -509,6 +513,37 @@ class LearningTransitionEngine {
       );
     }
     return out;
+  }
+
+  void _recordVisibleWordHints(
+    Map<ItemContextKey, ItemExposure> exposures,
+    LearningActivityDefinition definition,
+    ActivitySnapshot snapshot,
+  ) {
+    if (definition.kind != LearningActivityKind.wordGame ||
+        snapshot is! WordGameCheckpoint ||
+        snapshot.board.moves >= 4) {
+      return;
+    }
+    for (final wordId in snapshot.board.board.toSet()) {
+      final matches = definition.items.where((item) => item.id == wordId);
+      if (matches.length != 1) {
+        throw const LearningInvalidCommandException();
+      }
+      final context = ItemContextKey(
+        itemId: wordId,
+        targetSound: snapshot.board.target,
+      );
+      final previous = exposures[context] ??
+          ItemExposure(presentations: 0, assistance: const {});
+      exposures[context] = ItemExposure(
+        presentations: previous.presentations,
+        assistance: {
+          ...previous.assistance,
+          AssistanceFlag.graphemeHint,
+        },
+      );
+    }
   }
 
   CourseAttempt _attempt({

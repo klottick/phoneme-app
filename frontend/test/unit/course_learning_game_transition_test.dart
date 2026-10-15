@@ -8,6 +8,7 @@ import 'package:linguist/src/core/course/course_learning_command.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/course/course_learning_registry.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
+import 'package:linguist/src/core/course/course_skill_summary.dart';
 import 'package:linguist/src/core/course/course_learning_transition.dart';
 import 'package:linguist/src/features/arcade/word_match_engine.dart';
 import 'package:linguist/src/features/arcade/sound_match_engine.dart';
@@ -226,6 +227,174 @@ void main() {
           isTrue);
       current = stateAfter(current, result);
     }
+  });
+
+  test('displayed hint boards create zero-presentation word exposures', () {
+    final started = _start(engine, 'arcade:word', 701).$1;
+    final initialBoard =
+        (started.activities['arcade:word']!.snapshot as WordGameCheckpoint)
+            .board;
+    for (final wordId in initialBoard.board.toSet()) {
+      final exposure = started.activities['arcade:word']!.exposures[
+          ItemContextKey(itemId: wordId, targetSound: initialBoard.target)];
+      expect(exposure, isNotNull, reason: '$wordId was visible at run start');
+      expect(exposure!.presentations, 0);
+      expect(exposure.assistance, contains(AssistanceFlag.graphemeHint));
+    }
+
+    final command = engine.prepare(
+      state: started,
+      authGeneration: 0,
+      activityId: 'arcade:word',
+      action: LinkWordTiles(indices: _validChain(initialBoard)),
+      token: _tokenFor(702),
+      submittedAt: fixedTime,
+      random: Random(702),
+    );
+    final selected = _validChain(initialBoard)
+        .map((index) => initialBoard.board[index])
+        .toSet();
+    final transition = engine.evaluate(
+        state: started, command: command, committedAt: fixedTime);
+    final candidate = (transition.slot.snapshot as WordGameCheckpoint).board;
+    for (final wordId in candidate.board.toSet()) {
+      final exposure = transition.slot.exposures[
+          ItemContextKey(itemId: wordId, targetSound: candidate.target)];
+      expect(exposure, isNotNull,
+          reason: '$wordId was visible on the move result board');
+      expect(exposure!.assistance, contains(AssistanceFlag.graphemeHint));
+      if (!selected.contains(wordId)) {
+        expect(exposure.presentations, 0);
+      }
+    }
+    for (final wordId in selected) {
+      expect(
+        transition
+            .slot
+            .exposures[ItemContextKey(
+                itemId: wordId, targetSound: initialBoard.target)]!
+            .presentations,
+        greaterThan(0),
+      );
+    }
+  });
+
+  test('first-board hint persists to the next explicit target cycle only', () {
+    var reproduced = false;
+    for (var seed = 710; seed < 810 && !reproduced; seed++) {
+      CourseLearningState current = _start(engine, 'arcade:word', seed).$1;
+      final initial =
+          (current.activities['arcade:word']!.snapshot as WordGameCheckpoint)
+              .board;
+      final seenWord = initial.board.first;
+      var canCycle = true;
+      for (var move = 0; move < 8; move++) {
+        final board =
+            (current.activities['arcade:word']!.snapshot as WordGameCheckpoint)
+                .board;
+        final chain = _chainForWord(board, excludeWord: seenWord);
+        if (chain == null) {
+          canCycle = false;
+          break;
+        }
+        final command = engine.prepare(
+          state: current,
+          authGeneration: 0,
+          activityId: 'arcade:word',
+          action: LinkWordTiles(indices: chain),
+          token: _tokenFor(seed * 10 + move + 1),
+          submittedAt: fixedTime,
+          random: Random(seed * 10 + move + 1),
+        );
+        final transition = engine.evaluate(
+            state: current, command: command, committedAt: fixedTime);
+        if (move == 3) {
+          final changedTargetBoard =
+              (transition.slot.snapshot as WordGameCheckpoint).board;
+          expect(changedTargetBoard.moves, 4);
+          expect(changedTargetBoard.target, 'y');
+          for (final wordId in changedTargetBoard.board.toSet()) {
+            expect(
+              transition
+                  .slot
+                  .exposures[ItemContextKey(
+                      itemId: wordId, targetSound: changedTargetBoard.target)]
+                  ?.assistance,
+              isNot(contains(AssistanceFlag.graphemeHint)),
+            );
+          }
+        }
+        if (transition.attempts.any((attempt) => attempt.itemId == seenWord)) {
+          canCycle = false;
+          break;
+        }
+        current = stateAfter(current, transition);
+      }
+      if (!canCycle) continue;
+      final lateBoard =
+          (current.activities['arcade:word']!.snapshot as WordGameCheckpoint)
+              .board;
+      if (lateBoard.moves != 8 ||
+          lateBoard.target != 'u' ||
+          !lateBoard.board.contains(seenWord)) {
+        continue;
+      }
+      final chain = _chainForWord(lateBoard, includeWord: seenWord);
+      if (chain == null) continue;
+      final unseenWord = chain
+          .map((index) => lateBoard.board[index])
+          .where((wordId) => wordId != seenWord)
+          .firstWhere(
+            (wordId) => !current.activities['arcade:word']!.exposures
+                .containsKey(ItemContextKey(itemId: wordId, targetSound: 'u')),
+            orElse: () => '',
+          );
+      if (unseenWord.isEmpty) continue;
+
+      final seenContext =
+          ItemContextKey(itemId: seenWord, targetSound: lateBoard.target);
+      expect(
+          current.activities['arcade:word']!.exposures[seenContext], isNotNull);
+      expect(
+          current
+              .activities['arcade:word']!.exposures[seenContext]!.presentations,
+          0);
+      final command = engine.prepare(
+        state: current,
+        authGeneration: 0,
+        activityId: 'arcade:word',
+        action: LinkWordTiles(indices: chain),
+        token: _tokenFor(seed * 10 + 9),
+        submittedAt: fixedTime,
+        random: Random(seed * 10 + 9),
+      );
+      final transition = engine.evaluate(
+          state: current, command: command, committedAt: fixedTime);
+      final seenAttempt = transition.attempts
+          .firstWhere((attempt) => attempt.itemId == seenWord);
+      expect(seenAttempt.itemOccurrence, 1);
+      expect(seenAttempt.correct, isTrue);
+      expect(seenAttempt.assistance, contains(AssistanceFlag.graphemeHint));
+      final unseenAttempt = transition.attempts
+          .firstWhere((attempt) => attempt.itemId == unseenWord);
+      expect(unseenAttempt.assistance,
+          isNot(contains(AssistanceFlag.graphemeHint)));
+      final summaryKey = SummaryKey(
+        sound: 'u',
+        skill: seenAttempt.skill,
+        origin: seenAttempt.origin,
+        presentation: seenAttempt.presentation,
+        assistance: seenAttempt.assistance,
+      );
+      expect(
+        transition.summaries[summaryKey]!.correct,
+        greaterThan(current.summaries[summaryKey]?.correct ?? 0),
+      );
+      reproduced = true;
+    }
+    expect(reproduced, isTrue,
+        reason:
+            'a deterministic run should retain an unsubmitted first-board item');
   });
 
   test('wrong-chain feedback assists only the subsequent occurrence', () {
@@ -711,6 +880,36 @@ Set<String> _swapFamilies(List<String> source, int first, int second) {
 List<int> _validChain(WordBoardState board) {
   final engine = WordMatchEngine.fromState(board, random: Random(1));
   return engine.findChain();
+}
+
+List<int>? _chainForWord(WordBoardState board,
+    {String? includeWord, String? excludeWord}) {
+  final game = WordMatchEngine.fromState(board, random: Random(2));
+  bool eligible(int index) =>
+      game.board[index] != excludeWord &&
+      wordByText(game.board[index]).contains(game.target);
+
+  List<int>? visit(List<int> path) {
+    if (path.length >= 3 &&
+        (includeWord == null ||
+            path.any((index) => game.board[index] == includeWord))) {
+      return path;
+    }
+    for (var next = 0; next < game.board.length; next++) {
+      if (path.contains(next) || !eligible(next)) continue;
+      if (!game.adjacent(path.last, next)) continue;
+      final found = visit([...path, next]);
+      if (found != null) return found;
+    }
+    return null;
+  }
+
+  for (var start = 0; start < game.board.length; start++) {
+    if (!eligible(start)) continue;
+    final found = visit([start]);
+    if (found != null) return found;
+  }
+  return null;
 }
 
 CourseLearningState _replaceWordBoard(

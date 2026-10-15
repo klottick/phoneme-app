@@ -121,6 +121,51 @@ void main() {
     expect(restoredClock.snapshot().paused, isTrue);
   });
 
+  test('generated star and obstacle respawns round-trip through typed restore',
+      () {
+    var reproduced = false;
+    for (var seed = 0; seed < 2000 && !reproduced; seed++) {
+      final game = WordMatchEngine(random: Random(seed));
+      final firstChain = _chainClearingAllObstacles(game);
+      if (firstChain == null) continue;
+      expect(firstChain.length, greaterThanOrEqualTo(5));
+      expect(game.submit(firstChain).accepted, isTrue);
+      final afterStarAndRespawn = game.toJson();
+      final stars = List<int>.from(afterStarAndRespawn['stars'] as List);
+      final obstacles =
+          List<int>.from(afterStarAndRespawn['obstacles'] as List);
+      if (stars.toSet().intersection(obstacles.toSet()).isEmpty) continue;
+
+      reproduced = true;
+      expect(stars, isNotEmpty);
+      expect(obstacles, hasLength(2));
+      var state = _wordStateFromLegacyJson(afterStarAndRespawn);
+      final draws = RecordingLearningRandom(Random(seed + 4000));
+      var restored = WordMatchEngine.fromState(state, random: draws);
+      expect(draws.draws, isEmpty);
+      expect(restored.snapshot().board, state.board);
+      expect(restored.snapshot().stars, state.stars);
+      expect(restored.snapshot().obstacles, state.obstacles);
+
+      while (game.moves < 4) {
+        expect(game.submit(game.findChain()).accepted, isTrue);
+        state = _wordStateFromLegacyJson(game.toJson());
+        final roundTripDraws = RecordingLearningRandom(Random(seed + 4001));
+        restored = WordMatchEngine.fromState(state, random: roundTripDraws);
+        expect(roundTripDraws.draws, isEmpty);
+        expect(restored.snapshot().board, state.board);
+        expect(restored.snapshot().target, state.target);
+        expect(restored.snapshot().stars, state.stars);
+        expect(restored.snapshot().obstacles, state.obstacles);
+      }
+      expect(state.moves, 4);
+      expect(state.target, 'y');
+    }
+    expect(reproduced, isTrue,
+        reason:
+            'seeded legacy engine must reproduce reachable respawn overlap');
+  });
+
   test(
       'typed game restore rejects invalid special positions instead of filtering',
       () {
@@ -183,4 +228,38 @@ void main() {
     expect(data['lessons'], contains('en-fr-vowels'));
     expect((await CourseProgressStore('fr-en').load())['lessons'], isEmpty);
   });
+}
+
+WordBoardState _wordStateFromLegacyJson(Map<String, dynamic> json) =>
+    WordBoardState(
+      board: List<String>.from(json['board'] as List),
+      target: json['target'] as String,
+      moves: json['moves'] as int,
+      combo: json['combo'] as int,
+      stars: Set<int>.from(json['stars'] as List),
+      obstacles: Set<int>.from(json['obstacles'] as List),
+    );
+
+List<int>? _chainClearingAllObstacles(WordMatchEngine game) {
+  bool matches(int index) =>
+      wordByText(game.board[index]).contains(game.target);
+  final required = Set<int>.of(game.obstacles);
+
+  List<int>? visit(List<int> path) {
+    if (path.length >= 5 && path.toSet().containsAll(required)) return path;
+    for (var next = 0; next < game.board.length; next++) {
+      if (path.contains(next) || !matches(next)) continue;
+      if (path.isNotEmpty && !game.adjacent(path.last, next)) continue;
+      final result = visit([...path, next]);
+      if (result != null) return result;
+    }
+    return null;
+  }
+
+  for (var start = 0; start < game.board.length; start++) {
+    if (!matches(start)) continue;
+    final result = visit([start]);
+    if (result != null) return result;
+  }
+  return null;
 }

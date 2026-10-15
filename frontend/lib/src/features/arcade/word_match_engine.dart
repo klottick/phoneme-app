@@ -29,8 +29,7 @@ class WordMatchEngine {
         state.obstacles.isEmpty ||
         state.obstacles.length > 2 ||
         state.board
-            .any((word) => !pool.any((candidate) => candidate.text == word)) ||
-        state.stars.intersection(state.obstacles).isNotEmpty) {
+            .any((word) => !pool.any((candidate) => candidate.text == word))) {
       throw const FormatException('Invalid word board state');
     }
     board.addAll(state.board);
