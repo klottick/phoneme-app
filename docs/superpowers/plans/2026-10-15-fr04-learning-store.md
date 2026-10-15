@@ -203,7 +203,16 @@ answer/raw snapshot details to widgets.
 `core/course_learning_command.dart` defines `LearningCommand` fields
 `LearningScope scope`, `int authGeneration`, `String activityId`,
 `SlotCursor expected`, `String token`, `DateTime submittedAt`,
-`LearningAction action`, `List<RandomDraw> draws`, `ActivitySnapshot candidate`.
+`LearningAction action`, `List<RandomDraw> draws`, `ActivitySnapshot candidate`,
+`LearningFeedback feedback`. Define `LearningFeedback` in the same module with
+fields `String message`, `int points`, `int cascades`, `int bonus`, `bool? correct`;
+`LearningFeedback.none()` has empty message, zero counts and null correctness.
+It is presentation output derived by the pure engine, not an accuracy counter.
+Both candidate and feedback enter canonical command identity; evaluation replays
+and verifies them rather than trusting caller-supplied feedback. Widgets read
+`prepared.feedback` for immediate results and existing engine messages, not
+re-evaluating answers or executing a second game move. Attempts/summary buckets
+do not derive evidence from this presentation text.
 `RandomDraw({int upperBound, int value})` is valid only for
 `0 <= value < upperBound`. The token is 16 securely random bytes encoded as
 22-character unpadded base64url, created once when preparing the command.
@@ -516,6 +525,9 @@ consumes it exactly. Constructors from state never consume draws.
   ```
   Prepare/evaluate use the same pre-move state and injected random fixture;
   `selectedIndices` includes two different positions containing the same word.
+  Also pin `prepared.feedback.message`, points, cascades and bonus against the
+  existing engine/UI outputs on the identical input fixture; subsequent replay
+  must verify the same feedback without consuming a new random source.
 - [ ] **2. Run RED:** `flutter test test/unit/course_learning_random_test.dart test/unit/course_learning_game_transition_test.dart`. Record the missing typed restore/dispatcher failures.
 - [ ] **3. Implement strict typed snapshots, replay random and game reducer.** Reuse existing scoring/matching algorithms. Validate submitted indices/cue membership, derive one batch from explicit selected tiles or one qualified cue, and freeze the post-move board/score with the same receipt. Apply a move's frozen `elapsedSeconds` before that move in the same transition; if time reaches zero, reject the move and require a clock-only checkpoint, never grant post-timeout points. Word feedback updates exposure for later attempts only; intro preview is `explanationVisible`. Clock checkpoint deltas must be nonnegative and no more than available time; resume/continue clears transient cue state. No engine refactor unrelated to deterministic snapshots.
 - [ ] **4. Run GREEN:** targeted tests and `flutter test test/unit/course_arcade_test.dart`, then `flutter analyze`. Seeded legacy engine tests must remain unchanged; compare old/new action outcomes on identical typed input fixtures.
@@ -690,6 +702,10 @@ at least the new cutover/game tests use the real repository and preferences mock
   commit or explicit Reload of the committed board; Retry must not add it a
   second time. Clamp a clock-only expiry
   checkpoint to remaining time, never submit an expired scoring move.
+  Use the prepared command's typed feedback for the existing Word Match
+  message and Sound Match cascade/points/bonus text. The pure adapter obtains
+  it from the same engine execution that produced the frozen checkpoint; UI
+  code neither drops that feedback nor reconstructs correctness/scoring itself.
 - [ ] **5. Switch home/progress/review and pin exact copy.** Home counts only
   committed current-revision completions; no new locks. Progress shows separate
   practice/game, first/repeat/assistance counts with sample sizes and unresolved
