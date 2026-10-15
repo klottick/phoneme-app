@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
@@ -24,6 +25,56 @@ class TestFrenchAudio implements CourseAudio {
 
   @override
   Future<void> stop() async {}
+}
+
+/// One retained request of [HeldCueAudio]: released exactly once, with
+/// success or the exact engine error.
+final class HeldCue {
+  HeldCue(this._settle);
+
+  final Completer<Object?> _settle;
+
+  bool get settled => _settle.isCompleted;
+
+  void release([Object? error]) {
+    if (_settle.isCompleted) return;
+    if (error == null) {
+      _settle.complete();
+    } else {
+      _settle.completeError(error);
+    }
+  }
+}
+
+/// Adversarial-compatible [CourseAudio] boundary for caller-generation
+/// tests (I3 fix): [speak] retains a per-request cue; [stop] only records
+/// itself (a compatible implementation may settle after Stop); the cues
+/// then really settle with success or an exact error, and each must be
+/// survivable by the screen's generation guard.
+final class HeldCueAudio implements CourseAudio {
+  final List<String> spoken = <String>[];
+  final List<HeldCue> cues = <HeldCue>[];
+  int stops = 0;
+
+  @override
+  Future<void> speak(String word) {
+    spoken.add(word);
+    final Completer<Object?> settle = Completer<Object?>();
+    final HeldCue cue = HeldCue(settle);
+    cues.add(cue);
+    final Future<void> delivery = settle.future.then((Object? value) {});
+    unawaited(delivery.then<void>(
+        (Object? value) {}, onError: (Object error) {}));
+    return delivery;
+  }
+
+  @override
+  Future<void> stop() {
+    // Stop is recorded; the request stays retained and settles later,
+    // really — that is the stale-settlement shape callers must survive.
+    stops++;
+    return Future<void>.value();
+  }
 }
 
 void main() {
@@ -92,6 +143,152 @@ void main() {
     await tester.pump();
     expect(find.text('0 pts'), findsNothing);
     expect((await CourseProgressStore('en-fr').load())['evidence'], isEmpty);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  // Suspend while a cue is held, resume, take the explicit Resume, and wait
+  // for the round's NEXT cue (the Resume action intentionally retires the
+  // current cue, so the timer raises a fresh one). Returns the index of
+  // that new cue in [HeldCueAudio.cues].
+  Future<int> suspendResumeAndNextCue(
+      WidgetTester tester, HeldCueAudio audio) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pumpAndSettle();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Resume'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 12));
+    await tester.pump();
+    expect(audio.spoken, hasLength(2));
+    return 1;
+  }
+
+  testWidgets(
+      'backgrounding retires a held cue: a really late SUCCESS during a '
+      'newer held attempt cannot arm the bonus', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final board = SoundMatchEngine(random: Random(9));
+    SharedPreferences.setMockInitialValues({
+      'arcade.v1.en-fr.sound': jsonEncode({
+        'session': {'remaining': 60, 'round': 1, 'score': 0},
+        'board': board.toJson(),
+      })
+    });
+    final audio = HeldCueAudio();
+    await tester.pumpWidget(ProviderScope(
+        overrides: [courseAudioProvider.overrideWithValue(audio)],
+        child: const MaterialApp(home: ArcadeScreen(silent: false))));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Resume saved board'), 200);
+    await tester.tap(find.text('Resume saved board'));
+    await tester.pump(const Duration(seconds: 12));
+    await tester.pump();
+    expect(audio.spoken, isNotEmpty,
+        reason: 'the cue must reach playback before suspension');
+    final HeldCue firstCue = audio.cues[0];
+    // Suspend: the screen must stop the in-flight audio and release its
+    // audio-owned busy state; resume + explicit Resume retires the current
+    // cue by design, and the round's timer raises the newer one (B) which
+    // stays held while A is still pending.
+    await suspendResumeAndNextCue(tester, audio);
+    expect(
+      audio.stops,
+      greaterThanOrEqualTo(1),
+      reason: 'suspending must stop in-flight audio',
+    );
+    final HeldCue secondCue = audio.cues[1];
+    // The stale request settles with SUCCESS now, while the newer one is
+    // held: it must not arm the bonus and must not touch the newer state.
+    firstCue.release();
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Which vowel did you hear? Your next match can earn +100.'),
+      findsNothing,
+      reason: 'a stale success must not arm the bonus match',
+    );
+    final data = await CourseProgressStore('en-fr').load();
+    expect(data['evidence'], isEmpty,
+        reason: 'a stale success never records listening evidence');
+    // Only the current request may later complete and arm.
+    secondCue.release();
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Which vowel did you hear? Your next match can earn +100.'),
+      findsWidgets,
+      reason: 'the current request may arm the bonus on its own success',
+    );
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+      'backgrounding retires a held cue: a really late ERROR during a newer '
+      'held attempt must not publish failure or clear it', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final board = SoundMatchEngine(random: Random(9));
+    SharedPreferences.setMockInitialValues({
+      'arcade.v1.en-fr.sound': jsonEncode({
+        'session': {'remaining': 60, 'round': 1, 'score': 0},
+        'board': board.toJson(),
+      })
+    });
+    final audio = HeldCueAudio();
+    await tester.pumpWidget(ProviderScope(
+        overrides: [courseAudioProvider.overrideWithValue(audio)],
+        child: const MaterialApp(home: ArcadeScreen(silent: false))));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Resume saved board'), 200);
+    await tester.tap(find.text('Resume saved board'));
+    await tester.pump(const Duration(seconds: 12));
+    await tester.pump();
+    expect(audio.spoken, isNotEmpty,
+        reason: 'the cue must reach playback before suspension');
+    final HeldCue firstCue = audio.cues[0];
+    await suspendResumeAndNextCue(tester, audio);
+    expect(
+      audio.stops,
+      greaterThanOrEqualTo(1),
+      reason: 'suspending must stop in-flight audio',
+    );
+    final HeldCue secondCue = audio.cues[1];
+    // The stale request settles with a REAL engine failure now.
+    firstCue.release(StateError('late engine failure'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Audio unavailable.'),
+      findsNothing,
+      reason: 'a stale failure must not publish failure over the newer '
+          'request',
+    );
+    expect(
+      find.text('Which vowel did you hear? Your next match can earn +100.'),
+      findsNothing,
+      reason: 'a stale failure must not arm the bonus match',
+    );
+    // The newer request is still owned (busy) despite the stale error.
+    final IconButton replay = tester.widget<IconButton>(
+      find.ancestor(
+        of: find.byTooltip('Replay sound'),
+        matching: find.byType(IconButton),
+      ),
+    );
+    expect(
+      replay.onPressed,
+      isNull,
+      reason: 'a stale failure must not clear the newer held request busy',
+    );
+    final data = await CourseProgressStore('en-fr').load();
+    expect(data['evidence'], isEmpty,
+        reason: 'a stale failure never records listening evidence');
+    // The current request still completes and arms on its own success.
+    secondCue.release();
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Which vowel did you hear? Your next match can earn +100.'),
+      findsWidgets,
+    );
     await tester.pumpWidget(const SizedBox());
   });
 

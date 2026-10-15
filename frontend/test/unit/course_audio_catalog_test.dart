@@ -59,9 +59,25 @@ class _CountingBundle extends AssetBundle {
   }
 }
 
-List<int> _bytes(ByteData data) => data.buffer
-    .asUint8List(data.offsetInBytes, data.lengthInBytes)
-    .toList();
+class _CachingRetryBundle extends CachingAssetBundle {
+  _CachingRetryBundle(this.files);
+
+  final Map<String, String> files;
+  final Set<String> failNext = <String>{};
+  final Map<String, int> reads = <String, int>{};
+
+  @override
+  Future<ByteData> load(String key) async {
+    reads.update(key, (int count) => count + 1, ifAbsent: () => 1);
+    if (failNext.remove(key)) {
+      throw FlutterError('temporary read failure: $key');
+    }
+    return ByteData.sublistView(Uint8List.fromList(utf8.encode(files[key]!)));
+  }
+}
+
+List<int> _bytes(ByteData data) =>
+    data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes).toList();
 
 /// Runs [mutate] on fresh copies of the real manifest/provenance, loads
 /// through a real [CourseAudioCatalogLoader] over an injected bundle and
@@ -74,7 +90,8 @@ Future<void> _expectInvalidCatalogue(
   List<CourseAudioReference>? references,
 }) async {
   final Map<String, dynamic> manifest = jsonDecode(jsonEncode(_realManifest()));
-  final Map<String, dynamic> provenance = jsonDecode(jsonEncode(_realProvenance()));
+  final Map<String, dynamic> provenance =
+      jsonDecode(jsonEncode(_realProvenance()));
   mutate(manifest, provenance);
   final loader = CourseAudioCatalogLoader(
     bundle: _CountingBundle(
@@ -88,10 +105,10 @@ Future<void> _expectInvalidCatalogue(
   await expectLater(
     loader.load(),
     throwsA(isA<CourseAudioException>().having(
-          (CourseAudioException e) => e.failure.reason,
-          'failure.reason',
-          CourseAudioFailureReason.invalidCatalogue,
-        )),
+      (CourseAudioException e) => e.failure.reason,
+      'failure.reason',
+      CourseAudioFailureReason.invalidCatalogue,
+    )),
   );
 }
 
@@ -104,9 +121,10 @@ Future<void> _expectRawInvalidCatalogue(
   final loader = CourseAudioCatalogLoader(
     bundle: _CountingBundle(
       files: {
-        _manifestKey:
-            mutateManifestJson(File('assets/audio/fr/manifest.json').readAsStringSync()),
-        _provenanceKey: File('assets/audio/fr/provenance.json').readAsStringSync(),
+        _manifestKey: mutateManifestJson(
+            File('assets/audio/fr/manifest.json').readAsStringSync()),
+        _provenanceKey:
+            File('assets/audio/fr/provenance.json').readAsStringSync(),
       },
     ),
     references: List.of(frenchCurriculum.audioReferences),
@@ -114,10 +132,10 @@ Future<void> _expectRawInvalidCatalogue(
   await expectLater(
     loader.load(),
     throwsA(isA<CourseAudioException>().having(
-          (CourseAudioException e) => e.failure.reason,
-          'failure.reason',
-          CourseAudioFailureReason.invalidCatalogue,
-        )),
+      (CourseAudioException e) => e.failure.reason,
+      'failure.reason',
+      CourseAudioFailureReason.invalidCatalogue,
+    )),
   );
 }
 
@@ -141,19 +159,19 @@ Future<void> _expectFactoryInvalid(
       references: List.of(frenchCurriculum.audioReferences),
     ),
     throwsA(isA<CourseAudioException>().having(
-          (CourseAudioException e) => e.failure.reason,
-          'failure.reason',
-          CourseAudioFailureReason.invalidCatalogue,
-        )),
+      (CourseAudioException e) => e.failure.reason,
+      'failure.reason',
+      CourseAudioFailureReason.invalidCatalogue,
+    )),
   );
 }
 
 Matcher get _invalidCatalogueMatcher =>
     throwsA(isA<CourseAudioException>().having(
-          (CourseAudioException e) => e.failure.reason,
-          'failure.reason',
-          CourseAudioFailureReason.invalidCatalogue,
-        ));
+      (CourseAudioException e) => e.failure.reason,
+      'failure.reason',
+      CourseAudioFailureReason.invalidCatalogue,
+    ));
 
 /// Test-only entry for injected construction fixtures (missing coverage,
 /// mixed kinds, immutability, association). Optional overrides let a fixture
@@ -196,7 +214,8 @@ void main() {
   late CourseAudioCatalogLoader loader;
 
   setUp(() {
-    loader = CourseAudioCatalogLoader(bundle: rootBundle, references: references);
+    loader =
+        CourseAudioCatalogLoader(bundle: rootBundle, references: references);
   });
 
   group('pending bundled catalogue', () {
@@ -205,9 +224,13 @@ void main() {
       expect(catalog.entries.length, 24);
       expect(catalog.wordReferenceByText('île')!.id, 'fr-word-île');
       expect(catalog.wordReferenceByText('ile'), isNull);
-      expect(catalog.recordingFor('fr-word-tout', CourseAudioVariant.normal)!.source,
+      expect(
+          catalog
+              .recordingFor('fr-word-tout', CourseAudioVariant.normal)!
+              .source,
           CourseAudioSource.unverifiedRecording);
-      expect(catalog.recordingFor('fr-word-tout', CourseAudioVariant.slow), isNull);
+      expect(catalog.recordingFor('fr-word-tout', CourseAudioVariant.slow),
+          isNull);
     });
 
     test('entries resolve exactly by id, text and variant', () async {
@@ -215,11 +238,18 @@ void main() {
       expect(catalog.referenceById('fr-word-île'), isNotNull);
       expect(catalog.referenceById('fr-word-il\u0302e'), isNull);
       expect(catalog.wordReferenceByText('tout')!.id, 'fr-word-tout');
-      expect(catalog.recordingFor('fr-word-nope', CourseAudioVariant.normal), isNull);
+      expect(catalog.recordingFor('fr-word-nope', CourseAudioVariant.normal),
+          isNull);
       // The bundled normal recording is the unchanged pending candidate.
-      expect(catalog.recordingFor('fr-word-tout', CourseAudioVariant.normal)!.assetKey,
+      expect(
+          catalog
+              .recordingFor('fr-word-tout', CourseAudioVariant.normal)!
+              .assetKey,
           'assets/audio/fr/words/tout.wav');
-      expect(catalog.recordingFor('fr-word-tout', CourseAudioVariant.normal)!.byteLength,
+      expect(
+          catalog
+              .recordingFor('fr-word-tout', CourseAudioVariant.normal)!
+              .byteLength,
           66836);
     });
 
@@ -235,10 +265,11 @@ void main() {
       expect(tout.credit.auditedRevisionUrl,
           'https://commons.wikimedia.org/w/index.php?title=File%3ALL-Q150%20(fra)-LoquaxFR-tout.wav&oldid=995917835');
       expect(tout.credit.licenseId, 'CC-BY-SA-4.0');
-      expect(tout.credit.licenseUrl, 'https://creativecommons.org/licenses/by-sa/4.0/');
-      expect(tout.credit.licenseTextAssetKey, 'assets/audio/fr/licenses/CC-BY-SA-4.0.txt');
-      expect(
-          tout.credit.attribution,
+      expect(tout.credit.licenseUrl,
+          'https://creativecommons.org/licenses/by-sa/4.0/');
+      expect(tout.credit.licenseTextAssetKey,
+          'assets/audio/fr/licenses/CC-BY-SA-4.0.txt');
+      expect(tout.credit.attribution,
           "LoquaxFR (speaker and recorder), 'LL-Q150_(fra)-LoquaxFR-tout.wav', via Wikimedia Commons (CC BY SA 4.0)");
       expect(tout.credit.unchanged, isTrue);
       expect(tout.credit.notices, [
@@ -249,11 +280,13 @@ void main() {
       final sans = catalog.entries[catalog.entries.length - 1];
       expect(sans.reference.id, 'fr-word-sans');
       expect(sans.credit.licenseId, 'CC-BY-4.0');
-      expect(sans.credit.licenseTextAssetKey, 'assets/audio/fr/licenses/CC-BY-4.0.txt');
+      expect(sans.credit.licenseTextAssetKey,
+          'assets/audio/fr/licenses/CC-BY-4.0.txt');
       expect(sans.credit.unchanged, isTrue);
 
       // Archived mur keeps a faithful caveat; no other entry does.
-      final murIndex = catalog.entries.indexWhere((e) => e.reference.id == 'fr-word-mur');
+      final murIndex =
+          catalog.entries.indexWhere((e) => e.reference.id == 'fr-word-mur');
       expect(catalog.entries[murIndex].credit.provenanceCaveat, isNotNull);
       expect(
           catalog.entries
@@ -296,6 +329,36 @@ void main() {
   });
 
   group('loader behaviour', () {
+    test('production string cache does not poison failed or invalid retries',
+        () async {
+      final files = <String, String>{
+        _manifestKey: File('assets/audio/fr/manifest.json').readAsStringSync(),
+        _provenanceKey:
+            File('assets/audio/fr/provenance.json').readAsStringSync(),
+      };
+      for (final String key in <String>[_manifestKey, _provenanceKey]) {
+        final bundle = _CachingRetryBundle(Map<String, String>.of(files));
+        bundle.failNext.add(key);
+        final loader =
+            CourseAudioCatalogLoader(bundle: bundle, references: references);
+        await expectLater(loader.load(), throwsA(isA<CourseAudioException>()));
+        expect((await loader.load()).entries, hasLength(24));
+        expect(bundle.reads[key], 2,
+            reason: '$key transport retry must reach binary load');
+      }
+      for (final String key in <String>[_manifestKey, _provenanceKey]) {
+        final bundle = _CachingRetryBundle(Map<String, String>.of(files));
+        bundle.files[key] = '{ malformed';
+        final loader =
+            CourseAudioCatalogLoader(bundle: bundle, references: references);
+        await expectLater(loader.load(), throwsA(isA<CourseAudioException>()));
+        bundle.files[key] = files[key]!;
+        expect((await loader.load()).entries, hasLength(24));
+        expect(bundle.reads[key], 2,
+            reason: '$key invalid retry must reach binary load');
+      }
+    });
+
     test('failed load is retryable and successful concurrent loads coalesce',
         () async {
       final files = {
@@ -311,15 +374,16 @@ void main() {
       await expectLater(
         failingLoader.load(),
         throwsA(isA<CourseAudioException>().having(
-              (CourseAudioException e) => e.failure.reason,
-              'failure.reason',
-              CourseAudioFailureReason.invalidCatalogue,
-            )),
+          (CourseAudioException e) => e.failure.reason,
+          'failure.reason',
+          CourseAudioFailureReason.invalidCatalogue,
+        )),
       );
       final retried = await failingLoader.load();
       expect(retried.entries.length, 24);
       expect(failing.manifestReads, 2,
-          reason: 'Retry must perform a new bundle read, not reuse a failed cache');
+          reason:
+              'Retry must perform a new bundle read, not reuse a failed cache');
 
       // Concurrent successful loads share exactly one read of each asset.
       final shared = _CountingBundle(files: files);
@@ -381,10 +445,10 @@ void main() {
       await expectLater(
         wrongRoot.load(),
         throwsA(isA<CourseAudioException>().having(
-              (CourseAudioException e) => e.failure.reason,
-              'failure.reason',
-              CourseAudioFailureReason.invalidCatalogue,
-            )),
+          (CourseAudioException e) => e.failure.reason,
+          'failure.reason',
+          CourseAudioFailureReason.invalidCatalogue,
+        )),
       );
     });
 
@@ -415,8 +479,8 @@ void main() {
       });
       // ASCII-normalised île is a different identity, not the same word.
       await _expectInvalidCatalogue((manifest, provenance) {
-        final index = (manifest['entries'] as List<dynamic>)
-            .indexWhere((e) => (e as Map<String, dynamic>)['id'] == 'fr-word-île');
+        final index = (manifest['entries'] as List<dynamic>).indexWhere(
+            (e) => (e as Map<String, dynamic>)['id'] == 'fr-word-île');
         _entry(manifest, index)['spokenText'] = 'ile';
       });
     });
@@ -457,9 +521,13 @@ void main() {
         second['assetPath'] = first['assetPath'];
       }, references: [
         CourseAudioReference(
-            id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'tout'),
+            id: 'fr-word-tout',
+            kind: AudioReferenceKind.word,
+            spokenText: 'tout'),
         CourseAudioReference(
-            id: 'fr-word-rouge', kind: AudioReferenceKind.word, spokenText: 'rouge'),
+            id: 'fr-word-rouge',
+            kind: AudioReferenceKind.word,
+            spokenText: 'rouge'),
       ]);
     });
 
@@ -474,8 +542,8 @@ void main() {
 
     test('rejects any speaker qualification other than unverified', () async {
       await _expectInvalidCatalogue((manifest, provenance) {
-        (_entry(manifest, 0)['speaker'] as Map<String, dynamic>)[
-                'qualificationStatus'] = 'certified';
+        (_entry(manifest, 0)['speaker']
+            as Map<String, dynamic>)['qualificationStatus'] = 'certified';
       });
     });
 
@@ -485,14 +553,14 @@ void main() {
       await _expectInvalidCatalogue((manifest, provenance) {
         (_entry(manifest, 0)['speaker'] as Map<String, dynamic>)['sourceName'] =
             null;
-        ((provenance['entries'] as List<dynamic>)[0] as Map<String, dynamic>)[
-                'sourceSpeaker'] = null;
+        ((provenance['entries'] as List<dynamic>)[0]
+            as Map<String, dynamic>)['sourceSpeaker'] = null;
       });
       await _expectInvalidCatalogue((manifest, provenance) {
         (_entry(manifest, 0)['speaker'] as Map<String, dynamic>)['sourceName'] =
             '';
-        ((provenance['entries'] as List<dynamic>)[0] as Map<String, dynamic>)[
-                'sourceSpeaker'] = '';
+        ((provenance['entries'] as List<dynamic>)[0]
+            as Map<String, dynamic>)['sourceSpeaker'] = '';
       });
     });
 
@@ -510,9 +578,11 @@ void main() {
       });
     });
 
-    test('rejects boolean, nonfinite or nonpositive audio properties', () async {
+    test('rejects boolean, nonfinite or nonpositive audio properties',
+        () async {
       await _expectInvalidCatalogue((manifest, provenance) {
-        (_entry(manifest, 0)['audio'] as Map<String, dynamic>)['channels'] = true;
+        (_entry(manifest, 0)['audio'] as Map<String, dynamic>)['channels'] =
+            true;
       });
       // Nonfinite values cannot survive jsonEncode; inject the raw NaN /
       // Infinity literals a bad producer could actually ship.
@@ -521,16 +591,19 @@ void main() {
       await _expectRawInvalidCatalogue(
           (json) => json.replaceAll('0.7572789115646259', 'Infinity'));
       await _expectInvalidCatalogue((manifest, provenance) {
-        (_entry(manifest, 0)['audio'] as Map<String, dynamic>)['durationSeconds'] = 0;
+        (_entry(manifest, 0)['audio']
+            as Map<String, dynamic>)['durationSeconds'] = 0;
       });
       await _expectInvalidCatalogue((manifest, provenance) {
-        (_entry(manifest, 0)['audio'] as Map<String, dynamic>)['sampleRateHz'] = -1;
+        (_entry(manifest, 0)['audio'] as Map<String, dynamic>)['sampleRateHz'] =
+            -1;
       });
     });
 
     test('rejects an unknown review status or invented review data', () async {
       await _expectInvalidCatalogue((manifest, provenance) {
-        (_entry(manifest, 0)['review'] as Map<String, dynamic>)['status'] = 'reviewed';
+        (_entry(manifest, 0)['review'] as Map<String, dynamic>)['status'] =
+            'reviewed';
       });
       await _expectInvalidCatalogue((manifest, provenance) {
         (_entry(manifest, 0)['review'] as Map<String, dynamic>)['reviewer'] =
@@ -546,19 +619,18 @@ void main() {
         () async {
       // Provenance licence disagrees with the manifest licence.
       await _expectInvalidCatalogue((manifest, provenance) {
-        ((provenance['entries'] as List<dynamic>)[0] as Map<String, dynamic>)[
-                'licenseEvidence']
-            ['spdxId'] = 'CC-BY-4.0';
+        ((provenance['entries'] as List<dynamic>)[0]
+            as Map<String, dynamic>)['licenseEvidence']['spdxId'] = 'CC-BY-4.0';
       });
       // Provenance hash disagrees with the manifest hash.
       await _expectInvalidCatalogue((manifest, provenance) {
-        ((provenance['entries'] as List<dynamic>)[0] as Map<String, dynamic>)[
-            'sha256'] = 'd' * 64;
+        ((provenance['entries'] as List<dynamic>)[0]
+            as Map<String, dynamic>)['sha256'] = 'd' * 64;
       });
       // Attribution invented on the manifest side.
       await _expectInvalidCatalogue((manifest, provenance) {
-        (_entry(manifest, 0)['license'] as Map<String, dynamic>)['attribution'] =
-            'Invented attribution';
+        (_entry(manifest, 0)['license']
+            as Map<String, dynamic>)['attribution'] = 'Invented attribution';
       });
       // Wrong retained legal text for the declared licence.
       await _expectInvalidCatalogue((manifest, provenance) {
@@ -567,8 +639,8 @@ void main() {
       });
       // Provenance transcription disagrees with the spoken text.
       await _expectInvalidCatalogue((manifest, provenance) {
-        ((provenance['entries'] as List<dynamic>)[0] as Map<String, dynamic>)[
-            'sourceTranscription'] = 'toutt';
+        ((provenance['entries'] as List<dynamic>)[0]
+            as Map<String, dynamic>)['sourceTranscription'] = 'toutt';
       });
       // Notices dropped on the manifest side.
       await _expectInvalidCatalogue((manifest, provenance) {
@@ -594,7 +666,8 @@ void main() {
         _entries(manifest).removeAt(0);
       });
       await _expectInvalidCatalogue((manifest, provenance) {
-        _entries(manifest).add(jsonDecode(jsonEncode(_entry(_realManifest(), 0))));
+        _entries(manifest)
+            .add(jsonDecode(jsonEncode(_entry(_realManifest(), 0))));
       });
       final first = _entries(_realManifest())[0];
       await _expectInvalidCatalogue((m, provenance) {
@@ -615,20 +688,19 @@ void main() {
         (_entry(manifest, 0)['license'] as Map<String, dynamic>)['spdxId'] = 42;
       });
       await _expectFactoryInvalid((manifest, provenance) {
-        (_entry(manifest, 0)['license'] as Map<String, dynamic>)['url'] =
-            42;
+        (_entry(manifest, 0)['license'] as Map<String, dynamic>)['url'] = 42;
       });
       await _expectFactoryInvalid((manifest, provenance) {
         (_entry(manifest, 0)['license'] as Map<String, dynamic>)['textPath'] =
             42;
       });
       await _expectFactoryInvalid((manifest, provenance) {
-        ((provenance['entries'] as List<dynamic>)[0] as Map<String, dynamic>)[
-                'sourcePageUrl'] = 42;
+        ((provenance['entries'] as List<dynamic>)[0]
+            as Map<String, dynamic>)['sourcePageUrl'] = 42;
       });
       await _expectFactoryInvalid((manifest, provenance) {
-        ((provenance['entries'] as List<dynamic>)[0] as Map<String, dynamic>)[
-                'descriptionRevisionUrl'] = 42;
+        ((provenance['entries'] as List<dynamic>)[0]
+            as Map<String, dynamic>)['descriptionRevisionUrl'] = 42;
       });
     });
   });
@@ -636,21 +708,24 @@ void main() {
   group('injected catalogue construction (policy fixtures)', () {
     test('accepts references without recordings (missing coverage)', () {
       final reference = CourseAudioReference(
-          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'tout');
+          id: 'fr-word-tout',
+          kind: AudioReferenceKind.word,
+          spokenText: 'tout');
       final catalog =
           CourseAudioCatalog(references: [reference], entries: const []);
       expect(catalog.references, [reference]);
       expect(catalog.entries, isEmpty);
       expect(catalog.referenceById('fr-word-tout'), same(reference));
       expect(catalog.wordReferenceByText('tout'), same(reference));
-      expect(
-          catalog.recordingFor('fr-word-tout', CourseAudioVariant.normal),
+      expect(catalog.recordingFor('fr-word-tout', CourseAudioVariant.normal),
           isNull);
     });
 
     test('accepts mixed reference kinds sharing the word text exactly', () {
       final word = CourseAudioReference(
-          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'tout');
+          id: 'fr-word-tout',
+          kind: AudioReferenceKind.word,
+          spokenText: 'tout');
       final sentence = CourseAudioReference(
           id: 'fr-sent-tout',
           kind: AudioReferenceKind.sentence,
@@ -663,8 +738,7 @@ void main() {
       expect(catalog.wordReferenceByText('tout'), same(word));
     });
 
-    test('returns defensive immutable copies of the injected collections',
-        () {
+    test('returns defensive immutable copies of the injected collections', () {
       final refs = <CourseAudioReference>[
         CourseAudioReference(
             id: 'fr-word-a', kind: AudioReferenceKind.word, spokenText: 'a'),
@@ -692,9 +766,13 @@ void main() {
 
     test('rejects duplicate reference ids', () {
       final a = CourseAudioReference(
-          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'tout');
+          id: 'fr-word-tout',
+          kind: AudioReferenceKind.word,
+          spokenText: 'tout');
       final b = CourseAudioReference(
-          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'rouge');
+          id: 'fr-word-tout',
+          kind: AudioReferenceKind.word,
+          spokenText: 'rouge');
       expect(
         () => CourseAudioCatalog(references: [a, b], entries: const []),
         _invalidCatalogueMatcher,
@@ -703,9 +781,13 @@ void main() {
 
     test('rejects two word identities sharing the same exact text', () {
       final a = CourseAudioReference(
-          id: 'fr-word-tout-a', kind: AudioReferenceKind.word, spokenText: 'tout');
+          id: 'fr-word-tout-a',
+          kind: AudioReferenceKind.word,
+          spokenText: 'tout');
       final b = CourseAudioReference(
-          id: 'fr-word-tout-b', kind: AudioReferenceKind.word, spokenText: 'tout');
+          id: 'fr-word-tout-b',
+          kind: AudioReferenceKind.word,
+          spokenText: 'tout');
       expect(
         () => CourseAudioCatalog(references: [a, b], entries: const []),
         _invalidCatalogueMatcher,
@@ -735,13 +817,17 @@ void main() {
       // identity: a distinct immutable reference object with equal fields is
       // a valid pairing.
       final reference = CourseAudioReference(
-          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'tout');
+          id: 'fr-word-tout',
+          kind: AudioReferenceKind.word,
+          spokenText: 'tout');
       final distinct = CourseAudioReference(
-          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'tout');
+          id: 'fr-word-tout',
+          kind: AudioReferenceKind.word,
+          spokenText: 'tout');
       expect(identical(reference, distinct), isFalse);
-      final catalog =
-          CourseAudioCatalog(references: [reference],
-              entries: <CourseAudioEntry>[_injectedEntry(distinct)]);
+      final catalog = CourseAudioCatalog(
+          references: [reference],
+          entries: <CourseAudioEntry>[_injectedEntry(distinct)]);
       expect(catalog.references.length, 1);
       expect(catalog.entries.single.reference.id, 'fr-word-tout');
       expect(catalog.entries.single.credit.referenceId, 'fr-word-tout');
@@ -752,13 +838,17 @@ void main() {
 
     test('rejects a same-ID entry with a wrong kind or spoken text', () {
       final reference = CourseAudioReference(
-          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'tout');
+          id: 'fr-word-tout',
+          kind: AudioReferenceKind.word,
+          spokenText: 'tout');
       final wrongKind = CourseAudioReference(
           id: 'fr-word-tout',
           kind: AudioReferenceKind.sentence,
           spokenText: 'tout');
       final wrongText = CourseAudioReference(
-          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'rouge');
+          id: 'fr-word-tout',
+          kind: AudioReferenceKind.word,
+          spokenText: 'rouge');
       expect(
         () => CourseAudioCatalog(
             references: [reference],
@@ -773,20 +863,23 @@ void main() {
       );
     });
 
-    test('rejects credits carrying the wrong reference id or spoken text',
-        () {
+    test('rejects credits carrying the wrong reference id or spoken text', () {
       final reference = CourseAudioReference(
-          id: 'fr-word-tout', kind: AudioReferenceKind.word, spokenText: 'tout');
+          id: 'fr-word-tout',
+          kind: AudioReferenceKind.word,
+          spokenText: 'tout');
       expect(
-        () => CourseAudioCatalog(references: [reference],
-            entries: <CourseAudioEntry>[
+        () => CourseAudioCatalog(references: [
+          reference
+        ], entries: <CourseAudioEntry>[
           _injectedEntry(reference, creditReferenceId: 'fr-word-rouge'),
         ]),
         _invalidCatalogueMatcher,
       );
       expect(
-        () => CourseAudioCatalog(references: [reference],
-            entries: <CourseAudioEntry>[
+        () => CourseAudioCatalog(references: [
+          reference
+        ], entries: <CourseAudioEntry>[
           _injectedEntry(reference, creditSpokenText: 'rouge'),
         ]),
         _invalidCatalogueMatcher,
@@ -818,20 +911,21 @@ void main() {
             reason: CourseAudioFailureReason.unavailableVariant),
       );
       expect(failed.outcome, CourseAudioOutcome.failed);
-      expect(failed.failure!.reason, CourseAudioFailureReason.unavailableVariant);
+      expect(
+          failed.failure!.reason, CourseAudioFailureReason.unavailableVariant);
     });
 
     test('failures keep their reason and diagnostic cause', () {
       final Object cause = StateError('diagnostic');
-      final failure =
-          CourseAudioFailure(reason: CourseAudioFailureReason.missingAsset, cause: cause);
+      final failure = CourseAudioFailure(
+          reason: CourseAudioFailureReason.missingAsset, cause: cause);
       expect(failure.reason, CourseAudioFailureReason.missingAsset);
       expect(failure.cause, same(cause));
 
       const exception = CourseAudioException(CourseAudioFailure(
           reason: CourseAudioFailureReason.invalidCatalogue));
-      expect(exception.failure.reason,
-          CourseAudioFailureReason.invalidCatalogue);
+      expect(
+          exception.failure.reason, CourseAudioFailureReason.invalidCatalogue);
       expect(const CourseAudioCancelledException(),
           isNot(isA<CourseAudioException>()));
     });
@@ -858,12 +952,11 @@ void main() {
     });
 
     test('deadline validate() rejects nonpositive injection', () {
-      expect(
-          () => const CourseAudioDeadlines(setup: Duration.zero).validate(),
+      expect(() => const CourseAudioDeadlines(setup: Duration.zero).validate(),
           throwsArgumentError);
       expect(
           () => const CourseAudioDeadlines(cleanup: Duration(milliseconds: -1))
-                  .validate(),
+              .validate(),
           throwsArgumentError);
       expect(() => const CourseAudioDeadlines().validate(), returnsNormally);
     });

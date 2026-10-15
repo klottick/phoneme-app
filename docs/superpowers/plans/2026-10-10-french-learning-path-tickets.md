@@ -224,6 +224,22 @@ remain required. No recording production or playback is authorized by FR-01.
 
 **Verify:** `flutter test test/unit/course_audio_test.dart test/widget/sound_word_help_test.dart`; manual native/browser audio checks.
 
+**Status (2026-10-14):** FR-02 candidate package (FR-03 Task 1) and the
+ownership-aware facade contracts (Tasks 2–3) are published on `main`
+(PR28). **Task 4 is delivered pending controller review/merge:** the shared
+`courseReferenceAudioProvider` (with `courseAudioProvider` serving that same
+single instance) is the default player, recording-first for the 24
+unverified pending candidates with practice speech only for uncovered legacy
+text; the lesson, discovery, drill, and arcade surfaces pin the exact
+`Alpha audio: recordings are unverified; device speech is practice-only.`
+disclosure; cancellation is delivery-distinct from failure and can never
+mark heard, unlock choices, book progress, or present failure text (Stop
+control, End Session, navigation and disposal all retire in-flight
+playback); recording errors never auto-substitute TTS and failure copy stays
+Retry/unavailable (never "install a French voice"). Readiness remains 35
+pending; FR-15 remains deferred; browser/native real-playback and
+linguistic-review gates remain PENDING manual evidence.
+
 ### FR-04 — Persist typed evidence, mistake history, and resumable sessions
 
 **Priority:** P0. **Owner:** evidence/storage agent. **Depends on:** FR-01.

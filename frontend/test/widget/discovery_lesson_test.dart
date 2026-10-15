@@ -21,9 +21,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 
 class FakeAudio implements CourseAudio {
-  FakeAudio({this.fail = false, this.hold = false});
+  FakeAudio({this.fail = false, this.hold = false, this.cancel = false});
   bool fail;
   bool hold;
+  bool cancel;
   int speaks = 0;
   int stops = 0;
   final List<String> spoken = [];
@@ -32,6 +33,7 @@ class FakeAudio implements CourseAudio {
   Future<void> speak(String word) async {
     speaks++;
     spoken.add(word);
+    if (cancel) throw const CourseAudioCancelledException();
     if (fail) throw StateError('no french voice');
     if (hold) {
       await Completer<void>().future; // Never completes.
@@ -1181,6 +1183,94 @@ void main() {
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
       expect(choicesEnabled(tester), isTrue);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('cancelled playback is silent and keeps listening retryable',
+        (tester) async {
+      final audio = FakeAudio(cancel: true);
+      final store = FakeSectionStore();
+      await tester.pumpWidget(pumpLesson(tester, audio, store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      expect(
+          find.textContaining('could not be played'), findsNothing,
+          reason: 'a cancelled request is not an audio failure');
+      expect(choicesEnabled(tester), isFalse,
+          reason: 'a cancelled playback must never unlock the choices');
+      expect(store.answerCalls, 0,
+          reason: 'a cancelled playback records no answer');
+      // Listening stays retryable after a cancellation.
+      audio.cancel = false;
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      expect(choicesEnabled(tester), isTrue);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the audio failure guidance carries the exact alpha '
+        'disclosure', (tester) async {
+      final audio = FakeAudio(fail: true);
+      final store = FakeSectionStore();
+      await tester.pumpWidget(pumpLesson(tester, audio, store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      expect(
+          find.text(
+              'Alpha audio: recordings are unverified; '
+              'device speech is practice-only.'),
+          findsOneWidget,
+          reason: 'practice surfaces must carry the exact alpha label');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets(
+        'the exercise surface pins the exact disclosure persistently — '
+        'initial, pending and success — with no device-source claim',
+        (tester) async {
+      final audio = GateAudio();
+      final store = FakeSectionStore();
+      await tester.pumpWidget(pumpLesson(tester, audio, store));
+      await tester.pumpAndSettle();
+      expect(
+          find.text(
+              'Alpha audio: recordings are unverified; '
+              'device speech is practice-only.'),
+          findsWidgets,
+          reason: 'the exact alpha disclosure must be present from the '
+              'initial state, before any playback at all (I1: previously only '
+              'failure wording carried it)');
+      expect(
+          find.textContaining('Practice audio: spoken by this device.'),
+          findsNothing,
+          reason: 'covered words now select recorded (unverified) assets — '
+              'the unconditional device-source claim is false and must be '
+              'gone');
+      // Pending (held) playback keeps the same disclosure.
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      expect(
+          find.text(
+              'Alpha audio: recordings are unverified; '
+              'device speech is practice-only.'),
+          findsWidgets);
+      expect(choicesEnabled(tester), isFalse);
+      // Success keeps the same disclosure: a successful listener must see
+      // the alpha sentence, not a device-speech claim.
+      audio.gate.complete();
+      await tester.pumpAndSettle();
+      expect(
+          find.text(
+              'Alpha audio: recordings are unverified; '
+              'device speech is practice-only.'),
+          findsWidgets,
+          reason: 'the disclosure must persist on the success state');
+      expect(choicesEnabled(tester), isTrue);
+      expect(
+          find.textContaining('Practice audio: spoken by this device.'),
+          findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
   });

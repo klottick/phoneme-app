@@ -84,8 +84,11 @@ Option 1, as adopted:
   rejected in review).
 - The browser recognition boundary (`isBrowserAutoplayRejection`) has a
   VM stub that is conservative by construction; the web implementation is
-  compile-verified in this round, but the browser test gate is **PENDING**
-  (no browser binary in the worker environment). Browser, device, native,
+  compile-verified in this round, but the browser test gate is **PENDING**.
+  **2026-10-15 factual correction:** Chromium 1248 is installed at
+  `/home/klottick/.cache/ms-playwright/chromium-1248/chrome-linux64/chrome`;
+  ordinary launch fails with `No usable sandbox!`. No sandbox bypass was
+  authorized, so the browser gate remains pending. Browser, device, native,
   linguistic and French content/approval gates are all NOT claimed here.
 - M1/M2 (deferred from earlier tasks) are unchanged and out of scope.
 - `courseAudioProvider`'s default switch remains a later task; this

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/course/course_audio.dart';
 import '../../core/course/lesson_section.dart';
 import '../../core/course/lesson_section_session.dart';
 
@@ -169,10 +170,11 @@ class DiscoverySectionView extends StatelessWidget {
               style: textTheme.bodyLarge,
             ),
             const SizedBox(height: 8),
-            Text(
-              'Practice audio: spoken by this device.',
-              style: textTheme.bodySmall,
-            ),
+            // Exact shared alpha disclosure (I1): the default shared player
+            // selects the bundled unverified pending recordings for these
+            // covered words first, so the old unconditional device-source
+            // claim was false; the exact shared label is what stays pinned.
+            Text(alphaAudioDisclosure, style: textTheme.bodySmall),
           ],
         ),
       ),

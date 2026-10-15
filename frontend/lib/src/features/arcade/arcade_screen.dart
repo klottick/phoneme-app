@@ -69,6 +69,11 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
   bool _audioReady = false, _background = false, _saving = false;
   int? _selected;
   int _cueAge = 0;
+  /// Cue request-generation (I3): a cue that is superseded (suspension,
+  /// switch to Word Match, disposal) loses ownership BEFORE its stop; a
+  /// stale settlement of the retired cue can then neither arm the bonus,
+  /// publish failure feedback, nor clear a newer request's busy state.
+  int _cueGeneration = 0;
   String? _cueSound, _cueWord;
   String _message = '';
   String? _saveError;
@@ -158,6 +163,11 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
 
   Future<void> _switchToWordMatch() async {
     if (_saving) return;
+    // Retire any held cue before persisting and navigating away (I3): a
+    // stale settlement of the retired cue can then neither arm the bonus,
+    // publish failure feedback onto the next surface, nor clear a newer
+    // request's busy state.
+    _retireCue();
     // Freeze the session while persisting it. If storage fails, keep this
     // screen and its in-memory board so the pause menu can retry the save.
     setState(() => _session.paused = true);
@@ -192,6 +202,7 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
 
   Future<void> _playCue() async {
     if (_cueWord == null || _busy) return;
+    final int generation = ++_cueGeneration;
     setState(() {
       _busy = true;
       _audioReady = false;
@@ -200,19 +211,43 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
     try {
       _audio = ref.read(courseAudioProvider);
       await _audio!.speak(_cueWord!);
+      // Retired (suspension, switch, disposal): this settlement is stale —
+      // it must not arm the bonus or touch the screen's current state.
+      if (generation != _cueGeneration) return;
       if (!mounted || _background) return;
       setState(() {
         _audioReady = true;
         _message = 'Which vowel did you hear? Your next match can earn +100.';
       });
+    } on CourseAudioCancelledException {
+      // A user/system stop (backgrounding, switching, disposal) cancelled
+      // the cue: it is not an audio failure, and it must never arm the
+      // bonus or be displayed as one.
+      if (generation != _cueGeneration || !mounted) return;
     } catch (_) {
-      if (mounted) {
+      if (generation == _cueGeneration && mounted) {
         setState(() => _message =
             'Audio unavailable. Replay to retry, or play Word Match without sound.');
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      // A stale settlement must not clear a newer request's busy state.
+      if (generation == _cueGeneration && mounted) {
+        setState(() => _busy = false);
+      }
     }
+  }
+
+  /// Retires the in-flight cue (I3): ownership is invalidated BEFORE the
+  /// captured shared playback is stopped, and the cue's audio-owned busy
+  /// state is released so the round is usable again after resume/switch.
+  void _retireCue() {
+    if (widget.silent) return;
+    _cueGeneration++;
+    final CourseAudio? audio = _audio;
+    if (audio != null) {
+      unawaited(audio.stop().catchError((Object _) {}));
+    }
+    if (mounted) setState(() => _busy = false);
   }
 
   void _tapSound(int index) {
@@ -295,9 +330,9 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
     if (_background && _started) {
       _session.paused = true;
       _audioReady = false;
-      if (!widget.silent) {
-        ref.read(courseAudioProvider).stop().catchError((Object _) {});
-      }
+      // Retire the held cue BEFORE stopping the shared playback, and release
+      // the cue's busy ownership so the round is usable again after resume.
+      _retireCue();
       _save();
       if (mounted) setState(() {});
     }
@@ -306,7 +341,17 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
   @override
   void dispose() {
     _timer?.cancel();
-    _audio?.stop().catchError((Object _) {});
+    // Disposal retires any held cue the same way as an explicit stop:
+    // ownership is lost first, then the captured playback is stopped.
+    // (No busy/state reset here: the element is already leaving, and a
+    // disposal-time setState would be illegal.)
+    if (!widget.silent) {
+      _cueGeneration++;
+      final CourseAudio? audio = _audio;
+      if (audio != null) {
+        unawaited(audio.stop().catchError((Object _) {}));
+      }
+    }
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -370,6 +415,10 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
                               const Expanded(
                                   child: Text('Listen for the bonus sound')),
                             ]),
+                          if (!widget.silent)
+                            Text(alphaAudioDisclosure,
+                                textAlign: TextAlign.end,
+                                style: Theme.of(context).textTheme.bodySmall),
                           const SizedBox(height: 8),
                           if (widget.silent)
                             GestureDetector(

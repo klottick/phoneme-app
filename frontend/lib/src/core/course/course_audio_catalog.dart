@@ -78,7 +78,8 @@ final class CourseAudioCatalog {
     required this.references,
     required this.entries,
   })  : _byId = {
-          for (final CourseAudioReference reference in references) reference.id: reference,
+          for (final CourseAudioReference reference in references)
+            reference.id: reference,
         },
         _byText = {
           // Only word identities participate in the text index; a sound or
@@ -109,18 +110,16 @@ final class CourseAudioCatalog {
     required List<CourseAudioEntry> entries,
   }) {
     _validateReferences(references);
-    final Map<String, CourseAudioReference> canonicalById = <String,
-        CourseAudioReference>{};
+    final Map<String, CourseAudioReference> canonicalById =
+        <String, CourseAudioReference>{};
     for (final CourseAudioReference reference in references) {
       canonicalById[reference.id] = reference;
     }
     final Set<String> entryReferenceIds = <String>{};
     for (final CourseAudioEntry entry in entries) {
-      final CourseAudioReference? canonical =
-          canonicalById[entry.reference.id];
+      final CourseAudioReference? canonical = canonicalById[entry.reference.id];
       if (canonical == null) {
-        throw _invalid(
-            'every entry needs a matching reference; '
+        throw _invalid('every entry needs a matching reference; '
             '"${entry.reference.id}" is unknown');
       }
       if (entry.reference.kind != canonical.kind) {
@@ -233,7 +232,8 @@ final class CourseAudioCatalog {
 
   /// The bundled recording for [referenceId] and [variant], or null when
   /// that variant was not separately recorded (e.g. `slow`).
-  CourseAudioRecording? recordingFor(String referenceId, CourseAudioVariant variant) {
+  CourseAudioRecording? recordingFor(
+      String referenceId, CourseAudioVariant variant) {
     final CourseAudioReference? reference = _byId[referenceId];
     if (reference == null) return null;
     for (final CourseAudioEntry entry in entries) {
@@ -268,8 +268,7 @@ final class CourseAudioCatalog {
       }
       if (reference.kind == AudioReferenceKind.word &&
           !seenWordTexts.add(reference.spokenText)) {
-        throw _invalid(
-            'word references must have unique spoken text; '
+        throw _invalid('word references must have unique spoken text; '
             '"${reference.spokenText}" repeats');
       }
     }
@@ -298,7 +297,8 @@ final class CourseAudioCatalog {
     if (rawEntries is! List) {
       throw _invalid('provenance.entries must be a JSON list');
     }
-    final Map<String, Map<String, dynamic>> byId = <String, Map<String, dynamic>>{};
+    final Map<String, Map<String, dynamic>> byId =
+        <String, Map<String, dynamic>>{};
     for (final Object? raw in rawEntries) {
       if (raw is! Map<String, dynamic>) {
         throw _invalid('provenance.entries must hold JSON objects');
@@ -363,10 +363,9 @@ final class CourseAudioCatalog {
     }
     final Map<String, dynamic> license = rawLicense;
     final String licenseId = _validatedLicenseId(license['spdxId']);
-    final String licenseUrl = _validatedLicenseUrl(
-        license['url'], licenseId);
-    final String licenseTextKey = _validatedLicenseTextPath(
-        license['textPath'], licenseId);
+    final String licenseUrl = _validatedLicenseUrl(license['url'], licenseId);
+    final String licenseTextKey =
+        _validatedLicenseTextPath(license['textPath'], licenseId);
     final Object? attribution = license['attribution'];
     if (attribution is! String || attribution.isEmpty) {
       throw _invalid('entry.license.attribution must be a non-empty string');
@@ -383,9 +382,17 @@ final class CourseAudioCatalog {
       throw _invalid(
           'provenance record "$provenanceId" is missing for this entry');
     }
-    final CourseAudioCredit credit = _buildCredit(entry, license, licenseId,
-        licenseUrl, licenseTextKey, attribution, notices, record,
-        reference, speakerName);
+    final CourseAudioCredit credit = _buildCredit(
+        entry,
+        license,
+        licenseId,
+        licenseUrl,
+        licenseTextKey,
+        attribution,
+        notices,
+        record,
+        reference,
+        speakerName);
 
     // --- recordings (normal only; slow must be separately recorded) -----
     final CourseAudioRecording normal = CourseAudioRecording(
@@ -408,8 +415,11 @@ final class CourseAudioCatalog {
     if (raw is! String || raw.isEmpty) {
       throw _invalid('entry.assetPath must be a non-empty string');
     }
-    if (raw.contains('://') || raw.startsWith('http://') || raw.startsWith('https://')) {
-      throw _invalid('entry.assetPath must be a packaged asset, not a remote URL');
+    if (raw.contains('://') ||
+        raw.startsWith('http://') ||
+        raw.startsWith('https://')) {
+      throw _invalid(
+          'entry.assetPath must be a packaged asset, not a remote URL');
     }
     if (raw.contains('..')) {
       throw _invalid('entry.assetPath must not traverse directories');
@@ -442,7 +452,9 @@ final class CourseAudioCatalog {
     }
     final num value = raw as num;
     if (value.isNaN) throw _invalid('audio.durationSeconds must be finite');
-    if (value.isInfinite) throw _invalid('audio.durationSeconds must be finite');
+    if (value.isInfinite) {
+      throw _invalid('audio.durationSeconds must be finite');
+    }
     if (value <= 0) throw _invalid('audio.durationSeconds must be positive');
     return Duration(microseconds: (value * 1000000).round());
   }
@@ -597,11 +609,10 @@ final class CourseAudioCatalog {
     _validateLicenseEvidence(
         provenance, licenseId, licenseUrl, attribution, notices);
 
-    final String creator = _validatedCreator(provenance['creditedCreators'],
-        speakerName);
+    final String creator =
+        _validatedCreator(provenance['creditedCreators'], speakerName);
 
-    final bool unchanged =
-        (entry['changes'] as List).isEmpty;
+    final bool unchanged = (entry['changes'] as List).isEmpty;
 
     // The approved archived `mur` original is recognised by its archived
     // download URL; the caveat is faithful to that record and applied only
@@ -613,7 +624,8 @@ final class CourseAudioCatalog {
       spokenText: reference.spokenText,
       creator: creator,
       sourceUrl: _validatedHttpUrl(provenance['sourcePageUrl']),
-      auditedRevisionUrl: _validatedHttpUrl(provenance['descriptionRevisionUrl']),
+      auditedRevisionUrl:
+          _validatedHttpUrl(provenance['descriptionRevisionUrl']),
       licenseId: licenseId,
       licenseUrl: licenseUrl,
       licenseTextAssetKey: licenseTextKey,
@@ -631,13 +643,13 @@ final class CourseAudioCatalog {
     final List<String> creators = <String>[];
     for (final Object? creator in raw) {
       if (creator is! String || creator.isEmpty) {
-        throw _invalid('provenance.creditedCreators must hold non-empty strings');
+        throw _invalid(
+            'provenance.creditedCreators must hold non-empty strings');
       }
       creators.add(creator);
     }
     if (entrySpeaker != null && creators.first != entrySpeaker) {
-      throw _invalid(
-          'the credited creator must match the entry speaker name');
+      throw _invalid('the credited creator must match the entry speaker name');
     }
     return creators.join(', ');
   }
@@ -665,14 +677,16 @@ final class CourseAudioCatalog {
       throw _invalid('provenance licence id differs from the manifest licence');
     }
     if (evidence['url'] != manifestLicenseUrl) {
-      throw _invalid('provenance licence url differs from the manifest licence');
+      throw _invalid(
+          'provenance licence url differs from the manifest licence');
     }
     if (evidence['creditText'] != manifestAttribution) {
       throw _invalid(
           'provenance credit text differs from the manifest attribution');
     }
     final Object? evidenceNotices = evidence['notices'];
-    if (evidenceNotices is! List || evidenceNotices.length != manifestNotices.length) {
+    if (evidenceNotices is! List ||
+        evidenceNotices.length != manifestNotices.length) {
       throw _invalid('provenance notices differ from the manifest notices');
     }
     for (int i = 0; i < manifestNotices.length; i++) {
@@ -699,8 +713,7 @@ final class CourseAudioCatalog {
     String year = 'the recorded';
     if (media is String && media.length >= 4) {
       final String candidate = media.substring(0, 4);
-      if (candidate.codeUnits.every(
-          (int u) => u >= 48 && u <= 57)) {
+      if (candidate.codeUnits.every((int u) => u >= 48 && u <= 57)) {
         year = '$candidate original';
       }
     }
@@ -753,18 +766,18 @@ final class CourseAudioCatalogLoader {
     if (inFlight != null) {
       return inFlight;
     }
-    final Future<CourseAudioCatalog> future = _doLoad()
-        .whenComplete(() => _inFlight = null);
+    final Future<CourseAudioCatalog> future =
+        _doLoad().whenComplete(() => _inFlight = null);
     _inFlight = future;
     return future;
   }
 
   Future<CourseAudioCatalog> _doLoad() async {
     try {
-      final String manifestRaw = await _bundle.loadString(
-          'assets/audio/fr/manifest.json');
-      final String provenanceRaw = await _bundle.loadString(
-          'assets/audio/fr/provenance.json');
+      final String manifestRaw = await _bundle
+          .loadString('assets/audio/fr/manifest.json', cache: false);
+      final String provenanceRaw = await _bundle
+          .loadString('assets/audio/fr/provenance.json', cache: false);
 
       dynamic manifestJson;
       dynamic provenanceJson;

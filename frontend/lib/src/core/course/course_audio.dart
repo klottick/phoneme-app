@@ -3,7 +3,10 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+import 'course_audio_catalog.dart';
 import 'course_audio_contract.dart';
+import 'course_recording_backend.dart';
+import 'course_reference_audio.dart';
 
 export 'course_audio_contract.dart';
 
@@ -212,12 +215,62 @@ class FrenchWordAudio implements CourseAudio {
   }
 }
 
-final courseAudioProvider = Provider<CourseAudio>((ref) {
-  final audio = FrenchWordAudio();
+/// The exact alpha audio disclosure shown on every listening and practice
+/// surface. One shared constant so no surface drifts from the wording: the
+/// bundled recordings are linguistically unverified alpha material, and
+/// device speech is practice-only.
+const String alphaAudioDisclosure =
+    'Alpha audio: recordings are unverified; device speech is practice-only.';
+
+/// Dependency seam for the recording-engine factory (I4, approved factory
+/// boundary): the production [courseReferenceAudioProvider] reads the
+/// factory's FUNCTION here without invoking it — engines are still
+/// constructed only when a request selects one. Tests override this seam
+/// (plus the catalogue-asset seam) to run the real provider body against
+/// controlled engines, without overriding the provider or replacing the
+/// owned facade.
+final courseRecordingSessionFactoryProvider =
+    Provider<CourseRecordingSession Function()>(
+        (ref) => createCourseRecordingSession);
+
+/// Dependency seam for the practice-speech factory (I4, approved factory
+/// boundary), same lazy-factory contract as the recording seam.
+final courseSpeechSessionFactoryProvider =
+    Provider<CoursePracticeSpeechSession Function()>(
+        (ref) => createFrenchPracticeSpeechSession);
+
+/// The shared reference-audio provider for the alpha. This provider [owns]
+/// the one [FrenchReferenceAudio] instance: construction is lazy (no
+/// catalogue load, no recording engine, no speech engine until a request
+/// selects one), covered words select the bundled unverified recordings
+/// first, only uncovered legacy text may fall back to practice speech, and
+/// provider disposal retires any active request idempotently.
+final courseReferenceAudioProvider = Provider<CourseReferenceAudio>((ref) {
+  final CourseAudioCatalogLoader loader =
+      ref.watch(courseAudioCatalogLoaderProvider);
+  final FrenchReferenceAudio audio = FrenchReferenceAudio(
+    loadCatalog: loader.load,
+    // The factory FUNCTIONS are stored, never invoked here: the engines are
+    // built only when the facade actually selects a recording or speech.
+    recordingFactory: ref.watch(courseRecordingSessionFactoryProvider),
+    speechFactory: ref.watch(courseSpeechSessionFactoryProvider),
+    deadlines: const CourseAudioDeadlines(),
+  );
   ref.onDispose(() {
-    audio.stop().catchError((Object _) {});
+    unawaited(audio.dispose().catchError((Object _) {}));
   });
   return audio;
+});
+
+/// The existing legacy provider now serves the shared alpha player instead
+/// of a raw TTS adapter: `speak(word)` plays the bundled recording for
+/// covered words and keeps practice speech only for uncovered legacy text.
+/// The two-method [CourseAudio] contract is unchanged, so existing
+/// `implements CourseAudio` mocks and
+/// `courseAudioProvider.overrideWithValue(...)` overrides compile and run
+/// untouched.
+final courseAudioProvider = Provider<CourseAudio>((ref) {
+  return ref.watch(courseReferenceAudioProvider);
 });
 
 /// Bounded [CoursePracticeSpeechSession] over [FrenchWordAudio].
