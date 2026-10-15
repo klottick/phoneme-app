@@ -1,13 +1,17 @@
 import 'dart:async';
-import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/course/course_audio.dart';
-import '../../core/course/course_progress.dart';
+import '../../core/course/course_attempt.dart';
+import '../../core/course/course_learning_command.dart';
+import '../../core/course/course_learning_checkpoint.dart';
+import '../../core/course/course_learning_error.dart';
+import '../../core/course/course_learning_providers.dart';
+import '../../core/course/course_learning_state.dart';
+import '../../core/course/course_learning_store.dart';
 import '../../core/course/french_course.dart';
-import 'arcade_session.dart';
 import 'sound_match_engine.dart';
 import 'word_match_engine.dart';
 
@@ -57,18 +61,25 @@ class ArcadeScreen extends ConsumerStatefulWidget {
 
 class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
     with WidgetsBindingObserver {
-  final _session = ArcadeSession();
-  final _word = WordMatchEngine();
-  final _sound = SoundMatchEngine();
-  final _store = CourseProgressStore(frenchCourse.id);
+  late CourseLearningStore _store;
+  CourseLearningState? _state;
+  ActivitySlot? _slot;
+  WordMatchEngine _word = WordMatchEngine();
+  SoundMatchEngine _sound = SoundMatchEngine();
   final _chain = <int>[];
   final _boardKey = GlobalKey();
   Offset? _dragOrigin;
   Timer? _timer;
-  bool _loading = true, _started = false, _hasSaved = false, _busy = false;
-  bool _audioReady = false, _background = false, _saving = false;
+  bool _loading = true, _started = false, _busy = false, _showSummary = false;
+  bool _audioReady = false, _background = false;
+  bool _saveBusy = false;
+  int _elapsed = 0, _generation = 0, _loadOp = 0;
+  LearningCommand? _pendingCommand;
+  CourseLearningStore? _pendingStore;
+  VoidCallback? _pendingSuccess;
   int? _selected;
   int _cueAge = 0;
+
   /// Cue request-generation (I3): a cue that is superseded (suspension,
   /// switch to Word Match, disposal) loses ownership BEFORE its stop; a
   /// stale settlement of the retired cue can then neither arm the bonus,
@@ -78,91 +89,158 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
   String _message = '';
   String? _saveError;
   CourseAudio? _audio;
-  String get _game => widget.silent ? 'word' : 'sound';
-  String get _key => 'arcade.v1.${_store.storageScope}.$_game';
+  String get _activityId => widget.silent ? 'arcade:word' : 'arcade:sound';
+  ArcadeClockState? get _clock => switch (_slot?.snapshot) {
+        SoundGameCheckpoint(:final clock) => clock,
+        WordGameCheckpoint(:final clock) => clock,
+        _ => null,
+      };
+  int get _remaining => ((_clock?.remaining ?? 60) - _elapsed).clamp(0, 60);
+  int get _score => _clock?.score ?? 0;
+  int get _round => _clock?.round ?? 1;
+  bool get _roundOver => _remaining == 0;
   bool get _canMove =>
-      _started && !_session.roundOver && !_session.paused && !_busy;
+      _started &&
+      !_roundOver &&
+      !_busy &&
+      !_background &&
+      _pendingCommand == null;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _restore();
+    _store = ref.read(courseLearningStoreProvider);
+    ref.listenManual(courseLearningStoreProvider, _onStoreReplaced);
+    unawaited(_load(_store));
   }
 
-  Future<void> _restore() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_key);
-      if (raw != null) {
-        final data = jsonDecode(raw) as Map<String, dynamic>;
-        _session.restore(Map<String, dynamic>.from(data['session'] as Map));
-        final board = Map<String, dynamic>.from(data['board'] as Map);
-        if (widget.silent) {
-          _word.restore(board);
-        } else {
-          _sound.restore(board);
-        }
-        _hasSaved = true;
-      }
-    } catch (_) {
-      _session.restore({'remaining': 60, 'round': 1, 'score': 0});
-      _word.restore(WordMatchEngine().toJson());
-      _sound.shuffle();
-      _message = 'Your saved board could not be restored. Start a fresh round.';
-    }
-    if (mounted) setState(() => _loading = false);
-  }
-
-  void _start() {
-    if (_session.roundOver) _session.continueRound();
-    setState(() {
-      _started = true;
-      _session.paused = false;
-    });
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted || _session.paused || _session.roundOver || _busy) return;
+  Future<void> _load(CourseLearningStore store, {bool retry = false}) async {
+    final op = ++_loadOp;
+    final generation = _generation;
+    if (mounted) {
       setState(() {
-        _session.elapse(1);
-        _cueAge++;
+        _loading = true;
+        _saveError = null;
       });
-      if (_session.roundOver) {
-        _chain.clear();
-        _selected = null;
-        _save();
-      } else if (!widget.silent && _cueSound == null && _cueAge >= 12) {
-        _newCue();
+    }
+    try {
+      final state = retry ? await store.retryLoad() : await store.load();
+      if (!mounted ||
+          generation != _generation ||
+          op != _loadOp ||
+          !identical(store, _store)) {
+        return;
       }
-    });
+      _state = state;
+      _slot = state.activities[_activityId];
+      if (_slot?.snapshot case WordGameCheckpoint(:final board)) {
+        _word = WordMatchEngine.fromState(board, random: Random());
+      }
+      if (_slot?.snapshot case SoundGameCheckpoint(:final board)) {
+        _sound = SoundMatchEngine.fromState(board, random: Random());
+      }
+      _elapsed = 0;
+      _started = false;
+      _showSummary = false;
+      _message = '';
+      if (_slot != null) _observePreview();
+    } catch (_) {
+      if (!mounted || generation != _generation || op != _loadOp) return;
+      _message =
+          'Saved progress is unavailable. Retry loading before continuing.';
+    }
+    if (mounted && generation == _generation && op == _loadOp) {
+      setState(() => _loading = false);
+    }
   }
 
-  Future<void> _save() async {
-    if (_saving) return;
-    _saving = true;
-    try {
-      final snapshot = jsonEncode({
-        'session': _session.toJson(),
-        'board': widget.silent ? _word.toJson() : _sound.toJson()
+  void _onStoreReplaced(
+      CourseLearningStore? previous, CourseLearningStore next) {
+    if (identical(previous, next)) return;
+    _generation++;
+    _loadOp++;
+    _timer?.cancel();
+    _retireCue();
+    _pendingCommand = null;
+    _pendingStore = null;
+    _pendingSuccess = null;
+    _saveBusy = false;
+    _elapsed = 0;
+    _state = null;
+    _slot = null;
+    _started = false;
+    _store = next;
+    if (mounted) unawaited(_load(next));
+  }
+
+  Future<bool> _send(LearningAction action, {VoidCallback? onSuccess}) async {
+    if (_saveBusy || _pendingCommand != null || _state == null) return false;
+    final store = _store;
+    final generation = _generation;
+    _pendingCommand =
+        store.prepare(state: _state!, activityId: _activityId, action: action);
+    _pendingStore = store;
+    _pendingSuccess = onSuccess;
+    return _submitPending(generation);
+  }
+
+  Future<bool> _submitPending([int? expectedGeneration]) async {
+    final command = _pendingCommand;
+    final store = _pendingStore;
+    if (command == null || store == null || _saveBusy) return false;
+    final generation = expectedGeneration ?? _generation;
+    _saveBusy = true;
+    if (mounted) {
+      setState(() {
+        _busy = true;
+        _saveError = null;
       });
-      final prefs = await SharedPreferences.getInstance();
-      if (!await prefs.setString(_key, snapshot)) {
-        throw StateError('Storage unavailable');
+    }
+    try {
+      final commit = await store.submit(command);
+      if (!mounted || generation != _generation || !identical(store, _store)) {
+        return false;
       }
-      await _store.saveScore(_game, _session.score);
-      if (mounted) setState(() => _saveError = null);
-      if (mounted) ref.invalidate(courseProgressProvider);
-    } catch (_) {
-      if (mounted) {
-        setState(() =>
-            _saveError = 'Could not save this round. Retry before leaving.');
+      _state = commit.state;
+      _slot = commit.slot;
+      _elapsed = 0;
+      if (commit.slot.snapshot case WordGameCheckpoint(:final board)) {
+        _word = WordMatchEngine.fromState(board, random: Random());
       }
+      if (commit.slot.snapshot case SoundGameCheckpoint(:final board)) {
+        _sound = SoundMatchEngine.fromState(board, random: Random());
+      }
+      _pendingCommand = null;
+      _pendingStore = null;
+      final callback = _pendingSuccess;
+      _pendingSuccess = null;
+      setState(() {
+        _busy = false;
+        _saveError = null;
+        if (command.feedback.message.isNotEmpty) {
+          _message = command.feedback.message;
+        }
+      });
+      callback?.call();
+      return true;
+    } catch (error) {
+      if (mounted && generation == _generation && identical(store, _store)) {
+        setState(() {
+          _busy = false;
+          _saveError = error is LearningOwnerChangedException
+              ? 'This round belongs to a different account. Reload to continue.'
+              : 'Could not save this round. Retry before leaving.';
+        });
+      }
+      return false;
     } finally {
-      _saving = false;
+      if (generation == _generation) _saveBusy = false;
     }
   }
 
   Future<void> _switchToWordMatch() async {
-    if (_saving) return;
+    if (_saveBusy || _pendingCommand != null) return;
     // Retire any held cue before persisting and navigating away (I3): a
     // stale settlement of the retired cue can then neither arm the bonus,
     // publish failure feedback onto the next surface, nor clear a newer
@@ -170,38 +248,109 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
     _retireCue();
     // Freeze the session while persisting it. If storage fails, keep this
     // screen and its in-memory board so the pause menu can retry the save.
-    setState(() => _session.paused = true);
-    await _save();
-    if (!mounted || _saveError != null) return;
-    context.pushReplacement('/arcade/word');
+    _timer?.cancel();
+    unawaited(_send(CheckpointArcade(elapsedSeconds: _elapsed, paused: true),
+        onSuccess: () => context.pushReplacement('/arcade/word')));
   }
 
-  Future<void> _record(List<(String, bool)> answers, String skill) async {
-    try {
-      for (final answer in answers) {
-        await _store.record(answer.$1, skill, answer.$2, activity: _game);
-      }
-      if (mounted) ref.invalidate(courseProgressProvider);
-    } catch (_) {
-      if (mounted) {
-        setState(() =>
-            _message = 'Game continues, but this answer could not be saved.');
-      }
+  Future<void> _start() async {
+    if (_slot != null) {
+      final ok = _remaining == 0
+          ? await _send(const ContinueArcadeRound())
+          : await _send(CheckpointArcade(elapsedSeconds: 0, paused: false));
+      if (!ok) return;
+      _activate(resetCueAge: true);
+      return;
     }
+    if (!await _send(StartLearningRun(options: RunOptions()))) return;
+    if (!await _send(CheckpointArcade(elapsedSeconds: 0, paused: false))) {
+      return;
+    }
+    _observePreview();
+    _activate(resetCueAge: true);
+  }
+
+  void _activate({bool resetCueAge = false}) {
+    setState(() {
+      _started = true;
+      _showSummary = false;
+      if (resetCueAge) _cueAge = 0;
+    });
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || !_started || _busy || _background || _roundOver) return;
+      setState(() {
+        _elapsed++;
+        _cueAge++;
+      });
+      if (_roundOver) {
+        _chain.clear();
+        _selected = null;
+        _showSummary = true;
+        _timer?.cancel();
+        unawaited(
+            _send(CheckpointArcade(elapsedSeconds: _elapsed, paused: true)));
+      } else if (!widget.silent && _cueSound == null && _cueAge >= 12) {
+        _newCue();
+      }
+    });
+  }
+
+  Future<void> _checkpoint({
+    required bool paused,
+    VoidCallback? onSuccess,
+  }) async {
+    if (_pendingCommand != null) return;
+    _timer?.cancel();
+    if (paused && !widget.silent) {
+      _retireCue();
+      _audioReady = false;
+      _cueSound = null;
+      _cueWord = null;
+    }
+    await _send(
+      CheckpointArcade(elapsedSeconds: _elapsed, paused: paused),
+      onSuccess: onSuccess,
+    );
+  }
+
+  void _observePreview() {
+    if (_slot == null) return;
+    const preview = {
+      'tout': 'u',
+      'rouge': 'u',
+      'vous': 'u',
+      'tu': 'y',
+      'rue': 'y',
+      'lune': 'y',
+      'lit': 'i',
+      'beau': 'o',
+    };
+    final contexts = widget.silent
+        ? preview.entries
+            .where((entry) => entry.value == 'u' || entry.value == 'y')
+        : preview.entries;
+    final items = contexts
+        .map((entry) =>
+            ItemContextKey(itemId: entry.key, targetSound: entry.value))
+        .toSet();
+    unawaited(_send(ObserveAssistance(
+        items: items, flags: {AssistanceFlag.explanationVisible})));
   }
 
   Future<void> _newCue() async {
     final available = _sound.availableFamilies().toList()..shuffle();
     if (available.isEmpty) return;
-    _cueSound = available.first;
-    final words = frenchWords.where((w) => w.contains(_cueSound!)).toList()
+    final family = available.first;
+    _cueSound = family;
+    final words = frenchWords.where((w) => w.contains(family)).toList()
       ..shuffle();
     _cueWord = words.first.text;
     await _playCue();
   }
 
   Future<void> _playCue() async {
-    if (_cueWord == null || _busy) return;
+    if (_cueWord == null || _busy || _pendingCommand != null) return;
     final int generation = ++_cueGeneration;
     setState(() {
       _busy = true;
@@ -256,37 +405,33 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
       setState(() => _selected = index);
       return;
     }
-    final result = _sound.swap(_selected!, index);
-    setState(() {
-      _selected = null;
-      if (!result.accepted) {
-        _message = 'Swap neighbors to make a line of three.';
-        return;
-      }
-      _session.score += result.points;
-      _message =
-          '${result.cascades > 1 ? '${result.cascades} cascades! ' : ''}+${result.points}';
-      // Ambiguous double-family matches and failed playback are not evidence.
-      if (_cueSound != null && _audioReady && result.families.length == 1) {
-        final correct = result.families.single == _cueSound;
-        if (correct) _session.score += 100;
-        _message += correct
-            ? ' · Sound bonus +100!'
-            : ' · $_cueWord contains /$_cueSound/.';
-        _record([(_cueSound!, correct)], 'listening');
-        _cueSound = null;
-        _cueWord = null;
-        _audioReady = false;
-        _cueAge = 0;
-      } else if (_cueSound != null &&
-          !_sound.availableFamilies().contains(_cueSound)) {
-        // Board changes may remove the correct move. Retire the cue unscored.
+    final first = _selected!;
+    final cue = _cueSound != null && _audioReady && _cueWord != null
+        ? HeardSoundCue(
+            wordId: _cueWord!,
+            targetSound: _cueSound!,
+            audioSource: AttemptAudioSource.pendingRecording)
+        : null;
+    setState(() => _selected = null);
+    _timer?.cancel();
+    unawaited(_send(
+        SwapSoundTiles(
+            first: first,
+            second: index,
+            cue: cue,
+            elapsedSeconds: _elapsed), onSuccess: () {
+      if (cue != null) {
         _cueSound = null;
         _cueWord = null;
         _audioReady = false;
         _cueAge = 0;
       }
-    });
+      if (!_roundOver) {
+        _activate();
+      } else {
+        _started = true;
+      }
+    }));
   }
 
   void _addWord(int index) {
@@ -315,25 +460,31 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
 
   void _submitWord() {
     if (!_canMove || _chain.isEmpty) return;
-    final result = _word.submit(List.of(_chain));
-    setState(() {
-      _chain.clear();
-      _message = result.message;
-      _session.score += result.points;
-    });
-    if (result.evidence.isNotEmpty) _record(result.evidence, 'spelling');
+    final indices = List<int>.of(_chain);
+    setState(() => _chain.clear());
+    _timer?.cancel();
+    unawaited(_send(LinkWordTiles(indices: indices, elapsedSeconds: _elapsed),
+        onSuccess: () {
+      if (!_roundOver) {
+        _activate();
+      } else {
+        _started = true;
+      }
+    }));
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _background = state != AppLifecycleState.resumed;
     if (_background && _started) {
-      _session.paused = true;
+      _started = false;
+      _showSummary = true;
       _audioReady = false;
       // Retire the held cue BEFORE stopping the shared playback, and release
       // the cue's busy ownership so the round is usable again after resume.
       _retireCue();
-      _save();
+      _timer?.cancel();
+      _send(CheckpointArcade(elapsedSeconds: _elapsed, paused: true));
       if (mounted) setState(() {});
     }
   }
@@ -341,6 +492,7 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
   @override
   void dispose() {
     _timer?.cancel();
+    _generation++;
     // Disposal retires any held cue the same way as an explicit stop:
     // ownership is lost first, then the captured playback is stopped.
     // (No busy/state reset here: the element is already leaving, and a
@@ -361,16 +513,29 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
     return PopScope(
       canPop: !_started,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) setState(() => _session.paused = true);
+        if (!didPop) {
+          _timer?.cancel();
+          _checkpoint(
+              paused: true,
+              onSuccess: () => setState(() {
+                    _started = false;
+                    _showSummary = true;
+                  }));
+        }
       },
       child: Scaffold(
         appBar: AppBar(
             title: Text(widget.silent ? 'Word Match' : 'Sound Match'),
             actions: [
-              if (_started && !_session.roundOver)
+              if (_started && !_roundOver)
                 IconButton(
                     tooltip: 'Pause',
-                    onPressed: () => setState(() => _session.paused = true),
+                    onPressed: () => _checkpoint(
+                        paused: true,
+                        onSuccess: () => setState(() {
+                              _started = false;
+                              _showSummary = true;
+                            })),
                     icon: const Icon(Icons.pause)),
             ]),
         body: _loading
@@ -381,25 +546,23 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
                     child: ListView(
                       padding: const EdgeInsets.all(16),
                       children: [
-                        if (!_started)
+                        if (!_started && !_showSummary)
                           ..._intro(context)
-                        else if (_session.roundOver || _session.paused)
+                        else if (_roundOver || _showSummary)
                           ..._summary(context)
                         else ...[
                           Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text(
-                                    'Round ${_session.round} · ${_session.remaining}s',
+                                Text('Round $_round · ${_remaining}s',
                                     style:
                                         Theme.of(context).textTheme.titleLarge),
-                                Text('${_session.score} pts',
+                                Text('$_score pts',
                                     style:
                                         Theme.of(context).textTheme.titleLarge),
                               ]),
                           const SizedBox(height: 8),
-                          LinearProgressIndicator(
-                              value: _session.remaining / 60),
+                          LinearProgressIndicator(value: _remaining / 60),
                           const SizedBox(height: 16),
                           Text(
                               widget.silent
@@ -450,6 +613,12 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
                           Text(_message,
                               key: const ValueKey('game-feedback'),
                               style: Theme.of(context).textTheme.bodyLarge),
+                          if (_saveError != null) ...[
+                            Text(_saveError!),
+                            TextButton(
+                                onPressed: _submitPending,
+                                child: const Text('Retry save')),
+                          ],
                           if (!widget.silent)
                             TextButton(
                                 onPressed: _switchToWordMatch,
@@ -482,8 +651,9 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
         const SizedBox(height: 16),
         FilledButton(
             onPressed: _start,
-            child: Text(
-                _hasSaved ? 'Resume saved board' : 'Start 60-second round')),
+            child: Text(_slot != null
+                ? 'Resume saved board'
+                : 'Start 60-second round')),
         const SizedBox(height: 12),
         const Text(
             'Stop after a minute or continue the same board. Puzzle points do not determine lesson completion.'),
@@ -493,38 +663,52 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
   List<Widget> _summary(BuildContext context) => [
         const Icon(Icons.auto_awesome, size: 64),
         const SizedBox(height: 20),
-        Text(_session.roundOver ? 'Round complete' : 'Paused',
+        Text(_roundOver ? 'Round complete' : 'Paused',
             style: Theme.of(context).textTheme.headlineMedium),
-        Text('${_session.score} points · Round ${_session.round}',
+        Text('$_score points · Round $_round',
             style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 24),
         FilledButton(
-            onPressed: _saving
+            onPressed: _saveBusy
                 ? null
-                : () => setState(() {
-                      _session.continueRound();
-                      _session.paused = false;
+                : () async {
+                    if (!await _send(_roundOver
+                        ? const ContinueArcadeRound()
+                        : CheckpointArcade(elapsedSeconds: 0, paused: false))) {
+                      return;
+                    }
+                    setState(() {
                       _chain.clear();
                       _selected = null;
                       _cueAge = 0;
                       _cueSound = null;
                       _cueWord = null;
                       _audioReady = false;
-                    }),
-            child: Text(_session.roundOver ? 'Continue this board' : 'Resume')),
+                      _showSummary = false;
+                    });
+                    _activate();
+                  },
+            child: Text(_roundOver ? 'Continue this board' : 'Resume')),
         TextButton(
-            onPressed: _saving
+            onPressed: _saveBusy
                 ? null
                 : () async {
-                    await _save();
-                    if (!mounted || _saveError != null) return;
-                    setState(() => _started = false);
-                    if (context.mounted) Navigator.of(context).pop();
+                    await _checkpoint(
+                        paused: true,
+                        onSuccess: () {
+                          if (!mounted) return;
+                          setState(() {
+                            _started = false;
+                            _showSummary = true;
+                          });
+                          if (context.mounted) Navigator.of(context).pop();
+                        });
                   },
             child: const Text('Finish')),
         if (_saveError != null) ...[
           Text(_saveError!),
-          TextButton(onPressed: _save, child: const Text('Retry save')),
+          TextButton(
+              onPressed: _submitPending, child: const Text('Retry save')),
         ],
       ];
 
