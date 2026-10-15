@@ -442,7 +442,9 @@ final class CourseAudioCatalog {
     }
     final num value = raw as num;
     if (value.isNaN) throw _invalid('audio.durationSeconds must be finite');
-    if (value.isInfinite) throw _invalid('audio.durationSeconds must be finite');
+    if (value.isInfinite) {
+      throw _invalid('audio.durationSeconds must be finite');
+    }
     if (value <= 0) throw _invalid('audio.durationSeconds must be positive');
     return Duration(microseconds: (value * 1000000).round());
   }
@@ -762,9 +764,9 @@ final class CourseAudioCatalogLoader {
   Future<CourseAudioCatalog> _doLoad() async {
     try {
       final String manifestRaw = await _bundle.loadString(
-          'assets/audio/fr/manifest.json');
+          'assets/audio/fr/manifest.json', cache: false);
       final String provenanceRaw = await _bundle.loadString(
-          'assets/audio/fr/provenance.json');
+          'assets/audio/fr/provenance.json', cache: false);
 
       dynamic manifestJson;
       dynamic provenanceJson;

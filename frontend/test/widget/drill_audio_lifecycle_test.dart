@@ -276,6 +276,43 @@ void main() {
   });
 
   testWidgets(
+      'answer-save ownership rejects cached Play callbacks before and after advancement',
+      (WidgetTester tester) async {
+    final HeldCueAudio audio = HeldCueAudio();
+    final DrillHarness harness =
+        DrillHarness(GlobalKey<NavigatorState>(), audio);
+    await harness.pump(tester);
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await settle(tester);
+    audio.cues.single.release();
+    await settle(tester);
+    final IconButton play = tester.widget<IconButton>(find.byType(IconButton));
+    final FilledButton answer = tester.widget<FilledButton>(find.ancestor(
+        of: find.text('roue'), matching: find.byType(FilledButton)));
+    final VoidCallback savedPlay = play.onPressed!;
+    final VoidCallback savedAnswer = answer.onPressed!;
+
+    savedAnswer();
+    savedPlay();
+    expect(audio.spoken, <String>['roue'],
+        reason: 'the answer transition must own A before persistence yields');
+    await settle(tester);
+    expect(find.text('Item 2'), findsOneWidget);
+    savedPlay();
+    await settle(tester);
+    expect(audio.spoken, <String>['roue'],
+        reason: 'a stale A callback cannot replay over B');
+    expect(optionEnabled(tester, 'tu'), isFalse,
+        reason: 'B requires its own completed listen');
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await settle(tester);
+    expect(audio.spoken, <String>['roue', 'tu']);
+    audio.cues.last.release();
+    await settle(tester);
+    expect(optionEnabled(tester, 'tu'), isTrue);
+  });
+
+  testWidgets(
       'Stop retires in-flight playback; a really released stale '
       'error of the old request cannot surface over the newer held one',
       (WidgetTester tester) async {

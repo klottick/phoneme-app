@@ -30,7 +30,11 @@ must come from. No gate in the PENDING section below has passing evidence.
   `task-3-fix-2-controller-sandbox-probe.log` (exact command, FATAL
   message, exit -6). The documented workaround is `--no-sandbox`; running a
   browser with the sandbox disabled is NOT authorized in this environment,
-  so **no browser command was run by the worker and none may be reported
+  Flutter's ordinary headless launcher itself injects `--no-sandbox`; an
+  ordinary headless Flutter run is therefore also unauthorized here. Do not
+  run it without separately recorded authorization. A future sandbox-capable
+  gate must verify the actual launch configuration, not just operator-typed
+  flags. So **no browser command was run by the worker and none may be reported
   as evidence**. The gate owner must run the browser gate on a machine
   where the agent can launch with a working sandbox (or an explicit,
   recorded authorization for the alternative).

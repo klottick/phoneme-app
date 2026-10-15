@@ -59,6 +59,23 @@ class _CountingBundle extends AssetBundle {
   }
 }
 
+class _CachingRetryBundle extends CachingAssetBundle {
+  _CachingRetryBundle(this.files);
+
+  final Map<String, String> files;
+  final Set<String> failNext = <String>{};
+  final Map<String, int> reads = <String, int>{};
+
+  @override
+  Future<ByteData> load(String key) async {
+    reads.update(key, (int count) => count + 1, ifAbsent: () => 1);
+    if (failNext.remove(key)) {
+      throw FlutterError('temporary read failure: $key');
+    }
+    return ByteData.sublistView(Uint8List.fromList(utf8.encode(files[key]!)));
+  }
+}
+
 List<int> _bytes(ByteData data) => data.buffer
     .asUint8List(data.offsetInBytes, data.lengthInBytes)
     .toList();
@@ -296,6 +313,36 @@ void main() {
   });
 
   group('loader behaviour', () {
+    test('production string cache does not poison failed or invalid retries',
+        () async {
+      final files = <String, String>{
+        _manifestKey: File('assets/audio/fr/manifest.json').readAsStringSync(),
+        _provenanceKey:
+            File('assets/audio/fr/provenance.json').readAsStringSync(),
+      };
+      for (final String key in <String>[_manifestKey, _provenanceKey]) {
+        final bundle = _CachingRetryBundle(Map<String, String>.of(files));
+        bundle.failNext.add(key);
+        final loader = CourseAudioCatalogLoader(
+            bundle: bundle, references: references);
+        await expectLater(loader.load(), throwsA(isA<CourseAudioException>()));
+        expect((await loader.load()).entries, hasLength(24));
+        expect(bundle.reads[key], 2,
+            reason: '$key transport retry must reach binary load');
+      }
+      for (final String key in <String>[_manifestKey, _provenanceKey]) {
+        final bundle = _CachingRetryBundle(Map<String, String>.of(files));
+        bundle.files[key] = '{ malformed';
+        final loader = CourseAudioCatalogLoader(
+            bundle: bundle, references: references);
+        await expectLater(loader.load(), throwsA(isA<CourseAudioException>()));
+        bundle.files[key] = files[key]!;
+        expect((await loader.load()).entries, hasLength(24));
+        expect(bundle.reads[key], 2,
+            reason: '$key invalid retry must reach binary load');
+      }
+    });
+
     test('failed load is retryable and successful concurrent loads coalesce',
         () async {
       final files = {

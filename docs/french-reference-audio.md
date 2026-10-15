@@ -194,14 +194,15 @@ evidence inspection remains an independent acceptance check.
   `frenchAudioResources` is **not** populated from this manifest, no entry is
   set to `reviewedRecording`, and all 35 production readiness items (including
   the 24 missing-reviewed word recordings) remain as they were.
-- **FR-03 Task 1 (done):** the assets are now registered in `pubspec.yaml`
+- **FR-03 Task 1 (historical state, done):** the assets are registered in `pubspec.yaml`
   (manifest, provenance, `words/`, `licenses/`), and a metadata-only catalogue
   loader plus an in-app credit view read them. That loader validates the
   pending schema and credit associations, coalesces/concurrent-loads, and serves
   the bundled licence legal texts. It performs **no playback**: it does not
   select a source for a player, does not switch any resource to
-  `reviewedRecording`, and does not change default TTS behaviour. Playback
-  (FR-03 Task 4) is still pending. No product or tooling dependencies were
+  `reviewedRecording`, and does not change default TTS behaviour. At Task 1,
+  playback (FR-03 Task 4) was still pending; the subsequent Task 4 alpha
+  wiring and its remaining gates are recorded immediately below. No product or tooling dependencies were
   added by this step.
 - **Done (FR-03 Task 4, delivered 2026-10-14, controller review
   pending):** the default recording player exists for alpha practice — the

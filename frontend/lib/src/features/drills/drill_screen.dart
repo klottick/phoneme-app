@@ -22,6 +22,7 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
   bool _isPlaying = false;
   bool _heard = false;
   bool _ending = false;
+  bool _answerTransition = false;
   CourseAudio? _audio;
 
   /// Request-generation guard: a playback that is superseded (Stop control,
@@ -102,6 +103,7 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
           }
 
           final current = items[_index % items.length];
+          final int itemIndex = _index;
           final options = <String>[current.wordA, current.wordB]
             ..shuffle(Random());
 
@@ -133,7 +135,9 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
                       icon: Icon(_isPlaying ? Icons.stop : Icons.play_arrow),
                       iconSize: 36,
                       tooltip: 'Play audio',
-                      onPressed: _ending ? null : () => _onPlayStop(current),
+                       onPressed: _ending || _answerTransition
+                           ? null
+                           : () => _onPlayStop(current, itemIndex),
                     ),
                   ],
                 ),
@@ -144,9 +148,8 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
                     child: SizedBox(
                       width: double.infinity,
                       child: FilledButton.tonal(
-                        onPressed: !_ending && _heard && !_isPlaying
-                            ? () =>
-                                _handleAnswer(option, current.wordA, current)
+                        onPressed: !_ending && !_answerTransition && _heard && !_isPlaying
+                            ? () => _handleAnswer(option, current.wordA, current, itemIndex)
                             : null,
                         child: Text(option, textAlign: TextAlign.center),
                       ),
@@ -174,8 +177,8 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
   /// it — the request loses ownership and its late settlement is ignored —
   /// so a user stop never marks heard, unlocks the choices, or surfaces as
   /// an audio failure.
-  Future<void> _onPlayStop(dynamic currentPair) async {
-    if (_ending) return;
+  Future<void> _onPlayStop(dynamic currentPair, int itemIndex) async {
+    if (_ending || _answerTransition || _index != itemIndex) return;
     if (_isPlaying) {
       _retireAudio();
       if (mounted) {
@@ -186,11 +189,11 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
       }
       return;
     }
-    await _playAudio(currentPair);
+    await _playAudio(currentPair, itemIndex);
   }
 
-  Future<void> _playAudio(dynamic currentPair) async {
-    if (_ending) return;
+  Future<void> _playAudio(dynamic currentPair, int itemIndex) async {
+    if (_ending || _answerTransition || _index != itemIndex) return;
     final int generation = ++_playGeneration;
     setState(() {
       _isPlaying = true;
@@ -224,18 +227,38 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
     String selected,
     String correct,
     dynamic currentPair,
+    int itemIndex,
   ) async {
-    if (_ending || !_heard || _isPlaying) return;
+    if (_ending || _answerTransition || _index != itemIndex || !_heard || _isPlaying) return;
+    _answerTransition = true;
+    ++_playGeneration;
+    final int answeringIndex = _index;
     final isCorrect = selected == correct;
     if (isCorrect) {
       _correct++;
     }
 
     setState(() => _heard = false);
-    await CourseProgressStore('en-fr').record(
-        (currentPair.phonemeA as String).replaceAll('/', ''),
-        'listening',
-        isCorrect);
+    try {
+      await CourseProgressStore('en-fr').record(
+          (currentPair.phonemeA as String).replaceAll('/', ''),
+          'listening',
+          isCorrect);
+    } catch (_) {
+      if (mounted && answeringIndex == _index) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Could not save your answer. Please try again.')));
+      }
+      return;
+    } finally {
+      _answerTransition = false;
+      if (mounted && answeringIndex == _index) {
+        setState(() {
+          _isPlaying = false;
+          _heard = false;
+        });
+      }
+    }
     ref.invalidate(courseProgressProvider);
 
     if (!mounted) return;
@@ -248,6 +271,9 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
     );
 
     setState(() {
+      ++_playGeneration;
+      _isPlaying = false;
+      _heard = false;
       _index++;
     });
   }
