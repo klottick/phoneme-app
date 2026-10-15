@@ -76,9 +76,12 @@ File names below are exact; shorthand is used only in interface discussions.
 Constructors use named fields listed below, all required unless a default is
 shown. Fields are read-only; collections deep-copy and expose unmodifiable
 views. A `LessonSectionSession` field is copied on construction and access,
-because the existing session is mutable. Every persisted model has `toJson()`
-and strict `fromJson(Map<String, dynamic> json)`; only the codec/pure adapters
-call those methods, not widgets. Constructor misuse throws `ArgumentError`;
+because the existing session is mutable. The pure `LearningDocumentCodec` owns
+complete typed JSON conversion for every persisted model; records do not need
+redundant public `toJson`/`fromJson` entry points. Widgets never encode/decode
+learning records. This execution clarification preserves the spec's single JSON
+boundary and avoids circular codec/model imports; fields/wire formats remain
+unchanged. Constructor misuse throws `ArgumentError`;
 invalid stored payloads throw the typed corruption error. No permissive cast
 may silently turn malformed saved state into empty progress.
 
@@ -517,7 +520,11 @@ consumes it exactly. Constructors from state never consume draws.
 - [ ] **1. Write failing tests** `same frozen command replays identical board stars and score`, `replay rejects unused missing or wrong-bound random draws`, `two equal word tiles are two attempts`, `invalid geometry and automatic clears produce no attempts`, `wrong chain snapshots words before any mutation`, `single heard family gets one answer and existing 100 bonus`, `ambiguous family or unavailable audio gets no answer`, `board removed cue is retired unscored`, `first four moves keep grapheme hint exposure`, `feedback assists only subsequent occurrence`, `pause elapsed and continue preserve existing 60 second rules`. Mutating a submitted chain/board/draw list afterward must not change the prepared command.
   Pin deterministic replay and explicit-tile counts:
   ```dart
-  expect(replayed.slot.snapshot.toJson(), prepared.candidate.toJson());
+  final actual = replayed.slot.snapshot as WordGameCheckpoint;
+  final expected = prepared.candidate as WordGameCheckpoint;
+  expect(actual.board.board, expected.board.board);
+  expect(actual.board.stars, expected.board.stars);
+  expect(actual.clock.score, expected.clock.score);
   expect(tileResult.attempts.length, selectedIndices.length);
   expect(tileResult.attempts.map((a) => a.batchIndex).toSet().length,
     selectedIndices.length);
