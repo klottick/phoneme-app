@@ -326,7 +326,21 @@ class LearningTransitionEngine {
   }) {
     final out =
         Map<ItemContextKey, ItemExposure>.of(slot?.exposures ?? const {});
-    if (action is StartLearningRun) return out..clear();
+    if (action is StartLearningRun) {
+      out.clear();
+      if (definition.kind == LearningActivityKind.legacyLesson) {
+        for (final item in definition.items) {
+          for (final target in item.targetSounds) {
+            out[ItemContextKey(itemId: item.id, targetSound: target)] =
+                ItemExposure(
+              presentations: 0,
+              assistance: const {AssistanceFlag.explanationVisible},
+            );
+          }
+        }
+      }
+      return out;
+    }
     if (action is ObserveAssistance) {
       for (final context in action.items) {
         final old = out[context] ??
@@ -515,9 +529,15 @@ class LearningTransitionEngine {
   void _validateAssistance(
       LearningActivityDefinition definition, ObserveAssistance action) {
     final permitted = switch (definition.kind) {
-      LearningActivityKind.discovery ||
-      LearningActivityKind.legacyLesson =>
-        const {AssistanceFlag.explanationVisible, AssistanceFlag.graphemeHint},
+      LearningActivityKind.discovery => const {
+          AssistanceFlag.explanationVisible,
+          AssistanceFlag.graphemeHint,
+        },
+      LearningActivityKind.legacyLesson => const {
+          AssistanceFlag.explanationVisible,
+          AssistanceFlag.graphemeHint,
+          AssistanceFlag.answerRevealed,
+        },
       _ => const <AssistanceFlag>{},
     };
     if (action.items.isEmpty ||

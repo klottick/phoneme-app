@@ -458,9 +458,51 @@ void main() {
     expect(state.activities[activity]!.cursor.revision, 0);
   });
 
-  test('legacy explanation and opened reference remain assisted', () {
+  test('legacy run starts with explanation assistance for every context', () {
     const legacy = 'lesson:en-fr-vowels';
-    applyTo(legacy, StartLearningRun(options: RunOptions()), 80);
+    final started =
+        applyTo(legacy, StartLearningRun(options: RunOptions()), 80).slot;
+    expect(started.exposures, hasLength(4));
+    for (final exposure in started.exposures.values) {
+      expect(exposure.presentations, 0);
+      expect(exposure.assistance, {AssistanceFlag.explanationVisible});
+    }
+
+    final firstAnswer = applyTo(
+      legacy,
+      ChooseSound(
+        selectedSound: 'i',
+        audioSource: AttemptAudioSource.practiceSpeech,
+      ),
+      81,
+    );
+    expect(firstAnswer.attempts.single.assistance,
+        {AssistanceFlag.explanationVisible});
+    final firstSummary = firstAnswer.summaries.entries.singleWhere((entry) =>
+        entry.key.sound == 'i' &&
+        entry.key.presentation == AttemptPresentation.firstInRun);
+    expect(firstSummary.key.assistance, {AssistanceFlag.explanationVisible});
+
+    final restarted =
+        applyTo(legacy, StartLearningRun(options: RunOptions()), 82).slot;
+    expect(restarted.exposures, hasLength(4));
+    expect(
+      restarted.exposures.values.every((exposure) =>
+          exposure.presentations == 0 &&
+          exposure.assistance.length == 1 &&
+          exposure.assistance.contains(AssistanceFlag.explanationVisible)),
+      isTrue,
+    );
+    expect(
+      state.history.expand((batch) => batch.attempts).first.assistance,
+      {AssistanceFlag.explanationVisible},
+    );
+  });
+
+  test('legacy opened reference assistance persists and summarizes exactly',
+      () {
+    const legacy = 'lesson:en-fr-vowels';
+    applyTo(legacy, StartLearningRun(options: RunOptions()), 90);
     final explain = engine.prepare(
         state: state,
         authGeneration: 0,
@@ -468,18 +510,13 @@ void main() {
         action: ObserveAssistance(items: {
           ItemContextKey(itemId: 'lit', targetSound: 'i'),
         }, flags: {
-          AssistanceFlag.explanationVisible,
-          AssistanceFlag.graphemeHint,
+          AssistanceFlag.answerRevealed,
         }),
-        token: tokenFor(81),
+        token: tokenFor(91),
         submittedAt: fixedTime,
         random: _NoDrawRandom());
     final t =
         engine.evaluate(state: state, command: explain, committedAt: fixedTime);
-    expect(
-        t.slot.exposures.values.single.assistance,
-        containsAll(
-            [AssistanceFlag.explanationVisible, AssistanceFlag.graphemeHint]));
     state = stateAfter(state, t);
     final answer = applyTo(
         legacy,
@@ -487,11 +524,59 @@ void main() {
           selectedSound: 'i',
           audioSource: AttemptAudioSource.practiceSpeech,
         ),
-        82);
+        92);
+    expect(answer.attempts.single.assistance,
+        {AssistanceFlag.explanationVisible, AssistanceFlag.answerRevealed});
+    final summary = answer.summaries.entries.singleWhere((entry) =>
+        entry.key.sound == 'i' &&
+        entry.key.presentation == AttemptPresentation.firstInRun &&
+        entry.key.assistance.contains(AssistanceFlag.answerRevealed));
+    expect(summary.key.assistance,
+        {AssistanceFlag.explanationVisible, AssistanceFlag.answerRevealed});
+
+    applyTo(legacy, const AdvanceLesson(), 93);
+    final next = applyTo(
+      legacy,
+      ChooseSound(
+        selectedSound: 'u',
+        audioSource: AttemptAudioSource.practiceSpeech,
+      ),
+      94,
+    );
     expect(
-        answer.attempts.single.assistance,
-        containsAll(
-            [AssistanceFlag.explanationVisible, AssistanceFlag.graphemeHint]));
+        next.attempts.single.assistance, {AssistanceFlag.explanationVisible});
+    final saved = state.activities[legacy]!;
+    expect(
+      saved.exposures[ItemContextKey(itemId: 'lit', targetSound: 'i')]
+          ?.assistance,
+      {AssistanceFlag.explanationVisible, AssistanceFlag.answerRevealed},
+    );
+  });
+
+  test('legacy rejects discovery-only after-debrief assistance', () {
+    const legacy = 'lesson:en-fr-vowels';
+    applyTo(legacy, StartLearningRun(options: RunOptions()), 100);
+    expect(
+      () => engine.prepare(
+        state: state,
+        authGeneration: 0,
+        activityId: legacy,
+        action: ObserveAssistance(items: {
+          ItemContextKey(itemId: 'lit', targetSound: 'i'),
+        }, flags: {
+          AssistanceFlag.afterDebrief,
+        }),
+        token: tokenFor(101),
+        submittedAt: fixedTime,
+        random: _NoDrawRandom(),
+      ),
+      throwsA(isA<LearningInvalidCommandException>()),
+    );
+  });
+
+  test('discovery run starts without assistance', () {
+    start();
+    expect(state.activities[activity]!.exposures, isEmpty);
   });
 
   test('closing help and pruning detail cannot make repeated item first', () {
