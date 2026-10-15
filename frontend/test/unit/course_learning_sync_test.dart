@@ -1,0 +1,393 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:linguist/src/core/course/course_attempt.dart';
+import 'package:linguist/src/core/course/course_learning_persistence.dart';
+import 'package:linguist/src/core/course/course_learning_command.dart';
+import 'package:linguist/src/core/course/course_learning_registry.dart';
+import 'package:linguist/src/core/course/course_learning_state.dart';
+import 'package:linguist/src/core/course/course_learning_store.dart';
+import 'package:linguist/src/core/course/course_learning_sync.dart';
+import 'package:linguist/src/core/course/course_learning_transition.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+class _RecordingTransport implements LearningCloudTransport {
+  final List<List<SupportedCloudEvent>> batches = [];
+  Object? failure;
+  void Function()? onSend;
+  Completer<void>? entered;
+  Completer<void>? release;
+
+  @override
+  Future<void> send(List<SupportedCloudEvent> events) async {
+    batches.add(List.unmodifiable(events));
+    onSend?.call();
+    if (entered != null && !entered!.isCompleted) entered!.complete();
+    if (release != null) await release!.future;
+    if (failure case final error?) throw error;
+  }
+}
+
+class _MemoryPersistence implements LearningPersistence {
+  final Map<String, String> documents = {};
+  bool failNextWrite = false;
+  bool holdNextWrite = false;
+  Completer<void>? writeEntered;
+  Completer<bool>? writeGate;
+  @override
+  Future<String?> read(String key) async => documents[key];
+  @override
+  Future<void> write(String key, String value) async {
+    documents[key] = value;
+    if (holdNextWrite) {
+      holdNextWrite = false;
+      writeEntered!.complete();
+      if (!await writeGate!.future) throw StateError('write rejected');
+    }
+    if (failNextWrite) {
+      failNextWrite = false;
+      throw StateError('write rejected');
+    }
+  }
+
+  @override
+  Future<void> restore(String key, String? lastCommitted) async {
+    if (lastCommitted == null) {
+      documents.remove(key);
+    } else {
+      documents[key] = lastCommitted;
+    }
+  }
+
+  @override
+  Future<void> reload() async {}
+}
+
+void main() {
+  final owner = LearningOwner.account('sync-user');
+  final scope = LearningScope(courseId: 'en-fr', owner: owner);
+  var generation = 0;
+  var authOwner = owner;
+  var backend = owner;
+  LearningAuthScope currentAuth() =>
+      LearningAuthScope(owner: authOwner, generation: generation, ready: true);
+
+  CourseLearningState stateWith(List<SupportedCloudEvent> pending,
+          {int revision = 0, int commitOrdinal = 0}) =>
+      CourseLearningState(
+          scope: scope,
+          revision: revision,
+          commitOrdinal: commitOrdinal,
+          history: const [],
+          activities: const {},
+          mistakes: const {},
+          summaries: const {},
+          completions: const [],
+          bestScores: const {},
+          pending: pending);
+
+  SupportedCloudEvent event(int i) => SupportedCloudEvent(
+      id: 'event-$i',
+      userId: owner.userId!,
+      courseId: scope.courseId,
+      payload: CloudAnswer(
+          sound: 'u',
+          skill: LearningSkill.listening,
+          correct: true,
+          activity: 'lesson:en-fr-u-y'));
+
+  CourseLearningRepository repository(
+      _MemoryPersistence persistence, LearningCloudTransport transport) {
+    var tokenCounter = 0;
+    return CourseLearningRepository(
+        scope: scope,
+        authGeneration: generation,
+        currentAuth: currentAuth,
+        backendOwner: () => backend,
+        persistence: persistence,
+        transitions: LearningTransitionEngine(LearningRegistry.french()),
+        clock: () => DateTime.utc(2026),
+        newToken: () =>
+            'AAAAAAAAAAAAAAAAAAAA${(++tokenCounter).toRadixString(16).padLeft(2, '0')}',
+        random: Random(1),
+        cloud: transport);
+  }
+
+  test('offline guest learning requires no backend', () async {
+    final guest =
+        LearningScope(courseId: 'en-fr', owner: LearningOwner.guest());
+    final persistence = _MemoryPersistence();
+    final store = CourseLearningRepository(
+        scope: guest,
+        authGeneration: 0,
+        currentAuth: () =>
+            LearningAuthScope(owner: guest.owner, generation: 0, ready: true),
+        backendOwner: LearningOwner.guest,
+        persistence: persistence,
+        transitions: LearningTransitionEngine(LearningRegistry.french()),
+        clock: () => DateTime.utc(2026),
+        newToken: () => 'AAAAAAAAAAAAAAAAAAAAAA',
+        random: Random(1));
+    expect((await store.load()).pending, isEmpty);
+    expect((await store.sync()).status, SupportedSyncStatus.guest);
+  });
+
+  test('201 committed events deliver in batches of at most 100', () async {
+    final persistence = _MemoryPersistence();
+    persistence.documents[scope.storageKey] = const LearningDocumentCodec()
+        .encode(stateWith(List.generate(201, event)));
+    final transport = _RecordingTransport();
+    final store = repository(persistence, transport);
+    final result = await store.sync();
+    expect(transport.batches.map((b) => b.length).toList(), [100, 100, 1]);
+    expect(result.status, SupportedSyncStatus.synced);
+    expect(result.remainingEvents, 0);
+    expect((await store.load()).pending, isEmpty);
+  });
+
+  test('failed send and acknowledgment retain stable pending ids', () async {
+    final persistence = _MemoryPersistence();
+    final pending = [event(1), event(2)];
+    persistence.documents[scope.storageKey] =
+        const LearningDocumentCodec().encode(stateWith(pending));
+    final transport = _RecordingTransport()..failure = StateError('offline');
+    final store = repository(persistence, transport);
+    final failed = await store.sync();
+    expect(failed.status, SupportedSyncStatus.pending);
+    expect(failed.remainingEvents, 2);
+    expect(
+        (await store.load()).pending.map((e) => e.id), ['event-1', 'event-2']);
+    transport.failure = null;
+    final retry = await store.sync();
+    expect(transport.batches.last.map((e) => e.id), ['event-1', 'event-2']);
+    expect(retry.remainingEvents, 0);
+  });
+
+  test('acknowledgment failure rolls back and retries the same event id',
+      () async {
+    final persistence = _MemoryPersistence();
+    final pending = [event(9)];
+    persistence.documents[scope.storageKey] =
+        const LearningDocumentCodec().encode(stateWith(pending));
+    final transport = _RecordingTransport()
+      ..onSend = () => persistence.failNextWrite = true;
+    final store = repository(persistence, transport);
+    final result = await store.sync();
+    expect(result.status, SupportedSyncStatus.pending);
+    expect(result.remainingEvents, 1);
+    expect((await store.load()).pending.single.id, 'event-9');
+    transport.onSend = null;
+    final retry = await store.sync();
+    expect(transport.batches.map((batch) => batch.single.id),
+        ['event-9', 'event-9']);
+    expect(retry.remainingEvents, 0);
+  });
+
+  test('held failed local candidate never reaches transport', () async {
+    final persistence = _MemoryPersistence();
+    final transport = _RecordingTransport();
+    final store = repository(persistence, transport);
+    final initial = await store.load();
+    final started = await store.submit(store.prepare(
+        state: initial,
+        activityId: 'lesson:en-fr-u-y',
+        action: StartLearningRun(options: RunOptions())));
+    final answer = store.prepare(
+        state: started.state,
+        activityId: 'lesson:en-fr-u-y',
+        action: ChooseSound(
+            selectedSound: 'u',
+            audioSource: AttemptAudioSource.pendingRecording));
+    persistence
+      ..holdNextWrite = true
+      ..writeEntered = Completer<void>()
+      ..writeGate = Completer<bool>();
+    final failedWrite = store.submit(answer);
+    await persistence.writeEntered!.future;
+    final syncing = store.sync();
+    persistence.writeGate!.complete(false);
+    await expectLater(failedWrite, throwsA(isA<Exception>()));
+    final result = await syncing;
+    expect(transport.batches, isEmpty);
+    expect(result.remainingEvents, 0);
+  });
+
+  test('same-scope activity committed during send survives acknowledgment',
+      () async {
+    final persistence = _MemoryPersistence();
+    persistence.documents[scope.storageKey] =
+        const LearningDocumentCodec().encode(stateWith([event(1)]));
+    final transport = _RecordingTransport()
+      ..entered = Completer<void>()
+      ..release = Completer<void>();
+    final store = repository(persistence, transport);
+    final syncing = store.sync();
+    await transport.entered!.future;
+    // Simulate a second committed event using the exact same persisted document
+    // image while the transport request is outstanding.
+    const codec = LearningDocumentCodec();
+    final current =
+        codec.decode(persistence.documents[scope.storageKey]!, scope);
+    persistence.documents[scope.storageKey] = codec.encode(stateWith(
+        [...current.pending, event(2)],
+        revision: current.revision + 1));
+    transport.release!.complete();
+    final result = await syncing;
+    expect(result.remainingEvents, 1);
+    expect((await store.load()).pending.map((e) => e.id), ['event-2']);
+  });
+
+  test('sync coalesces same scope but isolates guest and another account',
+      () async {
+    final persistence = _MemoryPersistence();
+    persistence.documents[scope.storageKey] =
+        const LearningDocumentCodec().encode(stateWith([event(10)]));
+    final otherOwner = LearningOwner.account('another-user');
+    final otherScope = LearningScope(courseId: 'en-fr', owner: otherOwner);
+    final otherPersistence = _MemoryPersistence();
+    otherPersistence.documents[otherScope.storageKey] =
+        const LearningDocumentCodec().encode(CourseLearningState(
+            scope: otherScope,
+            revision: 0,
+            commitOrdinal: 0,
+            history: const [],
+            activities: const {},
+            mistakes: const {},
+            summaries: const {},
+            completions: const [],
+            bestScores: const {},
+            pending: [
+          SupportedCloudEvent(
+              id: 'other-event',
+              userId: 'another-user',
+              courseId: 'en-fr',
+              payload: CloudAnswer(
+                  sound: 'u',
+                  skill: LearningSkill.listening,
+                  correct: true,
+                  activity: 'lesson:en-fr-u-y'))
+        ]));
+    final transport = _RecordingTransport()
+      ..entered = Completer<void>()
+      ..release = Completer<void>();
+    final first = repository(persistence, transport);
+    final peer = repository(persistence, transport);
+    final firstSync = first.sync();
+    await transport.entered!.future;
+    final peerSync = peer.sync();
+    final other = CourseLearningRepository(
+        scope: otherScope,
+        authGeneration: 0,
+        currentAuth: () =>
+            LearningAuthScope(owner: otherOwner, generation: 0, ready: true),
+        backendOwner: () => otherOwner,
+        persistence: otherPersistence,
+        transitions: LearningTransitionEngine(LearningRegistry.french()),
+        clock: () => DateTime.utc(2026),
+        newToken: () => 'AAAAAAAAAAAAAAAAAAAAAA',
+        random: Random(2),
+        cloud: transport);
+    final otherSync = other.sync();
+    final guest =
+        LearningScope(courseId: 'en-fr', owner: LearningOwner.guest());
+    final guestStore = CourseLearningRepository(
+        scope: guest,
+        authGeneration: 0,
+        currentAuth: () =>
+            LearningAuthScope(owner: guest.owner, generation: 0, ready: true),
+        backendOwner: LearningOwner.guest,
+        persistence: _MemoryPersistence(),
+        transitions: LearningTransitionEngine(LearningRegistry.french()),
+        clock: () => DateTime.utc(2026),
+        newToken: () => 'AAAAAAAAAAAAAAAAAAAAAA',
+        random: Random(3),
+        cloud: transport);
+    expect((await guestStore.sync()).status, SupportedSyncStatus.guest);
+    await Future<void>.delayed(Duration.zero);
+    expect(transport.batches, hasLength(2));
+    expect(transport.batches.map((batch) => batch.single.id),
+        containsAll(['event-10', 'other-event']));
+    transport.release!.complete();
+    await Future.wait([firstSync, peerSync, otherSync]);
+  });
+
+  test('auth change prevents later batches and acknowledgment', () async {
+    final persistence = _MemoryPersistence();
+    persistence.documents[scope.storageKey] = const LearningDocumentCodec()
+        .encode(stateWith(List.generate(201, event)));
+    final transport = _RecordingTransport()
+      ..entered = Completer<void>()
+      ..release = Completer<void>();
+    final store = repository(persistence, transport);
+    final syncing = store.sync();
+    await transport.entered!.future;
+    authOwner = LearningOwner.account('other');
+    generation++;
+    backend = authOwner;
+    transport.release!.complete();
+    final result = await syncing;
+    expect(transport.batches, hasLength(1));
+    expect(result.status, SupportedSyncStatus.ownerChanged);
+    expect(result.remainingEvents, 201);
+    expect(
+        (const LearningDocumentCodec()
+                .decode(persistence.documents[scope.storageKey]!, scope))
+            .pending,
+        hasLength(201));
+  });
+
+  test('A to B to A during send cannot revive the captured generation',
+      () async {
+    generation = 20;
+    authOwner = owner;
+    backend = owner;
+    final persistence = _MemoryPersistence();
+    persistence.documents[scope.storageKey] =
+        const LearningDocumentCodec().encode(stateWith([event(3)]));
+    final transport = _RecordingTransport()
+      ..entered = Completer<void>()
+      ..release = Completer<void>();
+    final store = repository(persistence, transport);
+    final syncing = store.sync();
+    await transport.entered!.future;
+    generation++;
+    authOwner = LearningOwner.account('other');
+    generation++;
+    authOwner = owner;
+    backend = owner;
+    transport.release!.complete();
+    final result = await syncing;
+    expect(result.status, SupportedSyncStatus.ownerChanged);
+    expect(result.remainingEvents, 1);
+    expect((await store.load()).pending.single.id, 'event-3');
+  });
+
+  test('legacy RPC adapter sends exact event wire payload', () async {
+    final received = <Map<String, dynamic>>[];
+    final client =
+        SupabaseClient('https://course.example.invalid', 'public-test-key',
+            httpClient: MockClient((request) async {
+      expect(request.url.path, '/rest/v1/rpc/record_course_events');
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      expect(body.keys, ['events']);
+      received.addAll((body['events'] as List).cast<Map<String, dynamic>>());
+      return http.Response('', 204, request: request);
+    }));
+    addTearDown(client.dispose);
+    await SupabaseLearningCloudTransport(client).send([event(7)]);
+    expect(received.single, {
+      'id': 'event-7',
+      'user_id': 'sync-user',
+      'course_id': 'en-fr',
+      'kind': 'answer',
+      'sound': 'u',
+      'skill': 'listening',
+      'correct': true,
+      'activity': 'lesson:en-fr-u-y',
+    });
+  });
+}
