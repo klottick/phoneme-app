@@ -1594,6 +1594,7 @@ void main() {
       router.go('/course-lesson/does-not-exist');
       await tester.pumpAndSettle();
       expect(find.byType(CourseLessonScreen), findsOneWidget);
+      expect(find.text('This lesson is unavailable.'), findsOneWidget);
 
       router.go('/course-lesson/en-fr-u-y?review=true');
       await tester.pumpAndSettle();

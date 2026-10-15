@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:convert';
 
@@ -25,15 +26,28 @@ class _FailOncePersistence implements LearningPersistence {
   _FailOncePersistence(this.delegate);
   final LearningPersistence delegate;
   bool failNextWrite = false;
+  Completer<void>? writeEntered;
+  Completer<bool>? writeGate;
+
+  void holdAndRejectNextWrite() {
+    failNextWrite = true;
+    writeEntered = Completer<void>();
+    writeGate = Completer<bool>();
+  }
+
   @override
   Future<String?> read(String key) => delegate.read(key);
   @override
-  Future<void> write(String key, String value) {
+  Future<void> write(String key, String value) async {
+    await delegate.write(key, value);
     if (failNextWrite) {
       failNextWrite = false;
-      throw StateError('injected preferences save failure');
+      writeEntered!.complete();
+      if (!await writeGate!.future) {
+        throw StateError(
+            'injected preferences save failure after cache update');
+      }
     }
-    return delegate.write(key, value);
   }
 
   @override
@@ -125,10 +139,29 @@ void main() {
         state: activeCommit.state,
         activityId: 'arcade:word',
         action: LinkWordTiles(indices: selected, elapsedSeconds: 1));
-    persistence.failNextWrite = true;
-    await expectLater(
-        repository.submit(command), throwsA(isA<LearningSaveException>()));
-    final unchanged = await repository.load();
+    persistence.holdAndRejectNextWrite();
+    final pending = repository.submit(command);
+    await persistence.writeEntered!.future;
+    final prefs = await SharedPreferences.getInstance();
+    final optimistic =
+        jsonDecode(prefs.getString('course.learning.v2.ZW4tZnI.g')!) as Map;
+    expect(optimistic['history'], hasLength(1),
+        reason:
+            'the platform cache has optimistically accepted the full batch');
+    expect((optimistic['history'] as List).single['attempts'],
+        hasLength(selected.length),
+        reason: 'all selected tiles are one atomic persisted evidence batch');
+    var readFinished = false;
+    final read = repository.load().then((state) {
+      readFinished = true;
+      return state;
+    });
+    await Future<void>.delayed(Duration.zero);
+    expect(readFinished, isFalse,
+        reason: 'a concurrent reader cannot see pre-acknowledgment history');
+    persistence.writeGate!.complete(false);
+    await expectLater(pending, throwsA(isA<LearningSaveException>()));
+    final unchanged = await read;
     expect(unchanged.history, isEmpty);
     expect(
         (unchanged.activities['arcade:word']!.snapshot as WordGameCheckpoint)
@@ -140,7 +173,6 @@ void main() {
     expect(committed.history.single.attempts, hasLength(selected.length));
     expect(committed.activities['arcade:word']!.latestReceipt.token,
         command.token);
-    final prefs = await SharedPreferences.getInstance();
     final persisted =
         jsonDecode(prefs.getString('course.learning.v2.ZW4tZnI.g')!) as Map;
     expect(persisted['history'], hasLength(1));

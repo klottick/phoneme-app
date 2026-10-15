@@ -10,7 +10,6 @@ import 'package:linguist/src/features/arcade/sound_match_engine.dart';
 import 'package:linguist/src/features/arcade/word_match_engine.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
 import 'package:linguist/src/core/course/course_attempt.dart';
-import 'package:linguist/src/core/course/course_progress.dart';
 import 'package:linguist/src/core/course/course_learning_checkpoint.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/features/course/course_lesson_screen.dart';
@@ -290,8 +289,12 @@ void main() {
 
   testWidgets('lesson completion records real answers and advances the path',
       (tester) async {
+    final store = CourseLearningWidgetStore();
     await tester.pumpWidget(ProviderScope(
-        overrides: [courseAudioProvider.overrideWithValue(TestFrenchAudio())],
+        overrides: [
+          courseAudioProvider.overrideWithValue(TestFrenchAudio()),
+          courseLearningStoreProvider.overrideWithValue(store),
+        ],
         child: const MaterialApp(
             home: CourseLessonScreen(lessonId: 'en-fr-vowels'))));
     await tester.pumpAndSettle();
@@ -312,10 +315,19 @@ void main() {
       }
       await tester.pumpAndSettle();
     }
-    final data = await CourseProgressStore('en-fr').load();
-    expect(data['lessons'], contains('en-fr-vowels'), reason: data.toString());
-    expect(data['evidence']['listening:i']['correct'], 2);
-    expect(data['evidence']['listening:o']['correct'], 2);
+    final data = store.committedState;
+    expect(data.completions.map((completion) => completion.lessonId),
+        contains('en-fr-vowels'));
+    expect(
+        data.summaries.entries
+            .where((entry) => entry.key.sound == 'i')
+            .fold<int>(0, (sum, entry) => sum + entry.value.correct),
+        2);
+    expect(
+        data.summaries.entries
+            .where((entry) => entry.key.sound == 'o')
+            .fold<int>(0, (sum, entry) => sum + entry.value.correct),
+        2);
   });
 
   testWidgets('backgrounding pauses the game until explicitly resumed',
