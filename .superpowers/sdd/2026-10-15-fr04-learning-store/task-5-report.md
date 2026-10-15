@@ -54,20 +54,21 @@ download paths changed. The existing Task 4 projector remains authoritative.
     `course_learning_providers.dart`, and undefined declared providers and
     `LearningAuthTracker`. Test-harness typos found during this first compile
     were corrected before implementation continued.
+- RED command exit: 1 (expected compile failure from missing implementation APIs).
 - Focused GREEN + Task 4 safety suite (exit 0; 40 tests):
   ```sh
-  flutter test test/unit/course_learning_sync_test.dart \
+  PATH=/home/klottick/develop/flutter/bin:$PATH flutter test test/unit/course_learning_sync_test.dart \
     test/unit/course_learning_providers_test.dart \
     test/unit/course_learning_store_test.dart \
     test/unit/course_learning_commit_isolation_test.dart \
     test/unit/course_learning_retention_test.dart
   ```
-- Full suite (single requested pass, exit 0): `flutter test` — **1003 tests
+- Full suite (single requested pass, exit 0): `PATH=/home/klottick/develop/flutter/bin:$PATH flutter test` — **1003 tests
   passed**.
-- Analyzer (exit 0): `flutter analyze` — `No issues found!`.
+- Analyzer (exit 0): `PATH=/home/klottick/develop/flutter/bin:$PATH flutter analyze` — `No issues found!`.
 - Formatting: `dart format` on the five owned Dart files — no outstanding
   formatting changes.
-- Diff whitespace check: `git diff --check` — exit 0.
+- Diff whitespace check: `git diff --check` and `git diff HEAD^ HEAD --check` — exit 0.
 - Production provider import check: `grep -R course_learning_providers
   frontend/lib --include='*.dart'` — no matches.
 - No live Supabase credentials or network were used. The RPC was exercised
@@ -97,5 +98,8 @@ but both calls returned `Monthly quota exceeded`. Fallback references consulted:
   earlier generation; acknowledgment preserves newer pending data.
 - No blocking implementation concerns identified. Runtime screen migration,
   real service credentials/integration, and merge remain outside this task.
-- Commit: pending.
-- PR against GitHub `main`: pending publication; do not merge from this worker.
+- Implementation commit: `4630190db8264bd4783339463566f994d0733840`
+  (`feat: wire owner scoped FR04 backup and providers`).
+- PR against GitHub `main`: <https://github.com/klottick/phoneme-app/pull/36>
+  (open; no GitHub checks or reviews reported at initial publication). Do not
+  merge from this worker.
