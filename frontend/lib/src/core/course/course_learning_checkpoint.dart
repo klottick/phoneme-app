@@ -33,13 +33,17 @@ sealed class ActivitySnapshot {
 
 class DiscoveryCheckpoint extends ActivitySnapshot {
   DiscoveryCheckpoint({required LessonSectionSession session})
-      : session = LessonSectionSession.fromJson(
-          session.toJson(),
-          itemIds: session.itemIds,
-          contentRevision: session.contentRevision,
-        );
-  final LessonSectionSession session;
+      : _session = _copySession(session);
+
+  final LessonSectionSession _session;
+
+  /// Returns a detached session so callers cannot mutate this snapshot.
+  LessonSectionSession get session => _copySession(_session);
 }
+
+LessonSectionSession _copySession(LessonSectionSession session) =>
+    LessonSectionSession.fromJson(session.toJson(),
+        itemIds: session.itemIds, contentRevision: session.contentRevision);
 
 class LegacyLessonCheckpoint extends ActivitySnapshot {
   const LegacyLessonCheckpoint(

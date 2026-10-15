@@ -200,6 +200,12 @@ void main() {
     session.submit(false);
     expect(checkpoint.session.attemptCount, 0);
     expect(checkpoint.session.latestAnswers, isEmpty);
+
+    final exposed = checkpoint.session;
+    exposed.submit(true);
+    expect(checkpoint.session.attemptCount, 0);
+    expect(checkpoint.session.latestAnswers, isEmpty);
+    expect(identical(checkpoint.session, checkpoint.session), isFalse);
   });
 
   test('state does not claim equality from matching collection lengths', () {

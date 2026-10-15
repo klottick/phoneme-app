@@ -20,6 +20,23 @@ class LearningDocumentCodec {
       final root = _obj(jsonDecode(raw), 'document');
       final version = _int(root['schemaVersion'], 'schemaVersion');
       if (version != 2) throw const LearningUnsupportedVersionException();
+      _keys(
+          root,
+          {
+            'schemaVersion',
+            'courseId',
+            'owner',
+            'revision',
+            'commitOrdinal',
+            'history',
+            'activities',
+            'mistakes',
+            'summaries',
+            'completions',
+            'bestScores',
+            'pending'
+          },
+          'document');
       final owner = _owner(_obj(root['owner'], 'owner'));
       final scope = LearningScope(
           courseId: _str(root['courseId'], 'courseId'), owner: owner);
@@ -95,12 +112,20 @@ class LearningDocumentCodec {
 
   Map<String, Object?> _ownerJson(LearningOwner o) =>
       o.isGuest ? {'kind': 'guest'} : {'kind': 'account', 'userId': o.userId};
-  LearningOwner _owner(Map<String, Object?> m) =>
-      switch (_str(m['kind'], 'owner.kind')) {
-        'guest' => LearningOwner.guest(),
-        'account' => LearningOwner.account(_str(m['userId'], 'owner.userId')),
-        _ => throw const FormatException('unknown owner kind'),
-      };
+  LearningOwner _owner(Map<String, Object?> m) {
+    final kind = _str(m['kind'], 'owner.kind');
+    switch (kind) {
+      case 'guest':
+        _keys(m, {'kind'}, 'owner');
+        return LearningOwner.guest();
+      case 'account':
+        _keys(m, {'kind', 'userId'}, 'owner');
+        return LearningOwner.account(_str(m['userId'], 'owner.userId'));
+      default:
+        throw const FormatException('unknown owner kind');
+    }
+  }
+
   Map<String, Object?> _batch(AttemptBatch b) => {
         'activityId': b.activityId,
         'generation': b.generation,
@@ -109,16 +134,29 @@ class LearningDocumentCodec {
         'canonicalCommand': b.canonicalCommand,
         'attempts': b.attempts.map(_attempt).toList()
       };
-  AttemptBatch _readBatch(Map<String, Object?> m, LearningScope s) =>
-      AttemptBatch(
-          activityId: _str(m['activityId'], 'activityId'),
-          generation: _int(m['generation'], 'generation'),
-          sequence: _int(m['sequence'], 'sequence'),
-          token: _str(m['token'], 'token'),
-          canonicalCommand: _str(m['canonicalCommand'], 'canonicalCommand'),
-          attempts: _arr(m['attempts'], 'attempts')
-              .map((x) => _readAttempt(_obj(x, 'attempt'), s))
-              .toList());
+  AttemptBatch _readBatch(Map<String, Object?> m, LearningScope s) {
+    _keys(
+        m,
+        {
+          'activityId',
+          'generation',
+          'sequence',
+          'token',
+          'canonicalCommand',
+          'attempts'
+        },
+        'batch');
+    return AttemptBatch(
+        activityId: _str(m['activityId'], 'activityId'),
+        generation: _int(m['generation'], 'generation'),
+        sequence: _int(m['sequence'], 'sequence'),
+        token: _str(m['token'], 'token'),
+        canonicalCommand: _str(m['canonicalCommand'], 'canonicalCommand'),
+        attempts: _arr(m['attempts'], 'attempts')
+            .map((x) => _readAttempt(_obj(x, 'attempt'), s))
+            .toList());
+  }
+
   Map<String, Object?> _attempt(CourseAttempt a) => {
         'submissionId': a.submissionId,
         'activityId': a.activityId,
@@ -142,8 +180,63 @@ class LearningDocumentCodec {
         'correct': a.correct
       };
   CourseAttempt _readAttempt(Map<String, Object?> m, LearningScope s) {
+    _keys(
+        m,
+        {
+          'submissionId',
+          'activityId',
+          'runGeneration',
+          'commandSequence',
+          'batchIndex',
+          'itemId',
+          'itemOccurrence',
+          'contentRevision',
+          'commitOrdinal',
+          'answeredAt',
+          'committedAt',
+          'skill',
+          'targetSounds',
+          'answer',
+          'origin',
+          'presentation',
+          'assistance',
+          'contentState',
+          'audioSource',
+          'correct'
+        },
+        'attempt');
     final a = _obj(m['answer'], 'answer');
     final kind = _str(a['answerKind'], 'answerKind');
+    final answerFields = switch (kind) {
+      'soundChoice' => {
+          'answerKind',
+          'selectedSound',
+          'choices',
+          'expectedSound'
+        },
+      'drillChoice' => {
+          'answerKind',
+          'selectedWord',
+          'pairId',
+          'choices',
+          'expectedWord'
+        },
+      'soundCue' => {
+          'answerKind',
+          'selectedFamily',
+          'wordId',
+          'expectedFamily'
+        },
+      'wordTile' => {
+          'answerKind',
+          'wordId',
+          'tileIndex',
+          'targetSound',
+          'expectedMembership'
+        },
+      _ => throw const FormatException('unknown answer kind')
+    };
+    _keys(a, answerFields, 'answer');
     final ans = switch (kind) {
       'soundChoice' => SoundChoiceAnswer(
           selectedSound: _str(a['selectedSound'], 'selectedSound'),
@@ -231,6 +324,7 @@ class LearningDocumentCodec {
       };
   SlotCursor _readCursor(Object? v) {
     final m = _obj(v, 'cursor');
+    _keys(m, {'generation', 'sequence', 'revision'}, 'cursor');
     return SlotCursor(
         generation: _int(m['generation'], 'generation'),
         sequence: _int(m['sequence'], 'sequence'),
@@ -264,11 +358,26 @@ class LearningDocumentCodec {
     final out = <String, ActivitySlot>{};
     for (final x in _arr(v, 'activities')) {
       final m = _obj(x, 'activity');
+      _keys(
+          m,
+          {
+            'activityId',
+            'kind',
+            'contentRevision',
+            'cursor',
+            'options',
+            'snapshot',
+            'exposures',
+            'latestReceipt'
+          },
+          'activity');
       final id = _str(m['activityId'], 'activityId');
       final r = _obj(m['latestReceipt'], 'latestReceipt');
       final exp = <ItemContextKey, ItemExposure>{};
       for (final q in _arr(m['exposures'], 'exposures')) {
         final e = _obj(q, 'exposure');
+        _keys(e, {'itemId', 'targetSound', 'presentations', 'assistance'},
+            'exposure');
         final k = ItemContextKey(
             itemId: _str(e['itemId'], 'itemId'),
             targetSound: _str(e['targetSound'], 'targetSound'));
@@ -284,6 +393,13 @@ class LearningDocumentCodec {
       if (out.containsKey(id)) {
         throw const FormatException('duplicate activity');
       }
+      final receipt = r;
+      _keys(
+          receipt,
+          {'token', 'canonicalCommand', 'before', 'after', 'commitOrdinal'},
+          'latestReceipt');
+      final options = _obj(m['options'], 'options');
+      _keys(options, {'completionThresholdPercent'}, 'options');
       out[id] = ActivitySlot(
           activityId: id,
           kind: _enum(LearningActivityKind.values, m['kind'], 'kind'),
@@ -348,7 +464,29 @@ class LearningDocumentCodec {
   ActivitySnapshot _readSnapshot(Map<String, Object?> m) {
     switch (_str(m['kind'], 'snapshot.kind')) {
       case 'discovery':
+        _keys(m, {'kind', 'session'}, 'discovery snapshot');
         final session = _obj(m['session'], 'session');
+        _keys(
+            session,
+            {
+              'version',
+              'sessionId',
+              'contentRevision',
+              'itemIds',
+              'queue',
+              'position',
+              'round',
+              'attemptCount',
+              'phase',
+              'submittedThisRound',
+              'lastCorrect',
+              'answered',
+              'latestAnswers',
+              'policy'
+            },
+            'session');
+        final policy = _obj(session['policy'], 'session.policy');
+        _keys(policy, {'completionThresholdPercent'}, 'session.policy');
         final ids = _strs(session['itemIds'], 'itemIds');
         return DiscoveryCheckpoint(
             session: LessonSectionSession.fromJson(session,
@@ -356,6 +494,8 @@ class LearningDocumentCodec {
                 contentRevision:
                     _int(session['contentRevision'], 'contentRevision')));
       case 'legacyLesson':
+        _keys(m, {'kind', 'wordIndex', 'selectedSound', 'finished'},
+            'legacyLesson snapshot');
         return LegacyLessonCheckpoint(
             wordIndex: _int(m['wordIndex'], 'wordIndex'),
             selectedSound: m['selectedSound'] == null
@@ -363,20 +503,27 @@ class LearningDocumentCodec {
                 : _str(m['selectedSound'], 'selectedSound'),
             finished: _bool(m['finished'], 'finished'));
       case 'drill':
+        _keys(m, {'kind', 'pairIds', 'index', 'correct', 'ended'},
+            'drill snapshot');
         return DrillCheckpoint(
             pairIds: _strs(m['pairIds'], 'pairIds'),
             index: _int(m['index'], 'index'),
             correct: _int(m['correct'], 'correct'),
             ended: _bool(m['ended'], 'ended'));
       case 'soundGame':
+        _keys(m, {'kind', 'board', 'clock'}, 'soundGame snapshot');
         final b = _obj(m['board'], 'board');
+        _keys(b, {'board', 'stars'}, 'sound board');
         return SoundGameCheckpoint(
             board: SoundBoardState(
                 board: _strs(b['board'], 'board'),
                 stars: _intSet(b['stars'], 'stars')),
             clock: _readClock(_obj(m['clock'], 'clock')));
       case 'wordGame':
+        _keys(m, {'kind', 'board', 'clock'}, 'wordGame snapshot');
         final b = _obj(m['board'], 'board');
+        _keys(b, {'board', 'target', 'moves', 'combo', 'stars', 'obstacles'},
+            'word board');
         return WordGameCheckpoint(
             board: WordBoardState(
                 board: _strs(b['board'], 'board'),
@@ -391,11 +538,14 @@ class LearningDocumentCodec {
     }
   }
 
-  ArcadeClockState _readClock(Map<String, Object?> m) => ArcadeClockState(
-      remaining: _int(m['remaining'], 'remaining'),
-      round: _int(m['round'], 'round'),
-      score: _int(m['score'], 'score'),
-      paused: _bool(m['paused'], 'paused'));
+  ArcadeClockState _readClock(Map<String, Object?> m) {
+    _keys(m, {'remaining', 'round', 'score', 'paused'}, 'clock');
+    return ArcadeClockState(
+        remaining: _int(m['remaining'], 'remaining'),
+        round: _int(m['round'], 'round'),
+        score: _int(m['score'], 'score'),
+        paused: _bool(m['paused'], 'paused'));
+  }
 
   Map<String, Object?> _mistake(LearningMistake x) => {
         'key': {
@@ -416,7 +566,23 @@ class LearningDocumentCodec {
     final out = <MistakeKey, LearningMistake>{};
     for (final x in _arr(v, 'mistakes')) {
       final m = _obj(x, 'mistake');
+      _keys(
+          m,
+          {
+            'key',
+            'firstWrongId',
+            'firstWrongAt',
+            'latestWrongId',
+            'latestWrongAt',
+            'failureCount',
+            'lastRunGeneration'
+          },
+          'mistake');
       final k = _obj(m['key'], 'key');
+      _keys(
+          k,
+          {'activityId', 'itemId', 'contentRevision', 'skill', 'targetSound'},
+          'mistake.key');
       final key = MistakeKey(
           activityId: _str(k['activityId'], 'activityId'),
           itemId: _str(k['itemId'], 'itemId'),
@@ -451,7 +617,10 @@ class LearningDocumentCodec {
     final out = <SummaryKey, SkillCount>{};
     for (final x in _arr(v, 'summaries')) {
       final m = _obj(x, 'summary');
+      _keys(m, {'key', 'count'}, 'summary');
       final k = _obj(m['key'], 'key');
+      _keys(k, {'sound', 'skill', 'origin', 'presentation', 'assistance'},
+          'summary.key');
       final key = SummaryKey(
           sound: _str(k['sound'], 'sound'),
           skill: _enum(LearningSkill.values, k['skill'], 'skill'),
@@ -465,6 +634,7 @@ class LearningDocumentCodec {
         throw const FormatException('duplicate summary');
       }
       final n = _obj(m['count'], 'count');
+      _keys(n, {'total', 'correct'}, 'summary.count');
       out[key] = SkillCount(
           total: _int(n['total'], 'total'),
           correct: _int(n['correct'], 'correct'));
@@ -480,17 +650,30 @@ class LearningDocumentCodec {
         'thresholdPercent': x.thresholdPercent,
         'committedAt': _dateJson(x.committedAt)
       };
-  LearningCompletion _readCompletion(Map<String, Object?> m) =>
-      LearningCompletion(
-          lessonId: _str(m['lessonId'], 'lessonId'),
-          contentRevision: _int(m['contentRevision'], 'contentRevision'),
-          policyKind:
-              _enum(CompletionPolicyKind.values, m['policyKind'], 'policyKind'),
-          policyRevision: _int(m['policyRevision'], 'policyRevision'),
-          thresholdPercent: m['thresholdPercent'] == null
-              ? null
-              : _int(m['thresholdPercent'], 'thresholdPercent'),
-          committedAt: _date(m['committedAt'], 'committedAt'));
+  LearningCompletion _readCompletion(Map<String, Object?> m) {
+    _keys(
+        m,
+        {
+          'lessonId',
+          'contentRevision',
+          'policyKind',
+          'policyRevision',
+          'thresholdPercent',
+          'committedAt'
+        },
+        'completion');
+    return LearningCompletion(
+        lessonId: _str(m['lessonId'], 'lessonId'),
+        contentRevision: _int(m['contentRevision'], 'contentRevision'),
+        policyKind:
+            _enum(CompletionPolicyKind.values, m['policyKind'], 'policyKind'),
+        policyRevision: _int(m['policyRevision'], 'policyRevision'),
+        thresholdPercent: m['thresholdPercent'] == null
+            ? null
+            : _int(m['thresholdPercent'], 'thresholdPercent'),
+        committedAt: _date(m['committedAt'], 'committedAt'));
+  }
+
   Map<String, Object?> _event(SupportedCloudEvent e) => {
         'id': e.id,
         'userId': e.userId,
@@ -512,8 +695,19 @@ class LearningDocumentCodec {
         }
       };
   SupportedCloudEvent _readEvent(Map<String, Object?> m) {
+    _keys(m, {'id', 'userId', 'courseId', 'payload'}, 'event');
     final p = _obj(m['payload'], 'payload');
-    final payload = switch (_str(p['kind'], 'payload.kind')) {
+    final payloadKind = _str(p['kind'], 'payload.kind');
+    _keys(
+        p,
+        switch (payloadKind) {
+          'answer' => {'kind', 'sound', 'skill', 'correct', 'activity'},
+          'lesson' => {'kind', 'lessonId'},
+          'score' => {'kind', 'game', 'score'},
+          _ => throw const FormatException('unknown cloud payload kind')
+        },
+        'payload');
+    final payload = switch (payloadKind) {
       'answer' => CloudAnswer(
           sound: _str(p['sound'], 'sound'),
           skill: _enum(LearningSkill.values, p['skill'], 'skill'),
@@ -636,6 +830,16 @@ Map<String, Object?> _obj(Object? v, String n) =>
     v is Map && v.keys.every((k) => k is String)
         ? Map<String, Object?>.from(v)
         : throw FormatException('$n must be an object');
+void _keys(Map<String, Object?> value, Set<String> expected, String name) {
+  final actual = value.keys.toSet();
+  if (actual.length != expected.length || !actual.containsAll(expected)) {
+    final unknown = actual.difference(expected);
+    final missing = expected.difference(actual);
+    throw FormatException(
+        '$name has an invalid field set (unknown: $unknown, missing: $missing)');
+  }
+}
+
 String _str(Object? v, String n) => v is String && v.trim().isNotEmpty
     ? v
     : throw FormatException('$n must be a nonblank string');

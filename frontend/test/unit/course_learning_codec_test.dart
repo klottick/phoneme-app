@@ -339,6 +339,118 @@ void main() {
     unknownPayload['pending'][0]['payload']['kind'] = 'speaking';
     _expectCorrupt(unknownPayload);
   });
+  test('rejects unknown fields at typed persisted-object boundaries', () {
+    final valid = _copyJson(codec.encode(_validationState()));
+    final paths = <List<Object>>[
+      [],
+      ['owner'],
+      ['history', 0],
+      ['history', 0, 'attempts', 0],
+      ['history', 0, 'attempts', 0, 'answer'],
+      ['activities', 0],
+      ['activities', 0, 'cursor'],
+      ['activities', 0, 'options'],
+      ['activities', 0, 'snapshot'],
+      ['activities', 0, 'snapshot', 'session'],
+      ['activities', 0, 'snapshot', 'session', 'policy'],
+      ['activities', 0, 'latestReceipt'],
+      ['activities', 0, 'latestReceipt', 'before'],
+      ['activities', 0, 'exposures', 0],
+      ['mistakes', 0],
+      ['mistakes', 0, 'key'],
+      ['summaries', 0],
+      ['summaries', 0, 'key'],
+      ['summaries', 0, 'count'],
+      ['completions', 0],
+      ['pending', 0],
+      ['pending', 0, 'payload'],
+    ];
+    for (final path in paths) {
+      final copy = jsonDecode(jsonEncode(valid)) as Map<String, dynamic>;
+      _injectUnknownField(copy, path);
+      expect(() => codec.decode(jsonEncode(copy), accountAScope),
+          throwsA(isA<LearningCorruptException>()),
+          reason: 'unknown field at ${path.join('/')}');
+    }
+
+    final answerVariants = <AttemptAnswer>[
+      SoundChoiceAnswer(
+          selectedSound: 'sh', choices: const ['s', 'sh'], expectedSound: 's'),
+      DrillChoiceAnswer(
+          selectedWord: 'chat',
+          pairId: 'pair',
+          choices: const ['chat'],
+          expectedWord: 'chat'),
+      SoundCueAnswer(selectedFamily: 'sh', wordId: 'chat', expectedFamily: 's'),
+      WordTileAnswer(
+          wordId: 'chat',
+          tileIndex: 2,
+          targetSound: 'sh',
+          expectedMembership: true),
+    ];
+    for (final answer in answerVariants) {
+      final copy = _copyJson(codec
+          .encode(_stateWithAttempts([_attempt(answer: answer, index: 0)])));
+      _injectUnknownField(copy, ['history', 0, 'attempts', 0, 'answer']);
+      _expectCorrupt(copy, scope: guestScope);
+    }
+
+    final snapshots = <ActivitySnapshot>[
+      DiscoveryCheckpoint(
+          session:
+              LessonSectionSession(itemIds: const ['i'], sessionId: 'strict')),
+      const LegacyLessonCheckpoint(wordIndex: 0, finished: false),
+      DrillCheckpoint(pairIds: const ['p'], index: 0, correct: 0, ended: false),
+      SoundGameCheckpoint(
+          board: SoundBoardState(board: List.filled(36, 's'), stars: const {}),
+          clock: ArcadeClockState(
+              remaining: 60, round: 1, score: 0, paused: true)),
+      WordGameCheckpoint(
+          board: WordBoardState(
+              board: List.filled(16, 'w'),
+              target: 's',
+              moves: 0,
+              combo: 0,
+              stars: const {},
+              obstacles: const {}),
+          clock: ArcadeClockState(
+              remaining: 60, round: 1, score: 0, paused: true)),
+    ];
+    for (final snapshot in snapshots) {
+      final copy = _copyJson(codec.encode(_stateWithSnapshot(snapshot)));
+      _injectUnknownField(copy, ['activities', 0, 'snapshot']);
+      _expectCorrupt(copy, scope: guestScope);
+    }
+    for (final snapshot in [snapshots[3], snapshots[4]]) {
+      for (final nestedPath in [
+        ['activities', 0, 'snapshot', 'board'],
+        ['activities', 0, 'snapshot', 'clock'],
+      ]) {
+        final copy =
+            _copyJson(codec.encode(_stateWithSnapshot(snapshot)));
+        _injectUnknownField(copy, nestedPath);
+        _expectCorrupt(copy, scope: guestScope);
+      }
+    }
+
+    for (final kind in ['lesson', 'score']) {
+      final copy = _copyJson(codec.encode(_validationState()));
+      copy['pending'][0]['payload'] = kind == 'lesson'
+          ? {'kind': 'lesson', 'lessonId': 'lesson:sample'}
+          : {'kind': 'score', 'game': 'sound', 'score': 1};
+      _injectUnknownField(copy, ['pending', 0, 'payload']);
+      _expectCorrupt(copy);
+    }
+
+    final dynamicScore = _copyJson(codec.encode(_validationState()));
+    dynamicScore['bestScores']['game:season-7'] = 42;
+    expect(codec.decode(jsonEncode(dynamicScore), accountAScope).bestScores,
+        containsPair('game:season-7', 42));
+    final invalidSessionDataKey = _copyJson(codec.encode(_validationState()));
+    invalidSessionDataKey['activities'][0]['snapshot']['session']
+        ['latestAnswers']['not-an-item'] = true;
+    _expectCorrupt(invalidSessionDataKey);
+  });
   test('rejects mismatched nested scope receipts counters and batch identity',
       () {
     final raw = codec.encode(_validationState());
@@ -448,6 +560,26 @@ void main() {
     expect(codec.canonicalCommand(one), codec.canonicalCommand(same));
     expect(
         codec.canonicalCommand(one), isNot(codec.canonicalCommand(different)));
+  });
+  test('discovery snapshot reads cannot mutate state or command identity', () {
+    final original =
+        LessonSectionSession(itemIds: const ['i'], sessionId: 'immutable');
+    final checkpoint = DiscoveryCheckpoint(session: original);
+    final state = _stateWithSnapshot(checkpoint);
+    final base = sampleCommand(draws: []);
+    final command = _copyCommand(base, candidate: checkpoint);
+    final canonicalBefore = codec.canonicalCommand(command);
+    final stateBefore = codec.encode(state);
+
+    original.submit(false);
+    final firstRead = checkpoint.session;
+    firstRead.submit(true);
+    final secondRead = checkpoint.session;
+
+    expect(identical(firstRead, secondRead), isFalse);
+    expect(secondRead.attemptCount, 0);
+    expect(codec.canonicalCommand(command), canonicalBefore);
+    expect(codec.encode(state), stateBefore);
   });
   test('canonical identity includes action candidate clock and feedback data',
       () {
@@ -857,6 +989,30 @@ CourseLearningState _stateWithAttempts(List<CourseAttempt> attempts) {
       pending: const []);
 }
 
+CourseLearningState _stateWithSnapshot(ActivitySnapshot snapshot) =>
+    CourseLearningState(
+        scope: guestScope,
+        revision: 1,
+        commitOrdinal: 1,
+        history: sampleState().history,
+        activities: {
+          'strict': _slot(
+              'strict',
+              switch (snapshot) {
+                DiscoveryCheckpoint() => LearningActivityKind.discovery,
+                LegacyLessonCheckpoint() => LearningActivityKind.legacyLesson,
+                DrillCheckpoint() => LearningActivityKind.drill,
+                SoundGameCheckpoint() => LearningActivityKind.soundGame,
+                WordGameCheckpoint() => LearningActivityKind.wordGame,
+              },
+              snapshot)
+        },
+        mistakes: const {},
+        summaries: const {},
+        completions: const [],
+        bestScores: const {},
+        pending: const []);
+
 CourseAttempt _attempt({required AttemptAnswer answer, required int index}) =>
     CourseAttempt(
         scope: guestScope,
@@ -960,7 +1116,15 @@ CourseLearningState _validationState() {
       summaries: {
         summaryKey: SkillCount(total: 2, correct: 1)
       },
-      completions: const [],
+      completions: [
+        LearningCompletion(
+            lessonId: 'lesson:sample',
+            contentRevision: 1,
+            policyKind: CompletionPolicyKind.discoveryThreshold,
+            policyRevision: 1,
+            thresholdPercent: 80,
+            committedAt: fixedTime)
+      ],
       bestScores: const {},
       pending: [
         SupportedCloudEvent(
@@ -983,4 +1147,12 @@ void _expectCorrupt(Map<String, dynamic> json, {LearningScope? scope}) {
       () => const LearningDocumentCodec()
           .decode(jsonEncode(json), scope ?? accountAScope),
       throwsA(isA<LearningCorruptException>()));
+}
+
+void _injectUnknownField(Map<String, dynamic> root, List<Object> path) {
+  dynamic target = root;
+  for (final segment in path) {
+    target = segment is int ? (target as List)[segment] : target[segment];
+  }
+  (target as Map)['unknownFutureField'] = 'unknown';
 }
