@@ -11,6 +11,7 @@ import '../services/streak_service.dart';
 import '../services/phoneme_assessment_service.dart';
 import '../services/recording_service.dart' hide recordingServiceProvider;
 import '../course/french_course.dart';
+import '../course/course_learning_registry.dart';
 
 final supabaseClientProvider = Provider<SupabaseClient>((_) {
   return Supabase.instance.client;
@@ -53,26 +54,7 @@ final phonemesProvider = FutureProvider<List<Phoneme>>((ref) {
 
 final minimalPairsProvider = FutureProvider<List<MinimalPair>>((ref) {
   ref.watch(selectedCourseProvider);
-  return Future.value([
-    const MinimalPair(
-        id: 'en-fr-tu-tout',
-        wordA: 'tu',
-        wordB: 'tout',
-        phonemeA: '/y/',
-        phonemeB: '/u/'),
-    const MinimalPair(
-        id: 'en-fr-rue-roue',
-        wordA: 'rue',
-        wordB: 'roue',
-        phonemeA: '/y/',
-        phonemeB: '/u/'),
-    const MinimalPair(
-        id: 'en-fr-beau-bon',
-        wordA: 'beau',
-        wordB: 'bon',
-        phonemeA: '/o/',
-        phonemeB: '/ɔ̃/'),
-  ]);
+  return Future.value(frenchDrillPairs);
 });
 
 final dueReviewItemsProvider = FutureProvider<List<ReviewItem>>((ref) {

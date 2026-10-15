@@ -69,7 +69,7 @@ void main() {
               activityId: 'lesson:sample',
               kind: LearningActivityKind.discovery,
               contentRevision: 1,
-              cursor: SlotCursor(generation: 1, sequence: 1, revision: 1),
+              cursor: SlotCursor(generation: 1, sequence: 2, revision: 1),
               options: RunOptions(),
               snapshot: DiscoveryCheckpoint(
                   session: LessonSectionSession(
@@ -83,8 +83,8 @@ void main() {
               latestReceipt: CommandReceipt(
                   token: tokenFor(2),
                   canonicalCommand: 'c',
-                  before: SlotCursor(generation: 1, sequence: 0, revision: 0),
-                  after: SlotCursor(generation: 1, sequence: 1, revision: 1),
+                  before: SlotCursor(generation: 1, sequence: 1, revision: 0),
+                  after: SlotCursor(generation: 1, sequence: 2, revision: 1),
                   commitOrdinal: 1))
         },
         mistakes: {
@@ -426,8 +426,7 @@ void main() {
         ['activities', 0, 'snapshot', 'board'],
         ['activities', 0, 'snapshot', 'clock'],
       ]) {
-        final copy =
-            _copyJson(codec.encode(_stateWithSnapshot(snapshot)));
+        final copy = _copyJson(codec.encode(_stateWithSnapshot(snapshot)));
         _injectUnknownField(copy, nestedPath);
         _expectCorrupt(copy, scope: guestScope);
       }
@@ -455,7 +454,7 @@ void main() {
       () {
     final raw = codec.encode(_validationState());
     final receipt = _copyJson(raw);
-    receipt['activities'][0]['latestReceipt']['after']['sequence'] = 2;
+    receipt['activities'][0]['latestReceipt']['after']['sequence'] = 3;
     _expectCorrupt(receipt);
     final ordinal = _copyJson(raw);
     ordinal['commitOrdinal'] = 0;
@@ -943,15 +942,15 @@ void main() {
         activityId: 'lesson:x',
         kind: LearningActivityKind.discovery,
         contentRevision: 1,
-        cursor: SlotCursor(generation: 1, sequence: 1, revision: 1),
+        cursor: SlotCursor(generation: 1, sequence: 2, revision: 1),
         options: RunOptions(),
         snapshot: checkpoint,
         exposures: const {},
         latestReceipt: CommandReceipt(
             token: tokenFor(2),
             canonicalCommand: 'valid',
-            before: SlotCursor(generation: 1, sequence: 0, revision: 0),
-            after: SlotCursor(generation: 1, sequence: 1, revision: 1),
+            before: SlotCursor(generation: 1, sequence: 1, revision: 0),
+            after: SlotCursor(generation: 1, sequence: 2, revision: 1),
             commitOrdinal: 1));
 
     choices.add('bad');
@@ -965,7 +964,96 @@ void main() {
     expect((slot.snapshot as DiscoveryCheckpoint).session.answered, isFalse);
     expect(original, ['a', 'b']);
   });
+
+  test('start receipt resets revision and round trips through codec', () {
+    final state = CourseLearningState(
+      scope: guestScope,
+      revision: 1,
+      commitOrdinal: 1,
+      history: const [],
+      activities: {
+        'lesson:sample': ActivitySlot(
+          activityId: 'lesson:sample',
+          kind: LearningActivityKind.discovery,
+          contentRevision: 1,
+          cursor: SlotCursor(generation: 1, sequence: 1, revision: 0),
+          options: RunOptions(),
+          snapshot: DiscoveryCheckpoint(
+              session: LessonSectionSession(
+                  itemIds: const ['item'], sessionId: 'new-run')),
+          exposures: const {},
+          latestReceipt: CommandReceipt(
+            token: tokenFor(81),
+            canonicalCommand: 'start',
+            before: SlotCursor(generation: 0, sequence: 0, revision: 0),
+            after: SlotCursor(generation: 1, sequence: 1, revision: 0),
+            commitOrdinal: 1,
+          ),
+        ),
+      },
+      mistakes: const {},
+      summaries: const {},
+      completions: const [],
+      bestScores: const {},
+      pending: const [],
+    );
+    final restored = const LearningDocumentCodec()
+        .decode(const LearningDocumentCodec().encode(state), guestScope);
+    expect(restored.activities['lesson:sample']!.cursor.generation, 1);
+    expect(restored.activities['lesson:sample']!.cursor.sequence, 1);
+    expect(restored.activities['lesson:sample']!.cursor.revision, 0);
+  });
+
+  test('activity slot rejects generation jumps', () {
+    expect(
+        () => _receiptSlot(
+              before: SlotCursor(generation: 1, sequence: 2, revision: 3),
+              after: SlotCursor(generation: 3, sequence: 3, revision: 0),
+            ),
+        throwsArgumentError);
+  });
+
+  test('activity slot rejects a reset without a generation increment', () {
+    expect(
+        () => _receiptSlot(
+              before: SlotCursor(generation: 1, sequence: 2, revision: 3),
+              after: SlotCursor(generation: 1, sequence: 3, revision: 0),
+            ),
+        throwsArgumentError);
+  });
+
+  test('activity slot rejects backward or skipped sequence steps', () {
+    for (final afterSequence in [1, 4]) {
+      expect(
+          () => _receiptSlot(
+                before: SlotCursor(generation: 1, sequence: 2, revision: 3),
+                after: SlotCursor(
+                    generation: 1, sequence: afterSequence, revision: 4),
+              ),
+          throwsArgumentError);
+    }
+  });
 }
+
+ActivitySlot _receiptSlot(
+        {required SlotCursor before, required SlotCursor after}) =>
+    ActivitySlot(
+      activityId: 'lesson:sample',
+      kind: LearningActivityKind.discovery,
+      contentRevision: 1,
+      cursor: after,
+      options: RunOptions(),
+      snapshot: DiscoveryCheckpoint(
+          session:
+              LessonSectionSession(itemIds: const ['item'], sessionId: 's')),
+      exposures: const {},
+      latestReceipt: CommandReceipt(
+          token: tokenFor(82),
+          canonicalCommand: 'test',
+          before: before,
+          after: after,
+          commitOrdinal: 1),
+    );
 
 CourseLearningState _stateWithAttempts(List<CourseAttempt> attempts) {
   return CourseLearningState(
@@ -1044,15 +1132,15 @@ ActivitySlot _slot(
         activityId: id,
         kind: kind,
         contentRevision: 1,
-        cursor: SlotCursor(generation: 1, sequence: 1, revision: 1),
+        cursor: SlotCursor(generation: 1, sequence: 2, revision: 1),
         options: RunOptions(),
         snapshot: snapshot,
         exposures: exposures,
         latestReceipt: CommandReceipt(
             token: tokenFor(8),
             canonicalCommand: 'receipt',
-            before: SlotCursor(generation: 1, sequence: 0, revision: 0),
-            after: SlotCursor(generation: 1, sequence: 1, revision: 1),
+            before: SlotCursor(generation: 1, sequence: 1, revision: 0),
+            after: SlotCursor(generation: 1, sequence: 2, revision: 1),
             commitOrdinal: 1));
 
 LearningCommand _copyCommand(LearningCommand source,
