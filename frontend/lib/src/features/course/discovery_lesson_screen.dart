@@ -5,11 +5,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/course/course_audio.dart';
-import '../../core/course/course_progress.dart';
+import '../../core/course/course_attempt.dart';
+import '../../core/course/course_learning_checkpoint.dart';
+import '../../core/course/course_learning_command.dart';
+import '../../core/course/course_learning_error.dart';
+import '../../core/course/course_learning_providers.dart';
+import '../../core/course/course_learning_registry.dart';
+import '../../core/course/course_learning_state.dart';
+import '../../core/course/course_learning_store.dart';
 import '../../core/course/lesson_policy.dart';
 import '../../core/course/lesson_section.dart';
 import '../../core/course/lesson_section_session.dart';
-import '../../core/course/lesson_section_store.dart';
 import 'discovery_section_view.dart';
 
 /// Lifecycle-aware screen that owns a discovery listening section session:
@@ -17,7 +23,7 @@ import 'discovery_section_view.dart';
 /// a fresh-hearing requirement, per-action saves with retry, and owner-aware
 /// state.
 ///
-/// Each screen generation is bound to the [LessonSectionStore] captured when
+/// Each screen generation is bound to the [CourseLearningStore] captured when
 /// it loaded. When the store provider is replaced (for example, the signed-in
 /// account changes), the old owner's audio stops immediately, the departing
 /// generation's in-flight operations are invalidated, and the replacement
@@ -45,7 +51,7 @@ import 'discovery_section_view.dart';
 /// Listen attempt. Raw exceptions and snapshot details are never surfaced
 /// because they may contain the hidden answer.
 ///
-/// A save rejected with the store's typed [LessonSectionConflictException]
+/// A save rejected with the store's typed [LearningConflictException]
 /// is different from a transient failure: the store's stored state has moved
 /// ahead of this screen's session, so resending the checkpoint can never
 /// succeed. The screen then exposes an explicit `Reload saved progress`
@@ -67,7 +73,7 @@ import 'discovery_section_view.dart';
 /// keeping the hidden item out of the UI and semantics during the active
 /// listening puzzle, including loading and load-error states.
 ///
-/// A successful write invalidates [courseProgressProvider] so the
+/// A successful write invalidates [courseLearningStateProvider] so the
 /// home/dashboard refresh on return. Only a successful Finish exits the
 /// screen; with no previous route it falls back to `/home`.
 class DiscoveryLessonScreen extends ConsumerStatefulWidget {
@@ -99,10 +105,6 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       'This change could not be saved. Tap "Retry saving" to try again.';
   static const String _loadErrorText = 'Your saved progress could not be '
       'loaded. Tap "Retry loading" to try again.';
-  static const String _corruptText =
-      'Your saved progress for this section could not be restored, so this '
-      'attempt starts fresh. It will not overwrite the saved progress until '
-      'you save a new step.';
   static const String _conflictText =
       'This copy no longer matches the saved progress for this section. Tap '
       '"Reload saved progress" to load the saved state.';
@@ -115,7 +117,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       'again.';
 
   LessonSection? _section;
-  LessonSectionStore? _store;
+  CourseLearningStore? _store;
+  CourseLearningState? _learningState;
   LessonSectionSession? _session;
   String? _loadError;
   String? _corruptNotice;
@@ -159,30 +162,29 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   /// the widget tree redraws) must not start a competing load whose late
   /// result could publish over newer UI state.
   bool _loadInFlight = false;
+  bool _contentChanged = false;
 
   /// Identity of the load currently in flight (bumped when a load is
   /// orphaned, e.g. by a resumed-window re-drive or owner replacement). An
   /// orphaned load's late result cannot publish into newer UI state.
   int _loadOp = 0;
 
-  /// Identity counter for fresh session IDs kept within this generation.
-  int _sessionCounter = 0;
-
   CourseAudio? _activeAudio;
 
   /// The pending save (answer/advance/review/finish), kept verbatim so that
   /// `Retry saving` re-sends the very same checkpoint: same session, same
   /// attempt, recorded at most once.
-  Future<void> Function(LessonSectionStore store)? _pendingAction;
+  LearningCommand? _pendingCommand;
+  CourseLearningStore? _pendingStore;
   FutureOr<void> Function()? _pendingOnSaved;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    ref.listenManual(lessonSectionStoreProvider, _onStoreReplaced);
+    ref.listenManual(courseLearningStoreProvider, _onStoreReplaced);
     _section = sectionForLesson(widget.lessonId);
-    final LessonSectionStore store = ref.read(lessonSectionStoreProvider);
+    final CourseLearningStore store = ref.read(courseLearningStoreProvider);
     _store = store;
     unawaited(_load(store));
   }
@@ -237,7 +239,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   /// once. A `resumed` without a prior suspension does nothing.
   void _onForeground() {
     if (!_suspended) return;
-    final LessonSectionStore? store = _store;
+    final CourseLearningStore? store = _store;
     if (store == null || !mounted) return;
     _suspended = false;
     // The suspended flag was gating (disabling) the controls; clearing it
@@ -253,7 +255,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
         // behind an orphaned call forever.
         if (_loadInFlight) _loadOp += 1;
         unawaited(_load(store));
-      } else if (_pendingAction != null) {
+      } else if (_pendingCommand != null) {
         // Orphan whatever run the suspended window left in flight; its late
         // completion must not settle the UI or run an exit alongside this one.
         if (_saveInFlight) _saveOp += 1;
@@ -262,7 +264,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     });
   }
 
-  void _onStoreReplaced(LessonSectionStore? previous, LessonSectionStore next) {
+  void _onStoreReplaced(
+      CourseLearningStore? previous, CourseLearningStore next) {
     if (identical(previous, next)) return;
     // The owner changed: stop the old owner's audio immediately, invalidate
     // the departed generation's playback and publications, orphan its
@@ -275,7 +278,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     _saveInFlight = false;
     _loadOp += 1; // orphan the old owner's in-flight load
     _loadInFlight = false;
-    _pendingAction = null;
+    _pendingCommand = null;
+    _pendingStore = null;
     _pendingOnSaved = null;
     _stopAudio();
     _store = next;
@@ -287,14 +291,9 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     });
   }
 
-  List<String> get _itemIds => _section!.items.map((item) => item.id).toList();
+  static String get _activityId => 'lesson:${frenchUySection.lessonId}';
 
-  String _freshSessionId() {
-    _sessionCounter += 1;
-    return 'dss-$_sessionCounter-${DateTime.now().microsecondsSinceEpoch}';
-  }
-
-  Future<void> _load(LessonSectionStore store) async {
+  Future<void> _load(CourseLearningStore store, {bool retry = false}) async {
     final section = _section;
     if (section == null) return;
     _loadInFlight = true;
@@ -304,6 +303,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       setState(() {
         _session = null;
         _loadError = null;
+        _contentChanged = false;
         _corruptNotice = null;
         _saveError = null;
         _conflictError = null;
@@ -311,17 +311,10 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
         _busy = true;
       });
     }
-    Map<String, dynamic>? json;
+    CourseLearningState? loaded;
     Object? failure;
-    bool corruptEntry = false;
     try {
-      json = await store.loadLessonSection(widget.lessonId);
-    } on FormatException {
-      // An unusable entry — an unparseable checkpoint or processed metadata
-      // that does not match the stored checkpoint — follows the corrupt
-      // snapshot contract: start fresh with the notice, and write nothing
-      // until the learner saves a new step (which replaces the entry).
-      corruptEntry = true;
+      loaded = retry ? await store.retryLoad() : await store.load();
     } catch (error) {
       failure = error;
     }
@@ -340,36 +333,30 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       });
       return;
     }
-    if (corruptEntry) {
-      _publishFresh(section, _corruptText);
-      return;
-    }
-    if (json == null) {
-      _publishFresh(section, null);
-      return;
-    }
-    try {
-      final LessonSectionSession session = LessonSectionSession.fromJson(
-        json,
-        itemIds: _itemIds,
-        contentRevision: section.contentRevision,
+    _learningState = loaded!;
+    final ActivitySlot? slot = loaded.activities[_activityId];
+    if (slot == null) {
+      final command = store.prepare(
+        state: loaded,
+        activityId: _activityId,
+        action: StartLearningRun(options: RunOptions(policy: widget.policy)),
       );
-      _publish(session, section, null);
-    } on FormatException {
-      // A corrupt snapshot is never partially restored: start fresh, with a
-      // notice, and write nothing until the learner saves a new step.
-      _publishFresh(section, _corruptText);
+      _session = (command.candidate as DiscoveryCheckpoint).session;
+      _pendingCommand = command;
+      _pendingStore = store;
+      await _startSave();
+      return;
     }
-  }
-
-  void _publishFresh(LessonSection section, String? corruptNotice) {
-    final LessonSectionSession session = LessonSectionSession(
-      itemIds: _itemIds,
-      sessionId: _freshSessionId(),
-      contentRevision: section.contentRevision,
-      policy: widget.policy,
-    );
-    _publish(session, section, corruptNotice);
+    if (slot.contentRevision != section.contentRevision ||
+        slot.snapshot is! DiscoveryCheckpoint) {
+      setState(() {
+        _busy = false;
+        _contentChanged = true;
+        _loadError = 'This lesson has changed. Start a new run to continue.';
+      });
+      return;
+    }
+    _publish((slot.snapshot as DiscoveryCheckpoint).session, section, null);
   }
 
   void _publish(
@@ -383,13 +370,6 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     });
   }
 
-  LessonSectionSession _cloneSession(LessonSectionSession session) =>
-      LessonSectionSession.fromJson(
-        session.toJson(),
-        itemIds: _itemIds,
-        contentRevision: session.contentRevision,
-      );
-
   LessonSectionItem _currentItem(LessonSectionSession session) {
     final section = _section!;
     final String? id = session.currentItemId;
@@ -397,6 +377,14 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       (LessonSectionItem item) => item.id == id,
       orElse: () => throw StateError('The session points outside its section.'),
     );
+  }
+
+  AttemptAudioSource _audioSourceForCurrentItem(LessonSectionSession session) {
+    final String alias = _currentItem(session).id;
+    final definition = LearningRegistry.french().require(_activityId);
+    final source =
+        definition.items.firstWhere((item) => item.sessionAlias == alias);
+    return authoredAudioSource(source) ?? AttemptAudioSource.notApplicable;
   }
 
   // ---------------------------------------------------------------- playback
@@ -472,24 +460,29 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
 
   // ------------------------------------------------------------------- saves
 
-  void _runSave(
-    Future<void> Function(LessonSectionStore store) action,
-    FutureOr<void> Function()? onSaved,
-  ) {
+  LearningCommand? _prepare(LearningAction action) {
+    final CourseLearningStore? store = _store;
+    final CourseLearningState? state = _learningState;
+    if (store == null || state == null) return null;
+    return store.prepare(state: state, activityId: _activityId, action: action);
+  }
+
+  void _runSave(LearningCommand command, {FutureOr<void> Function()? onSaved}) {
     // Single-shot: nothing while suspended, and no second run for the same
     // identity — a double tap before the widget tree redraws must not start
     // a duplicate save (duplicate completion, duplicate exit, ...).
     if (_suspended || _saveInFlight) return;
-    _pendingAction = action;
+    _pendingCommand = command;
+    _pendingStore = _store;
     _pendingOnSaved = onSaved;
     unawaited(_startSave());
   }
 
   Future<void> _startSave() async {
-    final action = _pendingAction;
+    final command = _pendingCommand;
     final onSaved = _pendingOnSaved;
-    final LessonSectionStore? owner = _store;
-    if (action == null || owner == null || _session == null) return;
+    final CourseLearningStore? owner = _pendingStore;
+    if (command == null || owner == null) return;
     _saveInFlight = true;
     final int op = _saveOp;
     final int generation = _generation;
@@ -502,7 +495,14 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     }
     Object? failure;
     try {
-      await action(owner);
+      final LearningCommit commit = await owner.submit(command);
+      _learningState = commit.state;
+      if (commit.slot.snapshot case DiscoveryCheckpoint(:final session)) {
+        if (command.action is! AdvanceLesson &&
+            command.action is! ReviewDiscoveryMistakes) {
+          _session = session;
+        }
+      }
     } catch (error) {
       failure = error;
     }
@@ -515,13 +515,15 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     // retained pending action when `resumed` reopens foreground.
     if (generation != _generation || _suspended || !mounted) return;
     if (failure != null) {
-      if (failure is LessonSectionConflictException) {
+      if (failure is LearningConflictException ||
+          failure is LearningContentChangedException) {
         // A typed conflict: the store's stored state moved ahead of this
         // session, so resending the same checkpoint can never succeed. The
         // stale in-memory draft is abandoned only by the explicit
         // `Reload saved progress` action, which reconciles the stored
         // checkpoint; drop the pending save intent so it is never re-sent.
-        _pendingAction = null;
+        _pendingCommand = null;
+        _pendingStore = null;
         _pendingOnSaved = null;
         setState(() {
           _busy = false;
@@ -547,10 +549,11 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     });
     // Refresh before the (possibly exiting) publish so navigating away and
     // disposing cannot skip the refresh.
-    ref.invalidate(courseProgressProvider);
+    ref.invalidate(courseLearningStateProvider);
     // A successful write settles the pending action; a later resume must not
     // re-run it. Failed/uncertain ones are retained above.
-    _pendingAction = null;
+    _pendingCommand = null;
+    _pendingStore = null;
     _pendingOnSaved = null;
     if (onSaved != null) {
       await onSaved();
@@ -561,34 +564,27 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     final session = _session;
     if (session == null || session.answered) return;
     if (!_heard || _busy || _saveError != null || _loadError != null) return;
-    final LessonSectionItem item = _currentItem(session);
-    final bool correct = item.expectedSound == sound;
-    // Publish the outcome immediately; persistence follows and can be
-    // retried with this exact checkpoint.
-    final LessonSectionSession draft = _cloneSession(session);
-    draft.submit(correct);
-    final Map<String, dynamic> checkpoint = draft.toJson();
-    final String expectedSound = item.expectedSound;
+    final LearningCommand? command = _prepare(ChooseSound(
+      selectedSound: sound,
+      audioSource: _audioSourceForCurrentItem(session),
+    ));
+    if (command == null) return;
+    // The engine freezes the candidate and immediate feedback together; the
+    // screen never recalculates correctness or edits checkpoint state.
+    final LessonSectionSession draft =
+        (command.candidate as DiscoveryCheckpoint).session;
     if (mounted) setState(() => _session = draft);
-    _runSave(
-        (LessonSectionStore store) => store.recordLessonSectionAnswer(
-              widget.lessonId,
-              checkpoint,
-              sound: expectedSound,
-              correct: correct,
-            ),
-        null);
+    _runSave(command);
   }
 
   void _onNext() {
     final session = _session;
     if (session == null || !session.answered) return;
-    final LessonSectionSession draft = _cloneSession(session);
-    draft.advance();
-    final Map<String, dynamic> checkpoint = draft.toJson();
-    _runSave(
-        (LessonSectionStore store) =>
-            store.saveLessonSection(widget.lessonId, checkpoint), () {
+    final command = _prepare(const AdvanceLesson());
+    if (command == null) return;
+    final LessonSectionSession draft =
+        (command.candidate as DiscoveryCheckpoint).session;
+    _runSave(command, onSaved: () {
       if (mounted) {
         setState(() {
           _session = draft;
@@ -603,12 +599,11 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   void _onReview() {
     final session = _session;
     if (session == null || session.unresolvedItemIds.isEmpty) return;
-    final LessonSectionSession draft = _cloneSession(session);
-    draft.reviewMistakes();
-    final Map<String, dynamic> checkpoint = draft.toJson();
-    _runSave(
-        (LessonSectionStore store) =>
-            store.saveLessonSection(widget.lessonId, checkpoint), () {
+    final command = _prepare(const ReviewDiscoveryMistakes());
+    if (command == null) return;
+    final LessonSectionSession draft =
+        (command.candidate as DiscoveryCheckpoint).session;
+    _runSave(command, onSaved: () {
       if (mounted) {
         setState(() {
           _session = draft;
@@ -621,23 +616,19 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   void _onFinish() {
     final session = _session;
     if (session == null || !session.canComplete) return;
-    final Map<String, dynamic> checkpoint = session.toJson();
-    // review=true saves the section state but leaves completions unchanged.
-    final Future<void> Function(LessonSectionStore) action = widget.review
-        ? (LessonSectionStore store) =>
-            store.saveLessonSection(widget.lessonId, checkpoint)
-        : (LessonSectionStore store) =>
-            store.completeLessonSection(widget.lessonId, checkpoint);
-    _runSave(action, _exit);
+    final command = _prepare(FinishLearningActivity(
+      recordCompletion: !widget.review,
+    ));
+    if (command != null) _runSave(command, onSaved: _exit);
   }
 
   void _onRetrySave() {
-    if (_pendingAction == null) {
+    if (_pendingCommand == null) {
       // Nothing pending: reload through the captured owner (coalesced with
       // any load already in flight).
-      final LessonSectionStore? store = _store;
+      final CourseLearningStore? store = _store;
       if (store != null && !_suspended && !_saveInFlight && !_loadInFlight) {
-        unawaited(_load(store));
+        unawaited(_load(store, retry: true));
       }
       return;
     }
@@ -654,11 +645,12 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   /// never re-submitted.
   void _onReload() {
     if (_suspended || _saveInFlight || _loadInFlight) return;
-    _pendingAction = null;
+    _pendingCommand = null;
+    _pendingStore = null;
     _pendingOnSaved = null;
     _stopAudio();
     _conflictError = null;
-    final LessonSectionStore? store = _store;
+    final CourseLearningStore? store = _store;
     if (store == null) return;
     unawaited(_load(store));
   }
@@ -671,38 +663,52 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   /// UI — the new exercise is never shown before its identity is saved.
   void _onPractiseAgain() {
     final session = _session;
-    final section = _section;
-    if (session == null || section == null) return;
+    final state = _learningState;
+    final store = _store;
+    if (session == null || state == null || store == null) return;
     if (session.phase != LessonSectionPhase.debrief) return;
-    final LessonSectionSession fresh = LessonSectionSession(
-      itemIds: _itemIds,
-      sessionId: _freshSessionId(),
-      contentRevision: section.contentRevision,
-      policy: widget.policy,
+    final LearningCommand command = store.prepare(
+      state: state,
+      activityId: _activityId,
+      action: StartLearningRun(options: RunOptions(policy: session.policy)),
     );
-    final Map<String, dynamic> checkpoint = fresh.toJson();
-    _runSave(
-      (LessonSectionStore store) =>
-          store.saveLessonSection(widget.lessonId, checkpoint),
-      () {
-        if (mounted) {
-          setState(() {
-            _session = fresh;
-            // A fresh item requires a fresh completed playback.
-            _heard = false;
-          });
-        }
-      },
-    );
+    final LessonSectionSession fresh =
+        (command.candidate as DiscoveryCheckpoint).session;
+    _runSave(command, onSaved: () {
+      if (mounted) {
+        setState(() {
+          _session = fresh;
+          // A fresh item requires a fresh completed playback.
+          _heard = false;
+        });
+      }
+    });
   }
 
   void _onRetryLoad() {
-    final LessonSectionStore? store = _store;
+    final CourseLearningStore? store = _store;
     // Single-shot: a double tap before the busy state redraws (and any tap
     // while suspended) must not start a competing load whose late result
     // could publish over newer UI state.
     if (store == null || _suspended || _loadInFlight) return;
-    unawaited(_load(store));
+    unawaited(_load(store, retry: true));
+  }
+
+  void _onStartNewRun() {
+    final store = _store;
+    final state = _learningState;
+    if (store == null || state == null || !_contentChanged || _saveInFlight) {
+      return;
+    }
+    final command = store.prepare(
+      state: state,
+      activityId: _activityId,
+      action: StartLearningRun(options: RunOptions(policy: widget.policy)),
+    );
+    _session = (command.candidate as DiscoveryCheckpoint).session;
+    _loadError = null;
+    _contentChanged = false;
+    _runSave(command);
   }
 
   // -------------------------------------------------------------------- exit
@@ -744,10 +750,9 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     }
     // The word-bearing authored title (for example 'Tu or tout?') stays out
     // of the app bar while the item is hidden; only the debrief reveals it.
-    final String title =
-        _session?.phase == LessonSectionPhase.debrief
-            ? section.title
-            : 'Listening practice';
+    final String title = _session?.phase == LessonSectionPhase.debrief
+        ? section.title
+        : 'Listening practice';
     return Scaffold(
       appBar: AppBar(title: Text(title)),
       body: _body(),
@@ -763,19 +768,28 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     }
     if (_loadError != null) {
       final String loadError = _loadError!;
-      return Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(loadError, textAlign: TextAlign.center),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: _store == null ? null : _onRetryLoad,
-                child: const Text('Retry loading'),
-              ),
-            ],
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(loadError, textAlign: TextAlign.center),
+                const SizedBox(height: 16),
+                if (_contentChanged)
+                  FilledButton(
+                    onPressed: _onStartNewRun,
+                    child: const Text('Start new run'),
+                  )
+                else
+                  FilledButton(
+                    onPressed: _store == null ? null : _onRetryLoad,
+                    child: const Text('Retry loading'),
+                  ),
+              ],
+            ),
           ),
         ),
       );
