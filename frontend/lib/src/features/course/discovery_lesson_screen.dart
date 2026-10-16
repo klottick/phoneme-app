@@ -129,6 +129,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   String? _conflictError;
   bool _heard = false;
   bool _busy = false;
+  bool _playing = false;
+  String? _selectedSound;
 
   /// Bumped when the screen's identity changes (owner replacement,
   /// disposal) and when the app suspends: in-flight save/playback
@@ -231,6 +233,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       setState(() {
         _heard = false;
         _busy = false;
+        _playing = false;
+        _selectedSound = null;
       });
     }
   }
@@ -285,6 +289,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     _pendingStore = null;
     _pendingOnSaved = null;
     _stopAudio();
+    _playing = false;
+    _selectedSound = null;
     _store = next;
     if (!mounted) return;
     final int expectedGeneration = _generation;
@@ -312,6 +318,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
         _conflictError = null;
         _heard = false;
         _busy = true;
+        _playing = false;
+        _selectedSound = null;
       });
     }
     CourseLearningState? loaded;
@@ -370,6 +378,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       _corruptNotice = notice;
       _busy = false;
       _heard = false;
+      _playing = false;
+      _selectedSound = null;
     });
   }
 
@@ -396,10 +406,22 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     if (_suspended) return;
     final session = _session;
     if (session == null || session.answered) return;
-    if (_busy || _loadError != null || _saveError != null) return;
+    if (_busy ||
+        _loadError != null ||
+        _saveError != null ||
+        _conflictError != null) {
+      return;
+    }
     final int generation = _generation;
     final int playback = _playbackGeneration;
     final String word = _currentItem(session).word;
+    // Claim playback synchronously, before provider acquisition can throw or
+    // a second callback can arrive before the next frame.
+    setState(() {
+      _busy = true;
+      _playing = true;
+      _heard = false;
+    });
     CourseAudio audio;
     try {
       audio = ref.read(courseAudioProvider);
@@ -408,17 +430,14 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
           playback == _playbackGeneration &&
           mounted) {
         _showSnackBar(_audioErrorText);
-        setState(() => _busy = false);
+        setState(() {
+          _busy = false;
+          _playing = false;
+        });
       }
       return;
     }
     _activeAudio = audio;
-    if (mounted) {
-      setState(() {
-        _busy = true;
-        _heard = false;
-      });
-    }
     Object? failure;
     try {
       await audio.speak(word);
@@ -428,7 +447,10 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       if (generation == _generation &&
           playback == _playbackGeneration &&
           mounted) {
-        setState(() => _busy = false);
+        setState(() {
+          _busy = false;
+          _playing = false;
+        });
       }
       return;
     } catch (error) {
@@ -445,11 +467,15 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       // Audio failure is separate from persistence: generic feedback, no
       // answer, still retryable.
       _showSnackBar(_audioErrorText);
-      setState(() => _busy = false);
+      setState(() {
+        _busy = false;
+        _playing = false;
+      });
       return;
     }
     setState(() {
       _busy = false;
+      _playing = false;
       _heard = true;
     });
   }
@@ -604,12 +630,19 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   Future<void> _onAnswer(String sound) async {
     final session = _session;
     if (session == null || session.answered) return;
-    if (!_heard || _busy || _saveError != null || _loadError != null) return;
+    if (!_heard ||
+        _busy ||
+        _saveError != null ||
+        _loadError != null ||
+        _conflictError != null) {
+      return;
+    }
     final LearningCommand? command = _prepare(ChooseSound(
       selectedSound: sound,
       audioSource: _audioSourceForCurrentItem(session),
     ));
     if (command == null) return;
+    _selectedSound = sound;
     // The engine freezes the candidate and immediate feedback together; the
     // screen never recalculates correctness or edits checkpoint state.
     final LessonSectionSession draft =
@@ -632,6 +665,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
           // `heard` refers to the current item; a new item requires a fresh
           // completed playback before it can be answered.
           _heard = false;
+          _playing = false;
+          _selectedSound = null;
         });
       }
     });
@@ -649,6 +684,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
         setState(() {
           _session = draft;
           _heard = false;
+          _playing = false;
+          _selectedSound = null;
         });
       }
     });
@@ -721,6 +758,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
           _session = fresh;
           // A fresh item requires a fresh completed playback.
           _heard = false;
+          _playing = false;
+          _selectedSound = null;
         });
       }
     });
@@ -844,6 +883,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       session: session,
       heard: _heard,
       busy: _busy || _suspended,
+      playing: _playing,
+      selectedSound: _selectedSound,
       error: _saveError,
       conflict: _conflictError,
       // The recovery notice lives inside the view's scrolling content, so a

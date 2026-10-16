@@ -24,7 +24,7 @@ class ListeningChoice extends StatelessWidget {
         instruction: prompt.instruction,
         state: state,
         controls: Column(children: [
-          ElevatedButton(
+          FilledButton(
               onPressed: locked ? null : onListen,
               child: const Text('Listen to the word')),
           for (final choice in prompt.choices)
@@ -33,7 +33,7 @@ class ListeningChoice extends StatelessWidget {
                 container: true,
                 button: true,
                 selected: selectedChoiceId == choice.id,
-                child: ElevatedButton(
+                child: TextButton(
                     onPressed:
                         locked || !heard ? null : () => onAnswer(choice.id),
                     child: Text(choice.label)))

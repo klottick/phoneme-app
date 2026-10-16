@@ -10,7 +10,8 @@ import '../support/controlled_listening_audio.dart';
 import '../support/listening_comparison_harness.dart';
 
 ButtonStyleButton _button(WidgetTester t, String text) => t.widget(find
-    .ancestor(of: find.text(text), matching: find.byType(ElevatedButton))
+    .ancestor(
+        of: find.text(text), matching: find.bySubtype<ButtonStyleButton>())
     .first);
 String _semanticsText(WidgetTester t, Finder finder) {
   return t.getSemantics(finder).getSemanticsData().label;
