@@ -85,8 +85,8 @@ One item accepts at most one scored submission per round.
 
 The submitted choice and correctness feedback remain visible until the learner
 advances. Advancing after the last submitted item enters debrief, even if every
-answer was wrong. A wrong answer,
-repeated error or early-help action must not unlock the explanation mid-round.
+answer was wrong. A wrong answer, repeated error or early-help action must not
+unlock the explanation mid-round.
 
 ### 3.2 Debrief and optional review
 
@@ -109,10 +109,11 @@ active puzzle. Having already seen the debrief is not undone: retries retain
 their after-debrief/repeated-item assistance context and earlier outcomes in
 history. They must not be reclassified as fresh, unassisted or held-out evidence.
 
-Every round is bounded by its captured queue. The number of optional rounds is
-not capped, and there is no automatic restart, wall-clock deadline, lives system
-or twelve-submission sitting limit. The learner may leave and later resume at
-any committed position. An unavailable item can block scored advancement, but
+Every round is user-initiated and bounded by its captured queue, ending at
+debrief. The number of optional rounds is not capped; this is not a promise of
+a fixed sitting duration. There is no automatic restart, wall-clock deadline,
+lives system or twelve-submission sitting limit. The learner may leave and resume
+at any committed position. An unavailable item can block scored advancement, but
 cannot force the learner to remain on the screen.
 
 ### 3.3 Completion
@@ -135,6 +136,12 @@ an eligibility flag is not proof of a saved completion. Preserve the current
 idempotent completion identity, policy kind/revision and threshold metadata.
 Review-only route Finish must not award completion.
 
+For discovery completion, identity is lesson ID, content revision, policy kind,
+policy revision and threshold percentage. Record the threshold saved for the
+current run, not a subsequently changed default. Re-finishing under that same
+identity adds no duplicate; a later eligible run with a different saved threshold
+records its own completion without rewriting or removing the earlier record.
+
 Meeting the threshold or committing Finish must not erase remaining mistakes.
 Resolve a durable mistake only through a correct scored answer for that same
 activity/item/revision/skill-target identity, as in FR-04. Do not substitute an
@@ -152,16 +159,30 @@ policy schema or storage namespace solely to name finite rounds.
 
 Answers, historical attempts, mistake updates and their resulting checkpoint
 commit together through the FR-04 repository. Advance, review start and Finish
-also use the existing typed command path. A failed save must preserve the exact
-immutable pending command, captured owner/store and continuation for Retry; no
-duplicate attempt, queue advancement, completion or unlock may be claimed.
+also use the existing typed command path. A retryable persistence failure must
+preserve the exact immutable pending command, captured owner/store and
+continuation for Retry; no duplicate attempt, queue advancement, completion or
+unlock may be claimed.
 Concurrent or stale commands retain current revision/generation validation.
+Typed conflicts, content changes and owner changes follow existing explicit
+reload/recovery paths rather than blindly retrying an invalid command.
+
+In particular, a held or failed Advance retains the committed answered item and
+its feedback as the visible authoritative state. Disable further answer/advance
+actions while it is pending; Retry resends that frozen Advance command, not the
+answer and not a newly prepared advance. Publish the next position or debrief
+only after its acknowledgement. Review-start and Finish also publish their
+resulting navigation/state only after successful persistence.
 
 Resume an unanswered item, an answered item awaiting advance, a partly completed
 review round or a debrief without rebuilding the queue or replaying submissions.
 Do not restore playback permission, active audio or microphone state. A restored
 unanswered listening item needs fresh successful playback. Already committed
 answers are not submitted again merely because the screen remounts.
+If the answer committed but Advance did not, restore its committed choice and
+feedback, awaiting explicit advance. A still-live same-owner pending command can
+instead follow existing frozen-command Retry/resume recovery; pending UI intent
+is not invented from a checkpoint after a process restart.
 
 Playback failure/cancellation is a capability state, not a scored wrong answer.
 It creates no attempt, mistake, synthetic answer or coverage credit and does not
@@ -169,6 +190,10 @@ silently skip the item. Offer playback Retry or leave/resume. Do not introduce
 unassessed-speaking records or new schema variants: speaking and assessment
 remain outside FR-05. Preserve actual audio-source provenance and existing
 recording-failure behavior; never silently substitute TTS for a failed recording.
+Preserve the current visible distinction: an actual playback failure shows
+generic, non-answer-revealing audio feedback; a user/system cancellation is
+quiet and retryable, not reported as an audio failure. Neither grants fresh
+playback permission, and stale callbacks affect neither the old nor new screen.
 
 Reject malformed or incompatible snapshots using current recovery behavior;
 do not silently reinterpret content or reset a recoverable sibling activity.
@@ -211,6 +236,9 @@ tests, analysis and JavaScript release build. Check scope and unchanged audio,
 licence, dependency and backend files. Merge only the reviewed GitHub PR and
 verify its published tree; preserve branches, worktrees and process evidence.
 Missing GitHub checks are not a passing CI result.
+This is an implementation-delivery requirement, not a claim that this written
+spec or FR-05 is already accepted. A passing unchanged-product baseline does not
+replace the requirement/evidence audit or the user's spec and plan review gates.
 
 ## 6. Non-goals and outstanding gates
 
