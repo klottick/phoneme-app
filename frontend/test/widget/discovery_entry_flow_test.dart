@@ -599,6 +599,8 @@ void main() {
     await tester
         .tap(find.text('/${frenchUySection.items.first.expectedSound}/'));
     await tester.pump();
+    expect(find.text('Correct'), findsOneWidget);
+    expect(find.text('Not yet'), findsNothing);
     final departedAnswer = accountA.submitted
         .singleWhere((command) => command.action is ChooseSound);
     expect(departedAnswer.scope, scopeA);
@@ -607,12 +609,16 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
     expect(find.text('Continue discovery'), findsNothing);
+    expect(find.text('Correct'), findsNothing);
+    expect(find.text('Not yet'), findsNothing);
     container.read(_activeStoreProvider.notifier).state = replacementA;
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
     await tester.pumpAndSettle();
     expect(find.byType(DiscoveryLessonScreen), findsOneWidget);
     expect(find.text('Item 1 of 10'), findsOneWidget);
+    expect(find.text('Correct'), findsNothing);
+    expect(find.text('Not yet'), findsNothing);
     expect(
         replacementA.submitted
             .where((command) => command.action is ChooseSound),
@@ -629,7 +635,8 @@ void main() {
             .where((command) => command.action is ChooseSound),
         isEmpty);
     expect(find.text('Retry saving'), findsNothing);
-    expect(find.textContaining('That is'), findsNothing);
+    expect(find.text('Correct'), findsNothing);
+    expect(find.text('Not yet'), findsNothing);
     expect(router.state.uri.path, '/course-lesson/en-fr-u-y');
   });
 }
