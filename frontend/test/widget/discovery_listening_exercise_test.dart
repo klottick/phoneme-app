@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/semantics.dart' show SemanticsNode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
@@ -11,6 +12,7 @@ import 'package:linguist/src/core/course/course_learning_registry.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/lesson_policy.dart';
+import 'package:linguist/src/core/course/lesson_section.dart';
 import 'package:linguist/src/features/course/discovery_lesson_screen.dart';
 import 'package:linguist/src/features/course/exercises/listening_choice.dart';
 import '../support/controlled_listening_audio.dart';
@@ -41,6 +43,50 @@ Future<void> _seedDebriefWithMurMistake(CourseLearningWidgetStore store) async {
     ));
     await commit(const AdvanceLesson());
   }
+}
+
+void _expectNoHiddenPayload(WidgetTester tester, Iterable<String> sentinels) {
+  final root = tester
+      .binding.renderViews.first.owner!.semanticsOwner!.rootSemanticsNode!;
+  final nodes = <SemanticsNode>[];
+  void visit(SemanticsNode node) {
+    nodes.add(node);
+    node.visitChildren((child) {
+      visit(child);
+      return true;
+    });
+  }
+
+  visit(root);
+  final semanticPayload = nodes
+      .expand((node) => [
+            node.getSemanticsData().label,
+            node.getSemanticsData().value,
+            node.getSemanticsData().hint,
+            node.getSemanticsData().tooltip,
+          ])
+      .join('\n');
+  for (final sentinel in sentinels) {
+    expect(find.textContaining(sentinel), findsNothing, reason: sentinel);
+    expect(find.byTooltip(sentinel), findsNothing, reason: sentinel);
+    expect(find.bySemanticsLabel(RegExp(RegExp.escape(sentinel))), findsNothing,
+        reason: sentinel);
+    expect(semanticPayload, isNot(contains(sentinel)), reason: sentinel);
+  }
+}
+
+bool _hasPrimaryFocus(WidgetTester tester, String label) {
+  final element = find.text(label).evaluate().single;
+  return Focus.of(element).hasPrimaryFocus;
+}
+
+Future<void> _tabUntilFocused(WidgetTester tester, String label) async {
+  for (var attempt = 0; attempt < 10; attempt++) {
+    if (_hasPrimaryFocus(tester, label)) return;
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+  }
+  expect(_hasPrimaryFocus(tester, label), isTrue,
+      reason: 'keyboard traversal reaches $label');
 }
 
 void main() {
@@ -224,8 +270,49 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('retained_listen_callback_is_ignored_after_debrief',
+      (tester) async {
+    final audio = ControlledListeningAudio();
+    final store = CourseLearningWidgetStore();
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        courseAudioProvider.overrideWithValue(audio),
+        courseLearningStoreProvider.overrideWithValue(store),
+      ],
+      child:
+          const MaterialApp(home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y')),
+    ));
+    await tester.pumpAndSettle();
+    final retainedListen = tester
+        .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Listen to the word'))
+        .onPressed!;
+    final items = LearningRegistry.french().require('lesson:en-fr-u-y').items;
+    for (var index = 0; index < items.length; index++) {
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      audio.requests.last.complete();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/${items[index].expectedChoice}/'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(
+          index == items.length - 1 ? 'See section explanation' : 'Next word'));
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('Section debrief'), findsOneWidget);
+    final requestCount = audio.requests.length;
+    final preparedCount = store.prepared.length;
+    retainedListen();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(audio.requests, hasLength(requestCount));
+    expect(store.prepared, hasLength(preparedCount));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('replay_and_answer_claim_once_before_redraw_and_retry_is_frozen',
       (tester) async {
+    final semantics = tester.ensureSemantics();
     final audio = ControlledListeningAudio();
     final store = CourseLearningWidgetStore();
     await tester.pumpWidget(ProviderScope(
@@ -257,7 +344,14 @@ void main() {
     audio.requests.last.complete();
     await tester.pumpAndSettle();
 
-    store.failingActions.add(ChooseSound);
+    final beforeAnswer = store.committedState;
+    final requestsBeforeAnswer = audio.requests.length;
+    final listenCallback = tester
+        .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Listen to the word'))
+        .onPressed!;
+    final answerGate = Completer<void>();
+    store.actionGates[ChooseSound] = answerGate;
     final choice = tester.widget<ButtonStyleButton>(find
         .ancestor(
           of: find.text('/u/'),
@@ -266,24 +360,69 @@ void main() {
         .first);
     choice.onPressed!();
     choice.onPressed!();
-    await tester.pumpAndSettle();
+    await tester.pump();
     final answerCommands = store.prepared
         .where((command) => command.action is ChooseSound)
         .toList();
     expect(answerCommands, hasLength(1));
+    expect(store.committedState, same(beforeAnswer));
     final originalCommand = store.submitted.last;
     expect(find.text('Correct'), findsOneWidget);
-    final stateBeforeAcknowledgement = store.committedState;
-    expect(store.committedState.history, isEmpty);
+    expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('choice-u')))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected
+            .name,
+        'isTrue');
+    final requestsWhileHeld = audio.requests.length;
+    listenCallback();
+    choice.onPressed!();
+    await tester.pump();
+    expect(audio.requests, hasLength(requestsBeforeAnswer));
+    expect(store.prepared.where((command) => command.action is ChooseSound),
+        hasLength(1));
+    expect(store.submitted.where((command) => command.action is ChooseSound),
+        hasLength(1));
+    expect(store.committedState, same(beforeAnswer));
+    expect(audio.requests, hasLength(requestsWhileHeld));
+
+    store.failingActions.add(ChooseSound);
+    answerGate.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Correct'), findsOneWidget);
+    expect(store.committedState, same(beforeAnswer));
+    expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('choice-u')))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected
+            .name,
+        'isTrue');
+    final requestsAfterFailure = audio.requests.length;
+    listenCallback();
+    choice.onPressed!();
+    await tester.pump();
+    expect(audio.requests, hasLength(requestsAfterFailure));
+    expect(store.prepared.where((command) => command.action is ChooseSound),
+        hasLength(1));
+    expect(store.submitted.where((command) => command.action is ChooseSound),
+        hasLength(1));
+    expect(store.committedState, same(beforeAnswer));
 
     store.failingActions.clear();
+    store.actionGates.remove(ChooseSound);
     await tester.tap(find.text('Retry saving'));
     await tester.pumpAndSettle();
     expect(store.submitted.last, same(originalCommand));
     expect(store.prepared.where((command) => command.action is ChooseSound),
         hasLength(1));
+    expect(store.submitted.where((command) => command.action is ChooseSound),
+        hasLength(2));
     expect(store.committedState.history, hasLength(1));
-    expect(store.committedState, isNot(same(stateBeforeAcknowledgement)));
+    expect(store.committedState, isNot(same(beforeAnswer)));
 
     final advanceGate = Completer<void>();
     store.actionGates[AdvanceLesson] = advanceGate;
@@ -297,6 +436,86 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Item 2 of 10'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
+    semantics.dispose();
+  });
+
+  testWidgets('known_selection_survives_same_owner_suspend_and_frozen_retry',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    final audio = ControlledListeningAudio();
+    final store = CourseLearningWidgetStore();
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        courseAudioProvider.overrideWithValue(audio),
+        courseLearningStoreProvider.overrideWithValue(store),
+      ],
+      child:
+          const MaterialApp(home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y')),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Listen to the word'));
+    await tester.pump();
+    audio.requests.single.complete();
+    await tester.pumpAndSettle();
+    store.failingActions.add(ChooseSound);
+    await tester.tap(find.text('/u/'));
+    await tester.pumpAndSettle();
+    final beforeSuspend = store.committedState;
+    expect(find.text('Correct'), findsOneWidget);
+    expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('choice-u')))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected
+            .name,
+        'isTrue');
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(store.committedState, same(beforeSuspend));
+    expect(find.text('Correct'), findsOneWidget);
+    expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('choice-u')))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected
+            .name,
+        'isTrue',
+        reason: 'same-owner pending command retains known live response');
+
+    store.failingActions.clear();
+    final retryGate = Completer<void>();
+    store.actionGates[ChooseSound] = retryGate;
+    await tester.tap(find.text('Retry saving'));
+    await tester.pump();
+    expect(find.text('Correct'), findsOneWidget);
+    expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('choice-u')))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected
+            .name,
+        'isTrue');
+    expect(store.committedState, same(beforeSuspend));
+    retryGate.complete();
+    await tester.pumpAndSettle();
+    expect(store.committedState.history, hasLength(1));
+    expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('choice-u')))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected
+            .name,
+        'isTrue');
+    await tester.pumpWidget(const SizedBox.shrink());
+    semantics.dispose();
   });
 
   for (final lifecycleState in [
@@ -435,60 +654,240 @@ void main() {
     container.dispose();
   });
 
-  testWidgets('restored_answer_does_not_invent_selected_choice',
-      (tester) async {
-    final audio = ControlledListeningAudio();
-    final store = CourseLearningWidgetStore();
-    final overrides = [
-      courseAudioProvider.overrideWithValue(audio),
-      courseLearningStoreProvider.overrideWithValue(store),
-    ];
-    await tester.pumpWidget(ProviderScope(
-        overrides: overrides,
+  for (final outcome in ['success', 'failure', 'cancel']) {
+    testWidgets('stale_A_replay_${outcome}_cannot_stop_B_owner_playback',
+        (tester) async {
+      final audioA = ControlledListeningAudio();
+      final audioB = ControlledListeningAudio();
+      final ownerA = CourseLearningWidgetStore(
+          scope: LearningScope(
+              courseId: 'en-fr', owner: LearningOwner.account('replay-a')));
+      final ownerB = CourseLearningWidgetStore(
+          scope: LearningScope(
+              courseId: 'en-fr', owner: LearningOwner.account('replay-b')));
+      var currentStore = ownerA;
+      var currentAudio = audioA;
+      final container = ProviderContainer(overrides: [
+        courseAudioProvider.overrideWith((ref) => currentAudio),
+        courseLearningStoreProvider.overrideWith((ref) => currentStore),
+      ]);
+      await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
         child: const MaterialApp(
-            home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'))));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Listen to the word'));
-    await tester.pump();
-    audio.requests.single.complete();
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('/u/'));
-    await tester.pumpAndSettle();
-    expect(find.text('Correct'), findsOneWidget);
-    final answerCount =
-        store.prepared.where((command) => command.action is ChooseSound).length;
+            home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y')),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      audioA.requests.single.complete();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      final staleAReplay = audioA.requests.last;
 
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pumpWidget(ProviderScope(
+      currentStore = ownerB;
+      currentAudio = audioB;
+      container.invalidate(courseLearningStoreProvider);
+      container.invalidate(courseAudioProvider);
+      await tester.pumpAndSettle();
+      final bState = ownerB.committedState;
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      expect(audioB.requests, hasLength(1));
+      final stopCountWhileBPlaying = audioB.stopCalls;
+      if (outcome == 'success') {
+        staleAReplay.complete();
+      } else if (outcome == 'failure') {
+        staleAReplay.fail(cause: StateError('stale A exception sentinel'));
+      } else {
+        staleAReplay.cancel();
+      }
+      await tester.pump();
+      expect(find.text('Playback in progress'), findsOneWidget);
+      expect(
+          tester
+              .widget<ButtonStyleButton>(find
+                  .ancestor(
+                    of: find.text('/u/'),
+                    matching: find.bySubtype<ButtonStyleButton>(),
+                  )
+                  .first)
+              .onPressed,
+          isNull,
+          reason: 'B has not yet acquired hearing permission');
+      expect(audioB.stopCalls, stopCountWhileBPlaying,
+          reason: 'settling A must not stop actively playing B');
+      expect(ownerB.committedState, same(bState));
+      expect(ownerB.committedState.history, isEmpty);
+      expect(ownerB.committedState.mistakes, isEmpty);
+      expect(ownerB.prepared.where((command) => command.action is ChooseSound),
+          isEmpty);
+      expect(ownerB.submitted.where((command) => command.action is ChooseSound),
+          isEmpty);
+      expect(tester.takeException(), isNull);
+
+      audioB.requests.single.complete();
+      await tester.pumpAndSettle();
+      expect(
+          tester
+              .widget<ButtonStyleButton>(find
+                  .ancestor(
+                    of: find.text('/u/'),
+                    matching: find.bySubtype<ButtonStyleButton>(),
+                  )
+                  .first)
+              .onPressed,
+          isNotNull,
+          reason: 'only B current successful playback grants hearing');
+      await tester.pumpWidget(const SizedBox.shrink());
+      container.dispose();
+    });
+  }
+
+  for (final outcome in ['success', 'failure', 'cancel']) {
+    testWidgets('disposed_held_replay_${outcome}_cannot_unlock_remount',
+        (tester) async {
+      final departedAudio = ControlledListeningAudio();
+      final currentAudio = ControlledListeningAudio();
+      final store = CourseLearningWidgetStore();
+      final overrides = [
+        courseLearningStoreProvider.overrideWithValue(store),
+        courseAudioProvider.overrideWithValue(departedAudio),
+      ];
+      await tester.pumpWidget(ProviderScope(
         overrides: overrides,
         child: const MaterialApp(
-            home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'))));
-    await tester.pumpAndSettle();
-    expect(find.text('Correct'), findsOneWidget);
-    expect(find.text('Not yet'), findsNothing);
-    expect(
-        tester
-            .getSemantics(find
-                .ancestor(
-                  of: find.text('/u/'),
-                  matching: find.bySubtype<ButtonStyleButton>(),
-                )
-                .first)
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected
-            .name,
-        'none');
-    expect(store.prepared.where((command) => command.action is ChooseSound),
-        hasLength(answerCount));
-    expect(
-        tester
-            .widget<FilledButton>(
-                find.widgetWithText(FilledButton, 'Next word'))
-            .onPressed,
-        isNotNull);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
+            home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y')),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      departedAudio.requests.single.complete();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      final departedReplay = departedAudio.requests.last;
+      await tester.pumpWidget(const SizedBox.shrink());
+
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(store),
+          courseAudioProvider.overrideWithValue(currentAudio),
+        ],
+        child: const MaterialApp(
+            home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y')),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      expect(currentAudio.requests, hasLength(1));
+      final stopCount = currentAudio.stopCalls;
+      if (outcome == 'success') {
+        departedReplay.complete();
+      } else if (outcome == 'failure') {
+        departedReplay.fail(cause: StateError('departed exception sentinel'));
+      } else {
+        departedReplay.cancel();
+      }
+      await tester.pump();
+      expect(find.text('Playback in progress'), findsOneWidget);
+      expect(currentAudio.stopCalls, stopCount);
+      expect(store.prepared.where((command) => command.action is ChooseSound),
+          isEmpty);
+      expect(store.committedState.history, isEmpty);
+      expect(tester.takeException(), isNull);
+      currentAudio.requests.single.complete();
+      await tester.pumpAndSettle();
+      expect(
+          tester
+              .widget<ButtonStyleButton>(find
+                  .ancestor(
+                    of: find.text('/u/'),
+                    matching: find.bySubtype<ButtonStyleButton>(),
+                  )
+                  .first)
+              .onPressed,
+          isNotNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
+  for (final isCorrect in [true, false]) {
+    testWidgets(
+        'restored_answer_does_not_invent_selected_choice '
+        '(correct=$isCorrect)', (tester) async {
+      final audio = ControlledListeningAudio();
+      final store = CourseLearningWidgetStore();
+      final overrides = [
+        courseAudioProvider.overrideWithValue(audio),
+        courseLearningStoreProvider.overrideWithValue(store),
+      ];
+      await tester.pumpWidget(ProviderScope(
+          overrides: overrides,
+          child: const MaterialApp(
+              home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'))));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      audio.requests.single.complete();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(isCorrect ? '/u/' : '/y/'));
+      await tester.pumpAndSettle();
+      expect(find.text(isCorrect ? 'Correct' : 'Not yet'), findsOneWidget);
+      final committed = store.committedState;
+      final restoredStore = CourseLearningWidgetStore(initialState: committed);
+      final restoredAudio = ControlledListeningAudio();
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(ProviderScope(
+          overrides: [
+            courseAudioProvider.overrideWithValue(restoredAudio),
+            courseLearningStoreProvider.overrideWithValue(restoredStore),
+          ],
+          child: const MaterialApp(
+              home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'))));
+      await tester.pumpAndSettle();
+      expect(find.text(isCorrect ? 'Correct' : 'Not yet'), findsOneWidget);
+      for (final choice in ['u', 'y']) {
+        expect(
+            tester
+                .getSemantics(find.byKey(ValueKey('choice-$choice')))
+                .getSemanticsData()
+                .flagsCollection
+                .isSelected
+                .name,
+            'isFalse',
+            reason: 'restoration has no persisted selected choice');
+        expect(
+            tester
+                .widget<ButtonStyleButton>(find
+                    .ancestor(
+                      of: find.text('/$choice/'),
+                      matching: find.bySubtype<ButtonStyleButton>(),
+                    )
+                    .first)
+                .onPressed,
+            isNull,
+            reason: 'answered checkpoints cannot be reanswered');
+      }
+      expect(
+          tester
+              .widget<FilledButton>(
+                  find.widgetWithText(FilledButton, 'Listen to the word'))
+              .onPressed,
+          isNull,
+          reason: 'answered checkpoints cannot replay');
+      expect(restoredStore.prepared, isEmpty,
+          reason: 'restore does not invent or resubmit a response');
+      expect(
+          tester
+              .widget<FilledButton>(
+                  find.widgetWithText(FilledButton, 'Next word'))
+              .onPressed,
+          isNotNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
 
   testWidgets('one_item_review_replay_preserves_repeat_context',
       (tester) async {
@@ -544,15 +943,24 @@ void main() {
     expect(store.discoverySession!.policy.requiredCorrect(10), 10);
     expect(find.text('Section debrief'), findsNothing,
         reason: 'the debrief waits for explicit Advance acknowledgement');
+    final advanceGate = Completer<void>();
+    store.actionGates[AdvanceLesson] = advanceGate;
+    final beforeFinalAdvance = store.committedState;
     await tester.tap(find.text('See section explanation'));
+    await tester.pump();
+    expect(find.text('Correct'), findsOneWidget);
+    expect(find.text('Section debrief'), findsNothing);
+    expect(find.textContaining('1 of 1'), findsOneWidget);
+    expect(store.committedState, same(beforeFinalAdvance));
+    advanceGate.complete();
     await tester.pumpAndSettle();
     expect(find.text('Section debrief'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('pilot_accessibility_survives_extraction', (tester) async {
-    tester.view.physicalSize = const Size(720, 1280);
-    tester.view.devicePixelRatio = 2;
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
     tester.platformDispatcher.textScaleFactorTestValue = 2;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -560,27 +968,57 @@ void main() {
     final semantics = tester.ensureSemantics();
     final audio = ControlledListeningAudio();
     final store = CourseLearningWidgetStore();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        courseAudioProvider.overrideWithValue(audio),
-        courseLearningStoreProvider.overrideWithValue(store),
-      ],
+    var failProvider = true;
+    final container = ProviderContainer(overrides: [
+      courseAudioProvider.overrideWith((ref) {
+        if (failProvider) throw StateError('hidden-exception-sentinel');
+        return audio;
+      }),
+      courseLearningStoreProvider.overrideWithValue(store),
+    ]);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
       child: const MaterialApp(
         home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
       ),
     ));
     await tester.pumpAndSettle();
     expect(find.text(alphaAudioDisclosure), findsOneWidget);
-    expect(find.text('mur'), findsNothing);
-    expect(find.text('wall'), findsNothing);
     expect(find.text('Section debrief'), findsNothing);
+    final section = sectionForLesson('en-fr-u-y')!;
+    final tout = section.items.firstWhere((item) => item.id == 'tout');
+    _expectNoHiddenPayload(tester, [
+      tout.word,
+      'all',
+      'tu',
+      section.explanation,
+      'hidden-exception-sentinel',
+    ]);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(audio.requests, isEmpty,
+        reason: 'provider failure occurs before playback request creation');
+    _expectNoHiddenPayload(tester, [
+      tout.word,
+      'all',
+      'tu',
+      section.explanation,
+      'hidden-exception-sentinel',
+    ]);
+    expect(find.textContaining('could not be played'), findsOneWidget);
+
+    failProvider = false;
+    container.invalidate(courseAudioProvider);
+    await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     expect(audio.requests, hasLength(1),
         reason: 'keyboard focus activates the same real Listen action');
     expect(find.text('Playback in progress'), findsOneWidget);
+    expect(tester.getSemantics(find.text('Playback in progress')).label,
+        contains('Playback in progress'));
     expect(
         tester
             .getSemantics(find.text('Listen to the word'))
@@ -590,23 +1028,113 @@ void main() {
         isTrue);
     expect(
         tester
-            .getSemantics(find.byKey(const ValueKey('choice-u')))
+            .getSemantics(find.text('/u/'))
             .getSemanticsData()
             .flagsCollection
             .isButton,
         isTrue);
+    expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('choice-u')))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected
+            .name,
+        'isFalse');
+    expect(
+        tester
+            .getSemantics(find.text('Listen to the word'))
+            .getSemanticsData()
+            .flagsCollection
+            .isEnabled
+            .name,
+        'isFalse');
+    expect(
+        tester
+            .widget<FilledButton>(
+                find.widgetWithText(FilledButton, 'Listen to the word'))
+            .onPressed,
+        isNull,
+        reason: 'pending playback exposes disabled state');
     audio.requests.single.complete();
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('/y/'), 120);
-    await tester.tap(find.text('/y/'));
+    expect(find.text(alphaAudioDisclosure), findsOneWidget);
+    _expectNoHiddenPayload(tester, [
+      tout.word,
+      'all',
+      'tu',
+      section.explanation,
+      'hidden-exception-sentinel',
+    ]);
+    await _tabUntilFocused(tester, '/y/');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
+    expect(store.prepared.where((command) => command.action is ChooseSound),
+        hasLength(1),
+        reason: 'rapid keyboard Enter admits one answer');
+    final answer =
+        store.prepared.singleWhere((command) => command.action is ChooseSound);
+    expect((answer.action as ChooseSound).selectedSound, 'y');
     expect(find.text('Not yet'), findsOneWidget);
-    expect(find.text('mur'), findsNothing);
-    expect(find.text('wall'), findsNothing);
-    expect(find.text('Tu or tout?'), findsNothing);
+    expect(
+        tester.getSemantics(find.text('Not yet')).label, contains('Not yet'));
+    expect(
+        tester
+            .getSemantics(find.text('/y/'))
+            .getSemanticsData()
+            .flagsCollection
+            .isEnabled
+            .name,
+        'isFalse');
+    expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('choice-y')))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected
+            .name,
+        'isTrue');
+    expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('choice-u')))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected
+            .name,
+        'isFalse');
+    for (final choiceLabel in ['/u/', '/y/']) {
+      expect(
+          tester
+              .getSemantics(find.text(choiceLabel))
+              .getSemanticsData()
+              .flagsCollection
+              .isEnabled
+              .name,
+          'isFalse',
+          reason: 'answered choice $choiceLabel is semantically disabled');
+    }
+    expect(
+        tester
+            .getSemantics(find.text('Listen to the word'))
+            .getSemanticsData()
+            .flagsCollection
+            .isEnabled
+            .name,
+        'isFalse');
+    _expectNoHiddenPayload(tester, [
+      tout.word,
+      'all',
+      'tu',
+      section.explanation,
+      'hidden-exception-sentinel',
+    ]);
+    expect(find.text('Retry saving'), findsNothing);
+    expect(store.committedState.history, hasLength(1));
     expect(find.text(alphaAudioDisclosure), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     semantics.dispose();
+    container.dispose();
   });
 }

@@ -234,7 +234,6 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
         _heard = false;
         _busy = false;
         _playing = false;
-        _selectedSound = null;
       });
     }
   }
@@ -405,7 +404,11 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   Future<void> _onListen() async {
     if (_suspended) return;
     final session = _session;
-    if (session == null || session.answered) return;
+    if (session == null ||
+        session.phase != LessonSectionPhase.exercise ||
+        session.answered) {
+      return;
+    }
     if (_busy ||
         _loadError != null ||
         _saveError != null ||
