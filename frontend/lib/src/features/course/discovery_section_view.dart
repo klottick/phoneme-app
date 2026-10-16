@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../core/course/lesson_section.dart';
 import '../../core/course/lesson_section_session.dart';
+import '../../core/course/lesson_debrief_content.dart';
 import 'exercises/listening_choice.dart';
 import 'exercises/listening_exercise_contract.dart';
+import 'lesson_section_debrief.dart';
 
 /// Stateless view of one discovery listening section session.
 ///
@@ -21,7 +23,7 @@ import 'exercises/listening_exercise_contract.dart';
 /// [onReview], [onFinish], [onRetrySave]. This widget performs no I/O, never
 /// initializes audio, never writes progress, and mutates nothing.
 class DiscoverySectionView extends StatelessWidget {
-  const DiscoverySectionView({
+  DiscoverySectionView({
     super.key,
     required this.section,
     required this.session,
@@ -34,13 +36,14 @@ class DiscoverySectionView extends StatelessWidget {
     this.conflict,
     this.onReload,
     this.onPractiseAgain,
+    List<LessonDebriefEntry> teachingEntries = const [],
     required this.onListen,
     required this.onAnswer,
     required this.onNext,
     required this.onReview,
     required this.onFinish,
     required this.onRetrySave,
-  });
+  }) : teachingEntries = List.unmodifiable(teachingEntries);
 
   final LessonSection section;
   final LessonSectionSession session;
@@ -67,6 +70,7 @@ class DiscoverySectionView extends StatelessWidget {
   /// (explicit 'Practise again'). Null hides the control; non-null shows it
   /// in the debrief whether or not unresolved words remain.
   final VoidCallback? onPractiseAgain;
+  final List<LessonDebriefEntry> teachingEntries;
   final VoidCallback onListen;
   final ValueChanged<String> onAnswer;
   final VoidCallback onNext;
@@ -80,7 +84,21 @@ class DiscoverySectionView extends StatelessWidget {
     final Color divider = Theme.of(context).dividerColor;
     final List<Widget> children = session.phase == LessonSectionPhase.exercise
         ? _exerciseChildren(textTheme, divider)
-        : _debriefChildren(textTheme, divider);
+        : [
+            LessonSectionDebrief(
+              section: section,
+              session: session,
+              teachingEntries: teachingEntries,
+              busy: busy,
+              error: error,
+              conflict: conflict,
+              onReload: onReload,
+              onPractiseAgain: onPractiseAgain,
+              onReview: onReview,
+              onFinish: onFinish,
+              onRetrySave: onRetrySave,
+            )
+          ];
     final String? notice = this.notice;
     if (notice != null) {
       // The notice shares the scrolling content with the controls so that
@@ -98,7 +116,10 @@ class DiscoverySectionView extends StatelessWidget {
           ));
     }
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: EdgeInsets.symmetric(
+        horizontal: 20,
+        vertical: session.phase == LessonSectionPhase.debrief ? 8 : 16,
+      ),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 560),
@@ -196,97 +217,11 @@ class DiscoverySectionView extends StatelessWidget {
     ];
   }
 
-  List<Widget> _debriefChildren(TextTheme textTheme, Color divider) {
-    final bool inConflict = _inConflict();
-    final bool inError = error != null || inConflict;
-    final bool canFinish = session.canComplete && !busy && !inError;
-    final bool canReview = !busy && !inError;
-    final int total = session.itemIds.length;
-    final List<String> unresolvedWords =
-        _sectionWordFor(session.unresolvedItemIds);
-    return [
-      // The word-bearing authored title is only revealed together with its
-      // explanation at the debrief.
-      Text(section.title, style: textTheme.titleLarge),
-      const SizedBox(height: 8),
-      Text('Section debrief', style: textTheme.bodyMedium),
-      const SizedBox(height: 16),
-      Text(section.explanation, style: textTheme.bodyLarge),
-      const SizedBox(height: 16),
-      Text('You got ${session.correctCount} of $total correct.',
-          style: textTheme.titleMedium),
-      Text(
-        'Passing needs ${session.policy.requiredCorrect(total)} of $total correct.',
-        style: textTheme.bodyMedium,
-      ),
-      if (unresolvedWords.isEmpty)
-        Text('Every word is correct now.', style: textTheme.bodyMedium)
-      else ...[
-        const SizedBox(height: 16),
-        Text('Unresolved words:', style: textTheme.bodyMedium),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final String word in unresolvedWords)
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: divider),
-                ),
-                child: Text(word, style: textTheme.bodyMedium),
-              ),
-          ],
-        ),
-      ],
-      if (error != null) ..._errorChildren(textTheme),
-      if (inConflict) ..._conflictChildren(textTheme),
-      const SizedBox(height: 24),
-      FilledButton(
-        onPressed: canFinish ? onFinish : null,
-        child: const Text('Finish section'),
-      ),
-      if (unresolvedWords.isNotEmpty) ...[
-        const SizedBox(height: 10),
-        OutlinedButton(
-          onPressed: canReview ? onReview : null,
-          child: const Text('Review mistakes'),
-        ),
-      ],
-      if (onPractiseAgain != null) ...[
-        const SizedBox(height: 10),
-        OutlinedButton(
-          // Explicit only: the screen persists the fresh zero-attempt
-          // identity before the exercise is exposed, so disable while that
-          // save (or any error state) is unresolved.
-          onPressed: onPractiseAgain != null && !busy && !inError
-              ? onPractiseAgain
-              : null,
-          child: const Text('Practise again'),
-        ),
-      ],
-    ];
-  }
-
   String _progressLabel() {
     final String item =
         'item ${session.position + 1} of ${session.queue.length}';
     return session.round == 1
         ? item[0].toUpperCase() + item.substring(1)
         : 'Review round ${session.round} · $item';
-  }
-
-  /// The section words whose item IDs the session still reports unresolved.
-  List<String> _sectionWordFor(List<String> itemIds) {
-    final Map<String, String> wordById = {
-      for (final LessonSectionItem item in section.items) item.id: item.word,
-    };
-    return [
-      for (final String id in itemIds)
-        if (wordById[id] != null) wordById[id]!,
-    ];
   }
 }
