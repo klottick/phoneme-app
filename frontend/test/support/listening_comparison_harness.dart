@@ -105,7 +105,6 @@ class _ComparisonHarnessState extends State<ComparisonHarness>
         oldWidget.ownerId != widget.ownerId ||
         !_sameFixture(oldWidget.fixture, widget.fixture)) {
       _invalidate();
-      _blocked = false;
     }
   }
 

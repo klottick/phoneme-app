@@ -16,19 +16,27 @@ String _semanticsText(WidgetTester t, Finder finder) {
   return t.getSemantics(finder).getSemanticsData().label;
 }
 
+bool _primaryFocusContains(WidgetTester tester, String label) {
+  final element = find.text(label).evaluate().single;
+  return Focus.of(element).hasPrimaryFocus;
+}
+
 final _prompt = SoundComparisonPrompt(
     id: 'cmp',
     instruction: 'Compare the first sound in each word',
     sampleAReferenceId: 'ref-a',
     sampleBReferenceId: 'ref-b');
 ComparisonFixture _fixture(PhonemeRelation expected, String a, String b,
-        {String location = 'first sound', String? id}) =>
+        {String location = 'first sound',
+        String? id,
+        String referenceA = 'ref-a',
+        String referenceB = 'ref-b'}) =>
     ComparisonFixture(
         prompt: SoundComparisonPrompt(
             id: id ?? _prompt.id,
             instruction: 'Compare the $location in each word',
-            sampleAReferenceId: _prompt.sampleAReferenceId,
-            sampleBReferenceId: _prompt.sampleBReferenceId),
+            sampleAReferenceId: referenceA,
+            sampleBReferenceId: referenceB),
         targetLocationA: location,
         targetLocationB: location,
         targetPhonemeA: a,
@@ -232,12 +240,17 @@ void main() {
   testWidgets('comparison_uses_authored_phoneme_relation', (tester) async {
     for (final fixture in [
       _fixture(PhonemeRelation.same, 'u', 'u',
-          location: 'final sound', id: 'fr-word-tout/fr-word-vous'),
+          location: 'final sound',
+          referenceA: 'fr-word-tout',
+          referenceB: 'fr-word-vous'),
       _fixture(PhonemeRelation.different, 'u', 'y',
-          location: 'final sound', id: 'fr-word-tout/fr-word-tu'),
-      _fixture(PhonemeRelation.same, 'ʁ', 'ʁ', id: 'fr-word-rue/fr-word-rouge'),
+          location: 'final sound',
+          referenceA: 'fr-word-tout',
+          referenceB: 'fr-word-tu'),
+      _fixture(PhonemeRelation.same, 'ʁ', 'ʁ',
+          referenceA: 'fr-word-rue', referenceB: 'fr-word-rouge'),
       _fixture(PhonemeRelation.different, 'ʁ', 'v',
-          id: 'fr-word-rue/fr-word-vous')
+          referenceA: 'fr-word-rue', referenceB: 'fr-word-vous')
     ]) {
       for (final order in [
         ComparisonSample.values,
@@ -260,6 +273,12 @@ void main() {
               ? 'Listen to sample A'
               : 'Listen to sample B'));
           await tester.pump();
+          expect(
+            audio.requests.last.referenceId,
+            sample == ComparisonSample.a
+                ? fixture.prompt.sampleAReferenceId
+                : fixture.prompt.sampleBReferenceId,
+          );
           audio.requests.last.complete();
           await tester.pump();
         }
@@ -357,35 +376,87 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: Scaffold(
             body: SingleChildScrollView(
-                child: ComparisonHarness(
-                    fixture: _fixture(
-                        PhonemeRelation.different, 'secret-a', 'secret-b',
-                        id: 'fr-word-tout'),
-                    audio: audio,
-                    ownerId: 'o',
-                    onSubmitted: submissions.add)))));
+                child: Column(children: [
+      ComparisonHarness(
+          fixture: _fixture(PhonemeRelation.different, 'secret-a', 'secret-b',
+              id: 'fr-word-tout'),
+          audio: audio,
+          ownerId: 'o',
+          onSubmitted: submissions.add),
+      TextButton(onPressed: () {}, child: const Text('Outside control'))
+    ])))));
     expect(tester.takeException(), isNull);
     expect(
         tester.getSemantics(find.text('Listen to sample A')).label, isNotEmpty);
     expect(_button(tester, 'Same').enabled, isFalse);
+    expect(
+        tester
+            .getSemantics(find.text('Same'))
+            .getSemanticsData()
+            .flagsCollection
+            .isEnabled
+            .name,
+        'isFalse');
 
-    // Exercise real keyboard focus and activation, not a direct callback.
-    await tester.ensureVisible(find.text('Listen to sample A'));
-    await tester.tap(find.text('Listen to sample A'));
+    // Tab into the controls and activate both plays with the keyboard only.
+    tester.binding.focusManager.primaryFocus?.unfocus();
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
     await tester.pump();
-    audio.requests.last.complete();
-    await tester.pump();
-    await tester.ensureVisible(find.text('Listen to sample B'));
-    await tester.tap(find.text('Listen to sample B'));
-    await tester.pump();
-    audio.requests.last.complete();
-    await tester.pump();
-    await tester.ensureVisible(find.text('Same'));
-    await tester.tap(find.text('Same')); // Focus the actual Material button.
+    expect(tester.binding.focusManager.primaryFocus, isNotNull,
+        reason: 'Tab must move focus into the exercise');
+    expect(_primaryFocusContains(tester, 'Listen to sample A'), isTrue);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(find.text('Playback in progress'), findsOneWidget);
+    expect(tester.getSemantics(find.text('Playback in progress')).label,
+        contains('Playback in progress'));
+    expect(
+        tester
+            .getSemantics(find.text('Listen to sample B'))
+            .getSemanticsData()
+            .flagsCollection
+            .isEnabled
+            .name,
+        'isFalse');
+    audio.requests.last.complete();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    expect(_primaryFocusContains(tester, 'Listen to sample B'), isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(find.text('Playback in progress'), findsOneWidget);
+    audio.requests.last.complete();
+    await tester.pump();
+
+    // Traverse both responses and leave the exercise without pointer focus.
+    for (var tabPress = 0;
+        tabPress < 6 && !_primaryFocusContains(tester, 'Same');
+        tabPress++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    }
+    expect(_primaryFocusContains(tester, 'Same'), isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    expect(_primaryFocusContains(tester, 'Different'), isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    expect(_primaryFocusContains(tester, 'Outside control'), isTrue);
+    // Shift-Tab back through Different to the deliberately wrong Same response.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    expect(_primaryFocusContains(tester, 'Same'), isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(submissions, [PhonemeRelation.same],
+        reason: 'rapid keyboard activation is claimed once before redraw');
     await tester.pump();
     expect(submissions, [PhonemeRelation.same]);
     expect(find.text('Not yet'), findsOneWidget);
+    expect(
+        tester.getSemantics(find.text('Not yet')).label, contains('Not yet'));
     expect(
         tester
             .getSemantics(find.byKey(const ValueKey('relation-same')))
@@ -418,9 +489,6 @@ void main() {
       expect(
           find.bySemanticsLabel(RegExp(RegExp.escape(sentinel))), findsNothing,
           reason: sentinel);
-      expect(
-          find.bySemanticsLabel(RegExp(RegExp.escape(sentinel))), findsNothing,
-          reason: sentinel);
       final root = tester
           .binding.renderViews.first.owner!.semanticsOwner!.rootSemanticsNode!;
       final nodes = <SemanticsNode>[];
@@ -450,6 +518,148 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     audio.releaseAll();
+    semantics.dispose();
+    tester.view.resetPhysicalSize();
+    tester.view.resetDevicePixelRatio();
+    tester.platformDispatcher.clearTextScaleFactorTestValue();
+  });
+
+  testWidgets('identification_keyboard_semantics_and_layout_are_neutral',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    var busy = false;
+    var playing = false;
+    var heard = false;
+    var answered = false;
+    String? selected;
+    ListeningFeedback? feedback;
+    var submissions = 0;
+    late StateSetter rebuildOwner;
+    final prompt = ListeningChoicePrompt(
+      id: 'hidden-word-fr-word-tout',
+      instruction: 'Identify the sound',
+      choices: [
+        ListeningChoiceOption(id: 'u', label: '/u/'),
+        ListeningChoiceOption(id: 'y', label: '/y/'),
+      ],
+    );
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: SingleChildScrollView(
+                child: Column(children: [
+      StatefulBuilder(builder: (context, setState) {
+        rebuildOwner = setState;
+        return ListeningChoice(
+          prompt: prompt,
+          state: ListeningExerciseState(
+              busy: busy,
+              playing: playing,
+              answered: answered,
+              feedback: feedback),
+          heard: heard,
+          selectedChoiceId: selected,
+          onListen: () => setState(() {
+            busy = true;
+            playing = true;
+          }),
+          onAnswer: (id) {
+            if (answered) return;
+            submissions++;
+            setState(() {
+              answered = true;
+              selected = id;
+              feedback = id == 'y'
+                  ? ListeningFeedback.correct
+                  : ListeningFeedback.notYet;
+            });
+          },
+        );
+      }),
+      TextButton(onPressed: () {}, child: const Text('Identification outside'))
+    ])))));
+
+    tester.binding.focusManager.primaryFocus?.unfocus();
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    expect(
+        Focus.of(find.text('Listen to the word').evaluate().single)
+            .hasPrimaryFocus,
+        isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(find.text('Playback in progress'), findsOneWidget);
+    expect(tester.getSemantics(find.text('Playback in progress')).label,
+        contains('Playback in progress'));
+    expect(_button(tester, '/u/').enabled, isFalse);
+    expect(
+        tester
+            .getSemantics(find.text('/u/'))
+            .getSemanticsData()
+            .flagsCollection
+            .isEnabled
+            .name,
+        'isFalse');
+    rebuildOwner(() {
+      busy = false;
+      playing = false;
+      heard = true;
+    });
+    await tester.pump();
+
+    for (var tabPress = 0;
+        tabPress < 6 &&
+            !Focus.of(find.text('/u/').evaluate().single).hasPrimaryFocus;
+        tabPress++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    }
+    expect(
+        Focus.of(find.text('/u/').evaluate().single).hasPrimaryFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    expect(
+        Focus.of(find.text('/y/').evaluate().single).hasPrimaryFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    expect(
+        Focus.of(find.text('Identification outside').evaluate().single)
+            .hasPrimaryFocus,
+        isTrue);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    expect(
+        Focus.of(find.text('/u/').evaluate().single).hasPrimaryFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(submissions, 1,
+        reason: 'owner claims repeated keyboard answer before redraw');
+    await tester.pump();
+    expect(find.text('Not yet'), findsOneWidget);
+    expect(
+        tester.getSemantics(find.text('Not yet')).label, contains('Not yet'));
+    expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('choice-u')))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected
+            .name,
+        'isTrue');
+    expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('choice-y')))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected
+            .name,
+        'isFalse');
+
+    await tester.ensureVisible(find.text('/y/'));
+    expect(tester.getTopLeft(find.text('/y/')).dy, lessThan(640));
+    await tester.pumpWidget(const SizedBox());
     semantics.dispose();
     tester.view.resetPhysicalSize();
     tester.view.resetDevicePixelRatio();
@@ -523,20 +733,40 @@ void main() {
         host('A', audioA, _fixture(PhonemeRelation.same, 'u', 'u')));
     await tester.tap(find.text('Listen to sample A'));
     await tester.pump();
+    final oldARequest = audioA.requests.last;
     await tester.pumpWidget(
         host('B', audioB, _fixture(PhonemeRelation.same, 'u', 'u')));
     expect(audioA.stopCalls, 1);
     await tester.tap(find.text('Listen to sample A'));
     await tester.pump();
-    final current = audioB.requests.last;
-    audioA.requests.last.complete();
-    await tester.pump();
-    expect(_button(tester, 'Listen to sample B').enabled, isFalse);
-    current.complete();
-    await tester.pump();
-    expect(_button(tester, 'Listen to sample B').enabled, isTrue);
+    final heldBRequest = audioB.requests.last;
     await tester.pumpWidget(
         host('A', audioA, _fixture(PhonemeRelation.same, 'u', 'u')));
+    expect(audioB.stopCalls, 1);
+    await tester.tap(find.text('Listen to sample A'));
+    await tester.pump();
+    final currentARequest = audioA.requests.last;
+
+    oldARequest.complete(); // Settles only after owner A has returned.
+    await tester.pump();
+    expect(find.text('Playback in progress'), findsOneWidget);
+    expect(_button(tester, 'Listen to sample A').enabled, isFalse);
+    expect(_button(tester, 'Same').enabled, isFalse);
+    expect(audioA.stopCalls, 1, reason: 'stale A must not stop current A');
+    expect(submissions, isEmpty);
+    expect(find.text('Correct'), findsNothing);
+    expect(find.text('Not yet'), findsNothing);
+    heldBRequest.complete();
+    await tester.pump();
+    expect(find.text('Playback in progress'), findsOneWidget,
+        reason: 'stale B must not clear newer A busy state');
+    expect(find.text('Correct'), findsNothing);
+    expect(find.text('Not yet'), findsNothing);
+    expect(audioA.stopCalls, 1);
+    currentARequest.complete();
+    await tester.pump();
+    expect(_button(tester, 'Listen to sample B').enabled, isTrue,
+        reason: 'only current A success is heard after A→B→A');
     expect(_button(tester, 'Same').enabled, isFalse);
     expect(audioB.disposeCalls, 0);
     await tester.pumpWidget(const SizedBox());
@@ -580,32 +810,181 @@ void main() {
     }
   });
 
+  testWidgets('comparison_owner_replacement_resets_an_actual_answer',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    final audio = ControlledListeningAudio();
+    final submissions = <PhonemeRelation>[];
+    Widget host(String owner) => MaterialApp(
+        home: Scaffold(
+            body: ComparisonHarness(
+                key: const ValueKey('answer-owner'),
+                fixture: _fixture(PhonemeRelation.same, 'u', 'u'),
+                audio: audio,
+                ownerId: owner,
+                onSubmitted: submissions.add)));
+    Future<void> hearBoth() async {
+      for (final sample in ComparisonSample.values) {
+        await tester.tap(find.text(sample == ComparisonSample.a
+            ? 'Listen to sample A'
+            : 'Listen to sample B'));
+        await tester.pump();
+        audio.requests.last.complete();
+        await tester.pump();
+      }
+    }
+
+    await tester.pumpWidget(host('answered-owner'));
+    await hearBoth();
+    await tester.tap(find.text('Different'));
+    await tester.pump();
+    expect(submissions, [PhonemeRelation.different]);
+    expect(find.text('Not yet'), findsOneWidget);
+    expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('relation-different')))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected
+            .name,
+        'isTrue');
+
+    await tester.pumpWidget(host('replacement-owner'));
+    expect(find.text('Not yet'), findsNothing);
+    expect(find.text('Correct'), findsNothing);
+    expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('relation-different')))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected
+            .name,
+        'isFalse');
+    expect(_button(tester, 'Same').enabled, isFalse);
+    await hearBoth();
+    expect(_button(tester, 'Same').enabled, isTrue);
+    await tester.tap(find.text('Same'));
+    expect(submissions, [PhonemeRelation.different, PhonemeRelation.same]);
+    await tester.pump();
+    expect(find.text('Correct'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    audio.releaseAll();
+    semantics.dispose();
+  });
+
   testWidgets(
       'comparison_suspension_requires_fresh_hearing_and_resume_does_not_autoplay',
       (tester) async {
-    final audio = ControlledListeningAudio(), submissions = <PhonemeRelation>[];
-    await tester.pumpWidget(MaterialApp(
+    for (final ending in ['complete', 'cancel', 'fail']) {
+      final audio = ControlledListeningAudio();
+      final submissions = <PhonemeRelation>[];
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+              body: ComparisonHarness(
+                  fixture: _fixture(PhonemeRelation.same, 'u', 'u'),
+                  audio: audio,
+                  ownerId: 'life-$ending',
+                  onSubmitted: submissions.add))));
+      for (final sample in ComparisonSample.values) {
+        await tester.tap(find.text(sample == ComparisonSample.a
+            ? 'Listen to sample A'
+            : 'Listen to sample B'));
+        await tester.pump();
+        audio.requests.last.complete();
+        await tester.pump();
+      }
+      expect(_button(tester, 'Same').enabled, isTrue);
+      await tester.tap(find.text('Listen to sample A'));
+      await tester.pump();
+      final staleReplay = audio.requests.last;
+      expect(_button(tester, 'Same').enabled, isFalse,
+          reason: 'starting replay revokes A permission');
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      expect(audio.stopCalls, 1);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(audio.requests, hasLength(3), reason: 'resume must not autoplay');
+      await tester.tap(find.text('Listen to sample B'));
+      await tester.pump();
+      final currentB = audio.requests.last;
+      if (ending == 'complete') staleReplay.complete();
+      if (ending == 'cancel') staleReplay.cancel();
+      if (ending == 'fail') {
+        staleReplay.fail(cause: StateError('stale failure'));
+      }
+      await tester.pump();
+      expect(find.text('Playback in progress'), findsOneWidget,
+          reason: 'stale result must not clear current B busy');
+      expect(_button(tester, 'Same').enabled, isFalse);
+      expect(_button(tester, 'Listen to sample A').enabled, isFalse);
+      expect(
+          find.text('Audio unavailable. Try listening again.'), findsNothing);
+      expect(find.text('stale failure'), findsNothing);
+      expect(audio.stopCalls, 1,
+          reason: 'stale completion must not stop current B');
+      expect(submissions, isEmpty);
+      currentB.complete();
+      await tester.pump();
+      expect(_button(tester, 'Same').enabled, isFalse,
+          reason: 'stale A replay cannot restore A permission');
+      await tester.tap(find.text('Listen to sample A'));
+      await tester.pump();
+      expect(audio.requests.last.referenceId, 'ref-a');
+      audio.requests.last.complete();
+      await tester.pump();
+      expect(_button(tester, 'Same').enabled, isTrue);
+      await tester.pumpWidget(const SizedBox());
+      audio.releaseAll();
+    }
+  });
+
+  testWidgets(
+      'comparison_suspended_owner_replacement_keeps_playback_blocked_until_resume',
+      (tester) async {
+    final oldAudio = ControlledListeningAudio();
+    final newAudio = ControlledListeningAudio();
+    final submissions = <PhonemeRelation>[];
+    Widget host(String owner, ControlledListeningAudio audio) => MaterialApp(
         home: Scaffold(
             body: ComparisonHarness(
+                key: const ValueKey('harness'),
                 fixture: _fixture(PhonemeRelation.same, 'u', 'u'),
                 audio: audio,
-                ownerId: 'life',
-                onSubmitted: submissions.add))));
+                ownerId: owner,
+                onSubmitted: submissions.add)));
+
+    await tester.pumpWidget(host('old-owner', oldAudio));
     await tester.tap(find.text('Listen to sample A'));
     await tester.pump();
-    final old = audio.requests.last;
+    final heldOldRequest = oldAudio.requests.single;
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     await tester.pump();
-    expect(audio.stopCalls, 1);
+    await tester.pumpWidget(host('new-owner', newAudio));
+
+    expect(_button(tester, 'Listen to sample A').enabled, isFalse);
+    await tester.tap(find.text('Listen to sample A'));
+    await tester.tap(find.text('Listen to sample B'));
+    expect(newAudio.requests, isEmpty);
+    expect(submissions, isEmpty);
+
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump();
-    expect(audio.requests, hasLength(1));
-    old.complete();
+    expect(newAudio.requests, isEmpty, reason: 'resume must not autoplay');
+    expect(_button(tester, 'Listen to sample A').enabled, isTrue);
+    await tester.tap(find.text('Listen to sample A'));
+    await tester.pump();
+    expect(newAudio.requests.map((request) => request.referenceId), ['ref-a']);
+    newAudio.requests.single.complete();
+    await tester.pump();
+    expect(_button(tester, 'Same').enabled, isFalse,
+        reason: 'replacement reset requires both samples afresh');
+    heldOldRequest.complete();
     await tester.pump();
     expect(_button(tester, 'Same').enabled, isFalse);
-    expect(submissions, isEmpty);
     await tester.pumpWidget(const SizedBox());
-    audio.releaseAll();
+    oldAudio.releaseAll();
+    newAudio.releaseAll();
   });
 
   testWidgets(
@@ -619,27 +998,44 @@ void main() {
                 audio: audio,
                 ownerId: 'stable',
                 onSubmitted: submissions.add)));
-    await tester.pumpWidget(host(_fixture(PhonemeRelation.same, 'u', 'u')));
+    final original = _fixture(PhonemeRelation.same, 'u', 'u');
+    await tester.pumpWidget(host(original));
+    for (final sample in ComparisonSample.values) {
+      await tester.tap(find.text(sample == ComparisonSample.a
+          ? 'Listen to sample A'
+          : 'Listen to sample B'));
+      await tester.pump();
+      audio.requests.last.complete();
+      await tester.pump();
+    }
     await tester.tap(find.text('Listen to sample A'));
     await tester.pump();
-    final old = audio.requests.last;
-    final changed = ComparisonFixture(
-        prompt: SoundComparisonPrompt(
-            id: 'cmp',
-            instruction: 'Compare the final sound in each word',
-            sampleAReferenceId: 'new-a',
-            sampleBReferenceId: 'new-b'),
-        targetLocationA: 'final sound',
-        targetLocationB: 'final sound',
-        targetPhonemeA: 'u',
-        targetPhonemeB: 'u',
-        expected: PhonemeRelation.same);
+    final oldReplay = audio.requests.last;
+    final changed = _fixture(PhonemeRelation.same, 'u', 'u',
+        referenceA: 'new-a', referenceB: 'new-b');
     await tester.pumpWidget(host(changed));
-    old.complete();
-    await tester.pump();
-    expect(_button(tester, 'Same').enabled, isFalse);
-    expect(audio.requests, hasLength(1));
     expect(audio.stopCalls, 1);
+    await tester.tap(find.text('Listen to sample B'));
+    await tester.pump();
+    final currentB = audio.requests.last;
+    expect(currentB.referenceId, 'new-b');
+    oldReplay.complete();
+    await tester.pump();
+    expect(find.text('Playback in progress'), findsOneWidget);
+    expect(_button(tester, 'Same').enabled, isFalse);
+    expect(audio.stopCalls, 1,
+        reason: 'stale old reference must not stop new playback');
+    expect(submissions, isEmpty);
+    currentB.complete();
+    await tester.pump();
+    expect(_button(tester, 'Same').enabled, isFalse,
+        reason: 'stale old A replay cannot satisfy new A reference');
+    await tester.tap(find.text('Listen to sample A'));
+    await tester.pump();
+    expect(audio.requests.last.referenceId, 'new-a');
+    audio.requests.last.complete();
+    await tester.pump();
+    expect(_button(tester, 'Same').enabled, isTrue);
     await tester.pumpWidget(const SizedBox());
     audio.releaseAll();
   });
@@ -663,6 +1059,20 @@ void main() {
     expect(audio.stopCalls, 0);
     expect(_button(tester, 'Listen to sample B').enabled, isTrue);
     expect(audio.requests, hasLength(1));
+    expect(_button(tester, 'Same').enabled, isFalse);
+    await tester.tap(find.text('Listen to sample B'));
+    await tester.pump();
+    expect(audio.requests.last.referenceId, 'ref-b');
+    audio.requests.last.complete();
+    await tester.pump();
+    expect(_button(tester, 'Same').enabled, isTrue,
+        reason: 'equal-value rebuild must retain A hearing');
+    expect(audio.requests.map((request) => request.referenceId),
+        ['ref-a', 'ref-b']);
+    await tester.tap(find.text('Same'));
+    expect(submissions, [PhonemeRelation.same]);
+    await tester.pump();
+    expect(find.text('Correct'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     audio.releaseAll();
   });
