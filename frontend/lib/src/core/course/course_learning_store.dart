@@ -268,13 +268,22 @@ class CourseLearningRepository implements CourseLearningStore {
         _ensureAvailable();
         return (await _loadCommitted()).pending;
       }),
-      // Unlike readPending, this is deliberately count-only and reads only the
-      // latest known committed snapshot, so a quarantined scope remains blocked
-      // while sync can still report its retained event count.
-      knownPendingCount: () =>
-          _committed?.pending.length ?? state.pending.length,
+      // Unlike readPending, this is deliberately count-only and reads only a
+      // committed image, including the coordinator's last committed bytes
+      // when another repository instance has quarantined this owner scope.
+      knownPendingCount: () => _knownPendingCount(state),
       acknowledge: _acknowledge,
     ).run();
+  }
+
+  int _knownPendingCount(CourseLearningState fallback) {
+    final key = scope.storageKey;
+    if (_coordinator.blocked.contains(key) &&
+        _coordinator.known.containsKey(key)) {
+      final raw = _coordinator.known[key];
+      return raw == null ? 0 : _codec.decode(raw, scope).pending.length;
+    }
+    return _committed?.pending.length ?? fallback.pending.length;
   }
 
   Future<void> _acknowledge(Set<String> ids) =>

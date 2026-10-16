@@ -15,6 +15,8 @@ import 'course_learning_state.dart';
 import 'course_skill_summary.dart';
 import 'lesson_section_session.dart';
 
+const int _maxSafeInteger = 9007199254740991;
+
 class LearningTransition {
   LearningTransition({
     required this.slot,
@@ -360,10 +362,10 @@ class LearningTransitionEngine {
         case ChooseDrillWord(:final selectedWord, :final audioSource):
           if (drill.ended ||
               drill.index < 0 ||
-              drill.index >= definition.items.length) {
+              drill.index >= _maxSafeInteger) {
             throw const LearningInvalidCommandException();
           }
-          final item = definition.items[drill.index];
+          final item = definition.items[drill.index % definition.items.length];
           if (!item.choices.contains(selectedWord)) {
             throw const LearningInvalidCommandException();
           }
@@ -767,19 +769,15 @@ class LearningTransitionEngine {
                     selectedSound != null))) {
           throw const LearningInvalidCommandException();
         }
-      case DrillCheckpoint(
-          :final pairIds,
-          :final index,
-          :final correct,
-          :final ended
-        ):
+      case DrillCheckpoint(:final pairIds, :final index, :final correct):
         if (!_sameOrder(
                 pairIds, definition.items.map((item) => item.id).toList()) ||
+            pairIds.isEmpty ||
             index < 0 ||
-            index > pairIds.length ||
+            index > _maxSafeInteger ||
             correct < 0 ||
             correct > index ||
-            (ended && index > pairIds.length)) {
+            correct > _maxSafeInteger) {
           throw const LearningInvalidCommandException();
         }
       case SoundGameCheckpoint(:final board)

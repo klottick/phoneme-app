@@ -2,12 +2,16 @@ import 'dart:math';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:linguist/src/core/course/french_course.dart';
-import 'package:linguist/src/core/course/course_progress.dart';
 import 'package:linguist/src/features/arcade/word_match_engine.dart';
 import 'package:linguist/src/features/arcade/sound_match_engine.dart';
 import 'package:linguist/src/features/arcade/arcade_session.dart';
 import 'package:linguist/src/core/course/course_learning_checkpoint.dart';
 import 'package:linguist/src/core/course/course_learning_random.dart';
+import 'package:linguist/src/core/course/course_attempt.dart';
+import 'package:linguist/src/core/course/course_learning_command.dart';
+import 'package:linguist/src/core/course/course_learning_state.dart';
+
+import '../support/course_learning_preferences_harness.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -211,22 +215,61 @@ void main() {
   });
 
   test('concurrent answers do not overwrite one another', () async {
-    await Future.wait(List.generate(20,
-        (_) => CourseProgressStore('en-fr').record('u', 'listening', true)));
-    final data = await CourseProgressStore('en-fr').load();
-    expect(data['evidence']['listening:u']['attempts'], 20);
+    final harness = PreferencesLearningHarness();
+    final before = await harness.store.load();
+    final lessonStart = harness.store.prepare(
+      state: before,
+      activityId: 'lesson:en-fr-u-y',
+      action: StartLearningRun(options: RunOptions()),
+    );
+    final drillStart = harness.store.prepare(
+      state: before,
+      activityId: 'drill:minimal-pairs',
+      action: StartLearningRun(options: RunOptions()),
+    );
+    await Future.wait([
+      harness.store.submit(lessonStart),
+      harness.store.submit(drillStart),
+    ]);
+    final state = await harness.store.load();
+    expect(state.activities.keys,
+        containsAll(['lesson:en-fr-u-y', 'drill:minimal-pairs']));
   });
 
   test('progress keeps listening and spelling separate and survives reload',
       () async {
-    final store = CourseProgressStore('en-fr');
-    await store.record('u', 'spelling', true);
-    await store.completeLesson('en-fr-vowels');
-    final data = await CourseProgressStore('en-fr').load();
-    expect(data['evidence']['spelling:u']['correct'], 1);
-    expect(data['evidence']['listening:u'], isNull);
-    expect(data['lessons'], contains('en-fr-vowels'));
-    expect((await CourseProgressStore('fr-en').load())['lessons'], isEmpty);
+    final harness = PreferencesLearningHarness();
+    await harness.start('lesson:en-fr-u-y');
+    await harness.answerPilot('u');
+    await harness.start('arcade:word');
+    await harness.store.submit(harness.store.prepare(
+      state: await harness.store.load(),
+      activityId: 'arcade:word',
+      action: CheckpointArcade(elapsedSeconds: 0, paused: false),
+    ));
+    final state = await harness.store.load();
+    final board =
+        (state.activities['arcade:word']!.snapshot as WordGameCheckpoint).board;
+    final game = WordMatchEngine.fromState(board, random: Random(9));
+    final validChain = game.findChain();
+    await harness.store.submit(harness.store.prepare(
+      state: state,
+      activityId: 'arcade:word',
+      action: LinkWordTiles(indices: validChain),
+    ));
+    final reopened = PreferencesLearningHarness();
+    final loaded = await reopened.store.load();
+    final listening = loaded.summaries.entries
+        .where((entry) => entry.key.skill == LearningSkill.listening);
+    final spelling = loaded.summaries.entries
+        .where((entry) => entry.key.skill == LearningSkill.spelling);
+    expect(listening, isNotEmpty);
+    expect(spelling, isNotEmpty);
+    expect(spelling.every((entry) => entry.key.origin == AttemptOrigin.game),
+        isTrue);
+    expect(
+        listening.every((entry) => entry.key.origin == AttemptOrigin.practice),
+        isTrue);
   });
 }
 

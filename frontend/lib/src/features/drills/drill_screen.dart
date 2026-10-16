@@ -1,12 +1,19 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/app_providers.dart';
 import '../../core/course/course_audio.dart';
-import '../../core/course/course_progress.dart';
+import '../../core/course/course_attempt.dart';
+import '../../core/course/course_learning_checkpoint.dart';
+import '../../core/course/course_learning_command.dart';
+import '../../core/course/course_learning_error.dart';
+import '../../core/course/course_learning_providers.dart';
+import '../../core/course/course_learning_registry.dart';
+import '../../core/course/course_learning_state.dart';
+import '../../core/course/course_learning_store.dart';
+import '../../core/models/minimal_pair.dart';
 
 class DrillScreen extends ConsumerStatefulWidget {
   const DrillScreen({super.key});
@@ -17,27 +24,77 @@ class DrillScreen extends ConsumerStatefulWidget {
 
 class _DrillScreenState extends ConsumerState<DrillScreen>
     with WidgetsBindingObserver {
-  int _index = 0;
-  int _correct = 0;
-  bool _isPlaying = false;
-  bool _heard = false;
-  bool _ending = false;
-  bool _answerTransition = false;
+  static const _activityId = 'drill:minimal-pairs';
+  static const _saveError = 'Could not save your answer. Please try again.';
+  CourseLearningStore? _store, _pendingStore;
+  CourseLearningState? _state;
+  LearningCommand? _pending;
+  DrillCheckpoint? _checkpoint;
+  bool _loading = true, _contentChanged = false;
+  bool _busy = false, _isPlaying = false, _heard = false;
+  bool _answerTransition = false, _ending = false, _saveFailed = false;
+  bool _conflict = false;
+  String? _message;
+  String _feedback = '';
   CourseAudio? _audio;
+  int _playGeneration = 0,
+      _ownerGeneration = 0,
+      _saveOperation = 0,
+      _answerOperation = 0,
+      _finishOperation = 0;
+  bool _endCommitted = false;
 
-  /// Request-generation guard: a playback that is superseded (Stop control,
-  /// End Session, leaving the screen) must not publish its late settlement
-  /// over the current state — no heard mark, no unlock, no failure text.
-  int _playGeneration = 0;
+  LearningActivityDefinition get _definition =>
+      LearningRegistry.french().require(_activityId);
+  List<MinimalPair> get _pairs => frenchDrillPairs;
+  int get _index => _checkpoint?.index ?? 0;
+  int get _correct => _checkpoint?.correct ?? 0;
+  bool get _ended => _checkpoint?.ended ?? false;
+  MinimalPair get _current => _pairs[_index % _pairs.length];
+  LearningSourceItem get _item =>
+      _definition.items.firstWhere((item) => item.id == _current.id);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    ref.listenManual(courseLearningStoreProvider, _onStoreReplaced);
+    final store = ref.read(courseLearningStoreProvider);
+    _store = store;
+    unawaited(_load(store));
+  }
+
+  void _onStoreReplaced(CourseLearningStore? old, CourseLearningStore next) {
+    if (old == null || identical(old, next)) return;
+    _ownerGeneration++;
+    _saveOperation++;
+    _answerOperation++;
+    _finishOperation++;
+    _playGeneration++;
+    _retireAudio();
+    _pending = null;
+    _pendingStore = null;
+    _state = null;
+    _checkpoint = null;
+    _busy = false;
+    _answerTransition = false;
+    _heard = false;
+    _conflict = false;
+    _saveFailed = false;
+    _ending = false;
+    _endCommitted = false;
+    _isPlaying = false;
+    _feedback = '';
+    _store = next;
+    unawaited(_load(next));
   }
 
   @override
   void dispose() {
+    _ownerGeneration++;
+    _saveOperation++;
+    _answerOperation++;
+    _finishOperation++;
     WidgetsBinding.instance.removeObserver(this);
     _retireAudio();
     super.dispose();
@@ -48,141 +105,150 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
-      _retireForBackground();
+      _retireAudio();
+      if (mounted) {
+        setState(() {
+          _isPlaying = false;
+          _heard = false;
+        });
+      }
     }
   }
 
-  /// Retires in-flight shared playback: the current request loses ownership
-  /// FIRST (its late settlement is cancelled and ignored) and then stops.
   void _retireAudio() {
     _playGeneration++;
-    final CourseAudio? audio = _audio;
-    if (audio != null) {
-      unawaited(audio.stop().catchError((Object _) {}));
+    final audio = _audio;
+    if (audio != null) unawaited(audio.stop().catchError((Object _) {}));
+    _audio = null;
+  }
+
+  Future<void> _load(CourseLearningStore store, {bool retry = false}) async {
+    final generation = ++_ownerGeneration;
+    setState(() {
+      _loading = true;
+      _busy = false;
+      _message = null;
+      _contentChanged = false;
+      _conflict = false;
+      _heard = false;
+    });
+    try {
+      final state = retry ? await store.retryLoad() : await store.load();
+      if (!mounted || generation != _ownerGeneration) return;
+      _state = state;
+      final slot = state.activities[_activityId];
+      if (slot == null) {
+        final command = store.prepare(
+            state: state,
+            activityId: _activityId,
+            action: StartLearningRun(options: RunOptions()));
+        _pending = command;
+        _pendingStore = store;
+        await _submitPending();
+        return;
+      }
+      if (slot.contentRevision != _definition.contentRevision ||
+          slot.snapshot is! DrillCheckpoint) {
+        setState(() {
+          _loading = false;
+          _contentChanged = true;
+          _message = 'This drill has changed. Start a new run to continue.';
+        });
+        return;
+      }
+      final checkpoint = slot.snapshot as DrillCheckpoint;
+      if (checkpoint.pairIds.length != _pairs.length ||
+          checkpoint.pairIds
+              .asMap()
+              .entries
+              .any((entry) => entry.value != _pairs[entry.key].id)) {
+        setState(() {
+          _loading = false;
+          _contentChanged = true;
+          _message = 'This drill has changed. Start a new run to continue.';
+        });
+        return;
+      }
+      setState(() {
+        _checkpoint = checkpoint;
+        _loading = false;
+        _heard = false;
+        _endCommitted = checkpoint.ended;
+      });
+    } on LearningCorruptException {
+      if (mounted && generation == _ownerGeneration) _unavailableState();
+    } on LearningUnsupportedVersionException {
+      if (mounted && generation == _ownerGeneration) _unavailableState();
+    } catch (_) {
+      if (mounted && generation == _ownerGeneration) {
+        setState(() {
+          _loading = false;
+          _message = 'Saved progress is unavailable. Retry loading.';
+        });
+      }
     }
   }
 
-  /// App suspension retires a held playback (I2): invalidate the generation
-  /// before stopping the captured shared playback, then reset the drill's
-  /// playback/hearing state so a stale settlement cannot unlock or replay.
-  /// Scoring and the End Session streak path are untouched; a fresh
-  /// foreground Play is required and resume never auto-replays.
-  void _retireForBackground() {
-    _retireAudio();
+  void _unavailableState() {
     if (mounted) {
       setState(() {
-        _isPlaying = false;
-        _heard = false;
+        _loading = false;
+        _message = 'Saved learning progress is unavailable. Retry loading.';
       });
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final pairs = ref.watch(minimalPairsProvider);
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Minimal Pair Drill'),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Center(
-              child: Text(
-                '$_correct / ${_index + 1}',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ),
-          ),
-        ],
-      ),
-      body: pairs.when(
-        data: (items) {
-          if (items.isEmpty) {
-            return const Center(child: Text('No drill items yet.'));
-          }
-
-          final current = items[_index % items.length];
-          final int itemIndex = _index;
-          final options = <String>[current.wordA, current.wordB]
-            ..shuffle(Random());
-
-          return Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Item ${_index + 1}',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 8),
-                const Text('Listen and choose the word you hear.'),
-                const SizedBox(height: 4),
-                const Text(
-                  alphaAudioDisclosure,
-                  style: TextStyle(fontStyle: FontStyle.italic),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Text(
-                      '${current.phonemeA} vs ${current.phonemeB}',
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      icon: Icon(_isPlaying ? Icons.stop : Icons.play_arrow),
-                      iconSize: 36,
-                      tooltip: 'Play audio',
-                      onPressed: _ending || _answerTransition
-                          ? null
-                          : () => _onPlayStop(current, itemIndex),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                for (final option in options)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.tonal(
-                        onPressed: !_ending &&
-                                !_answerTransition &&
-                                _heard &&
-                                !_isPlaying
-                            ? () => _handleAnswer(
-                                option, current.wordA, current, itemIndex)
-                            : null,
-                        child: Text(option, textAlign: TextAlign.center),
-                      ),
-                    ),
-                  ),
-                const Spacer(),
-                Center(
-                  child: TextButton(
-                    onPressed: _ending ? null : _endSession,
-                    child: const Text('End Session'),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-        error: (error, _) =>
-            Center(child: Text('Failed to load drills: $error')),
-        loading: () => const Center(child: CircularProgressIndicator()),
-      ),
-    );
+  Future<void> _play(MinimalPair pair, int itemIndex) async {
+    if (_loading ||
+        _busy ||
+        _pending != null ||
+        _ending ||
+        _answerTransition ||
+        _checkpoint == null ||
+        _ended ||
+        _index != itemIndex) {
+      return;
+    }
+    final generation = ++_playGeneration;
+    setState(() {
+      _isPlaying = true;
+      _heard = false;
+      _feedback = '';
+    });
+    try {
+      final audio = ref.read(courseAudioProvider);
+      _audio = audio;
+      await audio.speak(pair.wordA);
+      if (mounted && generation == _playGeneration) {
+        setState(() {
+          _heard = true;
+          _isPlaying = false;
+        });
+      }
+    } on CourseAudioCancelledException {
+      // Cancel is quiet and does not satisfy the fresh-hearing gate.
+      if (mounted && generation == _playGeneration) {
+        setState(() => _isPlaying = false);
+      }
+    } catch (_) {
+      if (mounted && generation == _playGeneration) {
+        setState(() {
+          _isPlaying = false;
+          _feedback = 'French audio unavailable. Please retry.';
+        });
+      }
+    }
   }
 
-  /// Play/Stop control: while a playback is held, the same control retires
-  /// it — the request loses ownership and its late settlement is ignored —
-  /// so a user stop never marks heard, unlocks the choices, or surfaces as
-  /// an audio failure.
-  Future<void> _onPlayStop(dynamic currentPair, int itemIndex) async {
-    if (_ending || _answerTransition || _index != itemIndex) return;
+  Future<void> _onPlayStopFor(MinimalPair pair, int itemIndex) async {
+    if (_index != itemIndex ||
+        _pending != null ||
+        _ending ||
+        _ended ||
+        _answerTransition ||
+        _busy) {
+      return;
+    }
     if (_isPlaying) {
       _retireAudio();
       if (mounted) {
@@ -193,125 +259,338 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
       }
       return;
     }
-    await _playAudio(currentPair, itemIndex);
+    await _play(pair, itemIndex);
   }
 
-  Future<void> _playAudio(dynamic currentPair, int itemIndex) async {
-    if (_ending || _answerTransition || _index != itemIndex) return;
-    final int generation = ++_playGeneration;
-    setState(() {
-      _isPlaying = true;
-      _heard = false;
-    });
-    try {
-      final CourseAudio audio = ref.read(courseAudioProvider);
-      // Captured for retirement: Stop, End Session, and disposal must be
-      // able to stop exactly this shared playback.
-      _audio = audio;
-      await audio.speak(currentPair.wordA);
-      if (mounted && generation == _playGeneration) {
-        setState(() => _heard = true);
-      }
-    } on CourseAudioCancelledException {
-      // Retired by the Stop control, End Session, or screen disposal: the
-      // request is no longer owned, so its settlement is ignored.
-    } catch (_) {
-      if (mounted && generation == _playGeneration) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('French audio unavailable. Please retry.')));
-      }
-    } finally {
-      if (mounted && generation == _playGeneration) {
-        setState(() => _isPlaying = false);
-      }
-    }
-  }
-
-  Future<void> _handleAnswer(
-    String selected,
-    String correct,
-    dynamic currentPair,
-    int itemIndex,
-  ) async {
-    if (_ending ||
+  Future<void> _answer(String selected, int itemIndex) async {
+    if (_loading ||
+        _busy ||
+        _pending != null ||
+        _ending ||
+        _ended ||
         _answerTransition ||
         _index != itemIndex ||
         !_heard ||
-        _isPlaying) {
+        _state == null ||
+        _checkpoint == null) {
       return;
     }
+    final owner = _ownerGeneration;
+    final operation = ++_answerOperation;
     _answerTransition = true;
-    ++_playGeneration;
-    final int answeringIndex = _index;
-    final isCorrect = selected == correct;
-    if (isCorrect) {
-      _correct++;
-    }
-
-    setState(() => _heard = false);
-    try {
-      await CourseProgressStore('en-fr').record(
-          (currentPair.phonemeA as String).replaceAll('/', ''),
-          'listening',
-          isCorrect);
-    } catch (_) {
-      if (mounted && answeringIndex == _index) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Could not save your answer. Please try again.')));
-      }
-      return;
-    } finally {
+    _playGeneration++;
+    final command = _store!.prepare(
+      state: _state!,
+      activityId: _activityId,
+      action: ChooseDrillWord(
+          selectedWord: selected,
+          audioSource:
+              authoredAudioSource(_item) ?? AttemptAudioSource.notApplicable),
+    );
+    _pending = command;
+    _pendingStore = _store;
+    setState(() {
+      _heard = false;
+      _saveFailed = false;
+      _feedback = command.feedback.message;
+    });
+    await _submitPending();
+    if (mounted && owner == _ownerGeneration && operation == _answerOperation) {
       _answerTransition = false;
-      if (mounted && answeringIndex == _index) {
+    }
+  }
+
+  Future<void> _submitPending() async {
+    final command = _pending;
+    final store = _pendingStore;
+    if (command == null || store == null || _busy) return;
+    final operation = ++_saveOperation;
+    final owner = _ownerGeneration;
+    setState(() {
+      _busy = true;
+      _loading = false;
+      _saveFailed = false;
+    });
+    try {
+      final commit = await store.submit(command);
+      if (!mounted ||
+          owner != _ownerGeneration ||
+          operation != _saveOperation) {
+        return;
+      }
+      _state = commit.state;
+      _checkpoint = commit.slot.snapshot as DrillCheckpoint;
+      _pending = null;
+      _pendingStore = null;
+      _endCommitted = _checkpoint!.ended;
+      if (command.action is StartLearningRun) {
         setState(() {
-          _isPlaying = false;
+          _busy = false;
+          _loading = false;
+          _saveFailed = false;
+          _contentChanged = false;
+          _message = null;
           _heard = false;
         });
+        ref.invalidate(courseLearningStateProvider);
+        return;
       }
+      setState(() {
+        _busy = false;
+        _saveFailed = false;
+        _feedback = command.feedback.message;
+      });
+      ref.invalidate(courseLearningStateProvider);
+      if (command.action is EndDrill) await _finishSession();
+    } on LearningContentChangedException {
+      if (mounted && owner == _ownerGeneration && operation == _saveOperation) {
+        _pending = null;
+        _pendingStore = null;
+        setState(() {
+          _busy = false;
+          _saveFailed = false;
+          _contentChanged = true;
+          _message = 'This drill has changed. Start a new run to continue.';
+        });
+      }
+    } on LearningConflictException {
+      if (mounted && owner == _ownerGeneration && operation == _saveOperation) {
+        _showReloadRequired(
+          'This answer no longer matches saved progress. Reload saved progress to continue.',
+          owner,
+          operation,
+        );
+      }
+    } on LearningUnavailableException {
+      if (mounted && owner == _ownerGeneration && operation == _saveOperation) {
+        _pending = null;
+        _pendingStore = null;
+        setState(() {
+          _busy = false;
+          _loading = false;
+          _saveFailed = false;
+          _ending = false;
+          _conflict = false;
+          _heard = false;
+          _checkpoint = null;
+          _message = 'Saved progress is unavailable. Retry loading.';
+        });
+      }
+    } on LearningSaveException {
+      _showSaveFailure(owner, operation, command);
+    } on LearningInvalidCommandException {
+      _showReloadRequired(
+        'This learning action is no longer valid. Reload saved progress to continue.',
+        owner,
+        operation,
+      );
+    } catch (_) {
+      _showReloadRequired(
+        'This learning action could not be confirmed. Reload saved progress to continue.',
+        owner,
+        operation,
+      );
     }
-    ref.invalidate(courseProgressProvider);
+  }
 
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(isCorrect ? '✓ Correct' : '✗ Try: $correct'),
-        backgroundColor: isCorrect ? Colors.green : Colors.orange,
-      ),
-    );
-
+  void _showSaveFailure(int owner, int operation, LearningCommand command) {
+    if (!mounted || owner != _ownerGeneration || operation != _saveOperation) {
+      return;
+    }
     setState(() {
-      ++_playGeneration;
-      _isPlaying = false;
+      _busy = false;
+      _saveFailed = true;
+      if (command.action is EndDrill) _ending = false;
       _heard = false;
-      _index++;
+      _feedback = command.feedback.message.isEmpty
+          ? _saveError
+          : '${command.feedback.message}\n$_saveError';
     });
   }
 
-  Future<void> _endSession() async {
-    if (_ending) return;
+  void _showReloadRequired(String message, int owner, int operation) {
+    if (!mounted || owner != _ownerGeneration || operation != _saveOperation) {
+      return;
+    }
+    _pending = null;
+    _pendingStore = null;
     setState(() {
+      _busy = false;
+      _saveFailed = false;
+      _ending = false;
+      _conflict = true;
+      _message = message;
+    });
+  }
+
+  void _retrySave() {
+    if (_pending != null && !_busy) unawaited(_submitPending());
+  }
+
+  Future<void> _endSession() async {
+    if (_ending || _pending != null || _state == null || _checkpoint == null) {
+      return;
+    }
+    if (!_endCommitted) {
+      final command = _store!.prepare(
+          state: _state!, activityId: _activityId, action: const EndDrill());
+      _pending = command;
+      _pendingStore = _store;
       _ending = true;
+      _retireAudio();
+      setState(() {
+        _heard = false;
+        _isPlaying = false;
+      });
+      await _submitPending();
+      return;
+    }
+    _ending = true;
+    _retireAudio();
+    setState(() {
       _heard = false;
       _isPlaying = false;
     });
-    // Retire any in-flight playback before the screen exits, so a late
-    // settlement can never mark heard or unlock the choices.
-    _retireAudio();
+    await _finishSession();
+  }
+
+  Future<void> _finishSession() async {
+    final owner = _ownerGeneration;
+    final operation = ++_finishOperation;
     try {
       await ref.read(streakServiceProvider).recordPractice();
     } catch (_) {
-      if (mounted) setState(() => _ending = false);
+      if (mounted &&
+          owner == _ownerGeneration &&
+          operation == _finishOperation) {
+        setState(() {
+          _ending = false;
+          _busy = false;
+          _feedback = 'Could not save session. Tap End Session to retry.';
+        });
+      }
       return;
     }
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Session complete! $_correct / ${_index + 1} correct'),
-      ),
-    );
-    if (mounted) {
-      Navigator.of(context).pop();
+    if (!mounted ||
+        owner != _ownerGeneration ||
+        operation != _finishOperation) {
+      return;
     }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+            'Session complete! $_correct / ${_index == 0 ? 0 : _index} correct')));
+    Navigator.of(context).pop();
+  }
+
+  Future<void> _startNewRun() async {
+    if (!_contentChanged || _state == null || _busy || _pending != null) return;
+    final command = _store!.prepare(
+        state: _state!,
+        activityId: _activityId,
+        action: StartLearningRun(options: RunOptions()));
+    _pending = command;
+    _pendingStore = _store;
+    await _submitPending();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (_message != null || _checkpoint == null) {
+      return Scaffold(
+          appBar: AppBar(title: const Text('Minimal Pair Drill')),
+          body: Center(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(_message ?? 'Saved progress is unavailable.'),
+            if (_saveFailed)
+              FilledButton(
+                  onPressed: _busy ? null : _retrySave,
+                  child: const Text('Retry saving'))
+            else if (_conflict)
+              FilledButton(
+                  onPressed: _busy ? null : () => _load(_store!),
+                  child: const Text('Reload saved progress'))
+            else if (_contentChanged)
+              FilledButton(
+                  onPressed: _busy ? null : _startNewRun,
+                  child: const Text('Start new run'))
+            else
+              FilledButton(
+                  onPressed: _busy ? null : () => _load(_store!, retry: true),
+                  child: const Text('Retry loading')),
+          ])));
+    }
+    final current = _current;
+    final itemIndex = _index;
+    final options = _item.choices;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Minimal Pair Drill'), actions: [
+        Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Center(
+                child: Text('$_correct / ${_index + 1}',
+                    style: const TextStyle(fontWeight: FontWeight.bold)))),
+      ]),
+      body: Padding(
+          padding: const EdgeInsets.all(16),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Item ${itemIndex + 1}',
+                style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            const Text('Listen and choose the word you hear.'),
+            const SizedBox(height: 4),
+            const Text(alphaAudioDisclosure,
+                style: TextStyle(fontStyle: FontStyle.italic)),
+            const SizedBox(height: 16),
+            Row(children: [
+              Text('${current.phonemeA} vs ${current.phonemeB}',
+                  style: Theme.of(context).textTheme.headlineSmall),
+              const Spacer(),
+              IconButton(
+                  icon: Icon(_isPlaying ? Icons.stop : Icons.play_arrow),
+                  iconSize: 36,
+                  tooltip: 'Play audio',
+                  onPressed: _ending ||
+                          _ended ||
+                          _answerTransition ||
+                          _busy ||
+                          _pending != null
+                      ? null
+                      : () => _onPlayStopFor(current, itemIndex)),
+            ]),
+            const SizedBox(height: 24),
+            for (final option in options)
+              Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.tonal(
+                          onPressed: !_ending &&
+                                  !_ended &&
+                                  !_answerTransition &&
+                                  !_busy &&
+                                  _pending == null &&
+                                  _heard &&
+                                  !_isPlaying
+                              ? () => _answer(option, itemIndex)
+                              : null,
+                          child: Text(option, textAlign: TextAlign.center)))),
+            if (_feedback.isNotEmpty) Text(_feedback),
+            if (_saveFailed)
+              FilledButton(
+                  onPressed: _busy ? null : _retrySave,
+                  child: const Text('Retry saving')),
+            const Spacer(),
+            Center(
+                child: TextButton(
+                    onPressed: _ending || _busy || _pending != null
+                        ? null
+                        : _endSession,
+                    child: const Text('End Session'))),
+          ])),
+    );
   }
 }

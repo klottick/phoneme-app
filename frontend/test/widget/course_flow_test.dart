@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,8 +9,11 @@ import 'package:linguist/src/features/arcade/arcade_screen.dart';
 import 'package:linguist/src/features/arcade/sound_match_engine.dart';
 import 'package:linguist/src/features/arcade/word_match_engine.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
-import 'package:linguist/src/core/course/course_progress.dart';
+import 'package:linguist/src/core/course/course_attempt.dart';
+import 'package:linguist/src/core/course/course_learning_checkpoint.dart';
+import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/features/course/course_lesson_screen.dart';
+import '../support/course_learning_widget_store.dart';
 
 class TestFrenchAudio implements CourseAudio {
   TestFrenchAudio({this.fail = false});
@@ -63,8 +65,8 @@ final class HeldCueAudio implements CourseAudio {
     final HeldCue cue = HeldCue(settle);
     cues.add(cue);
     final Future<void> delivery = settle.future.then((Object? value) {});
-    unawaited(delivery.then<void>(
-        (Object? value) {}, onError: (Object error) {}));
+    unawaited(
+        delivery.then<void>((Object? value) {}, onError: (Object error) {}));
     return delivery;
   }
 
@@ -101,13 +103,16 @@ void main() {
   testWidgets('silent game ends at a minute and continues the same score',
       (tester) async {
     final audio = TestFrenchAudio(fail: true);
-    await tester.pumpWidget(ProviderScope(
-        overrides: [courseAudioProvider.overrideWithValue(audio)],
-        child: const MaterialApp(home: ArcadeScreen(silent: true))));
-    await tester.pumpAndSettle();
+    final store = CourseLearningWidgetStore();
+    await tester.pumpWidget(ProviderScope(overrides: [
+      courseAudioProvider.overrideWithValue(audio),
+      courseLearningStoreProvider.overrideWithValue(store),
+    ], child: const MaterialApp(home: ArcadeScreen(silent: true))));
+    await tester.pump();
     await tester.tap(find.text('Start 60-second round'));
+    await tester.pump();
     await tester.pump(const Duration(seconds: 60));
-    await tester.pumpAndSettle();
+    await tester.pump();
     expect(find.text('Round complete'), findsOneWidget);
     await tester.tap(find.text('Continue this board'));
     await tester.pump();
@@ -120,29 +125,28 @@ void main() {
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(800, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    final board = SoundMatchEngine(random: Random(9));
-    SharedPreferences.setMockInitialValues({
-      'arcade.v1.en-fr.sound': jsonEncode({
-        'session': {'remaining': 60, 'round': 1, 'score': 0},
-        'board': board.toJson(),
-      })
-    });
+    final store = CourseLearningWidgetStore();
     await tester.pumpWidget(ProviderScope(overrides: [
-      courseAudioProvider.overrideWithValue(TestFrenchAudio(fail: true))
+      courseAudioProvider.overrideWithValue(TestFrenchAudio(fail: true)),
+      courseLearningStoreProvider.overrideWithValue(store),
     ], child: const MaterialApp(home: ArcadeScreen(silent: false))));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Resume saved board'), 200);
-    await tester.tap(find.text('Resume saved board'));
+    await tester.tap(find.text('Start 60-second round'));
+    await tester.pump();
     await tester.pump(const Duration(seconds: 12));
-    await tester.pumpAndSettle();
+    await tester.pump();
     expect(find.textContaining('Audio unavailable.'), findsOneWidget);
+    final slot = store.committedState.activities['arcade:sound']!;
+    final checkpoint = slot.snapshot as SoundGameCheckpoint;
+    final board =
+        SoundMatchEngine.fromState(checkpoint.board, random: Random(9));
     final move = board.legalMoves().first;
     await tester.tap(find.byKey(ValueKey('sound-tile-${move.$1}')));
     await tester.pump();
     await tester.tap(find.byKey(ValueKey('sound-tile-${move.$2}')));
     await tester.pump();
     expect(find.text('0 pts'), findsNothing);
-    expect((await CourseProgressStore('en-fr').load())['evidence'], isEmpty);
+    expect(store.committedState.history, isEmpty);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -157,7 +161,8 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Resume'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump();
     await tester.pump(const Duration(seconds: 12));
     await tester.pump();
     expect(audio.spoken, hasLength(2));
@@ -169,20 +174,15 @@ void main() {
       'newer held attempt cannot arm the bonus', (tester) async {
     await tester.binding.setSurfaceSize(const Size(800, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    final board = SoundMatchEngine(random: Random(9));
-    SharedPreferences.setMockInitialValues({
-      'arcade.v1.en-fr.sound': jsonEncode({
-        'session': {'remaining': 60, 'round': 1, 'score': 0},
-        'board': board.toJson(),
-      })
-    });
+    final store = CourseLearningWidgetStore();
     final audio = HeldCueAudio();
-    await tester.pumpWidget(ProviderScope(
-        overrides: [courseAudioProvider.overrideWithValue(audio)],
-        child: const MaterialApp(home: ArcadeScreen(silent: false))));
+    await tester.pumpWidget(ProviderScope(overrides: [
+      courseAudioProvider.overrideWithValue(audio),
+      courseLearningStoreProvider.overrideWithValue(store),
+    ], child: const MaterialApp(home: ArcadeScreen(silent: false))));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Resume saved board'), 200);
-    await tester.tap(find.text('Resume saved board'));
+    await tester.tap(find.text('Start 60-second round'));
+    await tester.pump();
     await tester.pump(const Duration(seconds: 12));
     await tester.pump();
     expect(audio.spoken, isNotEmpty,
@@ -208,12 +208,12 @@ void main() {
       findsNothing,
       reason: 'a stale success must not arm the bonus match',
     );
-    final data = await CourseProgressStore('en-fr').load();
-    expect(data['evidence'], isEmpty,
+    expect(store.committedState.history, isEmpty,
         reason: 'a stale success never records listening evidence');
     // Only the current request may later complete and arm.
     secondCue.release();
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump();
     expect(
       find.text('Which vowel did you hear? Your next match can earn +100.'),
       findsWidgets,
@@ -227,20 +227,15 @@ void main() {
       'held attempt must not publish failure or clear it', (tester) async {
     await tester.binding.setSurfaceSize(const Size(800, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    final board = SoundMatchEngine(random: Random(9));
-    SharedPreferences.setMockInitialValues({
-      'arcade.v1.en-fr.sound': jsonEncode({
-        'session': {'remaining': 60, 'round': 1, 'score': 0},
-        'board': board.toJson(),
-      })
-    });
+    final store = CourseLearningWidgetStore();
     final audio = HeldCueAudio();
-    await tester.pumpWidget(ProviderScope(
-        overrides: [courseAudioProvider.overrideWithValue(audio)],
-        child: const MaterialApp(home: ArcadeScreen(silent: false))));
+    await tester.pumpWidget(ProviderScope(overrides: [
+      courseAudioProvider.overrideWithValue(audio),
+      courseLearningStoreProvider.overrideWithValue(store),
+    ], child: const MaterialApp(home: ArcadeScreen(silent: false))));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Resume saved board'), 200);
-    await tester.tap(find.text('Resume saved board'));
+    await tester.tap(find.text('Start 60-second round'));
+    await tester.pump();
     await tester.pump(const Duration(seconds: 12));
     await tester.pump();
     expect(audio.spoken, isNotEmpty,
@@ -279,12 +274,12 @@ void main() {
       isNull,
       reason: 'a stale failure must not clear the newer held request busy',
     );
-    final data = await CourseProgressStore('en-fr').load();
-    expect(data['evidence'], isEmpty,
+    expect(store.committedState.history, isEmpty,
         reason: 'a stale failure never records listening evidence');
     // The current request still completes and arms on its own success.
     secondCue.release();
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump();
     expect(
       find.text('Which vowel did you hear? Your next match can earn +100.'),
       findsWidgets,
@@ -294,10 +289,15 @@ void main() {
 
   testWidgets('lesson completion records real answers and advances the path',
       (tester) async {
+    final store = CourseLearningWidgetStore();
     await tester.pumpWidget(ProviderScope(
-        overrides: [courseAudioProvider.overrideWithValue(TestFrenchAudio())],
+        overrides: [
+          courseAudioProvider.overrideWithValue(TestFrenchAudio()),
+          courseLearningStoreProvider.overrideWithValue(store),
+        ],
         child: const MaterialApp(
             home: CourseLessonScreen(lessonId: 'en-fr-vowels'))));
+    await tester.pumpAndSettle();
     var step = 0;
     for (final sound in ['i', 'o', 'i', 'o']) {
       await tester.scrollUntilVisible(find.text('Listen to French word'), -200);
@@ -315,16 +315,27 @@ void main() {
       }
       await tester.pumpAndSettle();
     }
-    final data = await CourseProgressStore('en-fr').load();
-    expect(data['lessons'], contains('en-fr-vowels'), reason: data.toString());
-    expect(data['evidence']['listening:i']['correct'], 2);
-    expect(data['evidence']['listening:o']['correct'], 2);
+    final data = store.committedState;
+    expect(data.completions.map((completion) => completion.lessonId),
+        contains('en-fr-vowels'));
+    expect(
+        data.summaries.entries
+            .where((entry) => entry.key.sound == 'i')
+            .fold<int>(0, (sum, entry) => sum + entry.value.correct),
+        2);
+    expect(
+        data.summaries.entries
+            .where((entry) => entry.key.sound == 'o')
+            .fold<int>(0, (sum, entry) => sum + entry.value.correct),
+        2);
   });
 
   testWidgets('backgrounding pauses the game until explicitly resumed',
       (tester) async {
-    await tester.pumpWidget(const ProviderScope(
-        child: MaterialApp(home: ArcadeScreen(silent: true))));
+    final store = CourseLearningWidgetStore();
+    await tester.pumpWidget(ProviderScope(
+        overrides: [courseLearningStoreProvider.overrideWithValue(store)],
+        child: const MaterialApp(home: ArcadeScreen(silent: true))));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Start 60-second round'));
     await tester.pump(const Duration(seconds: 10));
@@ -335,6 +346,7 @@ void main() {
     expect(find.text('Paused'), findsOneWidget);
     await tester.tap(find.text('Resume'));
     await tester.pump();
+    await tester.pump();
     expect(find.text('Round 1 · 50s'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
@@ -344,28 +356,27 @@ void main() {
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(800, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    final board = WordMatchEngine(random: Random(3));
-    board.board.setRange(0, 4, ['tout', 'rouge', 'vous', 'tu']);
-    board.stars.add(0);
-    SharedPreferences.setMockInitialValues({
-      'arcade.v1.en-fr.word': jsonEncode({
-        'session': {'remaining': 60, 'round': 1, 'score': 0},
-        'board': board.toJson(),
-      })
-    });
+    final store = CourseLearningWidgetStore();
     final audio = TestFrenchAudio(fail: true);
-    await tester.pumpWidget(ProviderScope(
-        overrides: [courseAudioProvider.overrideWithValue(audio)],
-        child: const MaterialApp(home: ArcadeScreen(silent: true))));
+    await tester.pumpWidget(ProviderScope(overrides: [
+      courseAudioProvider.overrideWithValue(audio),
+      courseLearningStoreProvider.overrideWithValue(store),
+    ], child: const MaterialApp(home: ArcadeScreen(silent: true))));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Resume saved board'));
+    await tester.tap(find.text('Start 60-second round'));
     await tester.pump();
-    final start = tester.getCenter(find.byKey(const ValueKey('word-tile-0')));
+    final checkpoint = store.committedState.activities['arcade:word']!.snapshot
+        as WordGameCheckpoint;
+    final board =
+        WordMatchEngine.fromState(checkpoint.board, random: Random(3));
+    final chain = board.findChain();
+    final start =
+        tester.getCenter(find.byKey(ValueKey('word-tile-${chain.first}')));
     final gesture = await tester.startGesture(start);
     // Cross the touch-slop threshold inside the first tile before linking others.
     await gesture.moveTo(start + const Offset(22, 0));
     await tester.pump();
-    for (final i in [1, 2]) {
+    for (final i in chain.skip(1)) {
       await gesture
           .moveTo(tester.getCenter(find.byKey(ValueKey('word-tile-$i'))));
       await tester.pump();
@@ -377,12 +388,19 @@ void main() {
             .where((t) => t?.startsWith('Link ') ?? false),
         contains('Link 3 words'));
     await gesture.up();
-    await tester.pumpAndSettle();
+    await tester.pump();
     expect(find.text('0 pts'), findsNothing);
-    final data = await CourseProgressStore('en-fr').load();
-    expect(data['evidence']['spelling:u']['attempts'], 3);
-    expect(data['evidence']['spelling:u']['correct'], 3);
-    expect(data['evidence']['listening:u'], isNull);
+    final batch = store.committedState.history.last;
+    expect(batch.attempts, hasLength(chain.length));
+    expect(
+        batch.attempts
+            .map((attempt) => (attempt.answer as WordTileAnswer).wordId),
+        chain.map((index) => checkpoint.board.board[index]));
+    expect(batch.attempts.every((attempt) => attempt.correct), isTrue);
+    expect(
+        batch.attempts.every((attempt) =>
+            attempt.audioSource == AttemptAudioSource.notApplicable),
+        isTrue);
     expect(audio.calls, 0);
     await tester.pumpWidget(const SizedBox());
   });
