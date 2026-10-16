@@ -185,4 +185,108 @@ void main() {
     tester.view.resetPhysicalSize();
     tester.view.resetDevicePixelRatio();
   });
+
+  testWidgets(
+      'large text recovery and practise actions scroll and keyboard activate',
+      (tester) async {
+    for (final config in [(360.0, 640.0, 2.0), (360.0, 800.0, 3.0)]) {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = Size(config.$1, config.$2);
+
+      var retries = 0;
+      var reloads = 0;
+      var finishes = 0;
+      var reviews = 0;
+      var practises = 0;
+      var observedScale = 0.0;
+
+      Future<void> pumpDebrief({String? error, String? conflict}) async {
+        await tester.pumpWidget(MaterialApp(
+          home: Builder(builder: (appContext) {
+            final data = MediaQuery.of(appContext).copyWith(
+              textScaler: TextScaler.linear(config.$3),
+            );
+            return MediaQuery(
+              data: data,
+              child: Scaffold(
+                body: Builder(builder: (targetContext) {
+                  observedScale =
+                      MediaQuery.of(targetContext).textScaler.scale(1);
+                  return SingleChildScrollView(
+                    child: LessonSectionDebrief(
+                      section: _section(),
+                      session: _session(8),
+                      teachingEntries: _entries(),
+                      busy: false,
+                      error: error,
+                      conflict: conflict,
+                      onReload: () => reloads++,
+                      onPractiseAgain: () => practises++,
+                      onReview: () => reviews++,
+                      onFinish: () => finishes++,
+                      onRetrySave: () => retries++,
+                    ),
+                  );
+                }),
+              ),
+            );
+          }),
+        ));
+        await tester.pumpAndSettle();
+        expect(observedScale, config.$3);
+        expect(
+            MediaQuery.of(tester.element(find.byType(LessonSectionDebrief)))
+                .size,
+            Size(config.$1, config.$2));
+        expect(tester.takeException(), isNull);
+      }
+
+      Future<void> activateByKeyboard(String label) async {
+        await tester.ensureVisible(find.text(label));
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+      }
+
+      await pumpDebrief(error: 'Save failed.');
+      expect(_enabled(tester, 'Retry saving'), isTrue);
+      await activateByKeyboard('Retry saving');
+      expect(retries, 1);
+      expect(reloads, 0);
+      expect(finishes, 0);
+      expect(reviews, 0);
+      expect(practises, 0);
+
+      retries = 0;
+      await pumpDebrief(conflict: 'Stale session.');
+      expect(_enabled(tester, 'Reload saved progress'), isTrue);
+      await activateByKeyboard('Reload saved progress');
+      expect(reloads, 1);
+      expect(retries, 0);
+      expect(finishes, 0);
+      expect(reviews, 0);
+      expect(practises, 0);
+
+      reloads = 0;
+      await pumpDebrief();
+      await activateByKeyboard('Finish section');
+      expect(finishes, 1);
+      expect(reviews, 0);
+      expect(practises, 0);
+      await activateByKeyboard('Review mistakes');
+      expect(finishes, 1);
+      expect(reviews, 1);
+      expect(practises, 0);
+      await activateByKeyboard('Practise again');
+      expect(finishes, 1);
+      expect(reviews, 1);
+      expect(practises, 1);
+      expect(retries, 0);
+      expect(reloads, 0);
+      expect(tester.takeException(), isNull);
+    }
+    tester.view.resetPhysicalSize();
+    tester.view.resetDevicePixelRatio();
+  });
 }
