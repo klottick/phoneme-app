@@ -354,9 +354,8 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(
-        find.text('1 of 5 lessons complete · about 3 minutes'), findsOneWidget);
-    expect(find.textContaining('Continue lesson'), findsOneWidget);
+    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
+    expect(find.text('Continue discovery'), findsOneWidget);
   });
 
   testWidgets('home retry-loading calls retryLoad before refreshing state',
@@ -371,7 +370,7 @@ void main() {
     await tester.tap(find.text('Retry loading progress'));
     await tester.pumpAndSettle();
     expect(store.retryLoadCalls, 1);
-    expect(find.textContaining('Continue lesson'), findsOneWidget);
+    expect(find.text('Continue discovery'), findsOneWidget);
   });
 
   testWidgets('progress retry-loading calls retryLoad before refreshing state',
@@ -386,7 +385,10 @@ void main() {
     await tester.tap(find.text('Retry loading progress'));
     await tester.pumpAndSettle();
     expect(store.retryLoadCalls, 1);
-    expect(find.text('0/5 lessons complete'), findsOneWidget);
+    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
+    expect(
+        find.text('Existing lessons (includes discovery pilot): 0/5 complete'),
+        findsOneWidget);
   });
 
   for (final surface in ['home', 'progress']) {
