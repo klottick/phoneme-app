@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_learning_command.dart';
 import 'package:linguist/src/core/course/course_learning_checkpoint.dart';
+import 'package:linguist/src/core/course/course_learning_codec.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/course/course_learning_registry.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
@@ -239,6 +240,7 @@ void main() {
           ? null
           : persistence.cache.values.first;
       final attemptsBefore = state.history.expand((b) => b.attempts).toList();
+      final committedImage = const LearningDocumentCodec().encode(state);
       final cursorBefore = state.activities[activity]!.cursor;
       persistence.holdNextWrite();
       final save = repo.submit(command);
@@ -253,6 +255,9 @@ void main() {
       expect(persistence.cache.values.first, cachedBefore,
           reason: 'failed checkpoint must restore the adapter cache');
       final restored = await repository().load();
+      expect(const LearningDocumentCodec().encode(restored), committedImage,
+          reason:
+              'failed $scenario checkpoint must restore the complete committed state');
       expect(restored.activities[activity]!.cursor.sequence,
           cursorBefore.sequence);
       expect(
