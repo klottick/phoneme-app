@@ -37,10 +37,9 @@ no `ObserveAssistance` was submitted; the Retry case found no observation comman
 to retain/retry; the owner case likewise found no held observation command.
 These are behavioral failures, not compile/import failures.
 
-The controller's private diagnostic was independently reproduced on base as
-**1 failed** (its pre-existing `controller-arcade-preview-probe.log` records
-actual commands `StartLearningRun, CheckpointArcade` and missing explanation
-assistance). After the implementation, it passed unchanged:
+The supplied base diagnostic log records **1 failed** (actual commands
+`StartLearningRun, CheckpointArcade` and missing explanation assistance). After
+the implementation, the private diagnostic passed unchanged:
 
 ```sh
 PATH="/home/klottick/develop/flutter/bin:$PATH" \
@@ -109,7 +108,8 @@ and save-retry identity remain in place.
 Implementation commit: `fd210a4` (`fix arcade fresh-start preview assistance`).
 Existing draft PR37: https://github.com/klottick/phoneme-app/pull/37 (base
 `main`, head `feat/fr04-task6-caller-cutover`); remains unmerged for controller
-review. This report metadata is committed separately after the implementation
-commit.
+review. The pushed PR currently reports no GitHub checks; local verification
+above passed. This report metadata is committed separately after the
+implementation commit.
 No live cloud, browser, or sandbox run was performed; the requested local
 release JavaScript build and widget/regression coverage passed.
