@@ -245,6 +245,8 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
         _saveError = null;
       });
     }
+    VoidCallback? successCallback;
+    var committed = false;
     try {
       final commit = await store.submit(command);
       if (!mounted || generation != _generation || !identical(store, _store)) {
@@ -261,7 +263,7 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
       }
       _pendingCommand = null;
       _pendingStore = null;
-      final callback = _pendingSuccess;
+      successCallback = _pendingSuccess;
       _pendingSuccess = null;
       setState(() {
         _busy = false;
@@ -271,8 +273,7 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
           _message = command.feedback.message;
         }
       });
-      callback?.call();
-      return true;
+      committed = true;
     } catch (error) {
       if (mounted && generation == _generation && identical(store, _store)) {
         if (error is LearningSaveException) {
@@ -322,6 +323,18 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
     } finally {
       if (generation == _generation) _saveBusy = false;
     }
+    if (committed && successCallback != null) {
+      try {
+        successCallback();
+      } catch (error, stackTrace) {
+        FlutterError.reportError(FlutterErrorDetails(
+          exception: error,
+          stack: stackTrace,
+          library: 'arcade save continuation',
+        ));
+      }
+    }
+    return committed;
   }
 
   Future<void> _switchToWordMatch() async {
@@ -371,10 +384,8 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
       }
       unawaited(_send(
         CheckpointArcade(elapsedSeconds: 0, paused: false),
-        onSuccess: () {
-          _observePreview();
-          _activate(resetCueAge: true);
-        },
+        onSuccess: () =>
+            _observePreview(onSuccess: () => _activate(resetCueAge: true)),
       ));
     });
   }
@@ -443,7 +454,7 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
     );
   }
 
-  void _observePreview() {
+  void _observePreview({VoidCallback? onSuccess}) {
     if (_slot == null) return;
     const preview = {
       'tout': 'u',
@@ -463,8 +474,10 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
         .map((entry) =>
             ItemContextKey(itemId: entry.key, targetSound: entry.value))
         .toSet();
-    unawaited(_send(ObserveAssistance(
-        items: items, flags: {AssistanceFlag.explanationVisible})));
+    unawaited(_send(
+        ObserveAssistance(
+            items: items, flags: {AssistanceFlag.explanationVisible}),
+        onSuccess: onSuccess));
   }
 
   Future<void> _newCue() async {

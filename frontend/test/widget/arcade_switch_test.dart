@@ -156,9 +156,11 @@ void main() {
       final freshBoard = (freshSlot.snapshot as SoundGameCheckpoint).board;
       expect(freshSlot.contentRevision, 1);
       expect(freshSlot.cursor.generation, oldCursor.generation + 1);
-      expect(freshSlot.cursor.sequence, oldCursor.sequence + 2,
-          reason: 'the explicit Start is followed by the ordinary checkpoint');
-      expect(freshSlot.cursor.revision, 1);
+      expect(freshSlot.cursor.sequence, oldCursor.sequence + 3,
+          reason:
+              'Start, initial checkpoint, then preview assistance are saved');
+      expect(freshSlot.cursor.revision, 2,
+          reason: 'Start and initial checkpoint advance the board revision');
       expect(freshBoard.board, isNot(oldBoard.board));
       expect(freshBoard.board, everyElement(anyOf('u', 'y', 'i', 'o')));
       expect(after.history, hasLength(state.history.length));
