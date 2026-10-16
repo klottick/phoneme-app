@@ -11,6 +11,7 @@ import 'package:linguist/src/core/course/course_learning_command.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/course_learning_store.dart';
+import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/features/arcade/arcade_screen.dart';
 import 'package:linguist/src/features/arcade/sound_match_engine.dart';
 import '../support/course_learning_widget_store.dart';
@@ -139,6 +140,172 @@ void main() {
     expect(store.committedState.history, isEmpty);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('arcade intro retries an unavailable initial load',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final store = CourseLearningWidgetStore()..failLoad = true;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [courseLearningStoreProvider.overrideWithValue(store)],
+      child: const MaterialApp(home: ArcadeScreen(silent: true)),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Retry loading'), findsOneWidget);
+    expect(
+        tester
+            .widget<FilledButton>(
+                find.widgetWithText(FilledButton, 'Start 60-second round'))
+            .onPressed,
+        isNull);
+    await tester.tap(find.text('Retry loading'));
+    await tester.pumpAndSettle();
+    expect(store.retryLoadCalls, 1);
+    expect(find.text('Start 60-second round'), findsOneWidget);
+    expect(find.text('Retry loading'), findsNothing);
+  });
+
+  testWidgets('arcade intro retries the identical failed initial Start command',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final store = CourseLearningWidgetStore()
+      ..failingActions.add(StartLearningRun);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [courseLearningStoreProvider.overrideWithValue(store)],
+      child: const MaterialApp(home: ArcadeScreen(silent: true)),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Start 60-second round'));
+    await tester.pumpAndSettle();
+    expect(find.text('Retry save'), findsOneWidget);
+    final failed = store.submitted
+        .singleWhere((command) => command.action is StartLearningRun);
+
+    store.failingActions.remove(StartLearningRun);
+    await tester.tap(find.text('Retry save'));
+    await tester.pumpAndSettle();
+    expect(store.submitted.where((command) => command.token == failed.token),
+        hasLength(2));
+    expect(find.byTooltip('Pause'), findsOneWidget,
+        reason: 'retrying Start continues through the initial checkpoint');
+    final checkpoint = store.committedState.activities['arcade:word']!.snapshot
+        as WordGameCheckpoint;
+    expect(checkpoint.clock.paused, isFalse);
+  });
+
+  testWidgets('arcade intro retries the identical failed initial unpause',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final store = CourseLearningWidgetStore()
+      ..failingActions.add(CheckpointArcade);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [courseLearningStoreProvider.overrideWithValue(store)],
+      child: const MaterialApp(home: ArcadeScreen(silent: true)),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Start 60-second round'));
+    await tester.pumpAndSettle();
+    expect(find.text('Retry save'), findsOneWidget);
+    final failed = store.submitted
+        .singleWhere((command) => command.action is CheckpointArcade);
+    expect(
+        (store.committedState.activities['arcade:word']!.snapshot
+                as WordGameCheckpoint)
+            .clock
+            .paused,
+        isTrue);
+
+    store.failingActions.remove(CheckpointArcade);
+    await tester.tap(find.text('Retry save'));
+    await tester.pumpAndSettle();
+    expect(store.submitted.where((command) => command.token == failed.token),
+        hasLength(2));
+    expect(find.byTooltip('Pause'), findsOneWidget);
+    expect(
+        (store.committedState.activities['arcade:word']!.snapshot
+                as WordGameCheckpoint)
+            .clock
+            .paused,
+        isFalse);
+  });
+
+  testWidgets('unavailable arcade save retries loading instead of resending',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final store = CourseLearningWidgetStore()
+      ..actionFailures[CheckpointArcade] = const LearningUnavailableException();
+    await tester.pumpWidget(ProviderScope(
+      overrides: [courseLearningStoreProvider.overrideWithValue(store)],
+      child: const MaterialApp(home: ArcadeScreen(silent: true)),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Start 60-second round'));
+    await tester.pumpAndSettle();
+    expect(find.text('Retry save'), findsNothing);
+    expect(find.text('Retry loading'), findsOneWidget);
+    final checkpointAttempts = store.submitted
+        .where((command) => command.action is CheckpointArcade)
+        .length;
+    await tester.tap(find.text('Retry loading'));
+    await tester.pumpAndSettle();
+    expect(store.retryLoadCalls, 1);
+    expect(
+        store.submitted
+            .where((command) => command.action is CheckpointArcade)
+            .length,
+        checkpointAttempts);
+    expect(find.text('Resume saved board'), findsOneWidget);
+  });
+
+  testWidgets('invalid arcade command requires reload, not save retry',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final store = CourseLearningWidgetStore()
+      ..actionFailures[CheckpointArcade] =
+          const LearningInvalidCommandException();
+    await tester.pumpWidget(ProviderScope(
+      overrides: [courseLearningStoreProvider.overrideWithValue(store)],
+      child: const MaterialApp(home: ArcadeScreen(silent: true)),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Start 60-second round'));
+    await tester.pumpAndSettle();
+    expect(find.text('Retry save'), findsNothing);
+    expect(find.text('Reload saved board'), findsOneWidget);
+    expect(store.committedState.activities, contains('arcade:word'));
+  });
+
+  testWidgets('arcade same-slot conflict reloads current saved board',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final store = CourseLearningWidgetStore();
+    await tester.pumpWidget(ProviderScope(
+      overrides: [courseLearningStoreProvider.overrideWithValue(store)],
+      child: const MaterialApp(home: ArcadeScreen(silent: true)),
+    ));
+    await tester.pumpAndSettle();
+    final competing = store.prepare(
+      state: store.committedState,
+      activityId: 'arcade:word',
+      action: StartLearningRun(options: RunOptions()),
+    );
+    await store.submit(competing);
+    await tester.tap(find.text('Start 60-second round'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Retry save'), findsNothing);
+    expect(find.text('Reload saved board'), findsOneWidget);
+    await tester.tap(find.text('Reload saved board'));
+    await tester.pumpAndSettle();
+    expect(store.loadCalls, 2);
+    expect(store.retryLoadCalls, 0);
+    expect(find.text('Resume saved board'), findsOneWidget);
   });
 
   testWidgets('A to B to A ignores delayed old-owner move feedback and score',

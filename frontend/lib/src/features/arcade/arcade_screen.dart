@@ -70,7 +70,12 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
   final _boardKey = GlobalKey();
   Offset? _dragOrigin;
   Timer? _timer;
-  bool _loading = true, _started = false, _busy = false, _showSummary = false;
+  bool _loading = true,
+      _started = false,
+      _busy = false,
+      _showSummary = false,
+      _loadFailed = false,
+      _reloadRequired = false;
   bool _audioReady = false, _background = false;
   bool _saveBusy = false;
   int _elapsed = 0, _generation = 0, _loadOp = 0;
@@ -104,7 +109,9 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
       !_roundOver &&
       !_busy &&
       !_background &&
-      _pendingCommand == null;
+      _pendingCommand == null &&
+      !_loadFailed &&
+      !_reloadRequired;
 
   @override
   void initState() {
@@ -122,6 +129,7 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
       setState(() {
         _loading = true;
         _saveError = null;
+        _loadFailed = false;
       });
     }
     try {
@@ -144,11 +152,19 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
       _started = false;
       _showSummary = false;
       _message = '';
+      _loadFailed = false;
+      _reloadRequired = false;
       if (_slot != null) _observePreview();
     } catch (_) {
-      if (!mounted || generation != _generation || op != _loadOp) return;
+      if (!mounted ||
+          generation != _generation ||
+          op != _loadOp ||
+          !identical(store, _store)) {
+        return;
+      }
       _message =
           'Saved progress is unavailable. Retry loading before continuing.';
+      _loadFailed = true;
     }
     if (mounted && generation == _generation && op == _loadOp) {
       setState(() => _loading = false);
@@ -166,6 +182,11 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
     _pendingStore = null;
     _pendingSuccess = null;
     _saveBusy = false;
+    _loadFailed = false;
+    _reloadRequired = false;
+    _saveError = null;
+    _started = false;
+    _showSummary = false;
     _elapsed = 0;
     _state = null;
     _slot = null;
@@ -175,7 +196,13 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
   }
 
   Future<bool> _send(LearningAction action, {VoidCallback? onSuccess}) async {
-    if (_saveBusy || _pendingCommand != null || _state == null) return false;
+    if (_saveBusy ||
+        _pendingCommand != null ||
+        _state == null ||
+        _loadFailed ||
+        _reloadRequired) {
+      return false;
+    }
     final store = _store;
     final generation = _generation;
     _pendingCommand =
@@ -226,12 +253,48 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
       return true;
     } catch (error) {
       if (mounted && generation == _generation && identical(store, _store)) {
-        setState(() {
-          _busy = false;
-          _saveError = error is LearningOwnerChangedException
-              ? 'This round belongs to a different account. Reload to continue.'
-              : 'Could not save this round. Retry before leaving.';
-        });
+        if (error is LearningSaveException) {
+          setState(() {
+            _busy = false;
+            _saveError = 'Could not save this round. Retry before leaving.';
+          });
+        } else if (error is LearningUnavailableException) {
+          _pendingCommand = null;
+          _pendingStore = null;
+          _pendingSuccess = null;
+          _timer?.cancel();
+          _retireCue();
+          setState(() {
+            _busy = false;
+            _saveError = null;
+            _loadFailed = true;
+            _reloadRequired = false;
+            _started = false;
+            _showSummary = false;
+            _state = null;
+            _slot = null;
+            _message =
+                'Saved progress is unavailable. Retry loading before continuing.';
+          });
+        } else {
+          _pendingCommand = null;
+          _pendingStore = null;
+          _pendingSuccess = null;
+          _timer?.cancel();
+          _retireCue();
+          _chain.clear();
+          _selected = null;
+          setState(() {
+            _busy = false;
+            _saveError = null;
+            _reloadRequired = true;
+            _started = false;
+            _showSummary = false;
+            _message = error is LearningOwnerChangedException
+                ? 'This round belongs to a different account. Reload the saved board to continue.'
+                : 'This saved board changed. Reload the saved board to continue.';
+          });
+        }
       }
       return false;
     } finally {
@@ -254,20 +317,57 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
   }
 
   Future<void> _start() async {
+    if (_loadFailed || _reloadRequired || _pendingCommand != null) return;
     if (_slot != null) {
-      final ok = _remaining == 0
-          ? await _send(const ContinueArcadeRound())
-          : await _send(CheckpointArcade(elapsedSeconds: 0, paused: false));
-      if (!ok) return;
-      _activate(resetCueAge: true);
+      await _send(
+        _remaining == 0
+            ? const ContinueArcadeRound()
+            : CheckpointArcade(elapsedSeconds: 0, paused: false),
+        onSuccess: () => _activate(resetCueAge: true),
+      );
       return;
     }
-    if (!await _send(StartLearningRun(options: RunOptions()))) return;
-    if (!await _send(CheckpointArcade(elapsedSeconds: 0, paused: false))) {
-      return;
-    }
-    _observePreview();
-    _activate(resetCueAge: true);
+    await _send(
+      StartLearningRun(options: RunOptions()),
+      onSuccess: _startInitialCheckpoint,
+    );
+  }
+
+  void _startInitialCheckpoint() {
+    final generation = _generation;
+    final store = _store;
+    scheduleMicrotask(() {
+      if (!mounted || generation != _generation || !identical(store, _store)) {
+        return;
+      }
+      unawaited(_send(
+        CheckpointArcade(elapsedSeconds: 0, paused: false),
+        onSuccess: () {
+          _observePreview();
+          _activate(resetCueAge: true);
+        },
+      ));
+    });
+  }
+
+  void _retryLoad() {
+    final store = _store;
+    if (_loading || _saveBusy) return;
+    unawaited(_load(store, retry: true));
+  }
+
+  void _reloadBoard() {
+    if (_loading || _saveBusy) return;
+    _pendingCommand = null;
+    _pendingStore = null;
+    _pendingSuccess = null;
+    _timer?.cancel();
+    _retireCue();
+    _chain.clear();
+    _selected = null;
+    _started = false;
+    _showSummary = false;
+    unawaited(_load(_store));
   }
 
   void _activate({bool resetCueAge = false}) {
@@ -619,6 +719,11 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
                                 onPressed: _submitPending,
                                 child: const Text('Retry save')),
                           ],
+                          if (_reloadRequired)
+                            FilledButton(
+                              onPressed: _loading ? null : _reloadBoard,
+                              child: const Text('Reload saved board'),
+                            ),
                           if (!widget.silent)
                             TextButton(
                                 onPressed: _switchToWordMatch,
@@ -650,10 +755,29 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
                     'Quick sound preview\n\n/u/ → tout, rouge, vous: “ou”, a steady rounded vowel.\n/y/ → tu, rue, lune: say /i/ with rounded lips.\n/i/ → lit: a steady “ee”.\n/o/ → beau: a steady “oh”, without a glide.'))),
         const SizedBox(height: 16),
         FilledButton(
-            onPressed: _start,
+            onPressed: _loadFailed ||
+                    _reloadRequired ||
+                    _saveBusy ||
+                    _pendingCommand != null
+                ? null
+                : _start,
             child: Text(_slot != null
                 ? 'Resume saved board'
                 : 'Start 60-second round')),
+        if (_loadFailed)
+          FilledButton(
+              onPressed: _loading ? null : _retryLoad,
+              child: const Text('Retry loading')),
+        if (_saveError != null) ...[
+          Text(_saveError!),
+          TextButton(
+              onPressed: _saveBusy ? null : _submitPending,
+              child: const Text('Retry save')),
+        ],
+        if (_reloadRequired)
+          FilledButton(
+              onPressed: _loading ? null : _reloadBoard,
+              child: const Text('Reload saved board')),
         const SizedBox(height: 12),
         const Text(
             'Stop after a minute or continue the same board. Puzzle points do not determine lesson completion.'),

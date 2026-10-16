@@ -33,10 +33,15 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
   bool _loading = true, _contentChanged = false;
   bool _busy = false, _isPlaying = false, _heard = false;
   bool _answerTransition = false, _ending = false, _saveFailed = false;
+  bool _conflict = false;
   String? _message;
   String _feedback = '';
   CourseAudio? _audio;
-  int _playGeneration = 0, _ownerGeneration = 0, _saveOperation = 0;
+  int _playGeneration = 0,
+      _ownerGeneration = 0,
+      _saveOperation = 0,
+      _answerOperation = 0,
+      _finishOperation = 0;
   bool _endCommitted = false;
 
   LearningActivityDefinition get _definition =>
@@ -63,6 +68,8 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
     if (old == null || identical(old, next)) return;
     _ownerGeneration++;
     _saveOperation++;
+    _answerOperation++;
+    _finishOperation++;
     _playGeneration++;
     _retireAudio();
     _pending = null;
@@ -70,7 +77,9 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
     _state = null;
     _checkpoint = null;
     _busy = false;
+    _answerTransition = false;
     _heard = false;
+    _conflict = false;
     _saveFailed = false;
     _ending = false;
     _endCommitted = false;
@@ -84,6 +93,8 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
   void dispose() {
     _ownerGeneration++;
     _saveOperation++;
+    _answerOperation++;
+    _finishOperation++;
     WidgetsBinding.instance.removeObserver(this);
     _retireAudio();
     super.dispose();
@@ -118,6 +129,7 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
       _busy = false;
       _message = null;
       _contentChanged = false;
+      _conflict = false;
       _heard = false;
     });
     try {
@@ -189,6 +201,7 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
   Future<void> _play(MinimalPair pair, int itemIndex) async {
     if (_loading ||
         _busy ||
+        _pending != null ||
         _ending ||
         _answerTransition ||
         _checkpoint == null ||
@@ -229,6 +242,7 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
 
   Future<void> _onPlayStopFor(MinimalPair pair, int itemIndex) async {
     if (_index != itemIndex ||
+        _pending != null ||
         _ending ||
         _ended ||
         _answerTransition ||
@@ -251,6 +265,7 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
   Future<void> _answer(String selected, int itemIndex) async {
     if (_loading ||
         _busy ||
+        _pending != null ||
         _ending ||
         _ended ||
         _answerTransition ||
@@ -260,6 +275,8 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
         _checkpoint == null) {
       return;
     }
+    final owner = _ownerGeneration;
+    final operation = ++_answerOperation;
     _answerTransition = true;
     _playGeneration++;
     final command = _store!.prepare(
@@ -278,7 +295,9 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
       _feedback = command.feedback.message;
     });
     await _submitPending();
-    _answerTransition = false;
+    if (mounted && owner == _ownerGeneration && operation == _answerOperation) {
+      _answerTransition = false;
+    }
   }
 
   Future<void> _submitPending() async {
@@ -325,28 +344,83 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
       if (command.action is EndDrill) await _finishSession();
     } on LearningContentChangedException {
       if (mounted && owner == _ownerGeneration && operation == _saveOperation) {
+        _pending = null;
+        _pendingStore = null;
         setState(() {
           _busy = false;
+          _saveFailed = false;
           _contentChanged = true;
           _message = 'This drill has changed. Start a new run to continue.';
         });
       }
-    } catch (_) {
-      if (!mounted ||
-          owner != _ownerGeneration ||
-          operation != _saveOperation) {
-        return;
+    } on LearningConflictException {
+      if (mounted && owner == _ownerGeneration && operation == _saveOperation) {
+        _showReloadRequired(
+          'This answer no longer matches saved progress. Reload saved progress to continue.',
+          owner,
+          operation,
+        );
       }
-      setState(() {
-        _busy = false;
-        _saveFailed = true;
-        if (command.action is EndDrill) _ending = false;
-        _heard = false;
-        _feedback = command.feedback.message.isEmpty
-            ? _saveError
-            : '${command.feedback.message}\n$_saveError';
-      });
+    } on LearningUnavailableException {
+      if (mounted && owner == _ownerGeneration && operation == _saveOperation) {
+        _pending = null;
+        _pendingStore = null;
+        setState(() {
+          _busy = false;
+          _loading = false;
+          _saveFailed = false;
+          _ending = false;
+          _conflict = false;
+          _heard = false;
+          _checkpoint = null;
+          _message = 'Saved progress is unavailable. Retry loading.';
+        });
+      }
+    } on LearningSaveException {
+      _showSaveFailure(owner, operation, command);
+    } on LearningInvalidCommandException {
+      _showReloadRequired(
+        'This learning action is no longer valid. Reload saved progress to continue.',
+        owner,
+        operation,
+      );
+    } catch (_) {
+      _showReloadRequired(
+        'This learning action could not be confirmed. Reload saved progress to continue.',
+        owner,
+        operation,
+      );
     }
+  }
+
+  void _showSaveFailure(int owner, int operation, LearningCommand command) {
+    if (!mounted || owner != _ownerGeneration || operation != _saveOperation) {
+      return;
+    }
+    setState(() {
+      _busy = false;
+      _saveFailed = true;
+      if (command.action is EndDrill) _ending = false;
+      _heard = false;
+      _feedback = command.feedback.message.isEmpty
+          ? _saveError
+          : '${command.feedback.message}\n$_saveError';
+    });
+  }
+
+  void _showReloadRequired(String message, int owner, int operation) {
+    if (!mounted || owner != _ownerGeneration || operation != _saveOperation) {
+      return;
+    }
+    _pending = null;
+    _pendingStore = null;
+    setState(() {
+      _busy = false;
+      _saveFailed = false;
+      _ending = false;
+      _conflict = true;
+      _message = message;
+    });
   }
 
   void _retrySave() {
@@ -354,7 +428,9 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
   }
 
   Future<void> _endSession() async {
-    if (_ending || _state == null || _checkpoint == null) return;
+    if (_ending || _pending != null || _state == null || _checkpoint == null) {
+      return;
+    }
     if (!_endCommitted) {
       final command = _store!.prepare(
           state: _state!, activityId: _activityId, action: const EndDrill());
@@ -379,10 +455,14 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
   }
 
   Future<void> _finishSession() async {
+    final owner = _ownerGeneration;
+    final operation = ++_finishOperation;
     try {
       await ref.read(streakServiceProvider).recordPractice();
     } catch (_) {
-      if (mounted) {
+      if (mounted &&
+          owner == _ownerGeneration &&
+          operation == _finishOperation) {
         setState(() {
           _ending = false;
           _busy = false;
@@ -391,7 +471,11 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
       }
       return;
     }
-    if (!mounted) return;
+    if (!mounted ||
+        owner != _ownerGeneration ||
+        operation != _finishOperation) {
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(
             'Session complete! $_correct / ${_index == 0 ? 0 : _index} correct')));
@@ -399,7 +483,7 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
   }
 
   Future<void> _startNewRun() async {
-    if (!_contentChanged || _state == null || _busy) return;
+    if (!_contentChanged || _state == null || _busy || _pending != null) return;
     final command = _store!.prepare(
         state: _state!,
         activityId: _activityId,
@@ -424,6 +508,10 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
               FilledButton(
                   onPressed: _busy ? null : _retrySave,
                   child: const Text('Retry saving'))
+            else if (_conflict)
+              FilledButton(
+                  onPressed: _busy ? null : () => _load(_store!),
+                  child: const Text('Reload saved progress'))
             else if (_contentChanged)
               FilledButton(
                   onPressed: _busy ? null : _startNewRun,
@@ -465,7 +553,11 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
                   icon: Icon(_isPlaying ? Icons.stop : Icons.play_arrow),
                   iconSize: 36,
                   tooltip: 'Play audio',
-                  onPressed: _ending || _ended || _answerTransition || _busy
+                  onPressed: _ending ||
+                          _ended ||
+                          _answerTransition ||
+                          _busy ||
+                          _pending != null
                       ? null
                       : () => _onPlayStopFor(current, itemIndex)),
             ]),
@@ -480,6 +572,7 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
                                   !_ended &&
                                   !_answerTransition &&
                                   !_busy &&
+                                  _pending == null &&
                                   _heard &&
                                   !_isPlaying
                               ? () => _answer(option, itemIndex)
@@ -493,7 +586,9 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
             const Spacer(),
             Center(
                 child: TextButton(
-                    onPressed: _ending || _busy ? null : _endSession,
+                    onPressed: _ending || _busy || _pending != null
+                        ? null
+                        : _endSession,
                     child: const Text('End Session'))),
           ])),
     );

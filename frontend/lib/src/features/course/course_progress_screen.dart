@@ -11,26 +11,63 @@ import '../../core/course/course_learning_sync.dart';
 import '../../core/course/course_skill_summary.dart';
 import '../../core/course/french_course.dart';
 
-class CourseProgressScreen extends ConsumerWidget {
+class CourseProgressScreen extends ConsumerStatefulWidget {
   const CourseProgressScreen({super.key, this.review = false});
   final bool review;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CourseProgressScreen> createState() =>
+      _CourseProgressScreenState();
+}
+
+class _CourseProgressScreenState extends ConsumerState<CourseProgressScreen> {
+  bool _retryingLoad = false;
+
+  @override
+  void initState() {
+    super.initState();
+    ref.listenManual(courseLearningStoreProvider, (previous, next) {
+      if (!identical(previous, next) && mounted && _retryingLoad) {
+        setState(() => _retryingLoad = false);
+      }
+    });
+  }
+
+  Future<void> _retryLoad() async {
+    if (_retryingLoad) return;
+    final store = ref.read(courseLearningStoreProvider);
+    setState(() => _retryingLoad = true);
+    try {
+      await store.retryLoad();
+      if (!mounted ||
+          !identical(store, ref.read(courseLearningStoreProvider))) {
+        return;
+      }
+      ref.invalidate(courseLearningStateProvider);
+    } catch (_) {
+      // Keep the unavailable state and leave an explicit retry available.
+    } finally {
+      if (mounted) setState(() => _retryingLoad = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final progress = ref.watch(courseLearningStateProvider);
     return Scaffold(
-      appBar: AppBar(title: Text(review ? 'Review sounds' : 'Course progress')),
+      appBar: AppBar(
+          title: Text(widget.review ? 'Review sounds' : 'Course progress')),
       body: progress.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (_, __) => Center(
           child: TextButton(
-            onPressed: () => ref.invalidate(courseLearningStateProvider),
-            child: const Text('Retry loading progress'),
+            onPressed: _retryingLoad ? null : _retryLoad,
+            child: Text(_retryingLoad ? 'Retrying…' : 'Retry loading progress'),
           ),
         ),
         data: (state) => _ProgressContent(
           state: state,
-          review: review,
+          review: widget.review,
           registry: ref.watch(learningRegistryProvider),
           sync: () => ref.read(courseLearningStoreProvider).sync(),
         ),

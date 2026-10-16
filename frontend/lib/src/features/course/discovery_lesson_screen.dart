@@ -108,6 +108,9 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   static const String _conflictText =
       'This copy no longer matches the saved progress for this section. Tap '
       '"Reload saved progress" to load the saved state.';
+  static const String _invalidCommandText =
+      'This learning action is no longer valid. Tap "Reload saved progress" '
+      'to load the saved state.';
   // Pure Retry/unavailable guidance (I1): the exact shared alpha disclosure
   // is pinned persistently on the exercise surface itself
   // (DiscoverySectionView), so the transient failure wording stays focused
@@ -523,6 +526,42 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
           _busy = false;
           _saveError = null;
           _conflictError = _conflictText;
+        });
+        return;
+      }
+      if (failure is LearningUnavailableException) {
+        _pendingCommand = null;
+        _pendingStore = null;
+        _pendingOnSaved = null;
+        setState(() {
+          _busy = false;
+          _saveError = null;
+          _conflictError = null;
+          _loadError = _loadErrorText;
+          _session = null;
+        });
+        return;
+      }
+      if (failure is LearningInvalidCommandException ||
+          failure is LearningOwnerChangedException) {
+        _pendingCommand = null;
+        _pendingStore = null;
+        _pendingOnSaved = null;
+        setState(() {
+          _busy = false;
+          _saveError = null;
+          _conflictError = _invalidCommandText;
+        });
+        return;
+      }
+      if (failure is! LearningSaveException) {
+        _pendingCommand = null;
+        _pendingStore = null;
+        _pendingOnSaved = null;
+        setState(() {
+          _busy = false;
+          _saveError = null;
+          _conflictError = _invalidCommandText;
         });
         return;
       }

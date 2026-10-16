@@ -49,7 +49,7 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
   CourseLearningState? _state;
   LearningCommand? _pending;
   String? _loadMessage;
-  bool _saveFailed = false;
+  bool _saveFailed = false, _conflict = false;
   int _generation = 0, _listenGeneration = 0, _saveOperation = 0;
   int _recordingGeneration = 0;
 
@@ -101,6 +101,7 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
     _pending = null;
     _pendingStore = null;
     _saveFailed = false;
+    _conflict = false;
     _state = null;
     _index = 0;
     _answered = false;
@@ -157,6 +158,7 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
       _heard = false;
       _pending = null;
       _saveFailed = false;
+      _conflict = false;
       _candidateAnswer = false;
     });
     try {
@@ -240,7 +242,7 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
   }
 
   Future<void> _listen() async {
-    if (_busy || _recording || _saveFailed) return;
+    if (_busy || _recording || _saveFailed || _pending != null) return;
     final generation = ++_listenGeneration;
     _audioPending = true;
     setState(() {
@@ -270,7 +272,14 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
   }
 
   Future<void> _answer(String sound) async {
-    if (!_heard || _answered || _busy || _saveFailed || _state == null) return;
+    if (!_heard ||
+        _answered ||
+        _busy ||
+        _saveFailed ||
+        _pending != null ||
+        _state == null) {
+      return;
+    }
     _listenGeneration++;
     final command = _store!.prepare(
       state: _state!,
@@ -359,26 +368,84 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
       ref.invalidate(courseLearningStateProvider);
     } on LearningContentChangedException {
       if (mounted && generation == _generation && operation == _saveOperation) {
+        _pending = null;
+        _pendingStore = null;
         setState(() {
           _busy = false;
+          _saveFailed = false;
           _contentChanged = true;
           _loadMessage =
               'This lesson has changed. Start a new run to continue.';
         });
       }
-    } catch (_) {
-      if (!mounted ||
-          generation != _generation ||
-          operation != _saveOperation) {
-        return;
+    } on LearningConflictException {
+      if (mounted && generation == _generation && operation == _saveOperation) {
+        _pending = null;
+        _pendingStore = null;
+        setState(() {
+          _busy = false;
+          _saveFailed = false;
+          _conflict = true;
+          _loadMessage =
+              'This answer no longer matches saved progress. Reload saved progress to continue.';
+        });
       }
-      setState(() {
-        _busy = false;
-        _saveFailed = true;
-        if (command.action is ChooseSound) _answered = true;
-        _feedback = '$_feedback\n$_saveError';
-      });
+    } on LearningUnavailableException {
+      if (mounted && generation == _generation && operation == _saveOperation) {
+        _pending = null;
+        _pendingStore = null;
+        setState(() {
+          _busy = false;
+          _saveFailed = false;
+          _conflict = false;
+          _answered = false;
+          _candidateAnswer = false;
+          _heard = false;
+          _loadMessage = _loadError;
+        });
+      }
+    } on LearningSaveException {
+      _showSaveFailure(generation, operation, command);
+    } on LearningInvalidCommandException {
+      _showReloadRequired(
+        generation,
+        operation,
+        'This learning action is no longer valid. Reload saved progress to continue.',
+      );
+    } catch (_) {
+      _showReloadRequired(
+        generation,
+        operation,
+        'This learning action could not be confirmed. Reload saved progress to continue.',
+      );
     }
+  }
+
+  void _showSaveFailure(
+      int generation, int operation, LearningCommand command) {
+    if (!mounted || generation != _generation || operation != _saveOperation) {
+      return;
+    }
+    setState(() {
+      _busy = false;
+      _saveFailed = true;
+      if (command.action is ChooseSound) _answered = true;
+      _feedback = '$_feedback\n$_saveError';
+    });
+  }
+
+  void _showReloadRequired(int generation, int operation, String message) {
+    if (!mounted || generation != _generation || operation != _saveOperation) {
+      return;
+    }
+    _pending = null;
+    _pendingStore = null;
+    setState(() {
+      _busy = false;
+      _saveFailed = false;
+      _conflict = true;
+      _loadMessage = message;
+    });
   }
 
   void _retrySave() {
@@ -386,7 +453,12 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
   }
 
   Future<void> _next() async {
-    if (_busy || _recording || !_answered || _saveFailed || _state == null) {
+    if (_busy ||
+        _recording ||
+        !_answered ||
+        _saveFailed ||
+        _pending != null ||
+        _state == null) {
       return;
     }
     final command = _store!.prepare(
@@ -397,7 +469,7 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
   }
 
   Future<void> _finishRun() async {
-    if (_state == null || _store == null || _busy) return;
+    if (_state == null || _store == null || _busy || _pending != null) return;
     final command = _store!.prepare(
       state: _state!,
       activityId: _activityId,
@@ -471,7 +543,7 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
   }
 
   void _openReference(bool opened) {
-    if (!opened || _state == null || _busy) return;
+    if (!opened || _state == null || _busy || _pending != null) return;
     final contexts = <ItemContextKey>{
       for (final item in _definition.items)
         for (final target in item.targetSounds)
@@ -491,7 +563,12 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
   }
 
   Future<void> _startNewRun() async {
-    if ((!_contentChanged && !_finished) || _state == null || _busy) return;
+    if ((!_contentChanged && !_finished) ||
+        _state == null ||
+        _busy ||
+        _pending != null) {
+      return;
+    }
     final command = _store!.prepare(
         state: _state!,
         activityId: _activityId,
@@ -519,6 +596,10 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
                 FilledButton(
                     onPressed: _busy ? null : _retrySave,
                     child: const Text('Retry saving'))
+              else if (_conflict)
+                FilledButton(
+                    onPressed: _busy ? null : () => _load(_store!),
+                    child: const Text('Reload saved progress'))
               else if (_contentChanged || _finished)
                 FilledButton(
                     onPressed: _busy ? null : _startNewRun,
@@ -609,6 +690,7 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
                       ],
                       const SizedBox(height: 24),
                       ExpansionTile(
+                        enabled: _pending == null,
                         title: const Text('Word reference'),
                         onExpansionChanged: _openReference,
                         children: [

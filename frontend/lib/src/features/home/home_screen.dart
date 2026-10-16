@@ -5,11 +5,46 @@ import 'package:go_router/go_router.dart';
 import '../../core/course/course_learning_providers.dart';
 import '../../core/course/french_course.dart';
 
-class HomeScreen extends ConsumerWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  bool _retryingLoad = false;
+
+  @override
+  void initState() {
+    super.initState();
+    ref.listenManual(courseLearningStoreProvider, (previous, next) {
+      if (!identical(previous, next) && mounted && _retryingLoad) {
+        setState(() => _retryingLoad = false);
+      }
+    });
+  }
+
+  Future<void> _retryLoad() async {
+    if (_retryingLoad) return;
+    final store = ref.read(courseLearningStoreProvider);
+    setState(() => _retryingLoad = true);
+    try {
+      await store.retryLoad();
+      if (!mounted ||
+          !identical(store, ref.read(courseLearningStoreProvider))) {
+        return;
+      }
+      ref.invalidate(courseLearningStateProvider);
+    } catch (_) {
+      // The provider remains in its unavailable state; Retry can be tried again.
+    } finally {
+      if (mounted) setState(() => _retryingLoad = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final progress = ref.watch(courseLearningStateProvider);
     final registry = ref.watch(learningRegistryProvider);
     final currentRevisions = {
@@ -54,9 +89,9 @@ class HomeScreen extends ConsumerWidget {
                   loading: () =>
                       const Center(child: CircularProgressIndicator()),
                   error: (_, __) => TextButton(
-                    onPressed: () =>
-                        ref.invalidate(courseLearningStateProvider),
-                    child: const Text('Retry loading progress'),
+                    onPressed: _retryingLoad ? null : _retryLoad,
+                    child: Text(
+                        _retryingLoad ? 'Retrying…' : 'Retry loading progress'),
                   ),
                   data: (_) => Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

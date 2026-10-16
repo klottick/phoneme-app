@@ -536,6 +536,48 @@ void main() {
   });
 
   group('save failures and retries', () {
+    testWidgets('unavailable answer save requires retry loading',
+        (tester) async {
+      final store = CourseLearningWidgetStore()
+        ..actionFailures[ChooseSound] = const LearningUnavailableException();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Retry saving'), findsNothing);
+      expect(find.text('Retry loading'), findsOneWidget);
+      expect(store.discoverySession!.attemptCount, 0);
+      await tester.tap(find.text('Retry loading'));
+      await tester.pumpAndSettle();
+      expect(store.retryLoadCalls, 1);
+      expect(store.discoverySession!.attemptCount, 0,
+          reason: 'an unavailable candidate must not receive answer credit');
+      expect(find.text('Item 1 of 10'), findsOneWidget);
+    });
+
+    testWidgets('invalid answer command requires reload, not save retry',
+        (tester) async {
+      final store = CourseLearningWidgetStore()
+        ..actionFailures[ChooseSound] = const LearningInvalidCommandException();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Retry saving'), findsNothing);
+      expect(find.text('Reload saved progress'), findsOneWidget);
+      expect(store.discoverySession!.attemptCount, 0);
+      await tester.tap(find.text('Reload saved progress'));
+      await tester.pumpAndSettle();
+      expect(store.loadCalls, 2);
+      expect(store.discoverySession!.attemptCount, 0);
+    });
+
     testWidgets('answer save failure keeps the same attempt, retried once',
         (tester) async {
       final store = CourseLearningWidgetStore();

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,11 +7,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
+import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/course/course_learning_registry.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
+import 'package:linguist/src/core/course/course_learning_store.dart';
 import 'package:linguist/src/core/course/course_skill_summary.dart';
 import 'package:linguist/src/features/course/course_progress_screen.dart';
 import 'package:linguist/src/features/home/home_screen.dart';
+import '../support/course_learning_widget_store.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -169,6 +174,85 @@ void main() {
         find.text('1 of 5 lessons complete · about 3 minutes'), findsOneWidget);
     expect(find.textContaining('Continue lesson'), findsOneWidget);
   });
+
+  testWidgets('home retry-loading calls retryLoad before refreshing state',
+      (tester) async {
+    final store = CourseLearningWidgetStore()..failLoad = true;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [courseLearningStoreProvider.overrideWithValue(store)],
+      child: const MaterialApp(home: HomeScreen()),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Retry loading progress'), findsOneWidget);
+    await tester.tap(find.text('Retry loading progress'));
+    await tester.pumpAndSettle();
+    expect(store.retryLoadCalls, 1);
+    expect(find.textContaining('Continue lesson'), findsOneWidget);
+  });
+
+  testWidgets('progress retry-loading calls retryLoad before refreshing state',
+      (tester) async {
+    final store = CourseLearningWidgetStore()..failLoad = true;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [courseLearningStoreProvider.overrideWithValue(store)],
+      child: const MaterialApp(home: CourseProgressScreen()),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Retry loading progress'), findsOneWidget);
+    await tester.tap(find.text('Retry loading progress'));
+    await tester.pumpAndSettle();
+    expect(store.retryLoadCalls, 1);
+    expect(find.text('0/5 lessons complete'), findsOneWidget);
+  });
+
+  for (final surface in ['home', 'progress']) {
+    testWidgets('$surface retry completion cannot refresh a replacement owner',
+        (tester) async {
+      final oldStore = CourseLearningWidgetStore();
+      final newStore = CourseLearningWidgetStore();
+      final retryGate = Completer<void>();
+      oldStore.loadHandler = (call) async {
+        if (call == 1) throw const LearningUnavailableException();
+        await retryGate.future;
+        return oldStore.committedState;
+      };
+      var activeStore = oldStore;
+      final epoch = StateProvider<int>((ref) => 0);
+      final selectedStore = Provider<CourseLearningStore>((ref) {
+        ref.watch(epoch);
+        return activeStore;
+      });
+      final container = ProviderContainer(overrides: [
+        selectedStore.overrideWith((ref) {
+          ref.watch(epoch);
+          return activeStore;
+        }),
+        courseLearningStoreProvider
+            .overrideWith((ref) => ref.watch(selectedStore)),
+      ]);
+      addTearDown(container.dispose);
+      final page =
+          surface == 'home' ? const HomeScreen() : const CourseProgressScreen();
+      await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(home: page),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Retry loading progress'));
+      await tester.pump();
+      expect(oldStore.retryLoadCalls, 1);
+
+      activeStore = newStore;
+      container.read(epoch.notifier).state++;
+      await tester.pumpAndSettle();
+      expect(newStore.loadCalls, 1);
+      retryGate.complete();
+      await tester.pumpAndSettle();
+      expect(newStore.loadCalls, 1,
+          reason:
+              'the retired owner result must not invalidate new owner state');
+    });
+  }
 
   testWidgets('unavailable mistakes are labeled and cannot route to review',
       (tester) async {

@@ -14,6 +14,7 @@ import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/course_learning_store.dart';
 import 'package:linguist/src/core/course/course_learning_sync.dart';
 import 'package:linguist/src/core/course/course_learning_transition.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class _RecordingTransport implements LearningCloudTransport {
@@ -68,6 +69,34 @@ class _MemoryPersistence implements LearningPersistence {
 
   @override
   Future<void> reload() async {}
+}
+
+class _TrackingLearningPersistence implements LearningPersistence {
+  _TrackingLearningPersistence(this.delegate);
+  final LearningPersistence delegate;
+  final reads = <String>[];
+  final writes = <String>[];
+
+  @override
+  Future<String?> read(String key) {
+    reads.add(key);
+    return delegate.read(key);
+  }
+
+  @override
+  Future<void> write(String key, String value) {
+    writes.add(key);
+    return delegate.write(key, value);
+  }
+
+  @override
+  Future<void> restore(String key, String? lastCommitted) {
+    writes.add(key);
+    return delegate.restore(key, lastCommitted);
+  }
+
+  @override
+  Future<void> reload() => delegate.reload();
 }
 
 void main() {
@@ -137,6 +166,79 @@ void main() {
         random: Random(1));
     expect((await store.load()).pending, isEmpty);
     expect((await store.sync()).status, SupportedSyncStatus.guest);
+  });
+
+  test('account sync never reads or sends literal legacy outbox events',
+      () async {
+    const oldCourseKey = 'course.v1.en-fr';
+    const oldArcadeKey = 'arcade.v1.en-fr.sound';
+    const oldCourse =
+        '{"lessons":["en-fr-u-y"],"evidence":{"listening:u":{"attempts":8,"correct":7}},"pending":[{"id":"legacy-outbox-event-7","event":"legacy"}]}';
+    const oldArcade = '{"session":{"remaining":17,"score":91}}';
+    SharedPreferences.setMockInitialValues({
+      oldCourseKey: oldCourse,
+      oldArcadeKey: oldArcade,
+      'profile.name': 'keep-profile',
+    });
+    final preferences = await SharedPreferences.getInstance();
+    final owner = LearningOwner.account('legacy-outbox-user');
+    final scope = LearningScope(courseId: 'en-fr', owner: owner);
+    final auth = LearningAuthScope(owner: owner, generation: 0, ready: true);
+    final persistence = _TrackingLearningPersistence(
+      PreferencesLearningPersistence(
+          preferences: SharedPreferences.getInstance),
+    );
+    final transport = _RecordingTransport();
+    var tokenCounter = 0;
+    final store = CourseLearningRepository(
+      scope: scope,
+      authGeneration: 0,
+      currentAuth: () => auth,
+      backendOwner: () => owner,
+      persistence: persistence,
+      transitions: LearningTransitionEngine(LearningRegistry.french()),
+      clock: () => DateTime.utc(2026, 10, 15),
+      newToken: () => (++tokenCounter).toRadixString(36).padLeft(22, '0'),
+      random: Random(41),
+      cloud: transport,
+    );
+
+    expect((await store.load()).pending, isEmpty);
+    expect((await store.sync()).status, SupportedSyncStatus.synced);
+    expect(transport.batches, isEmpty,
+        reason: 'legacy pending data is not a supported typed event');
+    expect(persistence.reads, isNot(contains(oldCourseKey)));
+    expect(persistence.reads, isNot(contains(oldArcadeKey)));
+
+    var committed = await store.load();
+    committed = (await store.submit(store.prepare(
+      state: committed,
+      activityId: 'lesson:en-fr-u-y',
+      action: StartLearningRun(options: RunOptions()),
+    )))
+        .state;
+    await store.submit(store.prepare(
+      state: committed,
+      activityId: 'lesson:en-fr-u-y',
+      action: ChooseSound(
+        selectedSound: 'y',
+        audioSource: AttemptAudioSource.pendingRecording,
+      ),
+    ));
+    expect((await store.load()).pending, hasLength(1));
+    final synced = await store.sync();
+    expect(synced.status, SupportedSyncStatus.synced);
+    final sentIds = transport.batches.expand((batch) => batch.map((e) => e.id));
+    expect(sentIds, hasLength(1));
+    expect(sentIds.single, startsWith('fr04.c0.'));
+    expect(sentIds, isNot(contains('legacy-outbox-event-7')));
+    expect(persistence.reads, isNot(contains(oldCourseKey)));
+    expect(persistence.reads, isNot(contains(oldArcadeKey)));
+    expect(persistence.writes, isNot(contains(oldCourseKey)));
+    expect(persistence.writes, isNot(contains(oldArcadeKey)));
+    expect(preferences.getString(oldCourseKey), oldCourse);
+    expect(preferences.getString(oldArcadeKey), oldArcade);
+    expect(preferences.getString('profile.name'), 'keep-profile');
   });
 
   test('201 committed events deliver in batches of at most 100', () async {
