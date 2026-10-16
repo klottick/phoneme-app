@@ -8,16 +8,17 @@ import '../support/course_learning_widget_store.dart';
 void main() {
   setUp(() =>
       SharedPreferences.setMockInitialValues({'selected_course_id': 'en-fr'}));
-  testWidgets('course home opens its next lesson', (tester) async {
+  testWidgets('course home opens discovery before legacy practice',
+      (tester) async {
     await tester.pumpWidget(ProviderScope(overrides: [
       courseLearningStoreProvider
           .overrideWithValue(CourseLearningWidgetStore()),
     ], child: const LinguistApp()));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Continue lesson'));
+    await tester.tap(find.text('Continue discovery'));
     await tester.pumpAndSettle();
-    expect(find.text('Listen to French word'), findsOneWidget);
-    expect(find.text('Listen 1 of 4'), findsOneWidget);
+    expect(find.text('Listening practice'), findsWidgets);
+    expect(find.text('Item 1 of 10'), findsOneWidget);
   });
   testWidgets('course progress and settings remain accessible', (tester) async {
     await tester.pumpWidget(ProviderScope(overrides: [
@@ -32,6 +33,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Progress'));
     await tester.pumpAndSettle();
-    expect(find.text('0/5 lessons complete'), findsOneWidget);
+    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
+    expect(
+        find.text('Existing lessons (includes discovery pilot): 0/5 complete'),
+        findsOneWidget);
   });
 }

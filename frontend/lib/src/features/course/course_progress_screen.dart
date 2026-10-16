@@ -10,6 +10,7 @@ import '../../core/course/course_learning_state.dart';
 import '../../core/course/course_learning_sync.dart';
 import '../../core/course/course_skill_summary.dart';
 import '../../core/course/french_course.dart';
+import 'course_completion_summary.dart';
 
 class CourseProgressScreen extends ConsumerStatefulWidget {
   const CourseProgressScreen({super.key, this.review = false});
@@ -86,6 +87,7 @@ class _CourseProgressScreenState extends ConsumerState<CourseProgressScreen> {
       appBar: AppBar(
           title: Text(widget.review ? 'Review sounds' : 'Course progress')),
       body: progress.when(
+        skipLoadingOnRefresh: false,
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (_, __) => Center(
           child: TextButton(
@@ -119,15 +121,8 @@ class _ProgressContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final currentRevisions = {
-      for (final lesson in frenchLessons)
-        lesson.id: registry.require('lesson:${lesson.id}').contentRevision,
-    };
-    final completed = state.completions
-        .where((completion) =>
-            currentRevisions[completion.lessonId] == completion.contentRevision)
-        .map((completion) => completion.lessonId)
-        .toSet();
+    final completionSummary =
+        CourseCompletionSummary.fromState(state: state, registry: registry);
     final summaries = state.summaries.entries.toList()
       ..sort((a, b) {
         final keyA = a.key;
@@ -146,7 +141,10 @@ class _ProgressContent extends StatelessWidget {
     return ListView(padding: const EdgeInsets.all(20), children: [
       Text(frenchCourse.title, style: Theme.of(context).textTheme.titleLarge),
       const SizedBox(height: 16),
-      Text('${completed.length}/${frenchLessons.length} lessons complete'),
+      Text('Discovery lessons: '
+          '${completionSummary.discoveryCompleteCount}/${completionSummary.discoveryTotal} complete'),
+      Text('Existing lessons (includes discovery pilot): '
+          '${completionSummary.existingComplete}/${completionSummary.existingTotal} complete'),
       const Text(
           'On this device, committed practice and game answers are shown separately.'),
       const Text(

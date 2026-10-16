@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/course/course_learning_providers.dart';
 import '../../core/course/french_course.dart';
+import '../course/course_completion_summary.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -47,20 +48,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final progress = ref.watch(courseLearningStateProvider);
     final registry = ref.watch(learningRegistryProvider);
-    final currentRevisions = {
-      for (final lesson in frenchLessons)
-        lesson.id: registry.require('lesson:${lesson.id}').contentRevision,
-    };
-    final completed = progress.valueOrNull?.completions
-            .where((completion) =>
-                currentRevisions[completion.lessonId] ==
-                completion.contentRevision)
-            .map((completion) => completion.lessonId)
-            .toSet() ??
-        <String>{};
-    final next = frenchLessons.firstWhere(
-        (lesson) => !completed.contains(lesson.id),
-        orElse: () => frenchLessons.last);
+    final completedExistingLessonIds = progress.when(
+      skipLoadingOnRefresh: false,
+      data: (state) =>
+          CourseCompletionSummary.fromState(state: state, registry: registry)
+              .completedExistingLessonIds,
+      loading: () => const <String>{},
+      error: (_, __) => const <String>{},
+    );
+    final legacyLessons = frenchLessons
+        .where((lesson) => lesson.id != 'en-fr-u-y')
+        .toList(growable: false);
     return Scaffold(
       appBar: AppBar(title: const Text('Linguist'), actions: [
         IconButton(
@@ -86,6 +84,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(20),
                 child: progress.when(
+                  skipLoadingOnRefresh: false,
                   loading: () =>
                       const Center(child: CircularProgressIndicator()),
                   error: (_, __) => TextButton(
@@ -93,26 +92,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     child: Text(
                         _retryingLoad ? 'Retrying…' : 'Retry loading progress'),
                   ),
-                  data: (_) => Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(next.title,
-                          style: Theme.of(context).textTheme.titleLarge),
-                      const SizedBox(height: 8),
-                      Text(
-                          '${completed.length} of ${frenchLessons.length} lessons complete · about 3 minutes'),
-                      const SizedBox(height: 12),
-                      LinearProgressIndicator(
-                          value: completed.length / frenchLessons.length),
-                      const SizedBox(height: 16),
-                      FilledButton.icon(
-                        onPressed: () =>
-                            context.push('/course-lesson/${next.id}'),
-                        icon: const Icon(Icons.play_arrow),
-                        label: const Text('Continue lesson'),
-                      ),
-                    ],
-                  ),
+                  data: (state) {
+                    final completion = CourseCompletionSummary.fromState(
+                        state: state, registry: registry);
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Tu or tout?',
+                            style: Theme.of(context).textTheme.titleLarge),
+                        const SizedBox(height: 8),
+                        Text('Discovery lessons: '
+                            '${completion.discoveryCompleteCount}/${completion.discoveryTotal} complete'),
+                        const SizedBox(height: 12),
+                        LinearProgressIndicator(
+                            value: completion.discoveryCompleteCount /
+                                completion.discoveryTotal),
+                        const SizedBox(height: 16),
+                        FilledButton.icon(
+                          onPressed: () => context.push(
+                              '/course-lesson/en-fr-u-y'
+                              '${completion.discoveryComplete ? '?review=true' : ''}'),
+                          icon: const Icon(Icons.play_arrow),
+                          label: Text(completion.discoveryComplete
+                              ? 'Review discovery'
+                              : 'Continue discovery'),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ),
             ),
@@ -128,21 +135,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   label: const Text('Play for a minute')),
             ]),
             const SizedBox(height: 24),
-            Text('Your sound path',
+            Text('Legacy practice',
                 style: Theme.of(context).textTheme.titleLarge),
-            for (var i = 0; i < frenchLessons.length; i++)
+            for (var i = 0; i < legacyLessons.length; i++)
               Card(
                 child: ListTile(
                   leading: CircleAvatar(
-                      child: completed.contains(frenchLessons[i].id)
+                      child: completedExistingLessonIds
+                              .contains(legacyLessons[i].id)
                           ? const Icon(Icons.check)
                           : Text('${i + 1}')),
-                  title: Text(frenchLessons[i].title),
+                  title: Text(legacyLessons[i].title),
                   subtitle: Text(
-                      frenchLessons[i].sounds.map((s) => '/$s/').join('  ')),
+                      legacyLessons[i].sounds.map((s) => '/$s/').join('  ')),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () =>
-                      context.push('/course-lesson/${frenchLessons[i].id}'),
+                      context.push('/course-lesson/${legacyLessons[i].id}'),
                 ),
               ),
             const SizedBox(height: 12),
