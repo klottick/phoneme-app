@@ -106,6 +106,10 @@ input/timer stay inactive during a held write or Retry. Existing pending-command
 exclusivity, Start/checkpoint retry continuation, board/score/timer/audio logic,
 and save-retry identity remain in place.
 
-Commit: pending. Existing draft PR37 remains unmerged for controller review.
+Implementation commit: `fd210a4` (`fix arcade fresh-start preview assistance`).
+Existing draft PR37: https://github.com/klottick/phoneme-app/pull/37 (base
+`main`, head `feat/fr04-task6-caller-cutover`); remains unmerged for controller
+review. This report metadata is committed separately after the implementation
+commit.
 No live cloud, browser, or sandbox run was performed; the requested local
 release JavaScript build and widget/regression coverage passed.
