@@ -16,6 +16,8 @@ import '../../core/course/course_learning_store.dart';
 import '../../core/course/lesson_policy.dart';
 import '../../core/course/lesson_section.dart';
 import '../../core/course/lesson_section_session.dart';
+import '../../core/course/lesson_debrief_content.dart';
+import '../../core/course/french_lesson_teaching.dart';
 import 'discovery_section_view.dart';
 
 /// Lifecycle-aware screen that owns a discovery listening section session:
@@ -82,6 +84,7 @@ class DiscoveryLessonScreen extends ConsumerStatefulWidget {
     required this.lessonId,
     this.review = false,
     this.policy,
+    this.debriefContentLoader,
   });
 
   /// Lesson the section is bound to (the pilot is `en-fr-u-y`).
@@ -93,6 +96,8 @@ class DiscoveryLessonScreen extends ConsumerStatefulWidget {
   /// Policy used for fresh sessions; the saved policy is authoritative on
   /// resume.
   final LessonPolicy? policy;
+
+  final LessonDebriefContent Function()? debriefContentLoader;
 
   @override
   ConsumerState<DiscoveryLessonScreen> createState() =>
@@ -168,6 +173,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   /// result could publish over newer UI state.
   bool _loadInFlight = false;
   bool _contentChanged = false;
+  LessonDebriefContent? _debriefContent;
+  bool _teachingUnavailable = false;
 
   /// Identity of the load currently in flight (bumped when a load is
   /// orphaned, e.g. by a resumed-window re-drive or owner replacement). An
@@ -189,9 +196,29 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     WidgetsBinding.instance.addObserver(this);
     ref.listenManual(courseLearningStoreProvider, _onStoreReplaced);
     _section = sectionForLesson(widget.lessonId);
+    final section = _section;
+    if (section != null) {
+      try {
+        final content =
+            (widget.debriefContentLoader ?? loadFrenchPilotDebriefContent)();
+        if (content.lessonId != section.lessonId ||
+            content.contentRevision != section.contentRevision ||
+            content.entries.length != section.items.length ||
+            !List.generate(content.entries.length,
+                    (i) => content.entries[i].itemId == section.items[i].id)
+                .every((v) => v)) {
+          throw const FormatException('Mismatched lesson teaching content.');
+        }
+        _debriefContent = content;
+      } on LessonTeachingValidationException {
+        _teachingUnavailable = true;
+      } on FormatException {
+        _teachingUnavailable = true;
+      }
+    }
     final CourseLearningStore store = ref.read(courseLearningStoreProvider);
     _store = store;
-    unawaited(_load(store));
+    if (!_teachingUnavailable) unawaited(_load(store));
   }
 
   @override
@@ -244,6 +271,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   /// suspended window left behind so one action publishes/exits exactly
   /// once. A `resumed` without a prior suspension does nothing.
   void _onForeground() {
+    if (_teachingUnavailable) return;
     if (!_suspended) return;
     final CourseLearningStore? store = _store;
     if (store == null || !mounted) return;
@@ -273,6 +301,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   void _onStoreReplaced(
       CourseLearningStore? previous, CourseLearningStore next) {
     if (identical(previous, next)) return;
+    if (_teachingUnavailable) return;
     // The owner changed: stop the old owner's audio immediately, invalidate
     // the departed generation's playback and publications, orphan its
     // in-flight save run, and drop its pending save intent — it stays
@@ -302,6 +331,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   static String get _activityId => 'lesson:${frenchUySection.lessonId}';
 
   Future<void> _load(CourseLearningStore store, {bool retry = false}) async {
+    if (_teachingUnavailable) return;
     final section = _section;
     if (section == null) return;
     _loadInFlight = true;
@@ -833,9 +863,11 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     }
     // The word-bearing authored title (for example 'Tu or tout?') stays out
     // of the app bar while the item is hidden; only the debrief reveals it.
-    final String title = _session?.phase == LessonSectionPhase.debrief
-        ? section.title
-        : 'Listening practice';
+    final String title = _teachingUnavailable
+        ? 'Discovery lesson'
+        : _session?.phase == LessonSectionPhase.debrief
+            ? section.title
+            : 'Listening practice';
     return Scaffold(
       appBar: AppBar(title: Text(title)),
       body: _body(),
@@ -843,6 +875,9 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   }
 
   Widget _body() {
+    if (_teachingUnavailable) {
+      return const Center(child: Text('This discovery lesson is unavailable.'));
+    }
     final section = _section;
     if (section == null) {
       return const Center(
@@ -901,6 +936,9 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       onRetrySave: _onRetrySave,
       onReload: _onReload,
       onPractiseAgain: _onPractiseAgain,
+      teachingEntries: session.phase == LessonSectionPhase.debrief
+          ? _debriefContent!.forUnresolved(session.unresolvedItemIds)
+          : const [],
     );
   }
 }
