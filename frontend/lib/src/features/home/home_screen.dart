@@ -49,6 +49,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final progress = ref.watch(courseLearningStateProvider);
     final registry = ref.watch(learningRegistryProvider);
     final completedExistingLessonIds = progress.when(
+      skipLoadingOnRefresh: false,
       data: (state) =>
           CourseCompletionSummary.fromState(state: state, registry: registry)
               .completedExistingLessonIds,
@@ -83,6 +84,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(20),
                 child: progress.when(
+                  skipLoadingOnRefresh: false,
                   loading: () =>
                       const Center(child: CircularProgressIndicator()),
                   error: (_, __) => TextButton(

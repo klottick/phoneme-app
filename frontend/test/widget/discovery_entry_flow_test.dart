@@ -308,11 +308,25 @@ void main() {
       ..actionGates[FinishLearningActivity] = Completer<void>()
       ..failingActions.add(FinishLearningActivity);
     final app = await mountApp(tester, store);
+    var homeNavigationCount = 0;
+    Uri? lastObservedUri;
+    void countHomeNavigation() {
+      final currentUri = app.$2.state.uri;
+      if (currentUri != lastObservedUri && currentUri.path == '/home') {
+        homeNavigationCount++;
+      }
+      lastObservedUri = currentUri;
+    }
+
+    app.$2.routerDelegate.addListener(countHomeNavigation);
     addTearDown(() async {
+      app.$2.routerDelegate.removeListener(countHomeNavigation);
       store.actionGates[FinishLearningActivity]?.complete();
       await unmountApp(tester, app);
     });
     await tester.pumpAndSettle();
+    homeNavigationCount = 0;
+    lastObservedUri = app.$2.state.uri;
     expect(find.text('Continue discovery'), findsOneWidget);
     final startCountBeforeRefresh = store.submitted
         .where((command) => command.action is StartLearningRun)
@@ -363,6 +377,7 @@ void main() {
         hasLength(1));
     expect(store.committedState.completions, isEmpty);
     expect(app.$2.state.uri.path, '/course-lesson/en-fr-u-y');
+    expect(homeNavigationCount, 0);
 
     final pendingFinish = store.submitted
         .singleWhere((command) => command.action is FinishLearningActivity);
@@ -373,6 +388,7 @@ void main() {
     expect(find.text('Retry saving'), findsOneWidget);
     expect(store.committedState.completions, isEmpty);
     expect(app.$2.state.uri.path, '/course-lesson/en-fr-u-y');
+    expect(homeNavigationCount, 0);
 
     store.failingActions.remove(FinishLearningActivity);
     store.actionGates.remove(FinishLearningActivity);
@@ -381,6 +397,7 @@ void main() {
     expect(store.submitted.last, same(pendingFinish));
     expect(store.committedState.completions, hasLength(1));
     expect(app.$2.state.uri.path, '/home');
+    expect(homeNavigationCount, 1);
     await tester.pumpAndSettle();
     expect(find.text('Discovery lessons: 1/1 complete'), findsOneWidget);
     expect(find.text('Review discovery'), findsOneWidget);
@@ -388,6 +405,8 @@ void main() {
         store.submitted
             .where((command) => command.action is FinishLearningActivity),
         hasLength(2));
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(homeNavigationCount, 1);
 
     app.$2.go('/course-progress');
     await tester.pumpAndSettle();
@@ -467,6 +486,151 @@ void main() {
     expect(find.text('Discovery lessons: 1/1 complete'), findsOneWidget);
     expect(find.text('Review discovery'), findsOneWidget);
     expect(find.byIcon(Icons.check), findsOneWidget);
+  });
+
+  testWidgets('home hides completed state during explicit held refresh',
+      (tester) async {
+    final initial = _storeWithPilotCompletion('refresh-owner');
+    var refresh = Completer<void>();
+    var loads = 0;
+    initial.loadHandler = (call) async {
+      loads = call;
+      if (call > 1) await refresh.future;
+      return initial.committedState;
+    };
+    final audio = ControlledListeningAudio();
+    await tester.pumpWidget(ProviderScope(overrides: [
+      _activeStoreProvider.overrideWith((ref) => initial),
+      courseLearningStoreProvider
+          .overrideWith((ref) => ref.watch(_activeStoreProvider)),
+      courseAudioProvider.overrideWithValue(audio),
+    ], child: const LinguistApp()));
+    final scope = tester
+        .element(find.byType(LinguistApp))
+        .getElementForInheritedWidgetOfExactType<UncontrolledProviderScope>()!
+        .widget as UncontrolledProviderScope;
+    final container = scope.container;
+    final router = container.read(appRouterProvider);
+    addTearDown(() async {
+      if (!refresh.isCompleted) refresh.complete();
+      audio.releaseAll();
+      await tester.pumpWidget(const SizedBox());
+      router.dispose();
+      container.dispose();
+      await audio.dispose();
+    });
+    await tester.pumpAndSettle();
+    expect(loads, 1);
+    expect(find.text('Discovery lessons: 1/1 complete'), findsOneWidget);
+    expect(find.text('Review discovery'), findsOneWidget);
+    expect(find.byIcon(Icons.check), findsOneWidget);
+
+    container.invalidate(courseLearningStateProvider);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 20));
+    expect(loads, 2);
+    expect(find.textContaining('Discovery lessons:'), findsNothing);
+    expect(find.text('Review discovery'), findsNothing);
+    expect(find.text('Continue discovery'), findsNothing);
+    expect(find.byIcon(Icons.check), findsNothing);
+
+    refresh.complete();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.pumpAndSettle();
+    router.go('/course-progress');
+    await tester.pumpAndSettle();
+    expect(find.text('Discovery lessons: 1/1 complete'), findsOneWidget);
+    refresh = Completer<void>();
+    container.invalidate(courseLearningStateProvider);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 20));
+    expect(find.textContaining('Discovery lessons:'), findsNothing);
+    expect(find.textContaining('Existing lessons (includes discovery pilot)'),
+        findsNothing);
+  });
+
+  testWidgets('departed discovery save cannot publish after A-B-A',
+      (tester) async {
+    final scopeA = LearningScope(
+        courseId: 'en-fr', owner: LearningOwner.account('answer-owner-a'));
+    final accountA = CourseLearningWidgetStore(scope: scopeA)
+      ..actionGates[ChooseSound] = Completer<void>()
+      ..failingActions.add(ChooseSound);
+    final accountBLoad = Completer<void>();
+    final accountB = CourseLearningWidgetStore(
+      scope: LearningScope(
+          courseId: 'en-fr', owner: LearningOwner.account('answer-owner-b')),
+    )..loadGate = accountBLoad;
+    final replacementA = CourseLearningWidgetStore(
+      scope: scopeA,
+      initialState: accountA.committedState,
+    );
+    final audio = ControlledListeningAudio();
+    await tester.pumpWidget(ProviderScope(overrides: [
+      _activeStoreProvider.overrideWith((ref) => accountA),
+      courseLearningStoreProvider
+          .overrideWith((ref) => ref.watch(_activeStoreProvider)),
+      courseAudioProvider.overrideWithValue(audio),
+    ], child: const LinguistApp()));
+    final scope = tester
+        .element(find.byType(LinguistApp))
+        .getElementForInheritedWidgetOfExactType<UncontrolledProviderScope>()!
+        .widget as UncontrolledProviderScope;
+    final container = scope.container;
+    final router = container.read(appRouterProvider);
+    addTearDown(() async {
+      if (!accountBLoad.isCompleted) accountBLoad.complete();
+      final answerGate = accountA.actionGates[ChooseSound];
+      if (answerGate != null && !answerGate.isCompleted) answerGate.complete();
+      audio.releaseAll();
+      await tester.pumpWidget(const SizedBox());
+      router.dispose();
+      container.dispose();
+      await audio.dispose();
+    });
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue discovery'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Listen to the word'));
+    await tester.pump();
+    audio.requests.last.complete();
+    await tester.pumpAndSettle();
+    await tester
+        .tap(find.text('/${frenchUySection.items.first.expectedSound}/'));
+    await tester.pump();
+    final departedAnswer = accountA.submitted
+        .singleWhere((command) => command.action is ChooseSound);
+    expect(departedAnswer.scope, scopeA);
+
+    container.read(_activeStoreProvider.notifier).state = accountB;
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(find.text('Continue discovery'), findsNothing);
+    container.read(_activeStoreProvider.notifier).state = replacementA;
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.pumpAndSettle();
+    expect(find.byType(DiscoveryLessonScreen), findsOneWidget);
+    expect(find.text('Item 1 of 10'), findsOneWidget);
+    expect(
+        replacementA.submitted
+            .where((command) => command.action is ChooseSound),
+        isEmpty);
+
+    accountA.actionGates[ChooseSound]!.complete();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.pumpAndSettle();
+    expect(accountA.submitted.where((command) => command.action is ChooseSound),
+        hasLength(1));
+    expect(
+        replacementA.submitted
+            .where((command) => command.action is ChooseSound),
+        isEmpty);
+    expect(find.text('Retry saving'), findsNothing);
+    expect(find.textContaining('That is'), findsNothing);
+    expect(router.state.uri.path, '/course-lesson/en-fr-u-y');
   });
 }
 

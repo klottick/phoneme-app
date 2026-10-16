@@ -87,6 +87,7 @@ class _CourseProgressScreenState extends ConsumerState<CourseProgressScreen> {
       appBar: AppBar(
           title: Text(widget.review ? 'Review sounds' : 'Course progress')),
       body: progress.when(
+        skipLoadingOnRefresh: false,
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (_, __) => Center(
           child: TextButton(
