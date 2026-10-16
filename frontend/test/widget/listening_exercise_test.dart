@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart' show SemanticsNode;
+import 'package:flutter/semantics.dart' show SemanticsAction, SemanticsNode;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
@@ -10,10 +10,52 @@ import '../support/controlled_listening_audio.dart';
 import '../support/listening_comparison_harness.dart';
 
 ButtonStyleButton _button(WidgetTester t, String text) => t.widget(find
-    .ancestor(of: find.text(text), matching: find.byType(ElevatedButton))
+    .ancestor(
+        of: find.text(text), matching: find.bySubtype<ButtonStyleButton>())
     .first);
 String _semanticsText(WidgetTester t, Finder finder) {
   return t.getSemantics(finder).getSemanticsData().label;
+}
+
+List<SemanticsNode> _semanticsSubtree(WidgetTester tester, Finder finder) {
+  final nodes = <SemanticsNode>[];
+  void visit(SemanticsNode node) {
+    nodes.add(node);
+    node.visitChildren((child) {
+      visit(child);
+      return true;
+    });
+  }
+
+  visit(tester.getSemantics(finder));
+  return nodes;
+}
+
+void _expectOneLabeledResponse(
+  WidgetTester tester, {
+  required String key,
+  required String label,
+  required bool selected,
+  required bool enabled,
+}) {
+  final labelFinder =
+      find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}' r'$'));
+  expect(labelFinder, findsOneWidget, reason: 'one visible labeled response');
+  final data = tester.getSemantics(labelFinder).getSemanticsData();
+  expect(data.label, label);
+  expect(data.flagsCollection.isButton, isTrue);
+  expect(data.flagsCollection.isSelected.name, selected ? 'isTrue' : 'isFalse');
+  expect(data.flagsCollection.isEnabled.name, enabled ? 'isTrue' : 'isFalse');
+  expect(data.hasAction(SemanticsAction.tap), enabled,
+      reason: 'tap action belongs to the labeled control');
+  final buttonNodes = _semanticsSubtree(tester, find.byKey(ValueKey(key)))
+      .where((node) =>
+          !node.isMergedIntoParent &&
+          node.getSemanticsData().flagsCollection.isButton)
+      .toList();
+  expect(buttonNodes, hasLength(1),
+      reason: 'response has one button node, not an unlabeled wrapper button');
+  expect(buttonNodes.single.getSemanticsData().label, label);
 }
 
 bool _primaryFocusContains(WidgetTester tester, String label) {
@@ -44,6 +86,97 @@ ComparisonFixture _fixture(PhonemeRelation expected, String a, String b,
         expected: expected);
 
 void main() {
+  testWidgets('identification_response_semantics_are_one_labeled_control',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    final answers = <String>[];
+    final prompt = ListeningChoicePrompt(
+      id: 'semantic-prompt',
+      instruction: 'Identify the sound',
+      choices: [
+        ListeningChoiceOption(id: 'u', label: '/u/'),
+        ListeningChoiceOption(id: 'y', label: '/y/'),
+      ],
+    );
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+      body: ListeningChoice(
+        prompt: prompt,
+        state: ListeningExerciseState(),
+        heard: true,
+        selectedChoiceId: 'y',
+        onListen: () {},
+        onAnswer: answers.add,
+      ),
+    )));
+    _expectOneLabeledResponse(tester,
+        key: 'choice-y', label: '/y/', selected: true, enabled: true);
+    _expectOneLabeledResponse(tester,
+        key: 'choice-u', label: '/u/', selected: false, enabled: true);
+    tester.semantics.performAction(
+        find.semantics.byLabel(RegExp(r'^/y/$')), SemanticsAction.tap);
+    expect(answers, ['y'],
+        reason: 'semantics activation uses the real response callback');
+
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+      body: ListeningChoice(
+        prompt: prompt,
+        state: ListeningExerciseState(busy: true, playing: true),
+        heard: true,
+        onListen: () {},
+        onAnswer: answers.add,
+      ),
+    )));
+    _expectOneLabeledResponse(tester,
+        key: 'choice-y', label: '/y/', selected: false, enabled: false);
+    expect(find.text('Playback in progress'), findsOneWidget);
+    semantics.dispose();
+  });
+
+  testWidgets('comparison_response_semantics_are_one_labeled_control',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    final answers = <PhonemeRelation>[];
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+      body: SoundComparison(
+        prompt: _prompt,
+        state: ListeningExerciseState(),
+        heardSamples: ComparisonSample.values.toSet(),
+        selectedRelation: PhonemeRelation.different,
+        onListen: (_) {},
+        onAnswer: answers.add,
+      ),
+    )));
+    _expectOneLabeledResponse(tester,
+        key: 'relation-same', label: 'Same', selected: false, enabled: true);
+    _expectOneLabeledResponse(tester,
+        key: 'relation-different',
+        label: 'Different',
+        selected: true,
+        enabled: true);
+    tester.semantics.performAction(
+        find.semantics.byLabel(RegExp(r'^Same$')), SemanticsAction.tap);
+    expect(answers, [PhonemeRelation.same],
+        reason: 'semantics activation uses the typed callback');
+
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+      body: SoundComparison(
+        prompt: _prompt,
+        state: ListeningExerciseState(busy: true, playing: true),
+        heardSamples: ComparisonSample.values.toSet(),
+        onListen: (_) {},
+        onAnswer: answers.add,
+      ),
+    )));
+    _expectOneLabeledResponse(tester,
+        key: 'relation-same', label: 'Same', selected: false, enabled: false);
+    expect(find.text('Playback in progress'), findsOneWidget);
+    semantics.dispose();
+  });
+
   testWidgets('controlled_views_render_only_supplied_state', (tester) async {
     final semantics = tester.ensureSemantics();
     var listened = 0;
@@ -91,14 +224,8 @@ void main() {
     expect(find.text('Not yet'), findsOneWidget);
     expect(find.text('Correct'), findsNothing);
     expect(_semanticsText(tester, find.text('/y/')), contains('/y/'));
-    expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('choice-y')))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected
-            .name,
-        'isTrue');
+    _expectOneLabeledResponse(tester,
+        key: 'choice-y', label: '/y/', selected: true, enabled: false);
     final heard = {ComparisonSample.a, ComparisonSample.b};
     final comparison = SoundComparison(
         prompt: _prompt,
@@ -457,22 +584,13 @@ void main() {
     expect(find.text('Not yet'), findsOneWidget);
     expect(
         tester.getSemantics(find.text('Not yet')).label, contains('Not yet'));
-    expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('relation-same')))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected
-            .name,
-        'isTrue');
-    expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('relation-different')))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected
-            .name,
-        'isFalse');
+    _expectOneLabeledResponse(tester,
+        key: 'relation-same', label: 'Same', selected: true, enabled: false);
+    _expectOneLabeledResponse(tester,
+        key: 'relation-different',
+        label: 'Different',
+        selected: false,
+        enabled: false);
 
     // Search visible text, tooltips and recursively addressable semantic data;
     // the phoneme response labels are allowed, but hidden authored values are not.
@@ -640,22 +758,10 @@ void main() {
     expect(find.text('Not yet'), findsOneWidget);
     expect(
         tester.getSemantics(find.text('Not yet')).label, contains('Not yet'));
-    expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('choice-u')))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected
-            .name,
-        'isTrue');
-    expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('choice-y')))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected
-            .name,
-        'isFalse');
+    _expectOneLabeledResponse(tester,
+        key: 'choice-u', label: '/u/', selected: true, enabled: false);
+    _expectOneLabeledResponse(tester,
+        key: 'choice-y', label: '/y/', selected: false, enabled: false);
 
     await tester.ensureVisible(find.text('/y/'));
     expect(tester.getTopLeft(find.text('/y/')).dy, lessThan(640));
@@ -840,26 +946,20 @@ void main() {
     await tester.pump();
     expect(submissions, [PhonemeRelation.different]);
     expect(find.text('Not yet'), findsOneWidget);
-    expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('relation-different')))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected
-            .name,
-        'isTrue');
+    _expectOneLabeledResponse(tester,
+        key: 'relation-different',
+        label: 'Different',
+        selected: true,
+        enabled: false);
 
     await tester.pumpWidget(host('replacement-owner'));
     expect(find.text('Not yet'), findsNothing);
     expect(find.text('Correct'), findsNothing);
-    expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('relation-different')))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected
-            .name,
-        'isFalse');
+    _expectOneLabeledResponse(tester,
+        key: 'relation-different',
+        label: 'Different',
+        selected: false,
+        enabled: false);
     expect(_button(tester, 'Same').enabled, isFalse);
     await hearBoth();
     expect(_button(tester, 'Same').enabled, isTrue);

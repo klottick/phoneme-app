@@ -32,18 +32,19 @@ class SoundComparison extends StatelessWidget {
                     ? 'Listen to sample A'
                     : 'Listen to sample B')),
           for (final relation in PhonemeRelation.values)
-            Semantics(
-                key: ValueKey('relation-${relation.name}'),
-                container: true,
-                button: true,
-                selected: selectedRelation == relation,
-                child: ElevatedButton(
-                    onPressed: locked || heardSamples.length != 2
-                        ? null
-                        : () => onAnswer(relation),
-                    child: Text(relation == PhonemeRelation.same
-                        ? 'Same'
-                        : 'Different')))
+            MergeSemantics(
+                child: Semantics(
+                    key: ValueKey('relation-${relation.name}'),
+                    container: true,
+                    button: true,
+                    selected: selectedRelation == relation,
+                    child: ElevatedButton(
+                        onPressed: locked || heardSamples.length != 2
+                            ? null
+                            : () => onAnswer(relation),
+                        child: Text(relation == PhonemeRelation.same
+                            ? 'Same'
+                            : 'Different'))))
         ]));
   }
 }

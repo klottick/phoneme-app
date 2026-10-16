@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../../core/course/course_audio.dart';
 import '../../core/course/lesson_section.dart';
 import '../../core/course/lesson_section_session.dart';
+import 'exercises/listening_choice.dart';
+import 'exercises/listening_exercise_contract.dart';
 
 /// Stateless view of one discovery listening section session.
 ///
@@ -26,6 +27,8 @@ class DiscoverySectionView extends StatelessWidget {
     required this.session,
     required this.heard,
     required this.busy,
+    this.playing = false,
+    this.selectedSound,
     required this.error,
     this.notice,
     this.conflict,
@@ -43,6 +46,8 @@ class DiscoverySectionView extends StatelessWidget {
   final LessonSectionSession session;
   final bool heard;
   final bool busy;
+  final bool playing;
+  final String? selectedSound;
   final String? error;
 
   /// Optional recovery notice rendered inside the same scrolling content as
@@ -80,15 +85,17 @@ class DiscoverySectionView extends StatelessWidget {
     if (notice != null) {
       // The notice shares the scrolling content with the controls so that
       // large accessibility text cannot push the exercise off a small screen.
-      children.insert(0, Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        color: Colors.orange.shade100,
-        child: Text(
-          notice,
-          style: const TextStyle(color: Colors.black87),
-        ),
-      ));
+      children.insert(
+          0,
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            color: Colors.orange.shade100,
+            child: Text(
+              notice,
+              style: const TextStyle(color: Colors.black87),
+            ),
+          ));
     }
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -144,11 +151,8 @@ class DiscoverySectionView extends StatelessWidget {
     final bool answered = session.answered;
     final bool inConflict = _inConflict();
     final bool inError = error != null || inConflict;
-    final bool canListen = !answered && !heard && !busy && !inError;
-    final bool canAnswer = heard && !answered && !busy && !inError;
     final bool canNext = answered && !busy && !inError;
     final bool isLast = session.position == session.queue.length - 1;
-    final bool correct = session.answered && session.lastCorrect == true;
     return [
       // Neutral title while the item is hidden: the word-bearing authored
       // title belongs to the debrief, so it must not leak during practice.
@@ -156,68 +160,32 @@ class DiscoverySectionView extends StatelessWidget {
       const SizedBox(height: 6),
       Text(_progressLabel(), style: textTheme.bodyMedium),
       const SizedBox(height: 20),
-      Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: divider),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
+      ListeningChoice(
+        prompt: ListeningChoicePrompt(
+          id: session.currentItemId!,
+          instruction:
               'Listen to the French word, then choose the sound you hear.',
-              style: textTheme.bodyLarge,
-            ),
-            const SizedBox(height: 8),
-            // Exact shared alpha disclosure (I1): the default shared player
-            // selects the bundled unverified pending recordings for these
-            // covered words first, so the old unconditional device-source
-            // claim was false; the exact shared label is what stays pinned.
-            Text(alphaAudioDisclosure, style: textTheme.bodySmall),
-          ],
+          choices: section.sounds
+              .map((sound) =>
+                  ListeningChoiceOption(id: sound, label: '/$sound/'))
+              .toList(),
         ),
-      ),
-      const SizedBox(height: 24),
-      FilledButton(
-        onPressed: canListen ? onListen : null,
-        child: const Text('Listen to the word'),
-      ),
-      const SizedBox(height: 16),
-      Wrap(
-        spacing: 12,
-        runSpacing: 10,
-        children: [
-          for (final String sound in section.sounds)
-            TextButton(
-              onPressed: canAnswer ? () => onAnswer(sound) : null,
-              child: Text('/$sound/'),
-            ),
-        ],
-      ),
-      if (answered) ...[
-        const SizedBox(height: 20),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              correct ? Icons.check_circle : Icons.close,
-              size: 20,
-              color: correct ? Colors.green : Colors.red,
-            ),
-            const SizedBox(width: 8),
-            // The label may wrap at large accessibility text instead of
-            // pushing the row past the viewport width.
-            Flexible(
-              child: Text(
-                correct ? 'Correct' : 'Not yet',
-                style: _colored(
-                    textTheme.titleMedium, correct ? Colors.green : Colors.red),
-              ),
-            ),
-          ],
+        state: ListeningExerciseState(
+          busy: busy,
+          playing: playing,
+          blocked: inError,
+          answered: answered,
+          feedback: answered
+              ? (session.lastCorrect == true
+                  ? ListeningFeedback.correct
+                  : ListeningFeedback.notYet)
+              : null,
         ),
-      ],
+        heard: heard,
+        selectedChoiceId: selectedSound,
+        onListen: onListen,
+        onAnswer: onAnswer,
+      ),
       if (error != null) ..._errorChildren(textTheme),
       if (inConflict) ..._conflictChildren(textTheme),
       const SizedBox(height: 24),
@@ -294,8 +262,9 @@ class DiscoverySectionView extends StatelessWidget {
           // Explicit only: the screen persists the fresh zero-attempt
           // identity before the exercise is exposed, so disable while that
           // save (or any error state) is unresolved.
-          onPressed:
-              onPractiseAgain != null && !busy && !inError ? onPractiseAgain : null,
+          onPressed: onPractiseAgain != null && !busy && !inError
+              ? onPractiseAgain
+              : null,
           child: const Text('Practise again'),
         ),
       ],
