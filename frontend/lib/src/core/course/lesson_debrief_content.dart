@@ -29,14 +29,19 @@ List<LessonTeachingDiagnostic> validateLessonDebriefContent(
   final LessonSection section;
   try {
     section = LessonSection.fromCurriculum(curriculum, lessonId: lessonId);
-  } catch (_) {
+  } on StateError {
     return List.unmodifiable(
         [LessonTeachingDiagnostic(code: 'source.invalid', recordId: lessonId)]);
   }
   final diagnostics = <LessonTeachingDiagnostic>[];
+  final selectedIds = curriculum
+      .sectionById(sectionIdFor(curriculum, lessonId)!)!
+      .exerciseIds
+      .toSet();
   final ids = <String>{};
   for (final note in notes) {
-    final exercise = curriculum.exerciseById(note.exerciseId);
+    final matches = curriculum.exercises.where((e) => e.id == note.exerciseId);
+    final exercise = matches.length == 1 ? matches.single : null;
     if (!ids.add(note.exerciseId)) {
       diagnostics.add(LessonTeachingDiagnostic(
           code: 'note.duplicate', recordId: note.exerciseId));
@@ -57,8 +62,11 @@ List<LessonTeachingDiagnostic> validateLessonDebriefContent(
   }
   for (final item in section.items) {
     final exercise = curriculum.exercises
-        .where((e) => e is ListeningChoiceExercise && e.legacyItemId == item.id)
-        .first;
+        .where((e) =>
+            selectedIds.contains(e.id) &&
+            e is ListeningChoiceExercise &&
+            e.legacyItemId == item.id)
+        .single;
     if (!ids.contains(exercise.id)) {
       diagnostics.add(LessonTeachingDiagnostic(
           code: 'note.missing', recordId: exercise.id));
@@ -99,12 +107,18 @@ class LessonDebriefContent {
     }
     final section =
         LessonSection.fromCurriculum(curriculum, lessonId: lessonId);
+    final selectedIds = curriculum
+        .sectionById(sectionIdFor(curriculum, lessonId)!)!
+        .exerciseIds
+        .toSet();
     final byId = {for (final note in notes) note.exerciseId: note};
     final entries = <LessonDebriefEntry>[];
     for (final item in section.items) {
       final exercise = curriculum.exercises
-          .where(
-              (e) => e is ListeningChoiceExercise && e.legacyItemId == item.id)
+          .where((e) =>
+              selectedIds.contains(e.id) &&
+              e is ListeningChoiceExercise &&
+              e.legacyItemId == item.id)
           .single as ListeningChoiceExercise;
       entries.add(LessonDebriefEntry(
           itemId: exercise.legacyItemId!,
