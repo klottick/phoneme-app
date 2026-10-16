@@ -228,6 +228,43 @@ void main() {
         ]);
   });
 
+  test(
+      'selected catalogue alias and ownership ambiguity is rejected atomically',
+      () {
+    final exercises =
+        frenchCurriculum.exercises.cast<ListeningChoiceExercise>();
+    final first = exercises.first;
+    final second = exercises[1];
+    final cases = <CourseCurriculum>[
+      _withExercises([
+        ...exercises,
+        _copyExercise(first),
+      ]),
+      _withExercises([
+        _copyExercise(first),
+        _copyExercise(second, legacyItemId: first.legacyItemId),
+        ...exercises.skip(2),
+      ]),
+      _withExercises([
+        _copyExercise(first, sectionId: 'wrong-owner'),
+        ...exercises.skip(1),
+      ]),
+    ];
+
+    for (final invalid in cases) {
+      final diagnostics = validateLessonDebriefContent(invalid,
+          lessonId: 'en-fr-u-y', notes: frenchPilotTeachingNotes);
+      expect(diagnostics.map((d) => [d.code, d.recordId]), [
+        ['source.invalid', 'en-fr-u-y'],
+      ]);
+      expect(
+        () => LessonDebriefContent.fromCurriculum(invalid,
+            lessonId: 'en-fr-u-y', notes: frenchPilotTeachingNotes),
+        throwsA(isA<LessonTeachingValidationException>()),
+      );
+    }
+  });
+
   test('opaque sound labels and multi-choice structure are supported', () {
     final curriculum = CourseCurriculum(
       courseId: 'synthetic',
@@ -288,3 +325,29 @@ void main() {
     expect(projected.contentRevision, 7);
   });
 }
+
+CourseCurriculum _withExercises(List<ListeningChoiceExercise> exercises) =>
+    CourseCurriculum(
+      courseId: frenchCurriculum.courseId,
+      revision: frenchCurriculum.revision,
+      nodes: frenchCurriculum.nodes,
+      sections: frenchCurriculum.sections,
+      exercises: exercises,
+      sentences: frenchCurriculum.sentences,
+      audioReferences: frenchCurriculum.audioReferences,
+      phonemeCoverage: frenchCurriculum.phonemeCoverage,
+    );
+
+ListeningChoiceExercise _copyExercise(ListeningChoiceExercise source,
+        {String? legacyItemId, String? sectionId}) =>
+    ListeningChoiceExercise(
+      id: source.id,
+      sectionId: sectionId ?? source.sectionId,
+      audioRefId: source.audioRefId,
+      purpose: source.purpose,
+      reviewState: source.reviewState,
+      wordId: source.wordId,
+      expectedSound: source.expectedSound,
+      choices: source.choices,
+      legacyItemId: legacyItemId ?? source.legacyItemId,
+    );
