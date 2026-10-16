@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/semantics.dart' show SemanticsNode;
+import 'package:flutter/semantics.dart' show SemanticsAction, SemanticsNode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
@@ -73,6 +73,47 @@ void _expectNoHiddenPayload(WidgetTester tester, Iterable<String> sentinels) {
         reason: sentinel);
     expect(semanticPayload, isNot(contains(sentinel)), reason: sentinel);
   }
+}
+
+List<SemanticsNode> _pilotSemanticsSubtree(WidgetTester tester, Finder finder) {
+  final nodes = <SemanticsNode>[];
+  void visit(SemanticsNode node) {
+    nodes.add(node);
+    node.visitChildren((child) {
+      visit(child);
+      return true;
+    });
+  }
+
+  visit(tester.getSemantics(finder));
+  return nodes;
+}
+
+void _expectPilotResponseSemantics(
+  WidgetTester tester, {
+  required String id,
+  required bool selected,
+  required bool enabled,
+}) {
+  final label = '/$id/';
+  final labelFinder =
+      find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}' r'$'));
+  expect(labelFinder, findsOneWidget, reason: 'one visible response label');
+  final data = tester.getSemantics(labelFinder).getSemanticsData();
+  expect(data.label, label);
+  expect(data.flagsCollection.isButton, isTrue);
+  expect(data.flagsCollection.isSelected.name, selected ? 'isTrue' : 'isFalse');
+  expect(data.flagsCollection.isEnabled.name, enabled ? 'isTrue' : 'isFalse');
+  expect(data.hasAction(SemanticsAction.tap), enabled);
+  final buttonNodes =
+      _pilotSemanticsSubtree(tester, find.byKey(ValueKey('choice-$id')))
+          .where((node) =>
+              !node.isMergedIntoParent &&
+              node.getSemanticsData().flagsCollection.isButton)
+          .toList();
+  expect(buttonNodes, hasLength(1),
+      reason: 'one labeled response node, no extra unlabeled button');
+  expect(buttonNodes.single.getSemanticsData().label, label);
 }
 
 bool _hasPrimaryFocus(WidgetTester tester, String label) {
@@ -270,6 +311,49 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('pilot_labeled_response_semantics_activation_is_owner_guarded',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    final audio = ControlledListeningAudio();
+    final store = CourseLearningWidgetStore();
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        courseAudioProvider.overrideWithValue(audio),
+        courseLearningStoreProvider.overrideWithValue(store),
+      ],
+      child:
+          const MaterialApp(home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y')),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Listen to the word'));
+    await tester.pump();
+    audio.requests.single.complete();
+    await tester.pumpAndSettle();
+    _expectPilotResponseSemantics(tester,
+        id: 'u', selected: false, enabled: true);
+    _expectPilotResponseSemantics(tester,
+        id: 'y', selected: false, enabled: true);
+
+    final beforeAnswer = store.committedState;
+    final labeledResponse = find.semantics.byLabel(RegExp(r'^/u/$'));
+    tester.semantics.performAction(labeledResponse, SemanticsAction.tap);
+    tester.semantics.performAction(labeledResponse, SemanticsAction.tap);
+    expect(store.prepared.where((command) => command.action is ChooseSound),
+        hasLength(1),
+        reason: 'same-node semantic activation is guarded once');
+    expect(store.submitted.where((command) => command.action is ChooseSound),
+        hasLength(1));
+    expect(store.committedState, same(beforeAnswer));
+    await tester.pumpAndSettle();
+    expect(find.text('Correct'), findsOneWidget);
+    _expectPilotResponseSemantics(tester,
+        id: 'u', selected: true, enabled: false);
+    _expectPilotResponseSemantics(tester,
+        id: 'y', selected: false, enabled: false);
+    await tester.pumpWidget(const SizedBox.shrink());
+    semantics.dispose();
+  });
+
   testWidgets('retained_listen_callback_is_ignored_after_debrief',
       (tester) async {
     final audio = ControlledListeningAudio();
@@ -368,14 +452,8 @@ void main() {
     expect(store.committedState, same(beforeAnswer));
     final originalCommand = store.submitted.last;
     expect(find.text('Correct'), findsOneWidget);
-    expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('choice-u')))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected
-            .name,
-        'isTrue');
+    _expectPilotResponseSemantics(tester,
+        id: 'u', selected: true, enabled: false);
     final requestsWhileHeld = audio.requests.length;
     listenCallback();
     choice.onPressed!();
@@ -393,14 +471,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Correct'), findsOneWidget);
     expect(store.committedState, same(beforeAnswer));
-    expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('choice-u')))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected
-            .name,
-        'isTrue');
+    _expectPilotResponseSemantics(tester,
+        id: 'u', selected: true, enabled: false);
     final requestsAfterFailure = audio.requests.length;
     listenCallback();
     choice.onPressed!();
@@ -462,14 +534,8 @@ void main() {
     await tester.pumpAndSettle();
     final beforeSuspend = store.committedState;
     expect(find.text('Correct'), findsOneWidget);
-    expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('choice-u')))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected
-            .name,
-        'isTrue');
+    _expectPilotResponseSemantics(tester,
+        id: 'u', selected: true, enabled: false);
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     await tester.pump();
@@ -478,15 +544,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(store.committedState, same(beforeSuspend));
     expect(find.text('Correct'), findsOneWidget);
-    expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('choice-u')))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected
-            .name,
-        'isTrue',
-        reason: 'same-owner pending command retains known live response');
+    _expectPilotResponseSemantics(tester,
+        id: 'u', selected: true, enabled: false);
 
     store.failingActions.clear();
     final retryGate = Completer<void>();
@@ -494,26 +553,14 @@ void main() {
     await tester.tap(find.text('Retry saving'));
     await tester.pump();
     expect(find.text('Correct'), findsOneWidget);
-    expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('choice-u')))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected
-            .name,
-        'isTrue');
+    _expectPilotResponseSemantics(tester,
+        id: 'u', selected: true, enabled: false);
     expect(store.committedState, same(beforeSuspend));
     retryGate.complete();
     await tester.pumpAndSettle();
     expect(store.committedState.history, hasLength(1));
-    expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('choice-u')))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected
-            .name,
-        'isTrue');
+    _expectPilotResponseSemantics(tester,
+        id: 'u', selected: true, enabled: false);
     await tester.pumpWidget(const SizedBox.shrink());
     semantics.dispose();
   });
@@ -816,6 +863,7 @@ void main() {
     testWidgets(
         'restored_answer_does_not_invent_selected_choice '
         '(correct=$isCorrect)', (tester) async {
+      final semantics = tester.ensureSemantics();
       final audio = ControlledListeningAudio();
       final store = CourseLearningWidgetStore();
       final overrides = [
@@ -849,15 +897,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text(isCorrect ? 'Correct' : 'Not yet'), findsOneWidget);
       for (final choice in ['u', 'y']) {
-        expect(
-            tester
-                .getSemantics(find.byKey(ValueKey('choice-$choice')))
-                .getSemanticsData()
-                .flagsCollection
-                .isSelected
-                .name,
-            'isFalse',
-            reason: 'restoration has no persisted selected choice');
+        _expectPilotResponseSemantics(tester,
+            id: choice, selected: false, enabled: false);
         expect(
             tester
                 .widget<ButtonStyleButton>(find
@@ -885,7 +926,45 @@ void main() {
                   find.widgetWithText(FilledButton, 'Next word'))
               .onPressed,
           isNotNull);
+      await tester.tap(find.text('Next word'));
+      await tester.pumpAndSettle();
+      expect(find.text('Item 2 of 10'), findsOneWidget);
+      expect(find.text('Correct'), findsNothing);
+      expect(find.text('Not yet'), findsNothing);
+      for (final choice in ['u', 'y']) {
+        _expectPilotResponseSemantics(tester,
+            id: choice, selected: false, enabled: false);
+        expect(
+            restoredStore.prepared
+                .where((command) => command.action is ChooseSound),
+            isEmpty,
+            reason: 'advancement must not synthesize a ChooseSound');
+      }
+      expect(
+          tester
+              .widget<ButtonStyleButton>(find
+                  .ancestor(
+                    of: find.text('/u/'),
+                    matching: find.bySubtype<ButtonStyleButton>(),
+                  )
+                  .first)
+              .onPressed,
+          isNull,
+          reason: 'the next item requires fresh hearing');
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      restoredAudio.requests.single.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Correct'), findsNothing);
+      expect(find.text('Not yet'), findsNothing);
+      expect(
+          restoredStore.prepared
+              .where((command) => command.action is ChooseSound),
+          isEmpty);
+      _expectPilotResponseSemantics(tester,
+          id: 'u', selected: false, enabled: true);
       await tester.pumpWidget(const SizedBox.shrink());
+      semantics.dispose();
     });
   }
 
@@ -1033,14 +1112,8 @@ void main() {
             .flagsCollection
             .isButton,
         isTrue);
-    expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('choice-u')))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected
-            .name,
-        'isFalse');
+    _expectPilotResponseSemantics(tester,
+        id: 'u', selected: false, enabled: false);
     expect(
         tester
             .getSemantics(find.text('Listen to the word'))
@@ -1087,22 +1160,10 @@ void main() {
             .isEnabled
             .name,
         'isFalse');
-    expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('choice-y')))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected
-            .name,
-        'isTrue');
-    expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('choice-u')))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected
-            .name,
-        'isFalse');
+    _expectPilotResponseSemantics(tester,
+        id: 'y', selected: true, enabled: false);
+    _expectPilotResponseSemantics(tester,
+        id: 'u', selected: false, enabled: false);
     for (final choiceLabel in ['/u/', '/y/']) {
       expect(
           tester

@@ -28,15 +28,16 @@ class ListeningChoice extends StatelessWidget {
               onPressed: locked ? null : onListen,
               child: const Text('Listen to the word')),
           for (final choice in prompt.choices)
-            Semantics(
-                key: ValueKey('choice-${choice.id}'),
-                container: true,
-                button: true,
-                selected: selectedChoiceId == choice.id,
-                child: TextButton(
-                    onPressed:
-                        locked || !heard ? null : () => onAnswer(choice.id),
-                    child: Text(choice.label)))
+            MergeSemantics(
+                child: Semantics(
+                    key: ValueKey('choice-${choice.id}'),
+                    container: true,
+                    button: true,
+                    selected: selectedChoiceId == choice.id,
+                    child: TextButton(
+                        onPressed:
+                            locked || !heard ? null : () => onAnswer(choice.id),
+                        child: Text(choice.label))))
         ]));
   }
 }
