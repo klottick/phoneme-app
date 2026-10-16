@@ -24,6 +24,87 @@ void main() {
     expect(attempt.scope, guestScope);
     expect(decoded.revision, state.revision);
   });
+  test('round trip preserves wall-clock rollback ordered by commit ordinal',
+      () {
+    final earlierCommit = fixedTime.subtract(const Duration(seconds: 1));
+    final laterOrdinalAnswer = fixedTime.subtract(const Duration(seconds: 2));
+    final attempt = CourseAttempt(
+      scope: accountAScope,
+      submissionId: 'rollback-attempt',
+      activityId: 'lesson:sample',
+      runGeneration: 1,
+      commandSequence: 1,
+      batchIndex: 0,
+      itemId: 'item-0',
+      itemOccurrence: 1,
+      contentRevision: 1,
+      commitOrdinal: 1,
+      answeredAt: fixedTime,
+      committedAt: earlierCommit,
+      skill: LearningSkill.listening,
+      targetSounds: const ['s'],
+      answer: SoundChoiceAnswer(
+        selectedSound: 'sh',
+        choices: const ['s', 'sh'],
+        expectedSound: 's',
+      ),
+      origin: AttemptOrigin.practice,
+      presentation: AttemptPresentation.firstInRun,
+      assistance: const {},
+      contentState: AttemptContentState.existingCurated,
+      audioSource: AttemptAudioSource.practiceSpeech,
+      correct: false,
+    );
+    final mistakeKey = MistakeKey(
+      activityId: attempt.activityId,
+      itemId: attempt.itemId,
+      contentRevision: attempt.contentRevision,
+      skill: attempt.skill,
+      targetSound: 's',
+    );
+    final state = CourseLearningState(
+      scope: accountAScope,
+      revision: 1,
+      commitOrdinal: 1,
+      history: [
+        AttemptBatch(
+          activityId: attempt.activityId,
+          generation: attempt.runGeneration,
+          sequence: attempt.commandSequence,
+          token: tokenFor(32),
+          canonicalCommand: 'rollback-command',
+          attempts: [attempt],
+        ),
+      ],
+      activities: const {},
+      mistakes: {
+        mistakeKey: LearningMistake(
+          key: mistakeKey,
+          firstWrongId: 'first-wrong',
+          firstWrongAt: fixedTime,
+          latestWrongId: 'later-ordinal-wrong',
+          latestWrongAt: laterOrdinalAnswer,
+          failureCount: 2,
+          lastRunGeneration: 1,
+        ),
+      },
+      summaries: const {},
+      completions: const [],
+      bestScores: const {},
+      pending: const [],
+    );
+
+    final restored = codec.decode(codec.encode(state), accountAScope);
+    final restoredAttempt = restored.history.single.attempts.single;
+    final restoredMistake = restored.mistakes.values.single;
+    expect(restoredAttempt.commitOrdinal, 1);
+    expect(restoredAttempt.committedAt, earlierCommit);
+    expect(restoredAttempt.committedAt.isBefore(restoredAttempt.answeredAt),
+        isTrue);
+    expect(restoredMistake.latestWrongAt, laterOrdinalAnswer);
+    expect(restoredMistake.latestWrongAt.isBefore(restoredMistake.firstWrongAt),
+        isTrue);
+  });
   test('round trip preserves populated score summary and activity record', () {
     final fixture = sampleState();
     final state = CourseLearningState(

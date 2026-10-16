@@ -75,7 +75,8 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
       _busy = false,
       _showSummary = false,
       _loadFailed = false,
-      _reloadRequired = false;
+      _reloadRequired = false,
+      _contentChanged = false;
   bool _audioReady = false, _background = false;
   bool _saveBusy = false;
   int _elapsed = 0, _generation = 0, _loadOp = 0;
@@ -130,6 +131,7 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
         _loading = true;
         _saveError = null;
         _loadFailed = false;
+        _contentChanged = false;
       });
     }
     try {
@@ -142,6 +144,23 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
       }
       _state = state;
       _slot = state.activities[_activityId];
+      final definition =
+          ref.read(learningRegistryProvider).require(_activityId);
+      if (_slot != null &&
+          (_slot!.contentRevision != definition.contentRevision ||
+              _slot!.kind != definition.kind)) {
+        setState(() {
+          _elapsed = 0;
+          _started = false;
+          _showSummary = false;
+          _reloadRequired = false;
+          _contentChanged = true;
+          _message =
+              'This saved board uses older content. Start a new run to continue.';
+          _loading = false;
+        });
+        return;
+      }
       if (_slot?.snapshot case WordGameCheckpoint(:final board)) {
         _word = WordMatchEngine.fromState(board, random: Random());
       }
@@ -154,6 +173,7 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
       _message = '';
       _loadFailed = false;
       _reloadRequired = false;
+      _contentChanged = false;
       if (_slot != null) _observePreview();
     } catch (_) {
       if (!mounted ||
@@ -184,6 +204,7 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
     _saveBusy = false;
     _loadFailed = false;
     _reloadRequired = false;
+    _contentChanged = false;
     _saveError = null;
     _started = false;
     _showSummary = false;
@@ -245,6 +266,7 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
       setState(() {
         _busy = false;
         _saveError = null;
+        if (command.action is StartLearningRun) _contentChanged = false;
         if (command.feedback.message.isNotEmpty) {
           _message = command.feedback.message;
         }
@@ -319,6 +341,13 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
   Future<void> _start() async {
     if (_loadFailed || _reloadRequired || _pendingCommand != null) return;
     if (_slot != null) {
+      if (_contentChanged) {
+        await _send(
+          StartLearningRun(options: RunOptions()),
+          onSuccess: _startInitialCheckpoint,
+        );
+        return;
+      }
       await _send(
         _remaining == 0
             ? const ContinueArcadeRound()
@@ -762,7 +791,7 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
                 ? null
                 : _start,
             child: Text(_slot != null
-                ? 'Resume saved board'
+                ? (_contentChanged ? 'Start new run' : 'Resume saved board')
                 : 'Start 60-second round')),
         if (_loadFailed)
           FilledButton(

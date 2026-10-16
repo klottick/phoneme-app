@@ -226,11 +226,7 @@ class LearningMistake {
         latestWrongId = _nonblank(latestWrongId, 'latestWrongId'),
         failureCount = _count(failureCount, 'failureCount', minimum: 1),
         lastRunGeneration =
-            _count(lastRunGeneration, 'lastRunGeneration', minimum: 1) {
-    if (latestWrongAt.isBefore(firstWrongAt)) {
-      throw ArgumentError('latestWrongAt precedes firstWrongAt.');
-    }
-  }
+            _count(lastRunGeneration, 'lastRunGeneration', minimum: 1);
   final MistakeKey key;
   final String firstWrongId, latestWrongId;
   final DateTime firstWrongAt, latestWrongAt;

@@ -184,12 +184,7 @@ class CourseAttempt {
             _counter(contentRevision, 'contentRevision', minimum: 1),
         commitOrdinal = _counter(commitOrdinal, 'commitOrdinal', minimum: 1),
         targetSounds = _uniqueStrings(targetSounds, 'targetSounds'),
-        assistance = Set.unmodifiable(assistance) {
-    if (committedAt.isBefore(answeredAt)) {
-      throw ArgumentError.value(
-          committedAt, 'committedAt', 'Must not precede answeredAt.');
-    }
-  }
+        assistance = Set.unmodifiable(assistance);
   final LearningScope scope;
   final String submissionId;
   final String activityId;

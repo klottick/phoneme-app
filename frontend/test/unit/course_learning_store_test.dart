@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_learning_command.dart';
+import 'package:linguist/src/core/course/course_learning_checkpoint.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/course/course_learning_persistence.dart';
 import 'package:linguist/src/core/course/course_learning_registry.dart';
@@ -21,6 +22,7 @@ void main() {
   late CourseLearningRepository store;
   late LearningTransitionEngine engine;
   var tokenCounter = 1;
+  var clockTime = fixedTime;
   const activity = 'lesson:en-fr-u-y';
 
   CourseLearningRepository repository({int historyLimit = 2000}) =>
@@ -31,7 +33,7 @@ void main() {
         backendOwner: () => owner,
         persistence: persistence,
         transitions: engine,
-        clock: () => fixedTime,
+        clock: () => clockTime,
         newToken: () => tokenFor(tokenCounter++),
         random: Random(1),
         historyLimit: historyLimit,
@@ -43,7 +45,216 @@ void main() {
     auth = LearningAuthScope(owner: owner, generation: 0, ready: true);
     engine = LearningTransitionEngine(LearningRegistry.french());
     tokenCounter = 1;
+    clockTime = fixedTime;
     store = repository();
+  });
+
+  test('repository commits repeatable drill answers only to portable bound',
+      () async {
+    const maxSafeInteger = 9007199254740991;
+    const drillId = 'drill:minimal-pairs';
+    final definition = engine.registry.require(drillId);
+    final cursor = SlotCursor(generation: 1, sequence: 1, revision: 0);
+    final seededSlot = ActivitySlot(
+      activityId: drillId,
+      kind: LearningActivityKind.drill,
+      contentRevision: definition.contentRevision,
+      cursor: cursor,
+      options: RunOptions(),
+      snapshot: DrillCheckpoint(
+        pairIds: definition.items.map((item) => item.id).toList(),
+        index: maxSafeInteger - 1,
+        correct: 0,
+        ended: false,
+      ),
+      exposures: const {},
+      latestReceipt: CommandReceipt(
+        token: tokenFor(77),
+        canonicalCommand: 'seed-at-portable-drill-bound',
+        before: SlotCursor(generation: 0, sequence: 0, revision: 0),
+        after: cursor,
+        commitOrdinal: 1,
+      ),
+    );
+    persistence.platform[store.scope.storageKey] =
+        const LearningDocumentCodec().encode(CourseLearningState(
+      scope: store.scope,
+      revision: 1,
+      commitOrdinal: 1,
+      history: const [],
+      activities: {drillId: seededSlot},
+      mistakes: const {},
+      summaries: const {},
+      completions: const [],
+      bestScores: const {},
+      pending: const [],
+    ));
+
+    var state = await store.load();
+    final repeatedItem =
+        definition.items[(maxSafeInteger - 1) % definition.items.length];
+    final answer = store.prepare(
+      state: state,
+      activityId: drillId,
+      action: ChooseDrillWord(
+        selectedWord: repeatedItem.expectedChoice!,
+        audioSource: AttemptAudioSource.pendingRecording,
+      ),
+    );
+    state = (await store.submit(answer)).state;
+    expect((state.activities[drillId]!.snapshot as DrillCheckpoint).index,
+        maxSafeInteger);
+    final writesAtBound = persistence.writeCount;
+
+    expect(
+      () => store.prepare(
+        state: state,
+        activityId: drillId,
+        action: ChooseDrillWord(
+          selectedWord: repeatedItem.expectedChoice!,
+          audioSource: AttemptAudioSource.pendingRecording,
+        ),
+      ),
+      throwsA(isA<LearningInvalidCommandException>()),
+    );
+    expect(persistence.writeCount, writesAtBound,
+        reason: 'the portable counter boundary cannot be advanced or written');
+  });
+
+  test('drill resumes only with nonempty pair IDs in current authored order',
+      () async {
+    const drillId = 'drill:minimal-pairs';
+    final definition = engine.registry.require(drillId);
+    final invalidOrders = <List<String>>[
+      const [],
+      definition.items.reversed.map((item) => item.id).toList(),
+    ];
+
+    for (final pairIds in invalidOrders) {
+      final cursor = SlotCursor(generation: 1, sequence: 1, revision: 0);
+      final slot = ActivitySlot(
+        activityId: drillId,
+        kind: LearningActivityKind.drill,
+        contentRevision: definition.contentRevision,
+        cursor: cursor,
+        options: RunOptions(),
+        snapshot: DrillCheckpoint(
+          pairIds: pairIds,
+          index: 0,
+          correct: 0,
+          ended: false,
+        ),
+        exposures: const {},
+        latestReceipt: CommandReceipt(
+          token: tokenFor(78),
+          canonicalCommand: 'invalid-drill-pair-order',
+          before: SlotCursor(generation: 0, sequence: 0, revision: 0),
+          after: cursor,
+          commitOrdinal: 1,
+        ),
+      );
+      persistence.platform[store.scope.storageKey] =
+          const LearningDocumentCodec().encode(CourseLearningState(
+        scope: store.scope,
+        revision: 1,
+        commitOrdinal: 1,
+        history: const [],
+        activities: {drillId: slot},
+        mistakes: const {},
+        summaries: const {},
+        completions: const [],
+        bestScores: const {},
+        pending: const [],
+      ));
+
+      final state = await store.load();
+      expect(
+        () => store.prepare(
+          state: state,
+          activityId: drillId,
+          action: ChooseDrillWord(
+            selectedWord: definition.items.first.expectedChoice!,
+            audioSource: AttemptAudioSource.pendingRecording,
+          ),
+        ),
+        throwsA(isA<LearningInvalidCommandException>()),
+        reason: 'saved Drill pair IDs must be nonempty and exactly authored',
+      );
+    }
+  });
+
+  test('repository accepts earlier commit and later-ordinal earlier wrong time',
+      () async {
+    const lessonId = 'lesson:en-fr-vowels';
+    final definition = engine.registry.require(lessonId);
+    final item = definition.items.first;
+    final wrongChoice =
+        item.choices.firstWhere((choice) => choice != item.expectedChoice);
+    var state = await store.load();
+    state = (await store.submit(store.prepare(
+      state: state,
+      activityId: lessonId,
+      action: StartLearningRun(options: RunOptions()),
+    )))
+        .state;
+
+    final firstWrong = store.prepare(
+      state: state,
+      activityId: lessonId,
+      action: ChooseSound(
+        selectedSound: wrongChoice,
+        audioSource: AttemptAudioSource.pendingRecording,
+      ),
+    );
+    clockTime = fixedTime.subtract(const Duration(seconds: 1));
+    state = (await store.submit(firstWrong)).state;
+    final firstAttempt = state.history.single.attempts.single;
+    expect(firstAttempt.committedAt.isBefore(firstAttempt.answeredAt), isTrue);
+
+    clockTime = fixedTime.subtract(const Duration(seconds: 2));
+    state = (await store.submit(store.prepare(
+      state: state,
+      activityId: lessonId,
+      action: StartLearningRun(options: RunOptions()),
+    )))
+        .state;
+    final secondWrong = store.prepare(
+      state: state,
+      activityId: lessonId,
+      action: ChooseSound(
+        selectedSound: wrongChoice,
+        audioSource: AttemptAudioSource.pendingRecording,
+      ),
+    );
+    clockTime = fixedTime.subtract(const Duration(seconds: 3));
+    final committed = await store.submit(secondWrong);
+    final attempts =
+        committed.state.history.expand((batch) => batch.attempts).toList();
+    final mistake = committed.state.mistakes.values.single;
+    expect(attempts.map((attempt) => attempt.commitOrdinal), [2, 4]);
+    expect(mistake.failureCount, 2);
+    expect(mistake.firstWrongAt, fixedTime);
+    expect(
+        mistake.latestWrongAt, fixedTime.subtract(const Duration(seconds: 2)));
+    expect(mistake.latestWrongAt.isBefore(mistake.firstWrongAt), isTrue);
+    expect(
+        committed.state.summaries.values
+            .fold<int>(0, (total, count) => total + count.total),
+        2);
+
+    final restored = const LearningDocumentCodec().decode(
+        const LearningDocumentCodec().encode(committed.state), store.scope);
+    final restoredAttempts =
+        restored.history.expand((batch) => batch.attempts).toList();
+    expect(restoredAttempts.map((attempt) => attempt.commitOrdinal), [2, 4]);
+    expect(
+        restoredAttempts.first.committedAt
+            .isBefore(restoredAttempts.first.answeredAt),
+        isTrue);
+    expect(
+        restored.mistakes.values.single.latestWrongAt
+            .isBefore(restored.mistakes.values.single.firstWrongAt),
+        isTrue);
   });
 
   test('lost initial start acknowledgment returns same generation', () async {

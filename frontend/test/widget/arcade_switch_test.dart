@@ -5,11 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
 import 'package:linguist/src/core/course/course_learning_checkpoint.dart';
 import 'package:linguist/src/core/course/course_learning_command.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
+import 'package:linguist/src/core/course/course_learning_registry.dart';
 import 'package:linguist/src/core/course/course_learning_store.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/features/arcade/arcade_screen.dart';
@@ -36,7 +38,137 @@ final class _HeldCueAudio implements CourseAudio {
   }
 }
 
+final class _RecordingAudio implements CourseAudio {
+  final spoken = <String>[];
+
+  @override
+  Future<void> speak(String word) async => spoken.add(word);
+
+  @override
+  Future<void> stop() async {}
+}
+
 void main() {
+  for (final invalidOldPoolBoard in [false, true]) {
+    testWidgets(
+        'stale arcade revision waits for explicit fresh run, invalid old pool = $invalidOldPoolBoard',
+        (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final store = CourseLearningWidgetStore();
+      const lessonId = 'lesson:en-fr-vowels';
+      var state = store.committedState;
+      state = (await store.submit(store.prepare(
+        state: state,
+        activityId: lessonId,
+        action: StartLearningRun(options: RunOptions()),
+      )))
+          .state;
+      final lessonItem =
+          LearningRegistry.french().require(lessonId).items.first;
+      final wrongChoice = lessonItem.choices
+          .firstWhere((choice) => choice != lessonItem.expectedChoice);
+      state = (await store.submit(store.prepare(
+        state: state,
+        activityId: lessonId,
+        action: ChooseSound(
+          selectedSound: wrongChoice,
+          audioSource: AttemptAudioSource.pendingRecording,
+        ),
+      )))
+          .state;
+      final oldBoard = invalidOldPoolBoard
+          ? SoundBoardState(
+              board: List.filled(36, 'retired-pool'), stars: const {})
+          : SoundMatchEngine(random: Random(7)).snapshot();
+      final oldCursor = SlotCursor(generation: 1, sequence: 1, revision: 0);
+      final oldSlot = ActivitySlot(
+        activityId: 'arcade:sound',
+        kind: LearningActivityKind.soundGame,
+        contentRevision: 2,
+        cursor: oldCursor,
+        options: RunOptions(),
+        snapshot: SoundGameCheckpoint(
+          board: oldBoard,
+          clock: ArcadeClockState(
+            remaining: 41,
+            round: 3,
+            score: 29,
+            paused: true,
+          ),
+        ),
+        exposures: const {},
+        latestReceipt: CommandReceipt(
+          token: 'AAAAAAAAAAAAAAAAAAAAAA',
+          canonicalCommand: 'saved-old-content-board',
+          before: SlotCursor(generation: 0, sequence: 0, revision: 0),
+          after: oldCursor,
+          commitOrdinal: state.commitOrdinal,
+        ),
+      );
+      state = CourseLearningState(
+        scope: state.scope,
+        revision: state.revision,
+        commitOrdinal: state.commitOrdinal,
+        history: state.history,
+        activities: {...state.activities, 'arcade:sound': oldSlot},
+        mistakes: state.mistakes,
+        summaries: state.summaries,
+        completions: state.completions,
+        bestScores: const {'arcade:sound': 17, 'arcade:word': 8},
+        pending: state.pending,
+      );
+      store.seedCommittedState(state);
+      store.submitted.clear();
+      store.prepared.clear();
+      final audio = _RecordingAudio();
+
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(store),
+          courseAudioProvider.overrideWithValue(audio),
+        ],
+        child: const MaterialApp(home: ArcadeScreen(silent: false)),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Start new run'), findsOneWidget);
+      expect(find.text('Resume saved board'), findsNothing);
+      expect(store.submitted, isEmpty,
+          reason:
+              'loading a stale slot must not mutate it or observe assistance');
+      expect(
+          store.committedState.activities['arcade:sound']!.contentRevision, 2);
+      expect(audio.spoken, isEmpty,
+          reason: 'stale content does not grant cue or heard permission');
+
+      await tester.tap(find.text('Start new run'));
+      await tester.pumpAndSettle();
+
+      final start = store.prepared.singleWhere((command) =>
+          command.activityId == 'arcade:sound' &&
+          command.action is StartLearningRun);
+      expect(start.expected.generation, oldCursor.generation);
+      expect(start.expected.sequence, oldCursor.sequence);
+      expect(start.expected.revision, oldCursor.revision);
+      final after = store.committedState;
+      final freshSlot = after.activities['arcade:sound']!;
+      final freshBoard = (freshSlot.snapshot as SoundGameCheckpoint).board;
+      expect(freshSlot.contentRevision, 1);
+      expect(freshSlot.cursor.generation, oldCursor.generation + 1);
+      expect(freshSlot.cursor.sequence, oldCursor.sequence + 2,
+          reason: 'the explicit Start is followed by the ordinary checkpoint');
+      expect(freshSlot.cursor.revision, 1);
+      expect(freshBoard.board, isNot(oldBoard.board));
+      expect(freshBoard.board, everyElement(anyOf('u', 'y', 'i', 'o')));
+      expect(after.history, hasLength(state.history.length));
+      expect(after.mistakes.keys, state.mistakes.keys);
+      expect(after.summaries, state.summaries);
+      expect(after.bestScores, state.bestScores);
+      expect(audio.spoken, isEmpty);
+    });
+  }
+
   for (final failSave in [false, true]) {
     testWidgets(
         'switch games preserves typed progress with save failure = $failSave',

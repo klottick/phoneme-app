@@ -22,15 +22,43 @@ class CourseProgressScreen extends ConsumerStatefulWidget {
 
 class _CourseProgressScreenState extends ConsumerState<CourseProgressScreen> {
   bool _retryingLoad = false;
+  int _syncOperation = 0;
 
   @override
   void initState() {
     super.initState();
     ref.listenManual(courseLearningStoreProvider, (previous, next) {
-      if (!identical(previous, next) && mounted && _retryingLoad) {
-        setState(() => _retryingLoad = false);
+      if (!identical(previous, next)) {
+        _syncOperation++;
+        if (mounted && _retryingLoad) {
+          setState(() => _retryingLoad = false);
+        }
       }
     });
+  }
+
+  Future<void> _syncProgress() async {
+    final store = ref.read(courseLearningStoreProvider);
+    final operation = ++_syncOperation;
+    bool isCurrent() =>
+        mounted &&
+        operation == _syncOperation &&
+        identical(store, ref.read(courseLearningStoreProvider));
+
+    try {
+      final result = await store.sync();
+      if (!isCurrent()) return;
+      final message = result.status == SupportedSyncStatus.synced
+          ? 'Supported scores and answer totals backed up. Detailed history, mistakes and lesson resume stay on this device.'
+          : 'Supported backup pending. Local commits remain saved on this device. Earlier server totals were not reset or imported.';
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+    } catch (_) {
+      if (!isCurrent()) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              'Supported backup status could not be checked. Local commits remain saved on this device.')));
+    }
   }
 
   Future<void> _retryLoad() async {
@@ -69,7 +97,7 @@ class _CourseProgressScreenState extends ConsumerState<CourseProgressScreen> {
           state: state,
           review: widget.review,
           registry: ref.watch(learningRegistryProvider),
-          sync: () => ref.read(courseLearningStoreProvider).sync(),
+          onSync: _syncProgress,
         ),
       ),
     );
@@ -81,13 +109,13 @@ class _ProgressContent extends StatelessWidget {
     required this.state,
     required this.review,
     required this.registry,
-    required this.sync,
+    required this.onSync,
   });
 
   final CourseLearningState state;
   final bool review;
   final LearningRegistry registry;
-  final Future<SupportedSyncResult> Function() sync;
+  final Future<void> Function() onSync;
 
   @override
   Widget build(BuildContext context) {
@@ -127,21 +155,13 @@ class _ProgressContent extends StatelessWidget {
         TextButton.icon(
           icon: const Icon(Icons.cloud_upload_outlined),
           label: const Text('Sync supported progress'),
-          onPressed: () async {
-            final result = await sync();
-            if (!context.mounted) return;
-            final message = result.status == SupportedSyncStatus.synced
-                ? 'Supported scores and answer totals backed up. Detailed history, mistakes and lesson resume stay on this device.'
-                : 'Supported backup pending. Local commits remain saved on this device. Earlier server totals were not reset or imported.';
-            ScaffoldMessenger.of(context)
-                .showSnackBar(SnackBar(content: Text(message)));
-          },
+          onPressed: onSync,
         ),
       const Text(
           'Supported backup covers scores and answer totals. Detailed history, mistakes and lesson resume stay on this device.'),
       if (state.pending.isNotEmpty)
         const Text(
-            'Offline: supported backup is pending; local commits remain saved on this device.'),
+            'Supported backup is pending; local commits remain saved on this device.'),
       const Text('Earlier server totals were not reset or imported.'),
       const SizedBox(height: 16),
       if (review) ...[
@@ -177,8 +197,8 @@ class _ProgressContent extends StatelessWidget {
         const Text('Pronunciation assessment: not assessed'),
         const SizedBox(height: 12),
         const Text('Arcade best scores — separate from sound accuracy'),
-        Text('Sound Match: ${state.bestScores['sound'] ?? 0}'),
-        Text('Word Match: ${state.bestScores['word'] ?? 0}'),
+        Text('Sound Match: ${state.bestScores['arcade:sound'] ?? 0}'),
+        Text('Word Match: ${state.bestScores['arcade:word'] ?? 0}'),
       ],
     ]);
   }

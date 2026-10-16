@@ -272,6 +272,118 @@ void main() {
     expect(retry.remainingEvents, 0);
   });
 
+  test('held send failure reports latest committed count through quarantine',
+      () async {
+    final persistence = _MemoryPersistence();
+    final transport = _RecordingTransport()
+      ..entered = Completer<void>()
+      ..release = Completer<void>();
+    final store = repository(persistence, transport);
+    const activity = 'lesson:en-fr-u-y';
+    final definition = LearningRegistry.french().require(activity);
+    var state = await store.load();
+    state = (await store.submit(store.prepare(
+      state: state,
+      activityId: activity,
+      action: StartLearningRun(options: RunOptions()),
+    )))
+        .state;
+
+    Future<CourseLearningState> answerAt(CourseLearningRepository writer,
+        CourseLearningState current, int index) async {
+      final item = definition.items[index];
+      return (await writer.submit(writer.prepare(
+        state: current,
+        activityId: activity,
+        action: ChooseSound(
+          selectedSound: item.expectedChoice!,
+          audioSource: AttemptAudioSource.pendingRecording,
+        ),
+      )))
+          .state;
+    }
+
+    state = await answerAt(store, state, 0);
+    final firstCommittedIds = state.pending.map((event) => event.id).toList();
+    final writer = repository(persistence, transport);
+    final syncing = store.sync();
+    await transport.entered!.future;
+
+    state = await writer.load();
+    state = (await writer.submit(writer.prepare(
+      state: state,
+      activityId: activity,
+      action: const AdvanceLesson(),
+    )))
+        .state;
+    state = await answerAt(writer, state, 1);
+    final latestCommittedIds = state.pending.map((event) => event.id).toList();
+    expect(latestCommittedIds, hasLength(2));
+    expect(latestCommittedIds.first, firstCommittedIds.single);
+
+    state = (await writer.submit(writer.prepare(
+      state: state,
+      activityId: activity,
+      action: const AdvanceLesson(),
+    )))
+        .state;
+    final thirdItem = definition.items[2];
+    final rejected = writer.prepare(
+      state: state,
+      activityId: activity,
+      action: ChooseSound(
+        selectedSound: thirdItem.expectedChoice!,
+        audioSource: AttemptAudioSource.pendingRecording,
+      ),
+    );
+    persistence
+      ..failNextWrite = true
+      ..failRestore = true;
+    await expectLater(
+      writer.submit(rejected),
+      throwsA(isA<LearningSaveException>()),
+    );
+    expect(
+        const LearningDocumentCodec()
+            .decode(persistence.documents[scope.storageKey]!, scope)
+            .pending,
+        hasLength(3),
+        reason: 'the failing platform write left an optimistic third event');
+
+    transport
+      ..failure = StateError('transport disconnected')
+      ..release!.complete();
+    final outcome = await syncing.then<Object?>(
+      (result) => result,
+      onError: (Object error, StackTrace _) => error,
+    );
+    if (outcome is! SupportedSyncResult) {
+      persistence.failRestore = false;
+      await store.retryLoad();
+      expect(outcome, isA<SupportedSyncResult>(),
+          reason: 'send failure must return its retained pending result');
+    }
+    final result = outcome as SupportedSyncResult;
+    expect(result.status, SupportedSyncStatus.pending);
+    expect(result.remainingEvents, 2,
+        reason:
+            'only the two committed events count; optimistic failed bytes do not');
+    expect(transport.batches, hasLength(1),
+        reason: 'the failed send does not advance to another batch');
+    await expectLater(
+        store.sync(), throwsA(isA<LearningUnavailableException>()));
+    expect(transport.batches, hasLength(1),
+        reason: 'no resend is allowed while the owner scope is quarantined');
+
+    persistence.failRestore = false;
+    final restored = await store.retryLoad();
+    expect(restored.pending.map((event) => event.id), latestCommittedIds);
+    transport.failure = null;
+    final retried = await store.sync();
+    expect(retried.status, SupportedSyncStatus.synced);
+    expect(transport.batches.last.map((event) => event.id), latestCommittedIds);
+  });
+
   test('acknowledgment failure rolls back and retries the same event id',
       () async {
     final persistence = _MemoryPersistence();

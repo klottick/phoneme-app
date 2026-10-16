@@ -202,6 +202,14 @@ class SupportedProgressSync {
 
   Future<SupportedSyncResult> _run() async {
     var pending = await readPending();
+    int retainedPendingCount() {
+      try {
+        return knownPendingCount?.call() ?? pending.length;
+      } catch (_) {
+        return pending.length;
+      }
+    }
+
     if (pending.isEmpty) {
       return const SupportedSyncResult(
           status: SupportedSyncStatus.pending, remainingEvents: 0);
@@ -227,7 +235,13 @@ class SupportedProgressSync {
       try {
         await transport.send(batch);
       } catch (_) {
-        pending = await readPending();
+        try {
+          pending = await readPending();
+        } catch (_) {
+          return SupportedSyncResult(
+              status: SupportedSyncStatus.pending,
+              remainingEvents: retainedPendingCount());
+        }
         return SupportedSyncResult(
             status: SupportedSyncStatus.pending,
             remainingEvents: pending.length);
@@ -241,13 +255,13 @@ class SupportedProgressSync {
       try {
         await acknowledge(batch.map((event) => event.id).toSet());
       } catch (_) {
-        final knownCount = knownPendingCount;
-        if (knownCount != null) {
+        try {
+          pending = await readPending();
+        } catch (_) {
           return SupportedSyncResult(
               status: SupportedSyncStatus.pending,
-              remainingEvents: knownCount());
+              remainingEvents: retainedPendingCount());
         }
-        pending = await readPending();
         return SupportedSyncResult(
             status: SupportedSyncStatus.pending,
             remainingEvents: pending.length);
