@@ -269,6 +269,7 @@ final class _ComparisonWidgetStore implements ComparisonLearningStore {
   final ComparisonLearningRepository _delegate;
   final Zone _asyncZone;
   int loadCalls = 0, prepareCalls = 0, submitCalls = 0;
+  VoidCallback? onPrepare;
   final prepared = <ComparisonLearningCommand>[];
   final submitted = <ComparisonLearningCommand>[];
   Future<T> _runInStableAsyncZone<T>(Future<T> Function() operation) {
@@ -301,6 +302,7 @@ final class _ComparisonWidgetStore implements ComparisonLearningStore {
       required String activityId,
       required ComparisonAction action}) {
     prepareCalls++;
+    onPrepare?.call();
     final command =
         _delegate.prepare(state: state, activityId: activityId, action: action);
     prepared.add(command);
@@ -609,6 +611,391 @@ void main() {
       await tester.pump();
     }
   }
+
+  testWidgets('initial Start retries frozen command after app suspension',
+      (tester) async {
+    final h = await harness(tester);
+    final gate = await _runRealAsync(tester, () async => Completer<void>());
+    final entered = await _runRealAsync(tester, () async => Completer<void>());
+    h.persistence.holdNextWrite = gate;
+    h.persistence.writeEntered = entered;
+    ProviderContainer? container;
+    addTearDown(() {
+      if (!gate.isCompleted) gate.complete();
+      final mounted = container;
+      if (mounted != null) cleanup(mounted, h.audio);
+    });
+    container = await _mountComparison(tester,
+        store: h.store,
+        audio: h.audio,
+        catalogue: catalogue,
+        pumpInitialReadBarrier: false);
+    await _readSnapshot(tester, h.store);
+    await tester.pump();
+    await tester.runAsync(() => entered.future);
+    final frozen = h.store.submitted.single;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    gate.complete();
+    await _readSnapshot(tester, h.store);
+    for (var i = 0; i < 8; i++) {
+      await tester.pump();
+    }
+    expect(find.text('Listen to sample A'), findsOneWidget);
+    await tester.tap(find.text('Listen to sample A'));
+    await tester.pump();
+    expect(h.audio.requests, hasLength(1));
+    expect(h.store.submitted, hasLength(2));
+    expect(identical(h.store.submitted.last, frozen), isTrue);
+  });
+
+  testWidgets('covered initial Start remains explicit and retries same command',
+      (tester) async {
+    final h = await harness(tester);
+    final gate = await _runRealAsync(tester, () async => Completer<void>());
+    final entered = await _runRealAsync(tester, () async => Completer<void>());
+    h.persistence.holdNextWrite = gate;
+    h.persistence.writeEntered = entered;
+    final screen = ComparisonLessonScreen(
+        activityId: comparisonActivityId, catalogueLoader: () => catalogue);
+    final router = GoRouter(routes: [
+      ShellRoute(builder: (_, __, child) => Scaffold(body: child), routes: [
+        GoRoute(
+            path: '/compare',
+            pageBuilder: (_, __) => NoTransitionPage(child: screen)),
+        GoRoute(
+            path: '/other',
+            pageBuilder: (_, __) =>
+                const NoTransitionPage(child: Text('Other'))),
+      ]),
+    ], initialLocation: '/compare');
+    ProviderContainer? container;
+    addTearDown(() {
+      if (!gate.isCompleted) gate.complete();
+      final mounted = container;
+      if (mounted != null) cleanup(mounted, h.audio);
+      router.dispose();
+    });
+    container = await _mountComparison(tester,
+        store: h.store,
+        audio: h.audio,
+        catalogue: catalogue,
+        router: router,
+        pumpInitialReadBarrier: false);
+    await _readSnapshot(tester, h.store);
+    await tester.pump();
+    await tester.runAsync(() => entered.future);
+    final frozen = h.store.submitted.single;
+    router.push('/other');
+    await tester.pump();
+    h.persistence.failAfterHeldWrite = StateError('first Start write failed');
+    gate.complete();
+    await _readSnapshot(tester, h.store);
+    router.pop();
+    for (var i = 0; i < 8; i++) {
+      await tester.pump();
+    }
+    expect(h.store.submitted, hasLength(1),
+        reason: 'route uncover never automatically retries an uncertain Start');
+    expect(find.text('Retry saving'), findsOneWidget);
+    await tester.tap(find.text('Retry saving'));
+    await _readSnapshot(tester, h.store);
+    for (var i = 0; i < 8; i++) {
+      await tester.pump();
+    }
+    expect(h.store.submitted, hasLength(2));
+    expect(identical(h.store.submitted.last, frozen), isTrue);
+    expect(find.text('Listen to sample A'), findsOneWidget);
+  });
+
+  testWidgets('auth unready during app resume preserves pending Start retry',
+      (tester) async {
+    final h = await harness(tester);
+    final tracker = LearningAuthTracker(owner: h.auth.owner, ready: true);
+    final store = _createComparisonStore(
+        catalogue: catalogue,
+        persistence: h.persistence,
+        auth: tracker.current,
+        asyncZone: h.store._asyncZone,
+        currentAuth: () => tracker.current,
+        backendOwner: () => tracker.current.owner);
+    final gate = await _runRealAsync(tester, () async => Completer<void>());
+    final entered = await _runRealAsync(tester, () async => Completer<void>());
+    h.persistence.holdNextWrite = gate;
+    h.persistence.writeEntered = entered;
+    ProviderContainer? container;
+    addTearDown(() {
+      if (!gate.isCompleted) gate.complete();
+      final mounted = container;
+      if (mounted != null) cleanup(mounted, h.audio);
+    });
+    container = await _mountComparison(tester,
+        store: store,
+        audio: h.audio,
+        catalogue: catalogue,
+        authTracker: tracker,
+        pumpInitialReadBarrier: false);
+    await _readSnapshot(tester, store);
+    await tester.pump();
+    await tester.runAsync(() => entered.future);
+    final frozen = store.submitted.single;
+    tracker.observe(owner: h.auth.owner, ready: false);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(store.submitted, hasLength(1));
+    tracker.observe(owner: h.auth.owner, ready: true);
+    await tester.pump();
+    gate.complete();
+    await _readSnapshot(tester, store);
+    await tester.pump();
+    for (var i = 0; i < 6; i++) {
+      await tester.pump();
+    }
+    expect(store.submitted, hasLength(2));
+    expect(identical(store.submitted.last, frozen), isTrue);
+    expect(find.text('Listen to sample A'), findsOneWidget);
+    for (final sample in [ComparisonSample.a, ComparisonSample.b]) {
+      await tester.tap(find.text(sample == ComparisonSample.a
+          ? 'Listen to sample A'
+          : 'Listen to sample B'));
+      h.audio.completeNext(CourseAudioResult.completed(
+          referenceId: sample == ComparisonSample.a
+              ? catalogue.exercises.first.sampleA.referenceId
+              : catalogue.exercises.first.sampleB.referenceId,
+          source: CourseAudioSource.unverifiedRecording));
+      await tester.pump();
+    }
+    final answerGate =
+        await _runRealAsync(tester, () async => Completer<void>());
+    final answerEntered =
+        await _runRealAsync(tester, () async => Completer<void>());
+    h.persistence.holdNextWrite = answerGate;
+    h.persistence.writeEntered = answerEntered;
+    await tester.tap(find.text('Same'));
+    await tester.runAsync(() => answerEntered.future);
+    final frozenAnswer = store.submitted.last;
+    tracker.observe(owner: h.auth.owner, ready: false);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    tracker.observe(owner: h.auth.owner, ready: true);
+    await tester.pump();
+    answerGate.complete();
+    await _readSnapshot(tester, store);
+    for (var i = 0; i < 8; i++) {
+      await tester.pump();
+    }
+    expect(store.submitted.where((c) => c.action is AnswerComparisonPair),
+        hasLength(2));
+    expect(identical(store.submitted.last, frozenAnswer), isTrue);
+  });
+
+  testWidgets('auth readiness retries a load interrupted by app suspension',
+      (tester) async {
+    final h = await harness(tester);
+    final tracker = LearningAuthTracker(owner: h.auth.owner, ready: true);
+    final store = _createComparisonStore(
+        catalogue: catalogue,
+        persistence: h.persistence,
+        auth: tracker.current,
+        asyncZone: h.store._asyncZone,
+        currentAuth: () => tracker.current,
+        backendOwner: () => tracker.current.owner);
+    final readGate = await _runRealAsync(tester, () async => Completer<void>());
+    final firstEntered =
+        await _runRealAsync(tester, () async => Completer<void>());
+    h.persistence.holdNextRead = readGate;
+    h.persistence.readEntered = firstEntered;
+    ProviderContainer? container;
+    addTearDown(() {
+      if (!readGate.isCompleted) readGate.complete();
+      final mounted = container;
+      if (mounted != null) cleanup(mounted, h.audio);
+    });
+    container = await _mountComparison(tester,
+        store: store,
+        audio: h.audio,
+        catalogue: catalogue,
+        authTracker: tracker,
+        pumpInitialReadBarrier: false);
+    await tester.runAsync(() => firstEntered.future);
+    tracker.observe(owner: h.auth.owner, ready: false);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    final secondEntered =
+        await _runRealAsync(tester, () async => Completer<void>());
+    h.persistence.readEntered = secondEntered;
+    tracker.observe(owner: h.auth.owner, ready: true);
+    await tester.pump();
+    expect(store.loadCalls, 2,
+        reason: 'readiness must schedule recovery before releasing held read');
+    readGate.complete();
+    await tester.runAsync(() => secondEntered.future);
+    await _readSnapshot(tester, store);
+    for (var i = 0; i < 8; i++) {
+      await tester.pump();
+    }
+    expect(store.loadCalls, 2);
+    expect(find.text('Listen to sample A'), findsOneWidget);
+    expect(h.store.submitted, isEmpty,
+        reason:
+            'recovered initial read may submit one Start on the real store');
+    expect(store.submitted.where((c) => c.action is StartComparisonRun),
+        hasLength(1));
+  });
+
+  testWidgets('synchronous prepare reentrancy claims command input first',
+      (tester) async {
+    final h = await harness(tester);
+    await _seedFirstPass(tester, h.store,
+        catalogue: catalogue, policy: LessonPolicy());
+    final container = await _mountComparison(tester,
+        store: h.store, audio: h.audio, catalogue: catalogue);
+    addTearDown(() => cleanup(container, h.audio));
+    var reentered = false;
+    h.store.onPrepare = () {
+      if (reentered) return;
+      reentered = true;
+      tester
+          .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Finish comparison'))
+          .onPressed!
+          .call();
+    };
+    final preparesBeforeFinish = h.store.prepareCalls;
+    await tester.tap(find.text('Finish comparison'));
+    await tester.pump();
+    expect(h.store.prepareCalls, preparesBeforeFinish + 1);
+    expect(h.store.submitted.where((c) => c.action is FinishComparisonRun),
+        hasLength(1));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('saved debrief shows requested registered pair context only',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    final h = await harness(tester);
+    await _seedFirstPass(tester, h.store,
+        catalogue: catalogue, policy: LessonPolicy(), wrongIndexes: {0});
+    final container = await _mountComparison(tester,
+        store: h.store,
+        audio: h.audio,
+        catalogue: catalogue,
+        pairId: 'fr07b-pair-03');
+    addTearDown(() => cleanup(container, h.audio));
+    expect(find.text('Requested pair: fr07b-pair-03'), findsOneWidget);
+    await tester.tap(find.text('Review unresolved pairs'));
+    await _readSnapshot(tester, h.store);
+    for (var i = 0; i < 6; i++) {
+      await tester.pump();
+    }
+    expect(find.text('Requested pair: fr07b-pair-03'), findsNothing);
+    expect(find.text('Compare the vowel in each sample.'), findsOneWidget);
+    final semanticRoot = tester
+        .binding.renderViews.first.owner!.semanticsOwner!.rootSemanticsNode!;
+    final semanticNodes = <SemanticsNode>[];
+    void visit(SemanticsNode node) {
+      semanticNodes.add(node);
+      node.visitChildren((child) {
+        visit(child);
+        return true;
+      });
+    }
+
+    visit(semanticRoot);
+    expect(
+        semanticNodes
+            .expand((node) => [
+                  node.getSemanticsData().label,
+                  node.getSemanticsData().value,
+                  node.getSemanticsData().hint,
+                  node.getSemanticsData().tooltip,
+                ])
+            .join('\n'),
+        isNot(contains('fr07b-pair-03')));
+    await tester.tap(find.text('Listen to sample A'));
+    expect(h.audio.requests.single.referenceId,
+        catalogue.exercises.first.sampleA.referenceId,
+        reason: 'requested pair context does not reorder unresolved review');
+    semantics.dispose();
+  });
+
+  testWidgets('prepare exception releases claim and revokes heard grants',
+      (tester) async {
+    final h = await harness(tester);
+    final container = await _mountComparison(tester,
+        store: h.store, audio: h.audio, catalogue: catalogue);
+    addTearDown(() => cleanup(container, h.audio));
+    for (final sample in [ComparisonSample.a, ComparisonSample.b]) {
+      await tester.tap(find.text(sample == ComparisonSample.a
+          ? 'Listen to sample A'
+          : 'Listen to sample B'));
+      h.audio.completeNext(CourseAudioResult.completed(
+          referenceId: sample == ComparisonSample.a
+              ? catalogue.exercises.first.sampleA.referenceId
+              : catalogue.exercises.first.sampleB.referenceId,
+          source: CourseAudioSource.unverifiedRecording));
+      await tester.pump();
+    }
+    h.store.onPrepare = () => throw StateError('prepare rejected');
+    await tester.tap(find.text('Same'));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(
+        tester
+            .widget<SoundComparison>(find.byType(SoundComparison))
+            .heardSamples,
+        isEmpty);
+    expect(find.text('Retry loading'), findsOneWidget);
+    expect(h.store.submitted.where((c) => c.action is AnswerComparisonPair),
+        isEmpty);
+  });
+
+  testWidgets(
+      'unavailable saved debrief offers reload only and preserves bytes',
+      (tester) async {
+    final h = await harness(tester);
+    await _seedFirstPass(tester, h.store,
+        catalogue: catalogue, policy: LessonPolicy(), wrongIndexes: {0});
+    final container = await _mountComparison(tester,
+        store: h.store, audio: h.audio, catalogue: catalogue);
+    addTearDown(() => cleanup(container, h.audio));
+    final key = h.store.scope.storageKey;
+    h.persistence.values[key] = '{corrupt-saved-debrief';
+    final corrupt = h.persistence.values[key]!;
+    final prepares = h.store.prepareCalls;
+    final readEntered =
+        await _runRealAsync(tester, () async => Completer<void>());
+    h.persistence.readEntered = readEntered;
+    await tester.tap(find.text('Finish comparison'));
+    await tester.runAsync(() => readEntered.future);
+    for (var i = 0; i < 8; i++) {
+      await tester.pump();
+    }
+    expect(find.text('Reload saved progress'), findsOneWidget);
+    expect(find.text('Retry saving'), findsNothing);
+    expect(find.text('Finish comparison'), findsNothing);
+    expect(find.text('Review unresolved pairs'), findsNothing);
+    expect(h.persistence.values[key], corrupt);
+    expect(h.store.prepareCalls, prepares + 1);
+    final submitted = h.store.submitCalls;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(h.persistence.values[key], corrupt);
+    expect(h.store.submitCalls, submitted);
+  });
 
   testWidgets('comparison_view_is_neutral_and_accessible', (tester) async {
     final semantics = tester.ensureSemantics();
