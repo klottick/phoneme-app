@@ -113,6 +113,29 @@ List<ComparisonContentDiagnostic> _validate(List<ComparisonExerciseDraft> rows,
         exercises: rows,
         referencePhonemes: _fixturePhonemes);
 
+ComparisonExerciseDraft _copyDraft(ComparisonExerciseDraft source,
+        {ComparisonSampleDraft? sampleA,
+        bool replaceSampleA = false,
+        ComparisonSampleDraft? sampleB,
+        bool replaceSampleB = false,
+        ContentPurpose? purpose,
+        bool replacePurpose = false,
+        ContentReviewState? reviewState,
+        bool replaceReviewState = false}) =>
+    ComparisonExerciseDraft(
+      id: source.id,
+      activityId: source.activityId,
+      sectionId: source.sectionId,
+      contentRevision: source.contentRevision,
+      purpose: replacePurpose ? purpose : source.purpose,
+      reviewState: replaceReviewState ? reviewState : source.reviewState,
+      instruction: source.instruction,
+      sampleA: replaceSampleA ? sampleA : source.sampleA,
+      sampleB: replaceSampleB ? sampleB : source.sampleB,
+      expectedRelation: source.expectedRelation,
+      debriefNote: source.debriefNote,
+    );
+
 void main() {
   test('french_comparison_inventory_matches_approved_spec', () {
     final catalogue = loadFrenchComparisonCatalogue();
@@ -289,6 +312,175 @@ void main() {
       'catalogue.revision',
       'catalogue.count'
     ]);
+  });
+
+  test(
+      'wrong phoneme identity at a valid ordinal is rejected independently for A and B',
+      () {
+    final validTen = List.generate(10, _draft);
+    final cases = [
+      (ComparisonSample.a, 'exercise.sampleA.target.phoneme'),
+      (ComparisonSample.b, 'exercise.sampleB.target.phoneme'),
+    ];
+    for (final (slot, expectedCode) in cases) {
+      final base = validTen.first;
+      final original =
+          slot == ComparisonSample.a ? base.sampleA! : base.sampleB!;
+      final badTarget = ComparisonTargetDraft(
+          phonemeId: 'not-the-source-phoneme',
+          phonemeOrdinal: original.target!.phonemeOrdinal);
+      final badSample = ComparisonSampleDraft(
+          slot: slot, referenceId: original.referenceId, target: badTarget);
+      final invalid = [...validTen]..[0] = _copyDraft(base,
+          sampleA: badSample,
+          replaceSampleA: slot == ComparisonSample.a,
+          sampleB: badSample,
+          replaceSampleB: slot == ComparisonSample.b);
+      expect(_validate(invalid).map((d) => d.code), [expectedCode],
+          reason: '$slot mismatch');
+      expect(
+          () => ComparisonCatalogue.fromDrafts(
+              activityId: 'act',
+              sectionId: 'sec',
+              contentRevision: 1,
+              exercises: invalid,
+              referencePhonemes: _fixturePhonemes),
+          throwsA(isA<ComparisonContentValidationException>()));
+    }
+  });
+
+  test('missing targets suppress relation and balance and reject factory', () {
+    final validTen = List.generate(10, _draft);
+    for (final slot in ComparisonSample.values) {
+      final base = validTen.first;
+      final missing = ComparisonSampleDraft(
+          slot: slot,
+          referenceId: slot == ComparisonSample.a
+              ? base.sampleA!.referenceId
+              : base.sampleB!.referenceId,
+          target: null);
+      final invalid = [...validTen]..[0] = _copyDraft(base,
+          sampleA: missing,
+          replaceSampleA: slot == ComparisonSample.a,
+          sampleB: missing,
+          replaceSampleB: slot == ComparisonSample.b);
+      expect(
+          _validate(invalid).map((d) => d.code),
+          [
+            'exercise.sample${slot == ComparisonSample.a ? 'A' : 'B'}.target.missing'
+          ],
+          reason: '$slot target missing');
+      expect(
+          () => ComparisonCatalogue.fromDrafts(
+              activityId: 'act',
+              sectionId: 'sec',
+              contentRevision: 1,
+              exercises: invalid,
+              referencePhonemes: _fixturePhonemes),
+          throwsA(isA<ComparisonContentValidationException>()));
+    }
+  });
+
+  test('null purpose and review state have their own diagnostics', () {
+    final validTen = List.generate(10, _draft);
+    final row = validTen.first;
+    for (final (purpose, review, expected) in [
+      (null, ContentReviewState.pending, 'exercise.purpose'),
+      (ContentPurpose.practice, null, 'exercise.reviewState'),
+    ]) {
+      final invalid = [...validTen]..[0] = _copyDraft(row,
+          purpose: purpose,
+          replacePurpose: expected == 'exercise.purpose',
+          reviewState: review,
+          replaceReviewState: expected == 'exercise.reviewState');
+      expect(_validate(invalid).map((d) => d.code), [expected]);
+    }
+  });
+
+  test(
+      'null and negative ordinals suppress relation and balance on both samples',
+      () {
+    final validTen = List.generate(10, _draft);
+    for (final slot in ComparisonSample.values) {
+      for (final ordinal in <int?>[null, -1]) {
+        final base = validTen.first;
+        final source =
+            slot == ComparisonSample.a ? base.sampleA! : base.sampleB!;
+        final invalidSample = ComparisonSampleDraft(
+            slot: slot,
+            referenceId: source.referenceId,
+            target: ComparisonTargetDraft(
+                phonemeId: source.target!.phonemeId, phonemeOrdinal: ordinal));
+        final invalid = [...validTen]..[0] = _copyDraft(base,
+            sampleA: invalidSample,
+            replaceSampleA: slot == ComparisonSample.a,
+            sampleB: invalidSample,
+            replaceSampleB: slot == ComparisonSample.b);
+        expect(
+            _validate(invalid).map((d) => d.code),
+            [
+              'exercise.sample${slot == ComparisonSample.a ? 'A' : 'B'}.target.ordinal'
+            ],
+            reason: '$slot ordinal $ordinal');
+      }
+    }
+  });
+
+  test('relation mismatch is checked symmetrically for target A and B', () {
+    final validTen = List.generate(10, _draft);
+    for (final slot in ComparisonSample.values) {
+      final base = validTen.first;
+      const sameSourceTarget =
+          ComparisonTargetDraft(phonemeId: 'x', phonemeOrdinal: 0);
+      final invalidPair = _copyDraft(base,
+          sampleA: ComparisonSampleDraft(
+              slot: ComparisonSample.a,
+              referenceId:
+                  slot == ComparisonSample.a ? 'same-a' : 'different-a',
+              target: slot == ComparisonSample.a
+                  ? sameSourceTarget
+                  : const ComparisonTargetDraft(
+                      phonemeId: 'x', phonemeOrdinal: 0)),
+          replaceSampleA: true,
+          sampleB: ComparisonSampleDraft(
+              slot: ComparisonSample.b,
+              referenceId:
+                  slot == ComparisonSample.b ? 'same-b' : 'different-b',
+              target: slot == ComparisonSample.b
+                  ? sameSourceTarget
+                  : const ComparisonTargetDraft(
+                      phonemeId: 'x', phonemeOrdinal: 0)),
+          replaceSampleB: true);
+      final invalid = [...validTen]..[0] = ComparisonExerciseDraft(
+          id: invalidPair.id,
+          activityId: invalidPair.activityId,
+          sectionId: invalidPair.sectionId,
+          contentRevision: invalidPair.contentRevision,
+          purpose: invalidPair.purpose,
+          reviewState: invalidPair.reviewState,
+          instruction: invalidPair.instruction,
+          sampleA: invalidPair.sampleA,
+          sampleB: invalidPair.sampleB,
+          expectedRelation: PhonemeRelation.different,
+          debriefNote: invalidPair.debriefNote);
+      final refs = {
+        ..._fixturePhonemes,
+        'same-a': ['x'],
+        'same-b': ['x'],
+        'different-a': ['x'],
+        'different-b': ['x']
+      };
+      expect(
+          validateComparisonCatalogue(
+                  activityId: 'act',
+                  sectionId: 'sec',
+                  contentRevision: 1,
+                  exercises: invalid,
+                  referencePhonemes: refs)
+              .map((d) => d.code),
+          ['exercise.relation.mismatch'],
+          reason: '$slot relation mismatch');
+    }
   });
 
   test('same phoneme identity across distinct references is valid', () {
