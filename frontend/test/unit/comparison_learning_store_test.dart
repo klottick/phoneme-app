@@ -632,11 +632,17 @@ void main() {
     final preferences = await SharedPreferences.getInstance();
     final committed = preferences.getString(key);
     platform.begin();
+    addTearDown(() => platform.release(false));
     final saving = adapter.submit(start);
+    final saveSettled =
+        expectLater(saving, throwsA(isA<LearningSaveException>()));
     await platform.entered!.future;
-    expect(preferences.getString(key), isNot(committed));
-    platform.release(false);
-    await expectLater(saving, throwsA(isA<LearningSaveException>()));
+    try {
+      expect(preferences.getString(key), isNot(committed));
+    } finally {
+      platform.release(false);
+    }
+    await saveSettled;
     expect(preferences.getString(key), committed);
     expect((await adapter.load()).revision, 0);
   });

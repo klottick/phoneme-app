@@ -321,6 +321,11 @@ void main() {
     expect(d.codec.encode(decoded), raw);
     expect(decoded.receipts.map((r) => r.canonicalCommand).join(),
         contains('"kind":"review"'));
+    final pruned = jsonDecode(raw) as Map<String, Object?>;
+    pruned['receipts'] = <Object?>[];
+    expect(d.codec.decode(jsonEncode(pruned), d.scope, d.catalogue).completions,
+        hasLength(1),
+        reason: 'completion remains valid after its Finish receipt is pruned');
     final mutation = jsonDecode(raw) as Map<String, Object?>;
     ((mutation['completions'] as List).single
         as Map<String, Object?>)['extra'] = true;
@@ -346,6 +351,173 @@ void main() {
     ((document['slot'] as Map<String, Object?>)['latestReceipt']
         as Map<String, Object?>)['canonicalCommand'] = tampered;
     expect(() => d.codec.decode(jsonEncode(document), d.scope, d.catalogue),
+        throwsA(isA<ComparisonUnavailableException>()));
+  });
+
+  test('latest start cannot restore a forged answered checkpoint', () {
+    final d = _CodecDriver(LearningOwner.guest());
+    d.submit(StartComparisonRun(sessionId: 'fresh', policy: LessonPolicy()));
+    final raw = jsonDecode(d.codec.encode(d.state)) as Map<String, Object?>;
+    final ids = d.catalogue.exercises.map((exercise) => exercise.id).toList();
+    final forged = LessonSectionSession(itemIds: ids, sessionId: 'fresh');
+    for (var index = 0; index < ids.length; index++) {
+      forged.submit(true);
+      forged.advance();
+    }
+    final checkpoint = ((raw['slot'] as Map<String, Object?>)['checkpoint']
+        as Map<String, Object?>);
+    checkpoint['session'] = forged.toJson();
+    expect(() => d.codec.decode(jsonEncode(raw), d.scope, d.catalogue),
+        throwsA(isA<ComparisonUnavailableException>()));
+  });
+
+  test('latest start policy must match saved checkpoint policy', () {
+    final d = _CodecDriver(LearningOwner.guest());
+    d.submit(StartComparisonRun(sessionId: 'policy', policy: LessonPolicy()));
+    final raw = jsonDecode(d.codec.encode(d.state)) as Map<String, Object?>;
+    final receipts = raw['receipts'] as List;
+    final receipt = receipts.single as Map<String, Object?>;
+    final canonical = jsonDecode(receipt['canonicalCommand'] as String)
+        as Map<String, Object?>;
+    final action = canonical['action'] as Map<String, Object?>;
+    (action['policy'] as Map<String, Object?>)['completionThresholdPercent'] =
+        70;
+    final changed = jsonEncode(canonical);
+    receipt['canonicalCommand'] = changed;
+    final latest = ((raw['slot'] as Map<String, Object?>)['latestReceipt']
+        as Map<String, Object?>);
+    latest['canonicalCommand'] = changed;
+    expect(() => d.codec.decode(jsonEncode(raw), d.scope, d.catalogue),
+        throwsA(isA<ComparisonUnavailableException>()));
+  });
+
+  test('latest answer correctness must agree with saved checkpoint', () {
+    final d = _CodecDriver(LearningOwner.guest());
+    d.submit(StartComparisonRun(sessionId: 'answer', policy: LessonPolicy()));
+    d.answerFirstPair();
+    final raw = jsonDecode(d.codec.encode(d.state)) as Map<String, Object?>;
+    final session = (((raw['slot'] as Map<String, Object?>)['checkpoint']
+        as Map<String, Object?>)['session'] as Map<String, Object?>);
+    (session['latestAnswers'] as Map<String, Object?>)['fr07b-pair-01'] = true;
+    session['lastCorrect'] = true;
+    expect(() => d.codec.decode(jsonEncode(raw), d.scope, d.catalogue),
+        throwsA(isA<ComparisonUnavailableException>()));
+  });
+
+  test('latest answer must agree with an available retained attempt', () {
+    final d = _CodecDriver(LearningOwner.guest());
+    d.submit(StartComparisonRun(sessionId: 'attempt', policy: LessonPolicy()));
+    d.answerFirstPair();
+    final raw = jsonDecode(d.codec.encode(d.state)) as Map<String, Object?>;
+    raw['receipts'] = <Object?>[];
+    final attempt = (raw['attempts'] as List).single as Map<String, Object?>;
+    attempt['selectedRelation'] = 'different';
+    attempt['correct'] = true;
+    final summary =
+        (raw['summaries'] as Map).values.single as Map<String, Object?>;
+    summary['firstInRun'] = {'correct': 1, 'total': 1};
+    expect(() => d.codec.decode(jsonEncode(raw), d.scope, d.catalogue),
+        throwsA(isA<ComparisonUnavailableException>()));
+  });
+
+  test('zero-commit document cannot contain phantom completion', () {
+    final scope =
+        ComparisonProfileScope(courseId: 'en-fr', owner: LearningOwner.guest());
+    const codec = ComparisonLearningCodec();
+    final raw = jsonDecode(codec.encode(ComparisonLearningState.empty(scope)))
+        as Map<String, Object?>;
+    raw['completions'] = [
+      {
+        'activityId': 'en-fr-phoneme-comparison',
+        'contentRevision': 1,
+        'policyRevision': 1,
+        'thresholdPercent': 80,
+        'committedAt': '2026-01-01T00:00:00.000Z'
+      }
+    ];
+    expect(
+        () => codec.decode(
+            jsonEncode(raw), scope, loadFrenchComparisonCatalogue()),
+        throwsA(isA<ComparisonUnavailableException>()));
+  });
+
+  test('recorded finish receipt must retain its completion identity', () {
+    final d = _CodecDriver(LearningOwner.guest());
+    d.submit(StartComparisonRun(sessionId: 'finish', policy: LessonPolicy()));
+    for (var index = 0; index < d.catalogue.exercises.length; index++) {
+      d.answerCurrent(true);
+      d.submit(const AdvanceComparisonPair());
+    }
+    d.submit(const FinishComparisonRun(recordCompletion: true));
+    final raw = jsonDecode(d.codec.encode(d.state)) as Map<String, Object?>;
+    raw['completions'] = <Object?>[];
+    expect(() => d.codec.decode(jsonEncode(raw), d.scope, d.catalogue),
+        throwsA(isA<ComparisonUnavailableException>()));
+  });
+
+  test('summary cannot relabel a retained wrong attempt as a success', () {
+    final d = _CodecDriver(LearningOwner.guest());
+    d.submit(StartComparisonRun(sessionId: 'summary', policy: LessonPolicy()));
+    d.answerFirstPair();
+    final raw = jsonDecode(d.codec.encode(d.state)) as Map<String, Object?>;
+    final summaries = raw['summaries'] as Map<String, Object?>;
+    final summary = summaries.values.single as Map<String, Object?>;
+    summary['firstInRun'] = {'correct': 1, 'total': 1};
+    expect(() => d.codec.decode(jsonEncode(raw), d.scope, d.catalogue),
+        throwsA(isA<ComparisonUnavailableException>()));
+  });
+
+  test('round two attempts cannot be relabeled as first-pass evidence', () {
+    final d = _CodecDriver(LearningOwner.guest());
+    d.submit(StartComparisonRun(sessionId: 'rounds', policy: LessonPolicy()));
+    for (var index = 0; index < d.catalogue.exercises.length; index++) {
+      d.answerCurrent(false);
+      d.submit(const AdvanceComparisonPair());
+    }
+    d.submit(const ReviewComparisonPairs());
+    d.answerCurrent(false);
+    d.submit(const AdvanceComparisonPair());
+    final raw = jsonDecode(d.codec.encode(d.state)) as Map<String, Object?>;
+    raw['receipts'] = <Object?>[];
+    final attempt = (raw['attempts'] as List).last as Map<String, Object?>;
+    expect(attempt['round'], 2);
+    attempt['presentation'] = 'firstInRun';
+    attempt['afterDebrief'] = false;
+    final pairId = attempt['pairId'] as String;
+    final summary = (raw['summaries'] as Map<String, Object?>)
+        .entries
+        .singleWhere((entry) => (jsonDecode(entry.key) as List)[1] == pairId)
+        .value as Map<String, Object?>;
+    final first = summary['firstInRun'] as Map<String, Object?>;
+    final repeat = summary['repeatInRun'] as Map<String, Object?>;
+    final after = summary['afterDebrief'] as Map<String, Object?>;
+    final correct = attempt['correct'] as bool;
+    first['total'] = (first['total'] as int) + 1;
+    first['correct'] = (first['correct'] as int) + (correct ? 1 : 0);
+    repeat['total'] = (repeat['total'] as int) - 1;
+    repeat['correct'] = (repeat['correct'] as int) - (correct ? 1 : 0);
+    after['total'] = (after['total'] as int) - 1;
+    after['correct'] = (after['correct'] as int) - (correct ? 1 : 0);
+    expect(() => d.codec.decode(jsonEncode(raw), d.scope, d.catalogue),
+        throwsA(isA<ComparisonUnavailableException>()));
+  });
+
+  test('saved comparison review counters must fit safe integer bounds', () {
+    final d = _CodecDriver(LearningOwner.guest());
+    d.submit(StartComparisonRun(sessionId: 'large', policy: LessonPolicy()));
+    for (var index = 0; index < d.catalogue.exercises.length; index++) {
+      d.answerCurrent(index != 0);
+      d.submit(const AdvanceComparisonPair());
+    }
+    d.submit(const ReviewComparisonPairs());
+    final raw = jsonDecode(d.codec.encode(d.state)) as Map<String, Object?>;
+    final checkpoint = ((raw['slot'] as Map<String, Object?>)['checkpoint']
+        as Map<String, Object?>);
+    final session = _mutableSession(d.state.checkpoint!.sessionJson);
+    session['round'] = 9007199254740992;
+    session['attemptCount'] = 9007199254741000;
+    checkpoint['session'] = session;
+    expect(() => d.codec.decode(jsonEncode(raw), d.scope, d.catalogue),
         throwsA(isA<ComparisonUnavailableException>()));
   });
 }

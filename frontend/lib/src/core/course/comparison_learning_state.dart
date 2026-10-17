@@ -350,6 +350,11 @@ final class ComparisonPairAttempt {
     comparisonPositive(round, 'round');
     comparisonPositive(sequence, 'sequence');
     if (correct != (selectedRelation == expectedRelation) ||
+        (round == 1 &&
+            (presentation != AttemptPresentation.firstInRun || afterDebrief)) ||
+        (round > 1 &&
+            (presentation != AttemptPresentation.repeatInRun ||
+                !afterDebrief)) ||
         observations.length != 2 ||
         observations[0].slot != ComparisonSample.a ||
         observations[1].slot != ComparisonSample.b ||
@@ -406,6 +411,14 @@ final class ComparisonLearningState {
         receipts.length > 2000 ||
         (commitOrdinal == 0) != (slot == null)) {
       throw ArgumentError('Invalid comparison state header');
+    }
+    if (commitOrdinal == 0 &&
+        (this.attempts.isNotEmpty ||
+            this.receipts.isNotEmpty ||
+            this.mistakes.isNotEmpty ||
+            this.summaries.isNotEmpty ||
+            this.completions.isNotEmpty)) {
+      throw ArgumentError('Uncommitted comparison state contains evidence');
     }
     final tokens = <String>{};
     final sequences = <String>{};

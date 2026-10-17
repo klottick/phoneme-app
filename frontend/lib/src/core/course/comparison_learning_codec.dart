@@ -225,6 +225,15 @@ final class ComparisonLearningCodec {
     _exactKeys(savedSessionPolicy, const ['completionThresholdPercent'],
         'session.policy');
     final itemIds = catalogue.exercises.map((e) => e.id).toList();
+    for (final key in const [
+      'version',
+      'contentRevision',
+      'position',
+      'round',
+      'attemptCount'
+    ]) {
+      _integer(sessionRaw[key], 'session.$key');
+    }
     final session = LessonSectionSession.fromJson(
         Map<String, dynamic>.from(sessionRaw),
         itemIds: itemIds,
@@ -761,10 +770,15 @@ final class ComparisonLearningCodec {
       if (s == null ||
           s.firstInRun.total < e.value[0] ||
           s.firstInRun.correct < e.value[1] ||
+          s.firstInRun.total - s.firstInRun.correct < e.value[0] - e.value[1] ||
           s.repeatInRun.total < e.value[2] ||
           s.repeatInRun.correct < e.value[3] ||
+          s.repeatInRun.total - s.repeatInRun.correct <
+              e.value[2] - e.value[3] ||
           s.afterDebrief.total < e.value[4] ||
-          s.afterDebrief.correct < e.value[5]) {
+          s.afterDebrief.correct < e.value[5] ||
+          s.afterDebrief.total - s.afterDebrief.correct <
+              e.value[4] - e.value[5]) {
         throw const FormatException('Summary undercounts retained attempts.');
       }
     }
@@ -798,14 +812,102 @@ final class ComparisonLearningCodec {
               'Slot receipt differs from retained receipt.');
         }
       }
-      if (cmd.action case StartComparisonRun(:final sessionId)) {
-        if (slot.checkpoint.sessionId != sessionId) {
+      if (cmd.action case StartComparisonRun(:final sessionId, :final policy)) {
+        final session = _checkpointSession(slot, catalogue);
+        final fresh = LessonSectionSession(
+            itemIds: catalogue.exercises.map((e) => e.id).toList(),
+            sessionId: sessionId,
+            contentRevision: catalogue.contentRevision,
+            policy: slot.checkpoint.policy);
+        if (slot.checkpoint.sessionId != sessionId ||
+            slot.checkpoint.policy.completionThresholdPercent !=
+                policy.completionThresholdPercent ||
+            jsonEncode(session.toJson()) != jsonEncode(fresh.toJson())) {
           throw const FormatException(
-              'Latest start session identity mismatch.');
+              'Latest start must retain a fresh canonical session.');
+        }
+      } else if (cmd.action is AnswerComparisonPair) {
+        final session = _checkpointSession(slot, catalogue);
+        final answer = (cmd.action as AnswerComparisonPair).answer;
+        final currentPair = session.currentItemId;
+        final expectedCorrect =
+            answer.selectedRelation == answer.expectedRelationSnapshot;
+        ComparisonPairAttempt? retainedAttempt;
+        for (final attempt in state.attempts) {
+          if (attempt.activityId == slot.activityId &&
+              attempt.runGeneration == latest.after.generation &&
+              attempt.sequence == latest.after.sequence) {
+            retainedAttempt = attempt;
+            break;
+          }
+        }
+        if (!session.answered ||
+            currentPair == null ||
+            answer.observations.first.pairId != currentPair ||
+            answer.observations.first.round != session.round ||
+            session.lastCorrect != expectedCorrect ||
+            session.latestAnswers[currentPair] != expectedCorrect ||
+            (retainedAttempt != null &&
+                (retainedAttempt.pairId != currentPair ||
+                    retainedAttempt.round != session.round ||
+                    retainedAttempt.selectedRelation !=
+                        answer.selectedRelation ||
+                    retainedAttempt.expectedRelation !=
+                        answer.expectedRelationSnapshot ||
+                    retainedAttempt.correct != expectedCorrect ||
+                    cmd.submittedAt != retainedAttempt.answeredAt ||
+                    !_sameObservations(
+                        answer.observations, retainedAttempt.observations)))) {
+          throw const FormatException(
+              'Latest answer consequences differ from checkpoint.');
+        }
+      } else if (cmd.action is AdvanceComparisonPair) {
+        final session = _checkpointSession(slot, catalogue);
+        if (session.answered) {
+          throw const FormatException(
+              'Latest advance left an answered checkpoint item.');
+        }
+      } else if (cmd.action is ReviewComparisonPairs) {
+        final session = _checkpointSession(slot, catalogue);
+        if (session.round < 2) {
+          throw const FormatException(
+              'Latest review did not start a review round.');
+        }
+      } else if (cmd.action case FinishComparisonRun(recordCompletion: true)) {
+        final session = _checkpointSession(slot, catalogue);
+        final threshold = session.policy.completionThresholdPercent;
+        if (!session.canComplete ||
+            !state.completions.any((completion) =>
+                completion.activityId == slot.activityId &&
+                completion.contentRevision == slot.checkpoint.contentRevision &&
+                completion.policyRevision == 1 &&
+                completion.thresholdPercent == threshold)) {
+          throw const FormatException(
+              'Latest recorded finish lacks eligible completion evidence.');
+        }
+      }
+    }
+    for (final receipt in state.receipts) {
+      final command =
+          _readCanonicalCommand(receipt.canonicalCommand, state.scope);
+      if (command.action case FinishComparisonRun(recordCompletion: true)) {
+        if (!state.completions.any((completion) =>
+            completion.activityId == command.activityId &&
+            completion.contentRevision == catalogue.contentRevision &&
+            completion.policyRevision == 1)) {
+          throw const FormatException(
+              'Recorded finish receipt lacks matching completion evidence.');
         }
       }
     }
   }
+
+  LessonSectionSession _checkpointSession(
+          ComparisonSlot slot, ComparisonCatalogue catalogue) =>
+      LessonSectionSession.fromJson(
+          Map<String, dynamic>.from(slot.checkpoint.sessionJson),
+          itemIds: catalogue.exercises.map((e) => e.id).toList(),
+          contentRevision: catalogue.contentRevision);
 
   void _validateCommandContent(ComparisonLearningCommand command,
       ComparisonCursor after, ComparisonCatalogue catalogue) {
