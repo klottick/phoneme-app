@@ -148,7 +148,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   bool _ownerRouteCaptured = false;
   ModalRoute<dynamic>? _ownerModalRoute;
   Animation<double>? _routeCoverageAnimation;
-  bool _routeNeedsReconciliation = false;
+  bool? _routeWasCurrent;
+  bool _routeNeedsLoadRecovery = false;
   String? _ownerLessonId;
   bool? _ownerReview;
 
@@ -166,6 +167,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   int _loadOp = 0;
 
   CourseAudio? _activeAudio;
+  ExerciseRequestIdentity? _currentPlaybackRequest;
 
   @override
   void initState() {
@@ -202,10 +204,14 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final currentRoute = ModalRoute.of(context);
     if (!_ownerRouteCaptured && _ownerStore != null) {
-      _ownerModalRoute = ModalRoute.of(context);
+      _ownerModalRoute = currentRoute;
       _ownerRouteCaptured = true;
+      _routeWasCurrent = currentRoute?.isCurrent ?? true;
       _listenToRouteCoverage();
+    } else if (identical(currentRoute, _ownerModalRoute)) {
+      _handleRouteCurrentness(currentRoute);
     }
   }
 
@@ -216,14 +222,68 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   }
 
   void _onRouteCoverageChanged() {
-    final route = _ownerModalRoute;
-    if (route == null || !route.isCurrent || !_routeNeedsReconciliation) return;
-    _routeNeedsReconciliation = false;
+    _handleRouteCurrentness(_ownerModalRoute);
+  }
+
+  void _handleRouteCurrentness(ModalRoute<dynamic>? route) {
+    if (route == null || !identical(route, _ownerModalRoute)) return;
+    final current = route.isCurrent;
+    if (_routeWasCurrent == current) return;
+    _routeWasCurrent = current;
+    if (!current) {
+      _hearingGrants.revoke(null);
+      _currentPlaybackRequest = null;
+      final wasPlaying = _activeAudio != null;
+      _stopAudio();
+      if (_loadInFlight) _routeNeedsLoadRecovery = true;
+      if (_saveOwner?.pendingCommand != null && _conflictError == null) {
+        _saveOwner?.orphanInFlight();
+      }
+      if (mounted && (wasPlaying || _busy)) {
+        setState(() {
+          if (wasPlaying || _saveOwner?.pendingCommand != null) _busy = false;
+          _playing = false;
+        });
+      }
+      return;
+    }
+
     final store = _store;
-    if (store != null && _ownsCurrentOwner(store)) {
-      _saveOwner?.onConflictReloaded();
-      _saveOwner = null;
-      unawaited(_load(store));
+    if (store == null || !_ownsCapturedOwner(store)) return;
+    final pendingCommand = _saveOwner?.pendingCommand;
+    if (pendingCommand != null) {
+      if (_conflictError == null) {
+        if (mounted) {
+          setState(() {
+            _saveError = _saveErrorText;
+            _busy = false;
+            _playing = false;
+          });
+        }
+      } else if (mounted) {
+        setState(() {
+          _busy = false;
+          _playing = false;
+        });
+      }
+      return;
+    }
+
+    if (_loadInFlight) {
+      _loadOp++;
+      _loadInFlight = false;
+      _routeNeedsLoadRecovery = true;
+    }
+    if (_routeNeedsLoadRecovery || _session == null) {
+      _routeNeedsLoadRecovery = false;
+      unawaited(_load(store, preserveSession: true));
+      return;
+    }
+    if (mounted) {
+      setState(() {
+        _busy = false;
+        _playing = false;
+      });
     }
   }
 
@@ -232,6 +292,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     _fence.dispose();
     _hearingGrants.retire();
     _saveOwner?.retireOwner();
+    _currentPlaybackRequest = null;
     _stopAudio();
     _routeCoverageAnimation?.removeListener(_onRouteCoverageChanged);
     WidgetsBinding.instance.removeObserver(this);
@@ -263,6 +324,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   void _onSuspend() {
     _fence.suspend();
     _hearingGrants.revoke(null);
+    _currentPlaybackRequest = null;
     _stopAudio();
     if (mounted) {
       setState(() {
@@ -326,6 +388,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     _loadInFlight = false;
     _stopAudio();
     _playing = false;
+    _currentPlaybackRequest = null;
     _selectedSound = null;
     _store = next;
     _fence = ExerciseLifecycleFence();
@@ -356,6 +419,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     _ownerAuthGeneration = auth.generation;
     _ownerModalRoute = deferRouteCapture ? null : ModalRoute.of(context);
     _ownerRouteCaptured = !deferRouteCapture;
+    _routeWasCurrent = _ownerModalRoute?.isCurrent ?? true;
     if (!deferRouteCapture) _listenToRouteCoverage();
     _ownerLessonId = widget.lessonId;
     _ownerReview = widget.review;
@@ -363,12 +427,19 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
 
   bool _ownsCurrentOwner(CourseLearningStore store) {
     if (!mounted ||
+        !identical(ModalRoute.of(context), _ownerModalRoute) ||
+        (_ownerModalRoute != null && !_ownerModalRoute!.isCurrent)) {
+      return false;
+    }
+    return _ownsCapturedOwner(store);
+  }
+
+  bool _ownsCapturedOwner(CourseLearningStore store) {
+    if (!mounted ||
         !identical(_store, store) ||
         !identical(_ownerStore, store) ||
         widget.lessonId != _ownerLessonId ||
-        widget.review != _ownerReview ||
-        !identical(ModalRoute.of(context), _ownerModalRoute) ||
-        (_ownerModalRoute != null && !_ownerModalRoute!.isCurrent)) {
+        widget.review != _ownerReview) {
       return false;
     }
     try {
@@ -381,7 +452,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     }
   }
 
-  Future<void> _load(CourseLearningStore store, {bool retry = false}) async {
+  Future<void> _load(CourseLearningStore store,
+      {bool retry = false, bool preserveSession = false}) async {
     if (_teachingUnavailable) return;
     final section = _section;
     if (section == null) return;
@@ -391,7 +463,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     final int epoch = fence.lifecycleEpoch;
     if (mounted) {
       setState(() {
-        _session = null;
+        if (!preserveSession) _session = null;
         _loadError = null;
         _contentChanged = false;
         _corruptNotice = null;
@@ -419,7 +491,17 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     // must not publish either; resumed recovery re-drives it if needed.
     if (!identical(fence, _fence) ||
         !fence.owns(epoch) ||
+        !_ownsCapturedOwner(store) ||
         !_ownsCurrentOwner(store)) {
+      if (identical(fence, _fence) &&
+          fence.owns(epoch) &&
+          _ownsCapturedOwner(store) &&
+          identical(ModalRoute.of(context), _ownerModalRoute) &&
+          _ownerModalRoute != null &&
+          !_ownerModalRoute!.isCurrent) {
+        _routeNeedsLoadRecovery = true;
+        if (mounted) setState(() => _busy = false);
+      }
       return;
     }
     if (failure != null) {
@@ -522,6 +604,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       playbackNonce: fence.beginPlayback(),
     );
     _hearingGrants.beginSample(request);
+    _currentPlaybackRequest = request;
     // Claim playback synchronously, before provider acquisition can throw or
     // a second callback can arrive before the next frame.
     setState(() {
@@ -533,8 +616,10 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       audio = ref.read(courseAudioProvider);
     } catch (error) {
       if (identical(fence, _fence) &&
+          identical(_currentPlaybackRequest, request) &&
           fence.owns(request.lifecycleEpoch) &&
           _ownsCurrentOwner(ownerStore)) {
+        _currentPlaybackRequest = null;
         _showSnackBar(_audioErrorText);
         setState(() {
           _busy = false;
@@ -551,8 +636,10 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       // A user/system stop invalidates playback: quiet, retryable — it is
       // neither a success (no fresh-hearing) nor an audio failure.
       if (identical(fence, _fence) &&
+          identical(_currentPlaybackRequest, request) &&
           fence.owns(request.lifecycleEpoch) &&
           _ownsCurrentOwner(ownerStore)) {
+        _currentPlaybackRequest = null;
         setState(() {
           _busy = false;
           _playing = false;
@@ -565,16 +652,23 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     // A late completion (suspension, owner replacement, disposal) must not
     // unlock the choices or clear busy on a screen that no longer owns it.
     final store = _store;
+    if (!identical(_currentPlaybackRequest, request)) return;
     if (store == null ||
         !identical(fence, _fence) ||
         !fence.owns(request.lifecycleEpoch) ||
         !_ownsCurrentOwner(store)) {
+      if (identical(_ownerModalRoute, ModalRoute.of(context)) &&
+          _ownerModalRoute != null &&
+          !_ownerModalRoute!.isCurrent) {
+        _handleRouteCurrentness(_ownerModalRoute);
+      }
       return;
     }
     if (failure != null) {
       // Audio failure is separate from persistence: generic feedback, no
       // answer, still retryable.
       _showSnackBar(_audioErrorText);
+      _currentPlaybackRequest = null;
       setState(() {
         _busy = false;
         _playing = false;
@@ -588,6 +682,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       actualSource: _audioSourceForCurrentItem(session),
     );
     if (!accepted) return;
+    _currentPlaybackRequest = null;
     setState(() {
       _busy = false;
       _playing = false;
@@ -685,7 +780,6 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
           identical(store, _store) &&
           _ownerModalRoute != null &&
           !_ownerModalRoute!.isCurrent) {
-        _routeNeedsReconciliation = true;
         if (mounted) setState(() => _busy = false);
       }
       return;

@@ -252,6 +252,14 @@ final class FrozenExerciseSave<C, R> {
     _claimed = false;
   }
 
+  /// Invalidates the current asynchronous attempt while preserving its exact
+  /// command and claim for a later explicit retry.
+  void orphanInFlight() {
+    _operation++;
+    _inFlightOperation = null;
+    _inFlightEpoch = null;
+  }
+
   void retireOwner() {
     _retired = true;
     _operation++;

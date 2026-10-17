@@ -276,6 +276,49 @@ void main() {
       expect(submissions, 2);
     });
 
+    test('route orphan retains exact intent and explicit retry owns ACK',
+        () async {
+      final oldGate = Completer<Object>();
+      final retryGate = Completer<Object>();
+      addTearDown(() {
+        if (!oldGate.isCompleted) oldGate.complete(Object());
+        if (!retryGate.isCompleted) retryGate.complete(Object());
+      });
+      final command = Object();
+      final result = Object();
+      final submitted = <Object>[];
+      var callbacks = 0;
+      final save = FrozenExerciseSave<Object, Object>(
+        fence: ExerciseLifecycleFence(),
+        submit: (value) {
+          submitted.add(value);
+          return submitted.length == 1 ? oldGate.future : retryGate.future;
+        },
+        stillOwnsStoreAuthRoute: () => true,
+        onAcknowledged: (_) async {
+          callbacks++;
+        },
+      );
+      final coveredWrite = save.claimAndSubmit(command);
+      final coveredOutcome = expectLater(coveredWrite, completion(isNull));
+      save.orphanInFlight();
+      expect(save.pendingCommand, same(command));
+      expect(save.claimed, isTrue);
+      oldGate.complete(result);
+      await coveredOutcome;
+      expect(save.pendingCommand, same(command));
+      expect(callbacks, 0);
+      final retry = save.retry();
+      expect(submitted, hasLength(2));
+      expect(identical(submitted[0], command), isTrue);
+      expect(identical(submitted[1], command), isTrue);
+      final retryOutcome = expectLater(retry, completion(same(result)));
+      retryGate.complete(result);
+      await retryOutcome;
+      expect(callbacks, 1);
+      expect(save.pendingCommand, isNull);
+    });
+
     test('older callback failure cannot overwrite error state of next claim',
         () async {
       final firstResult = Object(), secondResult = Object();
