@@ -11,6 +11,7 @@ import '../../core/course/course_learning_sync.dart';
 import '../../core/course/course_skill_summary.dart';
 import '../../core/course/french_course.dart';
 import 'course_completion_summary.dart';
+import 'comparison_progress_summary.dart';
 
 class CourseProgressScreen extends ConsumerStatefulWidget {
   const CourseProgressScreen({super.key, this.review = false});
@@ -23,6 +24,7 @@ class CourseProgressScreen extends ConsumerStatefulWidget {
 
 class _CourseProgressScreenState extends ConsumerState<CourseProgressScreen> {
   bool _retryingLoad = false;
+  bool _retryingComparisonLoad = false;
   int _syncOperation = 0;
 
   @override
@@ -80,28 +82,112 @@ class _CourseProgressScreenState extends ConsumerState<CourseProgressScreen> {
     }
   }
 
+  Future<void> _retryComparisonLoad() async {
+    if (_retryingComparisonLoad) return;
+    final store = ref.read(comparisonLearningStoreProvider);
+    setState(() => _retryingComparisonLoad = true);
+    try {
+      await store.retryLoad();
+      if (!mounted ||
+          !identical(store, ref.read(comparisonLearningStoreProvider))) {
+        return;
+      }
+      ref.invalidate(comparisonLearningStateProvider);
+    } catch (_) {
+      // Keep only the comparison section unavailable with its retry available.
+    } finally {
+      if (mounted) setState(() => _retryingComparisonLoad = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final progress = ref.watch(courseLearningStateProvider);
     return Scaffold(
       appBar: AppBar(
           title: Text(widget.review ? 'Review sounds' : 'Course progress')),
-      body: progress.when(
-        skipLoadingOnRefresh: false,
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, __) => Center(
-          child: TextButton(
-            onPressed: _retryingLoad ? null : _retryLoad,
-            child: Text(_retryingLoad ? 'Retrying…' : 'Retry loading progress'),
+      body: ListView(padding: const EdgeInsets.all(20), children: [
+        progress.when(
+          skipLoadingOnRefresh: false,
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (_, __) => Center(
+            child: TextButton(
+              onPressed: _retryingLoad ? null : _retryLoad,
+              child:
+                  Text(_retryingLoad ? 'Retrying…' : 'Retry loading progress'),
+            ),
+          ),
+          data: (state) => _ProgressContent(
+            state: state,
+            review: widget.review,
+            registry: ref.watch(learningRegistryProvider),
+            onSync: _syncProgress,
           ),
         ),
-        data: (state) => _ProgressContent(
-          state: state,
-          review: widget.review,
-          registry: ref.watch(learningRegistryProvider),
-          onSync: _syncProgress,
+        const Divider(height: 32),
+        _ComparisonProgressSection(
+          retrying: _retryingComparisonLoad,
+          onRetry: _retryComparisonLoad,
         ),
-      ),
+      ]),
+    );
+  }
+}
+
+class _ComparisonProgressSection extends ConsumerWidget {
+  const _ComparisonProgressSection(
+      {required this.retrying, required this.onRetry});
+  final bool retrying;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final progress = ref.watch(comparisonLearningStateProvider);
+    return progress.when(
+      skipLoadingOnRefresh: false,
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (_, __) =>
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Comparison practice, not phoneme mastery'),
+        const Text('Unavailable'),
+        TextButton(
+            onPressed: retrying ? null : onRetry,
+            child: Text(retrying
+                ? 'Retrying comparison…'
+                : 'Retry comparison progress')),
+      ]),
+      data: (state) {
+        try {
+          final summary = ComparisonProgressSummary.fromState(
+              state: state, catalogue: ref.watch(comparisonCatalogueProvider));
+          return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(summary.practiceLabel),
+                Text(summary.pairsLabel),
+                Text(summary.answersLabel),
+                Text(summary.afterDebriefLabel),
+                Text(summary.completionLabel),
+                Text(summary.unresolvedLabel),
+                for (final mistake in summary.unresolvedMistakes)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('Comparison pair ${mistake.key.pairId}'),
+                    subtitle: Text(
+                        'Unresolved · ${mistake.failureCount} incorrect answers'),
+                    onTap: () => context.push(
+                        '/course-comparison/${mistake.key.activityId}?pairId=${mistake.key.pairId}&review=true'),
+                  ),
+              ]);
+        } catch (_) {
+          return const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Comparison practice, not phoneme mastery'),
+                Text('Unavailable'),
+              ]);
+        }
+      },
     );
   }
 }
@@ -138,7 +224,7 @@ class _ProgressContent extends StatelessWidget {
     final mistakes = state.mistakes.values.toList()
       ..sort((a, b) => a.key.targetSound.compareTo(b.key.targetSound));
 
-    return ListView(padding: const EdgeInsets.all(20), children: [
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(frenchCourse.title, style: Theme.of(context).textTheme.titleLarge),
       const SizedBox(height: 16),
       Text('Discovery lessons: '

@@ -89,6 +89,10 @@ void main() {
     await tester.tap(find.text('Start English → French'));
     await tester.pumpAndSettle();
     expect(find.text('French for English speakers'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Play for a minute'), 250,
+        scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
+    expect(find.text('Play for a minute').hitTestable(), findsOneWidget);
     await tester.tap(find.text('Play for a minute'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Word Match'));

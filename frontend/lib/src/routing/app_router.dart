@@ -8,6 +8,9 @@ import '../features/arcade/arcade_screen.dart';
 import '../features/course/course_lesson_screen.dart';
 import '../features/course/course_progress_screen.dart';
 import '../features/course/discovery_lesson_screen.dart';
+import '../features/course/comparison_lesson_screen.dart';
+import '../core/course/comparison_content.dart';
+import '../core/course/course_learning_providers.dart';
 import '../features/auth/login_screen.dart';
 import '../features/drills/drill_screen.dart';
 import '../features/home/home_screen.dart';
@@ -79,6 +82,37 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
           path: '/course-progress',
           builder: (_, __) => const CourseProgressScreen()),
+      GoRoute(
+          path: '/course-comparison/:activityId',
+          builder: (context, state) {
+            const unavailable = Scaffold(
+                body: Center(
+                    child: Text('This comparison activity is unavailable.')));
+            final activityId = state.pathParameters['activityId'];
+            final all = state.uri.queryParametersAll;
+            if (activityId != comparisonActivityId ||
+                all.keys.any((key) => key != 'review' && key != 'pairId') ||
+                all.values.any((values) => values.length != 1) ||
+                (all['review'] != null &&
+                    !{'true', 'false'}.contains(all['review']!.single))) {
+              return unavailable;
+            }
+            final pairId = all['pairId']?.single;
+            return Consumer(builder: (context, ref, _) {
+              try {
+                final catalogue = ref.watch(comparisonCatalogueProvider);
+                if (pairId != null && !catalogue.byId.containsKey(pairId)) {
+                  return unavailable;
+                }
+                return ComparisonLessonScreen(
+                    activityId: activityId!,
+                    review: all['review']?.single == 'true',
+                    pairId: pairId);
+              } catch (_) {
+                return unavailable;
+              }
+            });
+          }),
       GoRoute(
           path: '/course-review',
           builder: (_, __) => const CourseProgressScreen(review: true)),

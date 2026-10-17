@@ -12,6 +12,7 @@ import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/course_learning_registry.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/course_attempt.dart';
+import 'package:linguist/src/core/course/comparison_learning_state.dart';
 import 'package:linguist/src/core/course/french_course.dart';
 import 'package:linguist/src/core/course/lesson_section.dart';
 import 'package:linguist/src/core/course/lesson_section_session.dart';
@@ -28,12 +29,17 @@ import '../support/course_learning_widget_store.dart';
 
 final _activeStoreProvider = StateProvider<CourseLearningWidgetStore>(
     (ref) => CourseLearningWidgetStore());
+final _emptyComparisonStateOverride =
+    comparisonLearningStateProvider.overrideWith((ref) async =>
+        ComparisonLearningState.empty(ComparisonProfileScope(
+            courseId: 'en-fr', owner: LearningOwner.guest())));
 
 Future<ProviderContainer> _mountApp(WidgetTester tester,
     CourseLearningWidgetStore store, ControlledListeningAudio audio) async {
   await tester.pumpWidget(ProviderScope(overrides: [
     courseLearningStoreProvider.overrideWithValue(store),
     courseAudioProvider.overrideWithValue(audio),
+    _emptyComparisonStateOverride,
   ], child: const LinguistApp()));
   final scope = tester
       .element(find.byType(LinguistApp))
@@ -148,7 +154,8 @@ void main() {
     ]) {
       app.$2.go('/home');
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text(title));
+      await tester.scrollUntilVisible(find.text(title), 250,
+          scrollable: find.byType(Scrollable).first);
       await tester.tap(find.text(title));
       await tester.pumpAndSettle();
       expect(
@@ -435,6 +442,7 @@ void main() {
       courseLearningStoreProvider
           .overrideWith((ref) => ref.watch(_activeStoreProvider)),
       courseAudioProvider.overrideWithValue(audio),
+      _emptyComparisonStateOverride,
     ], child: const LinguistApp()));
     final scope = tester
         .element(find.byType(LinguistApp))
@@ -454,7 +462,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Discovery lessons: 1/1 complete'), findsOneWidget);
     expect(find.text('Review discovery'), findsOneWidget);
-    expect(find.byIcon(Icons.check), findsOneWidget);
+    await _expectLegacyCompletionIcon(
+        tester, 'Keep French vowels steady', true);
+    await _scrollHomeToDiscoverySummary(tester);
 
     // Replace the store with a same-owner delayed refresh, then change A→B.
     // The watched store provider dependency invalidates course state naturally.
@@ -463,10 +473,13 @@ void main() {
     container.read(_activeStoreProvider.notifier).state = accountB;
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
+    await _scrollHomeToDiscoverySummary(tester);
     expect(find.text('Discovery lessons: 1/1 complete'), findsNothing);
     expect(find.text('Review discovery'), findsNothing);
     expect(find.text('Continue discovery'), findsNothing);
-    expect(find.byIcon(Icons.check), findsNothing);
+    await _expectLegacyCompletionIcon(
+        tester, 'Keep French vowels steady', false);
+    await _scrollHomeToDiscoverySummary(tester);
 
     accountBLoad.complete();
     await tester.pump();
@@ -477,15 +490,20 @@ void main() {
     staleALoad.complete();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
+    await _scrollHomeToDiscoverySummary(tester);
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
     expect(find.text('Review discovery'), findsNothing);
-    expect(find.byIcon(Icons.check), findsNothing);
+    await _expectLegacyCompletionIcon(
+        tester, 'Keep French vowels steady', false);
+    await _scrollHomeToDiscoverySummary(tester);
 
     container.read(_activeStoreProvider.notifier).state = accountA;
     await tester.pumpAndSettle();
+    await _scrollHomeToDiscoverySummary(tester);
     expect(find.text('Discovery lessons: 1/1 complete'), findsOneWidget);
     expect(find.text('Review discovery'), findsOneWidget);
-    expect(find.byIcon(Icons.check), findsOneWidget);
+    await _expectLegacyCompletionIcon(
+        tester, 'Keep French vowels steady', true);
   });
 
   testWidgets('home hides completed state during explicit held refresh',
@@ -504,6 +522,7 @@ void main() {
       courseLearningStoreProvider
           .overrideWith((ref) => ref.watch(_activeStoreProvider)),
       courseAudioProvider.overrideWithValue(audio),
+      _emptyComparisonStateOverride,
     ], child: const LinguistApp()));
     final scope = tester
         .element(find.byType(LinguistApp))
@@ -523,16 +542,21 @@ void main() {
     expect(loads, 1);
     expect(find.text('Discovery lessons: 1/1 complete'), findsOneWidget);
     expect(find.text('Review discovery'), findsOneWidget);
-    expect(find.byIcon(Icons.check), findsOneWidget);
+    await _expectLegacyCompletionIcon(
+        tester, 'Keep French vowels steady', true);
+    await _scrollHomeToDiscoverySummary(tester);
 
     container.invalidate(courseLearningStateProvider);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 20));
     expect(loads, 2);
+    await _scrollHomeToDiscoverySummary(tester);
     expect(find.textContaining('Discovery lessons:'), findsNothing);
     expect(find.text('Review discovery'), findsNothing);
     expect(find.text('Continue discovery'), findsNothing);
-    expect(find.byIcon(Icons.check), findsNothing);
+    await _expectLegacyCompletionIcon(
+        tester, 'Keep French vowels steady', false);
+    await _scrollHomeToDiscoverySummary(tester);
 
     refresh.complete();
     await tester.pump();
@@ -572,6 +596,7 @@ void main() {
       courseLearningStoreProvider
           .overrideWith((ref) => ref.watch(_activeStoreProvider)),
       courseAudioProvider.overrideWithValue(audio),
+      _emptyComparisonStateOverride,
     ], child: const LinguistApp()));
     final scope = tester
         .element(find.byType(LinguistApp))
@@ -639,6 +664,22 @@ void main() {
     expect(find.text('Not yet'), findsNothing);
     expect(router.state.uri.path, '/course-lesson/en-fr-u-y');
   });
+}
+
+Future<void> _scrollHomeToDiscoverySummary(WidgetTester tester) async {
+  await tester.drag(find.byType(Scrollable).first, const Offset(0, 1600));
+  await tester.pump();
+}
+
+Future<void> _expectLegacyCompletionIcon(
+    WidgetTester tester, String title, bool completed) async {
+  await tester.scrollUntilVisible(find.text(title), 250,
+      scrollable: find.byType(Scrollable).first);
+  await tester.pump();
+  final tile =
+      find.ancestor(of: find.text(title), matching: find.byType(ListTile));
+  expect(find.descendant(of: tile, matching: find.byIcon(Icons.check)),
+      completed ? findsOneWidget : findsNothing);
 }
 
 Future<void> _activateUsingKeyboard(WidgetTester tester, Finder control) async {
