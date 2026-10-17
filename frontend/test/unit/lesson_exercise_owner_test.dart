@@ -316,13 +316,15 @@ void main() {
 
   group('Exercise identities', () {
     test('equivalent reconstructed identities compare by value', () {
-      const first = ExercisePromptIdentity(
+      // ignore: prefer_const_constructors
+      final first = ExercisePromptIdentity(
         activityId: 'activity',
         runGeneration: 1,
         round: 2,
         itemId: 'item',
       );
-      const equivalent = ExercisePromptIdentity(
+      // ignore: prefer_const_constructors
+      final equivalent = ExercisePromptIdentity(
         activityId: 'activity',
         runGeneration: 1,
         round: 2,
@@ -331,14 +333,14 @@ void main() {
       expect(equivalent, first);
       expect(equivalent.hashCode, first.hashCode);
 
-      const request = ExerciseRequestIdentity(
+      final request = ExerciseRequestIdentity(
         prompt: first,
         sample: ComparisonSample.a,
         referenceId: 'reference',
         lifecycleEpoch: 7,
         playbackNonce: 1,
       );
-      const equivalentRequest = ExerciseRequestIdentity(
+      final equivalentRequest = ExerciseRequestIdentity(
         prompt: equivalent,
         sample: ComparisonSample.a,
         referenceId: 'reference',
@@ -347,6 +349,9 @@ void main() {
       );
       expect(equivalentRequest, request);
       expect(equivalentRequest.hashCode, request.hashCode);
+      expect(identical(first, equivalent), isFalse);
+      expect(identical(request, equivalentRequest), isFalse);
+      expect({request}.contains(equivalentRequest), isTrue);
       expect(
         {
           const ExercisePromptIdentity(
@@ -372,25 +377,25 @@ void main() {
       expect(
           {
             request,
-            const ExerciseRequestIdentity(
+            ExerciseRequestIdentity(
                 prompt: first,
                 sample: ComparisonSample.b,
                 referenceId: 'reference',
                 lifecycleEpoch: 7,
                 playbackNonce: 1),
-            const ExerciseRequestIdentity(
+            ExerciseRequestIdentity(
                 prompt: first,
                 sample: ComparisonSample.a,
                 referenceId: 'other',
                 lifecycleEpoch: 7,
                 playbackNonce: 1),
-            const ExerciseRequestIdentity(
+            ExerciseRequestIdentity(
                 prompt: first,
                 sample: ComparisonSample.a,
                 referenceId: 'reference',
                 lifecycleEpoch: 8,
                 playbackNonce: 1),
-            const ExerciseRequestIdentity(
+            ExerciseRequestIdentity(
                 prompt: first,
                 sample: ComparisonSample.a,
                 referenceId: 'reference',
@@ -403,7 +408,8 @@ void main() {
 
   group('ExerciseAudioGrants', () {
     test('grants require exact current requests and one discovery sample', () {
-      const prompt = ExercisePromptIdentity(
+      // ignore: prefer_const_constructors
+      final prompt = ExercisePromptIdentity(
         activityId: comparisonActivityId,
         runGeneration: 1,
         round: 1,
@@ -412,7 +418,7 @@ void main() {
       final grants = ExerciseAudioGrants<CourseAudioSource>(
         requiredSamples: {ComparisonSample.a, ComparisonSample.b},
       )..beginPrompt(prompt);
-      const aRequest = ExerciseRequestIdentity(
+      final aRequest = ExerciseRequestIdentity(
         prompt: prompt,
         sample: ComparisonSample.a,
         referenceId: 'fr-word-tout',
@@ -422,7 +428,20 @@ void main() {
       grants.beginSample(aRequest);
       expect(
         grants.acceptSuccess(
-          request: aRequest,
+          // ignore: prefer_const_constructors
+          request: ExerciseRequestIdentity(
+            // ignore: prefer_const_constructors
+            prompt: ExercisePromptIdentity(
+              activityId: comparisonActivityId,
+              runGeneration: 1,
+              round: 1,
+              itemId: 'fr07b-pair-01',
+            ),
+            sample: ComparisonSample.a,
+            referenceId: 'fr-word-tout',
+            lifecycleEpoch: 7,
+            playbackNonce: 1,
+          ),
           actualReferenceId: 'fr-word-tout',
           outcome: CourseAudioOutcome.completed,
           actualSource: CourseAudioSource.unverifiedRecording,
@@ -431,7 +450,7 @@ void main() {
       );
       expect(grants.grantFor(ComparisonSample.a)?.request.playbackNonce, 1);
       expect(grants.canAnswer, isFalse);
-      const bRequest = ExerciseRequestIdentity(
+      final bRequest = ExerciseRequestIdentity(
         prompt: prompt,
         sample: ComparisonSample.b,
         referenceId: 'fr-word-tu',
@@ -449,7 +468,7 @@ void main() {
         isTrue,
       );
       expect(grants.canAnswer, isTrue);
-      grants.beginSample(const ExerciseRequestIdentity(
+      grants.beginSample(ExerciseRequestIdentity(
         prompt: prompt,
         sample: ComparisonSample.a,
         referenceId: 'fr-word-tout',
@@ -471,7 +490,7 @@ void main() {
       final discovery = ExerciseAudioGrants<CourseAudioSource>(
         requiredSamples: {null},
       )..beginPrompt(prompt);
-      const legacyRequest = ExerciseRequestIdentity(
+      final legacyRequest = ExerciseRequestIdentity(
         prompt: prompt,
         sample: null,
         referenceId: 'legacy-item',

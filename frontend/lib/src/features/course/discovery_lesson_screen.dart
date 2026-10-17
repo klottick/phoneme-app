@@ -145,8 +145,10 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   CourseLearningStore? _ownerStore;
   LearningOwner? _ownerAuth;
   int? _ownerAuthGeneration;
-  String? _ownerRoute;
   bool _ownerRouteCaptured = false;
+  ModalRoute<dynamic>? _ownerModalRoute;
+  Animation<double>? _routeCoverageAnimation;
+  bool _routeNeedsReconciliation = false;
   String? _ownerLessonId;
   bool? _ownerReview;
 
@@ -200,11 +202,28 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final route = _routeIdentity();
-    if ((!_ownerRouteCaptured || (_ownerRoute == null && route != null)) &&
-        _ownerStore != null) {
-      _ownerRoute = route;
+    if (!_ownerRouteCaptured && _ownerStore != null) {
+      _ownerModalRoute = ModalRoute.of(context);
       _ownerRouteCaptured = true;
+      _listenToRouteCoverage();
+    }
+  }
+
+  void _listenToRouteCoverage() {
+    _routeCoverageAnimation?.removeListener(_onRouteCoverageChanged);
+    _routeCoverageAnimation = _ownerModalRoute?.secondaryAnimation;
+    _routeCoverageAnimation?.addListener(_onRouteCoverageChanged);
+  }
+
+  void _onRouteCoverageChanged() {
+    final route = _ownerModalRoute;
+    if (route == null || !route.isCurrent || !_routeNeedsReconciliation) return;
+    _routeNeedsReconciliation = false;
+    final store = _store;
+    if (store != null && _ownsCurrentOwner(store)) {
+      _saveOwner?.onConflictReloaded();
+      _saveOwner = null;
+      unawaited(_load(store));
     }
   }
 
@@ -214,6 +233,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     _hearingGrants.retire();
     _saveOwner?.retireOwner();
     _stopAudio();
+    _routeCoverageAnimation?.removeListener(_onRouteCoverageChanged);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -281,7 +301,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
         // behind an orphaned call forever.
         if (_loadInFlight) _loadOp += 1;
         unawaited(_load(store));
-      } else if (_saveOwner?.pendingCommand != null) {
+      } else if (_saveOwner?.pendingCommand != null && _conflictError == null) {
         // Orphan whatever run the suspended window left in flight; its late
         // completion must not settle the UI or run an exit alongside this one.
         unawaited(_retrySave());
@@ -328,26 +348,15 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
 
   static String get _activityId => 'lesson:${frenchUySection.lessonId}';
 
-  String? _routeIdentity() {
-    try {
-      return GoRouter.of(context)
-          .routerDelegate
-          .currentConfiguration
-          .uri
-          .toString();
-    } catch (_) {
-      return null;
-    }
-  }
-
   void _captureOwner(CourseLearningStore store,
       {bool deferRouteCapture = false}) {
     final auth = ref.read(learningAuthScopeProvider);
     _ownerStore = store;
     _ownerAuth = auth.owner;
     _ownerAuthGeneration = auth.generation;
-    _ownerRoute = deferRouteCapture ? null : _routeIdentity();
+    _ownerModalRoute = deferRouteCapture ? null : ModalRoute.of(context);
     _ownerRouteCaptured = !deferRouteCapture;
+    if (!deferRouteCapture) _listenToRouteCoverage();
     _ownerLessonId = widget.lessonId;
     _ownerReview = widget.review;
   }
@@ -358,7 +367,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
         !identical(_ownerStore, store) ||
         widget.lessonId != _ownerLessonId ||
         widget.review != _ownerReview ||
-        _routeIdentity() != _ownerRoute) {
+        !identical(ModalRoute.of(context), _ownerModalRoute) ||
+        (_ownerModalRoute != null && !_ownerModalRoute!.isCurrent)) {
       return false;
     }
     try {
@@ -638,6 +648,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     if (owner == null ||
         store == null ||
         owner.pendingCommand == null ||
+        _conflictError != null ||
         _fence.isSuspended ||
         !_ownsCurrentOwner(store)) {
       return;
@@ -669,6 +680,14 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     if (commit == null ||
         !identical(owner, _saveOwner) ||
         !_ownsCurrentOwner(store)) {
+      if (commit == null &&
+          identical(owner, _saveOwner) &&
+          identical(store, _store) &&
+          _ownerModalRoute != null &&
+          !_ownerModalRoute!.isCurrent) {
+        _routeNeedsReconciliation = true;
+        if (mounted) setState(() => _busy = false);
+      }
       return;
     }
     final callbackError = owner.acknowledgementError;
@@ -825,6 +844,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   }
 
   void _onRetrySave() {
+    if (_conflictError != null) return;
     if (_saveOwner?.pendingCommand == null) {
       // Nothing pending: reload through the captured owner (coalesced with
       // any load already in flight).
