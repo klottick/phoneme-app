@@ -224,10 +224,12 @@ and notes only. Teaching remains absent during all active review puzzles.
 
 ### 5.1 Hearing and lifecycle
 
-Use the shared reference-audio facade and exercise-owner seam with recording-only
-requests (`allowPracticeTts: false`). No uncovered-text/device-speech path may
-answer this activity. Exact asset/reference and source must be checked against
-the current request before granting hearing permission.
+Use the shared reference-audio facade and exercise-owner seam with
+`CourseAudioUse.reviewedOnly` and `allowPracticeTts: false`. Require the observed
+source to be `CourseAudioSource.reviewedRecording`; unverified recordings and
+device speech cannot grant hearing even if returned by a misconfigured adapter.
+Exact asset/reference and source must be checked against the current request
+before granting hearing permission. This does not promote any existing asset.
 
 Bind playback to owner/auth generation, section, content revision, run generation,
 round, item, exact reference and UI generation. One successful completed current
@@ -253,11 +255,17 @@ replace it with a new default.
 
 When unresolved items remain, offer finite mistake review even on a passing
 debrief. Queue those items once in original order; wrong retries do not grow the
-round, and its end returns to debrief. Never auto-repeat. An eligible practice
-Finish records completion only after its transaction succeeds. A review-only
-Finish creates no new completion. New runs reset only that section's active
-draft, not history or sibling checkpoints. Leaving and resuming a section must
-not abandon another section's saved session.
+round, and its end returns to debrief. Never auto-repeat. Mistake rounds within
+an unfinished practice run can raise its latest correct count to the threshold;
+an eligible practice Finish then records completion after its transaction
+succeeds, even when the first pass failed. Teaching-exposed evidence remains
+labeled as such.
+
+"Review-only" means a separately entered mistake-review run, not simply round
+two or later within practice. Persist its non-completing mode across resume;
+its Finish creates no new completion even if the threshold is met. New runs
+reset only that section's active draft, not history or sibling checkpoints.
+Leaving and resuming a section must not abandon another section's saved session.
 
 ### 5.3 Typed local evidence and honest progress
 
@@ -336,8 +344,8 @@ test-first regressions. These are future requirements, not reported test results
 | Contextual validation | Missing/duplicate/unknown/mismatched identities, text/audio/token coverage, pending/rejected clips, incorrect target role and invalid keys rejected; punctuation not a distractor; variants/liaison explicitly resolved or excluded |
 | Scoring | Exact multiple-target set succeeds; missed/extra/all/empty selections behave correctly; order irrelevant; repeats distinct; punctuation/unknown/duplicate IDs rejected; one attempt per submission, no tap-level evidence |
 | UI/debrief | Target/text visible, teaching/key absent in active text and semantics; immediate whole-answer result; all five declarative keys/notes at saved debrief; no invented restored selection or learner diagnosis |
-| Audio | Exact reference/source success required; replay revokes grant; failure/cancellation unscored with no TTS; stale prompt, covered route, background and owner events fenced; fresh hearing on unanswered restore |
-| Sessions | Three independent authored five-item sessions; saved four-of-five default/configured policy; full coverage before eligible Finish; finite mistake rounds, no automatic requeue; review-only Finish adds no completion |
+| Audio | Reviewed-only request and exact reviewed-recording reference/source success required; unexpected unverified/TTS source grants nothing; replay revokes grant; failure/cancellation unscored with no TTS; stale prompt, covered route, background and owner events fenced; fresh hearing on unanswered restore |
+| Sessions | Three independent authored five-item sessions; saved four-of-five default/configured policy; full coverage before eligible Finish; finite mistake rounds, no automatic requeue; remediation crossing the threshold enables practice completion; separate review-only mode survives resume and its Finish adds no completion |
 | Evidence/progress | Item-scoped mistakes/routes; first/repeat and teaching exposure explicit; committed-only current distinct-section count stays within zero to three; no identification/comparison/mastery or cloud event pollution |
 | Transactions | Actual shared repository held/failing writes prove answer and Finish ACK barriers, identical retry, duplicate idempotency, conflicts, rollback/cache recovery and automatic current-owner provider publication |
 | Restore/isolation | Independent section checkpoints, changed content/key unavailable without deletion, future/corrupt family raw preserved, valid sibling families load; guest/A/B and A-to-B-to-A refresh/held-work isolation |
