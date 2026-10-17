@@ -133,7 +133,8 @@ void main() {
           activity: 'lesson:en-fr-u-y'));
 
   CourseLearningRepository repository(
-      _MemoryPersistence persistence, LearningCloudTransport transport) {
+      _MemoryPersistence persistence, LearningCloudTransport transport,
+      {void Function()? onCommitted}) {
     var tokenCounter = 0;
     return CourseLearningRepository(
         scope: scope,
@@ -146,7 +147,8 @@ void main() {
         newToken: () =>
             'AAAAAAAAAAAAAAAAAAAA${(++tokenCounter).toRadixString(16).padLeft(2, '0')}',
         random: Random(1),
-        cloud: transport);
+        cloud: transport,
+        onCommitted: onCommitted);
   }
 
   test('offline guest learning requires no backend', () async {
@@ -270,6 +272,26 @@ void main() {
     final retry = await store.sync();
     expect(transport.batches.last.map((e) => e.id), ['event-1', 'event-2']);
     expect(retry.remainingEvents, 0);
+  });
+
+  test('cloud ack advances revision only and does not notify commit observers',
+      () async {
+    final persistence = _MemoryPersistence();
+    persistence.documents[scope.storageKey] = const LearningDocumentCodec()
+        .encode(stateWith([event(41)], revision: 7, commitOrdinal: 3));
+    var notifications = 0;
+    final transport = _RecordingTransport();
+    final store =
+        repository(persistence, transport, onCommitted: () => notifications++);
+    final result = await store.sync();
+    final acknowledged = await store.load();
+    expect(result.status, SupportedSyncStatus.synced);
+    expect(acknowledged.pending, isEmpty);
+    expect(acknowledged.revision, 8);
+    expect(acknowledged.commitOrdinal, 3);
+    expect(acknowledged.history, isEmpty);
+    expect(acknowledged.activities, isEmpty);
+    expect(notifications, 0);
   });
 
   test('held send failure reports latest committed count through quarantine',

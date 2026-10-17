@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:math';
 
 import 'course_attempt.dart';
@@ -7,6 +6,7 @@ import 'course_learning_error.dart';
 import 'course_learning_persistence.dart';
 import 'course_learning_state.dart';
 import 'course_learning_sync.dart';
+import 'course_learning_transaction.dart';
 import 'course_learning_transition.dart';
 
 abstract class CourseLearningStore {
@@ -47,6 +47,18 @@ class CourseLearningRepository implements CourseLearningStore {
     if (historyLimit < 1) {
       throw ArgumentError.value(historyLimit, 'historyLimit');
     }
+    _transactions = LearningTransactionCoordinator(
+        adapter: _V2LearningProfileAdapter(
+            scope: scope,
+            codec: _codec,
+            transitions: transitions,
+            historyLimit: historyLimit),
+        persistence: persistence,
+        authGeneration: authGeneration,
+        currentAuth: currentAuth,
+        backendOwner: backendOwner,
+        clock: clock,
+        onCommitted: onCommitted);
   }
 
   @override
@@ -62,38 +74,17 @@ class CourseLearningRepository implements CourseLearningStore {
   final String Function() newToken;
   final Random random;
   final int historyLimit;
-  static final _coordinator = _LearningCoordinator();
   static const _codec = LearningDocumentCodec();
-  String? _committedRaw;
-  CourseLearningState? _committed;
+  late final LearningTransactionCoordinator<LearningScope, CourseLearningState,
+      LearningCommand, LearningCommit> _transactions;
 
   @override
-  Future<CourseLearningState> load() =>
-      _coordinator.run(scope.storageKey, () async {
-        _ensureAvailable();
-        return _loadCommitted();
-      });
+  Future<CourseLearningState> load() async =>
+      (await _transactions.load()).payload;
 
   @override
-  Future<CourseLearningState> retryLoad() =>
-      _coordinator.run(scope.storageKey, () async {
-        final known = _coordinator.blocked.contains(scope.storageKey)
-            ? _coordinator.known[scope.storageKey]
-            : _committedRaw;
-        if (_coordinator.blocked.contains(scope.storageKey)) {
-          await persistence.restore(scope.storageKey, known);
-          await persistence.reload();
-          final reread = await persistence.read(scope.storageKey);
-          if (reread != known) throw const LearningUnavailableException();
-          _coordinator.blocked.remove(scope.storageKey);
-          _committedRaw = reread;
-          _committed = reread == null
-              ? CourseLearningState.empty(scope)
-              : _codec.decode(reread, scope);
-          return _committed!;
-        }
-        return _loadCommitted();
-      });
+  Future<CourseLearningState> retryLoad() async =>
+      (await _transactions.retryLoad()).payload;
 
   @override
   LearningCommand prepare(
@@ -113,134 +104,11 @@ class CourseLearningRepository implements CourseLearningStore {
 
   @override
   Future<LearningCommit> submit(LearningCommand command) =>
-      _coordinator.run(scope.storageKey, () async {
-        _ensureAvailable();
-        final before = await _loadCommitted();
-        _checkAuth();
-        if (command.scope != scope ||
-            command.authGeneration != authGeneration) {
-          throw const LearningOwnerChangedException();
-        }
-        final fingerprint = _codec.canonicalCommand(command);
-        final slot = before.activities[command.activityId];
-        final latest = slot?.latestReceipt;
-        if (latest != null && latest.token == command.token) {
-          if (latest.canonicalCommand != fingerprint) {
-            throw const LearningInvalidCommandException();
-          }
-          return LearningCommit(state: before, slot: slot!, duplicate: true);
-        }
-        final retained = before.history
-            .where((b) =>
-                b.activityId == command.activityId &&
-                b.generation == command.expected.generation &&
-                b.sequence == command.expected.sequence + 1 &&
-                b.token == command.token)
-            .firstOrNull;
-        if (retained != null) {
-          if (retained.canonicalCommand != fingerprint) {
-            throw const LearningInvalidCommandException();
-          }
-          final current = before.activities[command.activityId];
-          if (current != null &&
-              current.cursor.generation == command.expected.generation) {
-            return LearningCommit(
-                state: before, slot: current, duplicate: true);
-          }
-          throw const LearningConflictException();
-        }
-        if (slot != null &&
-            (command.expected.generation != slot.cursor.generation ||
-                command.expected.sequence != slot.cursor.sequence ||
-                command.expected.revision != slot.cursor.revision)) {
-          throw const LearningConflictException();
-        }
-        if (slot == null &&
-            (command.expected.generation != 0 ||
-                command.expected.sequence != 0 ||
-                command.expected.revision != 0)) {
-          throw const LearningConflictException();
-        }
-        final isStart = command.action is StartLearningRun;
-        if (slot == null && !isStart) {
-          throw const LearningInvalidCommandException();
-        }
-        if (before.revision >= 9007199254740991 ||
-            before.commitOrdinal >= 9007199254740991) {
-          throw const LearningInvalidCommandException();
-        }
-        final transition = transitions.evaluate(
-            state: before, command: command, committedAt: clock().toUtc());
-        final events = const SupportedProgressProjector()
-            .project(before: before, transition: transition, command: command);
-        final history = [...before.history];
-        if (transition.attempts.isNotEmpty) {
-          history.add(AttemptBatch(
-              activityId: command.activityId,
-              generation: transition.slot.cursor.generation,
-              sequence: transition.slot.cursor.sequence,
-              token: command.token,
-              canonicalCommand: fingerprint,
-              attempts: transition.attempts));
-          while (history.fold<int>(0, (n, b) => n + b.attempts.length) >
-                  historyLimit &&
-              history.length > 1) {
-            history.removeAt(0);
-          }
-        }
-        final pending = [...before.pending, ...events];
-        final next = CourseLearningState(
-            scope: scope,
-            revision: before.revision + 1,
-            commitOrdinal: before.commitOrdinal + 1,
-            history: history,
-            activities: {
-              ...before.activities,
-              command.activityId: transition.slot
-            },
-            mistakes: transition.mistakes,
-            summaries: transition.summaries,
-            completions: transition.completions,
-            bestScores: transition.bestScores,
-            pending: pending);
-        final encoded = _codec.encode(next);
-        _checkAuth();
-        try {
-          await persistence.write(scope.storageKey, encoded);
-        } catch (error) {
-          try {
-            await persistence.restore(scope.storageKey, _committedRaw);
-            await persistence.reload();
-            final restored = await persistence.read(scope.storageKey);
-            if (restored != _committedRaw) {
-              throw StateError('rollback mismatch');
-            }
-          } catch (_) {
-            _coordinator.blocked.add(scope.storageKey);
-            _coordinator.known[scope.storageKey] = _committedRaw;
-          }
-          throw LearningSaveException(error);
-        }
-        _committed = next;
-        _committedRaw = encoded;
-        // Persistence has committed. Observer failures cannot turn that durable
-        // acknowledgment into an apparent save failure or prompt a duplicate.
-        try {
-          onCommitted?.call();
-        } catch (_) {
-          // Commit notifications are best-effort; storage failures above remain
-          // visible to the caller through the normal rollback path.
-        }
-        return LearningCommit(
-            state: next, slot: transition.slot, duplicate: false);
-      });
+      _transactions.submit(command);
 
   @override
   Future<SupportedSyncResult> sync() async {
-    final state = await _coordinator.run(scope.storageKey, () async {
-      _ensureAvailable();
-      return _loadCommitted();
-    });
+    final state = (await _transactions.load()).payload;
     if (scope.owner.isGuest) {
       return const SupportedSyncResult(
           status: SupportedSyncStatus.guest, remainingEvents: 0);
@@ -264,89 +132,37 @@ class CourseLearningRepository implements CourseLearningStore {
       authGeneration: authGeneration,
       transport: cloud!,
       isCurrent: _isCurrent,
-      readPending: () => _coordinator.run(scope.storageKey, () async {
-        _ensureAvailable();
-        return (await _loadCommitted()).pending;
-      }),
-      // Unlike readPending, this is deliberately count-only and reads only a
-      // committed image, including the coordinator's last committed bytes
-      // when another repository instance has quarantined this owner scope.
-      knownPendingCount: () => _knownPendingCount(state),
+      readPending: () async => (await _transactions.load()).payload.pending,
+      knownPendingCount: () => _transactions.knownCommittedCount(
+          (payload) => payload.pending.length,
+          fallback: state),
       acknowledge: _acknowledge,
     ).run();
   }
 
-  int _knownPendingCount(CourseLearningState fallback) {
-    final key = scope.storageKey;
-    if (_coordinator.blocked.contains(key) &&
-        _coordinator.known.containsKey(key)) {
-      final raw = _coordinator.known[key];
-      return raw == null ? 0 : _codec.decode(raw, scope).pending.length;
-    }
-    return _committed?.pending.length ?? fallback.pending.length;
-  }
-
-  Future<void> _acknowledge(Set<String> ids) =>
-      _coordinator.run(scope.storageKey, () async {
-        _ensureAvailable();
-        final current = await _loadCommitted();
-        _checkAuth();
-        final pending = current.pending
-            .where((event) => !ids.contains(event.id))
+  Future<void> _acknowledge(Set<String> ids) => _transactions.acknowledge(ids, (
+          {required current,
+          required receiptIds,
+          required nextRevision,
+          required currentCommitOrdinal}) {
+        final state = current.payload;
+        final pending = state.pending
+            .where((event) => !receiptIds.contains(event.id))
             .toList(growable: false);
-        if (pending.length == current.pending.length) return;
-        final next = CourseLearningState(
+        if (pending.length == state.pending.length) return current;
+        final nextState = CourseLearningState(
             scope: scope,
-            revision: current.revision + 1,
-            commitOrdinal: current.commitOrdinal,
-            history: current.history,
-            activities: current.activities,
-            mistakes: current.mistakes,
-            summaries: current.summaries,
-            completions: current.completions,
-            bestScores: current.bestScores,
+            revision: nextRevision,
+            commitOrdinal: currentCommitOrdinal,
+            history: state.history,
+            activities: state.activities,
+            mistakes: state.mistakes,
+            summaries: state.summaries,
+            completions: state.completions,
+            bestScores: state.bestScores,
             pending: pending);
-        final encoded = _codec.encode(next);
-        _checkAuth();
-        try {
-          await persistence.write(scope.storageKey, encoded);
-        } catch (error) {
-          try {
-            await persistence.restore(scope.storageKey, _committedRaw);
-            await persistence.reload();
-            final restored = await persistence.read(scope.storageKey);
-            if (restored != _committedRaw) {
-              throw StateError('rollback mismatch');
-            }
-          } catch (_) {
-            _coordinator.blocked.add(scope.storageKey);
-            _coordinator.known[scope.storageKey] = _committedRaw;
-          }
-          throw LearningSaveException(error);
-        }
-        _committed = next;
-        _committedRaw = encoded;
+        return _v2Envelope(nextState);
       });
-
-  Future<CourseLearningState> _loadCommitted() async {
-    // Repository instances may have been preloaded before another instance
-    // committed. Refresh the adapter's cache/image inside the process-wide
-    // coordinator before using this document as a merge base.
-    await persistence.reload();
-    final raw = await persistence.read(scope.storageKey);
-    final state = raw == null
-        ? CourseLearningState.empty(scope)
-        : _codec.decode(raw, scope);
-    _committedRaw = raw;
-    _committed = state;
-    return state;
-  }
-
-  void _ensureAvailable() {
-    if (_coordinator.blocked.contains(scope.storageKey)) {
-      throw const LearningUnavailableException();
-    }
-  }
 
   bool _isCurrent() {
     final auth = currentAuth();
@@ -357,26 +173,185 @@ class CourseLearningRepository implements CourseLearningStore {
   }
 
   void _checkAuth() {
-    if (!_isCurrent()) {
-      throw const LearningOwnerChangedException();
+    if (!_isCurrent()) throw const LearningOwnerChangedException();
+  }
+}
+
+const _v2DocumentFamily = LearningDocumentFamily('course-learning-v2');
+
+LearningCursorPosition _v2Cursor(SlotCursor cursor) => LearningCursorPosition(
+    generation: cursor.generation,
+    sequence: cursor.sequence,
+    revision: cursor.revision);
+
+LearningDocumentEnvelope<LearningScope, CourseLearningState> _v2Envelope(
+        CourseLearningState state) =>
+    LearningDocumentEnvelope(
+        scope: state.scope,
+        family: _v2DocumentFamily,
+        revision: state.revision,
+        commitOrdinal: state.commitOrdinal,
+        payload: state);
+
+final class _V2LearningProfileAdapter
+    implements
+        LearningProfileAdapter<LearningScope, CourseLearningState,
+            LearningCommand, LearningCommit> {
+  const _V2LearningProfileAdapter(
+      {required this.scope,
+      required this.codec,
+      required this.transitions,
+      required this.historyLimit});
+
+  @override
+  final LearningScope scope;
+  final LearningDocumentCodec codec;
+  final LearningTransitionEngine transitions;
+  final int historyLimit;
+
+  @override
+  LearningOwner get owner => scope.owner;
+  @override
+  String get courseId => scope.courseId;
+  @override
+  LearningDocumentFamily get family => _v2DocumentFamily;
+  @override
+  String get storageKey => scope.storageKey;
+
+  @override
+  LearningDocumentEnvelope<LearningScope, CourseLearningState>
+      emptyDocument() => _v2Envelope(CourseLearningState.empty(scope));
+
+  @override
+  LearningDocumentEnvelope<LearningScope, CourseLearningState> decodeDocument(
+          String raw) =>
+      _v2Envelope(codec.decode(raw, scope));
+
+  @override
+  String encodePayload(
+      LearningDocumentEnvelope<LearningScope, CourseLearningState> document) {
+    final state = document.payload;
+    if (document.scope != scope ||
+        document.family != family ||
+        state.scope != scope ||
+        state.revision != document.revision ||
+        state.commitOrdinal != document.commitOrdinal) {
+      throw const LearningInvalidCommandException();
     }
+    return codec.encode(state);
   }
-}
 
-class _LearningCoordinator {
-  Future<void> _tail = Future.value();
-  final Set<String> blocked = {};
-  final Map<String, String?> known = {};
-  Future<T> run<T>(String key, Future<T> Function() action) {
-    final result = _tail.then((_) => action());
-    _tail = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
-    return result;
+  @override
+  LearningScope commandScope(LearningCommand command) => command.scope;
+  @override
+  int commandAuthGeneration(LearningCommand command) => command.authGeneration;
+  @override
+  String commandToken(LearningCommand command) => command.token;
+  @override
+  String commandFingerprint(LearningCommand command) =>
+      codec.canonicalCommand(command);
+  @override
+  String commandActivityId(LearningCommand command) => command.activityId;
+  @override
+  LearningCursorPosition commandExpected(LearningCommand command) =>
+      _v2Cursor(command.expected);
+
+  @override
+  LearningCursorPosition? currentCursor(
+          CourseLearningState payload, String activityId) =>
+      payload.activities[activityId] == null
+          ? null
+          : _v2Cursor(payload.activities[activityId]!.cursor);
+
+  @override
+  LearningReceiptIdentity? latestReceipt(
+      CourseLearningState payload, String activityId) {
+    final receipt = payload.activities[activityId]?.latestReceipt;
+    if (receipt == null) return null;
+    return LearningReceiptIdentity(
+        activityId: activityId,
+        token: receipt.token,
+        canonicalCommand: receipt.canonicalCommand,
+        before: _v2Cursor(receipt.before),
+        after: _v2Cursor(receipt.after),
+        commitOrdinal: receipt.commitOrdinal);
   }
-}
 
-extension<T> on Iterable<T> {
-  T? get firstOrNull {
-    final iterator = this.iterator;
-    return iterator.moveNext() ? iterator.current : null;
+  @override
+  LearningRetainedReceiptIdentity? retainedReceipt(CourseLearningState payload,
+      String activityId, LearningCursorPosition after, String token) {
+    for (final batch in payload.history) {
+      if (batch.activityId == activityId &&
+          batch.generation == after.generation &&
+          batch.sequence == after.sequence &&
+          batch.token == token) {
+        return LearningRetainedReceiptIdentity(
+            activityId: batch.activityId,
+            token: batch.token,
+            canonicalCommand: batch.canonicalCommand,
+            generation: batch.generation,
+            sequence: batch.sequence);
+      }
+    }
+    return null;
+  }
+
+  @override
+  bool isStart(LearningCommand command) => command.action is StartLearningRun;
+
+  @override
+  LearningTransactionTransition<LearningScope, CourseLearningState,
+          LearningCommit>
+      evaluate(
+          {required LearningDocumentEnvelope<LearningScope, CourseLearningState>
+              before,
+          required LearningCommand command,
+          required int nextRevision,
+          required int nextCommitOrdinal,
+          required DateTime committedAt}) {
+    final transition = transitions.evaluate(
+        state: before.payload, command: command, committedAt: committedAt);
+    final events = const SupportedProgressProjector().project(
+        before: before.payload, transition: transition, command: command);
+    final history = [...before.payload.history];
+    if (transition.attempts.isNotEmpty) {
+      history.add(AttemptBatch(
+          activityId: command.activityId,
+          generation: transition.slot.cursor.generation,
+          sequence: transition.slot.cursor.sequence,
+          token: command.token,
+          canonicalCommand: commandFingerprint(command),
+          attempts: transition.attempts));
+      while (history.fold<int>(0, (n, batch) => n + batch.attempts.length) >
+              historyLimit &&
+          history.length > 1) {
+        history.removeAt(0);
+      }
+    }
+    final state = before.payload;
+    final next = CourseLearningState(
+        scope: scope,
+        revision: nextRevision,
+        commitOrdinal: nextCommitOrdinal,
+        history: history,
+        activities: {...state.activities, command.activityId: transition.slot},
+        mistakes: transition.mistakes,
+        summaries: transition.summaries,
+        completions: transition.completions,
+        bestScores: transition.bestScores,
+        pending: [...state.pending, ...events]);
+    return LearningTransactionTransition(
+        nextDocument: _v2Envelope(next),
+        result: LearningCommit(
+            state: next, slot: transition.slot, duplicate: false));
+  }
+
+  @override
+  LearningCommit duplicateResult(
+      {required LearningDocumentEnvelope<LearningScope, CourseLearningState>
+          current,
+      required LearningCommand command}) {
+    final slot = current.payload.activities[command.activityId]!;
+    return LearningCommit(state: current.payload, slot: slot, duplicate: true);
   }
 }
