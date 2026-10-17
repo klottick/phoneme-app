@@ -685,14 +685,16 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
       _busy = true;
       _error = null;
     });
-    unawaited(owner.claimAndSubmit(command).then((_) {
+    unawaited(owner.claimAndSubmit(command).then((result) {
       if (!mounted ||
           !identical(_save, owner) ||
           contextRevision != _widgetContextRevision ||
           !identical(_store, store)) {
         return;
       }
-      _explicitRetryRequired = false;
+      if (result != null || owner.pendingCommand == null) {
+        _explicitRetryRequired = false;
+      }
       if (owner.acknowledgementError != null) {
         setState(() {
           _busy = false;
@@ -700,8 +702,6 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
           _conflict =
               'This change was saved, but the screen could not update. Reload saved progress.';
         });
-      } else {
-        _explicitRetryRequired = false;
       }
     }, onError: (Object error) {
       if (!mounted ||

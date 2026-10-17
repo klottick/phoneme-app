@@ -942,6 +942,141 @@ void main() {
     expect(h.audio.requests.last.referenceId, nextPrompt.sampleAReferenceId);
   });
 
+  for (final operation in ['Answer', 'Finish']) {
+    for (final failOriginalWrite in [false, true]) {
+      testWidgets(
+          'early orphaned $operation ${failOriginalWrite ? 'failure' : 'success'} settlement retains explicit retry',
+          (tester) async {
+        final h = await harness(tester);
+        final tracker = LearningAuthTracker(owner: h.auth.owner, ready: true);
+        final store = _createComparisonStore(
+            catalogue: catalogue,
+            persistence: h.persistence,
+            auth: tracker.current,
+            asyncZone: h.store._asyncZone,
+            currentAuth: () => tracker.current,
+            backendOwner: () => tracker.current.owner);
+        if (operation == 'Finish') {
+          await _seedFirstPass(tester, store,
+              catalogue: catalogue, policy: LessonPolicy());
+        }
+        final screen = ComparisonLessonScreen(
+            activityId: comparisonActivityId, catalogueLoader: () => catalogue);
+        final router = GoRouter(routes: [
+          GoRoute(path: '/', builder: (_, __) => const Text('Home'), routes: [
+            GoRoute(path: 'compare', builder: (_, __) => screen),
+            GoRoute(
+                path: 'other', builder: (_, __) => const Text('Upper route')),
+          ]),
+        ], initialLocation: '/compare');
+        ProviderContainer? container;
+        addTearDown(() {
+          final mounted = container;
+          if (mounted != null) cleanup(mounted, h.audio);
+          router.dispose();
+        });
+        container = await _mountComparison(tester,
+            store: store,
+            audio: h.audio,
+            catalogue: catalogue,
+            router: router,
+            authTracker: tracker);
+        if (operation == 'Answer') {
+          for (final sample in [ComparisonSample.a, ComparisonSample.b]) {
+            await tester.tap(find.text(sample == ComparisonSample.a
+                ? 'Listen to sample A'
+                : 'Listen to sample B'));
+            h.audio.completeNext(CourseAudioResult.completed(
+                referenceId: sample == ComparisonSample.a
+                    ? catalogue.exercises.first.sampleA.referenceId
+                    : catalogue.exercises.first.sampleB.referenceId,
+                source: CourseAudioSource.unverifiedRecording));
+            await tester.pump();
+          }
+        }
+
+        final gate = await _runRealAsync(tester, () async => Completer<void>());
+        addTearDown(() {
+          if (!gate.isCompleted) gate.complete();
+        });
+        final writeEntered =
+            await _runRealAsync(tester, () async => Completer<void>());
+        h.persistence.holdNextWrite = gate;
+        h.persistence.writeEntered = writeEntered;
+        if (operation == 'Answer') {
+          final relation = catalogue.exercises.first.expectedRelation;
+          await tester.tap(find
+              .text(relation == PhonemeRelation.same ? 'Same' : 'Different'));
+        } else {
+          await tester.tap(find.text('Finish comparison'));
+        }
+        await tester.runAsync(() => writeEntered.future);
+        final frozen = store.submitted.last;
+        final priorSubmitCount = store.submitted.length;
+        if (failOriginalWrite) {
+          h.persistence.failAfterHeldWrite =
+              StateError('early orphaned write failed');
+        }
+        final failed = failOriginalWrite
+            ? await _runRealAsync(tester, () async => Completer<void>())
+            : null;
+        if (failed != null) h.persistence.writeFailed = failed;
+
+        router.push('/other');
+        await tester.pump();
+        tracker.observe(owner: h.auth.owner, ready: false);
+        await tester.pump();
+        gate.complete();
+        if (failed != null) {
+          await tester.runAsync(() => failed.future);
+        }
+        final originalState = await _readSnapshot(tester, store);
+        await tester.pump();
+        if (operation == 'Answer') {
+          expect(originalState.attempts, hasLength(failOriginalWrite ? 0 : 1));
+        } else {
+          expect(
+              originalState.completions, hasLength(failOriginalWrite ? 0 : 1));
+        }
+        expect(store.submitted, hasLength(priorSubmitCount));
+        if (operation == 'Finish') {
+          expect(router.canPop(), isTrue,
+              reason: 'orphaned Finish settlement must not exit while covered');
+        }
+
+        router.pop();
+        await tester.pump();
+        tracker.observe(owner: h.auth.owner, ready: true);
+        await tester.pump();
+        expect(store.submitted, hasLength(priorSubmitCount),
+            reason:
+                'a null orphan result is not ACK and cannot clear route intent');
+        expect(find.text('Retry saving'), findsOneWidget);
+        if (operation == 'Finish') {
+          expect(find.text('Comparison debrief'), findsOneWidget);
+          expect(find.text('Home'), findsNothing,
+              reason: 'no Finish pop may precede explicit user retry');
+        }
+
+        await tester.tap(find.text('Retry saving'));
+        final durable = await _readSnapshot(tester, store);
+        for (var i = 0; i < 8; i++) {
+          await tester.pump();
+        }
+        expect(store.submitted, hasLength(priorSubmitCount + 1));
+        expect(identical(store.submitted.last, frozen), isTrue);
+        if (operation == 'Answer') {
+          expect(durable.attempts, hasLength(1));
+          expect(find.text('Continue'), findsOneWidget);
+        } else {
+          expect(durable.completions, hasLength(1));
+          expect(find.text('Home'), findsOneWidget);
+          expect(router.canPop(), isFalse);
+        }
+      });
+    }
+  }
+
   testWidgets('auth unready during app resume preserves pending Start retry',
       (tester) async {
     final h = await harness(tester);
