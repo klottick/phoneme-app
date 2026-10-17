@@ -63,6 +63,29 @@ class GateAudio extends FakeAudio {
   }
 }
 
+class QueuedGateAudio extends FakeAudio {
+  final List<Completer<void>> gates = [];
+
+  @override
+  Future<void> speak(String word) {
+    speaks++;
+    spoken.add(word);
+    final gate = Completer<void>();
+    gates.add(gate);
+    return gate.future;
+  }
+}
+
+class CountingNavigatorObserver extends NavigatorObserver {
+  int popCount = 0;
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    popCount++;
+    super.didPop(route, previousRoute);
+  }
+}
+
 class FailablePreferences extends InMemorySharedPreferencesStore {
   FailablePreferences() : super.withData(const {});
 
@@ -151,9 +174,692 @@ Future<void> suspendResume(WidgetTester tester) async {
   await tester.pump();
 }
 
+Future<void> pumpRouteTransition(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(const Duration(seconds: 1));
+  await tester.pump();
+  await tester.pump();
+}
+
 void main() {
   final section = frenchUySection;
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  group('shared_owner_preserves_discovery_frozen_retry_and_lifecycle', () {
+    testWidgets('legacy speak success grants only authored evidence',
+        (tester) async {
+      final audio = FakeAudio();
+      final store = CourseLearningWidgetStore();
+      await tester.pumpWidget(pumpLesson(tester, audio, store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      expect(audio.spoken, ['tout']);
+      expect(choicesEnabled(tester), isTrue);
+      audio.fail = true;
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      expect(choicesEnabled(tester), isFalse,
+          reason: 'a failed replay revokes this sample grant');
+      audio.fail = false;
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pumpAndSettle();
+      final answer = store.submitted.last.action as ChooseSound;
+      expect(answer.audioSource, AttemptAudioSource.pendingRecording);
+      expect(audio.spoken, ['tout', 'tout', 'tout']);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('paused late audio cannot revoke resumed playback grant',
+        (tester) async {
+      final audio = QueuedGateAudio();
+      addTearDown(() {
+        for (final gate in audio.gates) {
+          if (!gate.isCompleted) gate.complete();
+        }
+      });
+      final store = CourseLearningWidgetStore();
+      await tester.pumpWidget(pumpLesson(tester, audio, store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.scheduleForcedFrame();
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      expect(audio.gates, hasLength(2));
+      audio.gates[1].complete();
+      await tester.pumpAndSettle();
+      expect(choicesEnabled(tester), isTrue);
+      audio.gates[0].complete();
+      await tester.pump();
+      expect(choicesEnabled(tester), isTrue,
+          reason: 'old audio completion cannot alter the newer grant');
+      expect(actionCount(store, ChooseSound), 0);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('A to B to A repository changes keep owners isolated',
+        (tester) async {
+      final audio = FakeAudio();
+      final ownerA = CourseLearningWidgetStore();
+      final ownerB = CourseLearningWidgetStore();
+      Widget app(CourseLearningWidgetStore owner) => ProviderScope(
+            overrides: [
+              courseAudioProvider.overrideWithValue(audio),
+              courseLearningStoreProvider.overrideWithValue(owner),
+            ],
+            child: const MaterialApp(
+              home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
+            ),
+          );
+      await tester.pumpWidget(app(ownerA));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(app(ownerB));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(app(ownerA));
+      await tester.pumpAndSettle();
+      expect(find.text('Item 1 of 10'), findsOneWidget);
+      expect(choicesEnabled(tester), isFalse,
+          reason: 'returning to A must not restore its old transient grant');
+      expect(ownerB.discoverySession?.attemptCount, 0);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('same-owner held save retries the identical command on resume',
+        (tester) async {
+      final gate = Completer<void>();
+      addTearDown(() {
+        if (!gate.isCompleted) gate.complete();
+      });
+      final audio = FakeAudio();
+      final store = CourseLearningWidgetStore()
+        ..actionGates[ChooseSound] = gate;
+      await tester.pumpWidget(pumpLesson(tester, audio, store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pump();
+      expect(actionCount(store, ChooseSound), 1);
+      final command = store.submitted.last;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.scheduleForcedFrame();
+      await tester.pump();
+      gate.complete();
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      final answers = store.submitted
+          .where((submitted) => submitted.action is ChooseSound)
+          .toList();
+      expect(answers, hasLength(2));
+      expect(identical(answers[0], command), isTrue);
+      expect(identical(answers[1], command), isTrue);
+      expect(store.discoverySession?.attemptCount, 1);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('auth generation change fences an in-flight acknowledgement',
+        (tester) async {
+      final gate = Completer<void>();
+      addTearDown(() {
+        if (!gate.isCompleted) gate.complete();
+      });
+      final tracker = LearningAuthTracker(
+        owner: LearningOwner.guest(),
+        ready: true,
+      );
+      final store = CourseLearningWidgetStore()
+        ..actionGates[FinishLearningActivity] = gate;
+      final session = LessonSectionSession(
+        itemIds: discoveryItemIds,
+        sessionId: 'auth-fence',
+      );
+      for (var i = 0; i < 10; i++) {
+        session.submit(true);
+        session.advance();
+      }
+      store.seedSession(session);
+      final router = lessonRouter();
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          courseAudioProvider.overrideWithValue(FakeAudio()),
+          courseLearningStoreProvider.overrideWithValue(store),
+          learningAuthScopeProvider.overrideWith((ref) => tracker),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Finish section'));
+      await tester.pump();
+      tracker.observe(
+          owner: LearningOwner.account('next-account'), ready: true);
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(router.routeInformationProvider.value.uri.path,
+          '/course-lesson/en-fr-u-y',
+          reason: 'a stale auth acknowledgement cannot navigate away');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('held lower finish cannot pop a newly pushed route',
+        (tester) async {
+      final gate = Completer<void>();
+      final observer = CountingNavigatorObserver();
+      addTearDown(() {
+        if (!gate.isCompleted) gate.complete();
+      });
+      final store = CourseLearningWidgetStore()
+        ..actionGates[FinishLearningActivity] = gate;
+      final session = LessonSectionSession(
+        itemIds: discoveryItemIds,
+        sessionId: 'route-fence-different',
+      );
+      for (var i = 0; i < 10; i++) {
+        session.submit(true);
+        session.advance();
+      }
+      store.seedSession(session);
+      final router = GoRouter(
+        initialLocation: '/home',
+        observers: [observer],
+        routes: [
+          GoRoute(path: '/home', builder: (_, __) => const Text('home')),
+          GoRoute(
+            path: '/course-lesson/:id',
+            builder: (_, state) => DiscoveryLessonScreen(
+              lessonId: state.pathParameters['id']!,
+            ),
+          ),
+          GoRoute(path: '/other', builder: (_, __) => const Text('other top')),
+        ],
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          courseAudioProvider.overrideWithValue(FakeAudio()),
+          courseLearningStoreProvider.overrideWithValue(store),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ));
+      await tester.pumpAndSettle();
+      router.push('/course-lesson/en-fr-u-y');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Finish section'));
+      await tester.pump();
+      final originalFinish = store.submitted.last;
+      router.push('/other');
+      await pumpRouteTransition(tester);
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(observer.popCount, 0,
+          reason: 'the covered lesson cannot pop the newer route on ACK');
+      expect(find.text('other top'), findsOneWidget);
+      router.pop();
+      await tester.pumpAndSettle();
+      expect(find.text('home'), findsNothing);
+      expect(find.text('Retry saving'), findsOneWidget,
+          reason: 'uncovering preserves the covered Finish for explicit retry');
+      final finishCount = actionCount(store, FinishLearningActivity);
+      final popCountBeforeRetry = observer.popCount;
+      await tester.tap(find.text('Retry saving'));
+      await tester.pumpAndSettle();
+      expect(actionCount(store, FinishLearningActivity), finishCount + 1,
+          reason: 'the explicit retry resubmits the frozen Finish command');
+      expect(identical(store.submitted.last, originalFinish), isTrue);
+      expect(observer.popCount, popCountBeforeRetry + 1,
+          reason: 'the current acknowledged Finish exits exactly once');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('same-URI pushed discovery remains above held lower finish',
+        (tester) async {
+      final gate = Completer<void>();
+      final observer = CountingNavigatorObserver();
+      addTearDown(() {
+        if (!gate.isCompleted) gate.complete();
+      });
+      final store = CourseLearningWidgetStore()
+        ..actionGates[FinishLearningActivity] = gate;
+      final session = LessonSectionSession(
+        itemIds: discoveryItemIds,
+        sessionId: 'route-fence-same-uri',
+      );
+      for (var i = 0; i < 10; i++) {
+        session.submit(true);
+        session.advance();
+      }
+      store.seedSession(session);
+      final router = GoRouter(
+        initialLocation: '/course-lesson/en-fr-u-y',
+        observers: [observer],
+        routes: [
+          GoRoute(
+            path: '/course-lesson/:id',
+            builder: (_, state) => DiscoveryLessonScreen(
+              lessonId: state.pathParameters['id']!,
+            ),
+          ),
+        ],
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          courseAudioProvider.overrideWithValue(FakeAudio()),
+          courseLearningStoreProvider.overrideWithValue(store),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Finish section'));
+      await tester.pump();
+      router.push('/course-lesson/en-fr-u-y');
+      await pumpRouteTransition(tester);
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(observer.popCount, 0,
+          reason: 'equal route URIs do not confer ownership to the lower page');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets(
+        'conflict remains frozen through pause and resumes only on reload',
+        (tester) async {
+      final store = CourseLearningWidgetStore()
+        ..actionFailures[ChooseSound] = const LearningConflictException();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pumpAndSettle();
+      final attemptsBeforePause = actionCount(store, ChooseSound);
+      expect(find.text('Reload saved progress'), findsOneWidget);
+      expect(find.text('Retry saving'), findsNothing);
+      await suspendResume(tester);
+      expect(actionCount(store, ChooseSound), attemptsBeforePause,
+          reason: 'a typed conflict must not be resubmitted on resume');
+      expect(find.text('Reload saved progress'), findsOneWidget);
+      expect(find.text('Retry saving'), findsNothing);
+      await tester.tap(find.text('Reload saved progress'));
+      await tester.pumpAndSettle();
+      expect(find.text('Reload saved progress'), findsNothing);
+      expect(store.discoverySession?.attemptCount, 0);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('content-changed conflict remains frozen through pause',
+        (tester) async {
+      final store = CourseLearningWidgetStore()
+        ..actionFailures[ChooseSound] = const LearningContentChangedException();
+      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pumpAndSettle();
+      final attemptsBeforePause = actionCount(store, ChooseSound);
+      expect(find.text('Reload saved progress'), findsOneWidget);
+      await suspendResume(tester);
+      expect(actionCount(store, ChooseSound), attemptsBeforePause,
+          reason: 'content changes require the same explicit reload path');
+      expect(find.text('Reload saved progress'), findsOneWidget);
+      expect(find.text('Retry saving'), findsNothing);
+      await tester.tap(find.text('Reload saved progress'));
+      await tester.pumpAndSettle();
+      expect(store.discoverySession?.attemptCount, 0);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('covered failed write returns as exact explicit retry',
+        (tester) async {
+      final gate = Completer<void>();
+      addTearDown(() {
+        if (!gate.isCompleted) gate.complete();
+      });
+      final store = CourseLearningWidgetStore()
+        ..actionGates[ChooseSound] = gate;
+      final router = GoRouter(
+        initialLocation: '/lesson',
+        routes: [
+          GoRoute(
+            path: '/lesson',
+            builder: (_, __) => const DiscoveryLessonScreen(
+              lessonId: 'en-fr-u-y',
+            ),
+          ),
+          GoRoute(path: '/other', builder: (_, __) => const Text('upper page')),
+        ],
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          courseAudioProvider.overrideWithValue(FakeAudio()),
+          courseLearningStoreProvider.overrideWithValue(store),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pump();
+      final original = store.submitted.last;
+      store.actionFailures[ChooseSound] = const LearningSaveException();
+      router.push('/other');
+      await pumpRouteTransition(tester);
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('upper page'), findsOneWidget);
+      router.pop();
+      await tester.pumpAndSettle();
+      expect(find.text('Retry saving'), findsOneWidget);
+      expect(find.text('Reload saved progress'), findsNothing);
+      expect(store.discoverySession?.attemptCount, 0,
+          reason: 'a failed covered save must not discard its draft');
+      store.actionFailures.remove(ChooseSound);
+      await tester.tap(find.text('Retry saving'));
+      await tester.pumpAndSettle();
+      final answers = store.submitted
+          .where((command) => command.action is ChooseSound)
+          .toList();
+      expect(answers, hasLength(2));
+      expect(identical(answers.first, original), isTrue);
+      expect(identical(answers.last, original), isTrue);
+      expect(store.discoverySession?.attemptCount, 1);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('covered successful Finish waits for explicit retry to exit',
+        (tester) async {
+      final gate = Completer<void>();
+      addTearDown(() {
+        if (!gate.isCompleted) gate.complete();
+      });
+      final observer = CountingNavigatorObserver();
+      final store = CourseLearningWidgetStore()
+        ..actionGates[FinishLearningActivity] = gate;
+      final session = LessonSectionSession(
+        itemIds: discoveryItemIds,
+        sessionId: 'covered-successful-finish',
+      );
+      for (var i = 0; i < 10; i++) {
+        session.submit(true);
+        session.advance();
+      }
+      store.seedSession(session);
+      final router = GoRouter(
+        initialLocation: '/home',
+        observers: [observer],
+        routes: [
+          GoRoute(path: '/home', builder: (_, __) => const Text('home page')),
+          GoRoute(
+            path: '/lesson',
+            builder: (_, __) => const DiscoveryLessonScreen(
+              lessonId: 'en-fr-u-y',
+            ),
+          ),
+          GoRoute(path: '/other', builder: (_, __) => const Text('upper page')),
+        ],
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          courseAudioProvider.overrideWithValue(FakeAudio()),
+          courseLearningStoreProvider.overrideWithValue(store),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ));
+      await tester.pumpAndSettle();
+      router.push('/lesson');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Finish section'));
+      await tester.pump();
+      final original = store.submitted.last;
+      router.push('/other');
+      await pumpRouteTransition(tester);
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('upper page'), findsOneWidget);
+      final coveredPopCount = observer.popCount;
+      router.pop();
+      await tester.pumpAndSettle();
+      expect(find.text('Retry saving'), findsOneWidget,
+          reason: 'return requires a learner-confirmed idempotent retry');
+      expect(observer.popCount, coveredPopCount + 1,
+          reason: 'uncover itself does not exit');
+      final beforeRetry = observer.popCount;
+      await tester.tap(find.text('Retry saving'));
+      await tester.pumpAndSettle();
+      expect(observer.popCount, beforeRetry + 1,
+          reason: 'only the current explicit ACK may run Finish navigation');
+      expect(find.text('home page'), findsOneWidget);
+      final finishes = store.submitted
+          .where((command) => command.action is FinishLearningActivity)
+          .toList();
+      expect(finishes, hasLength(2));
+      expect(identical(finishes.first, original), isTrue);
+      expect(identical(finishes.last, original), isTrue);
+      expect(
+          store.committedState.completions
+              .where((completion) => completion.lessonId == 'en-fr-u-y')
+              .length,
+          1);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets(
+        'covered initial load is reread on zero-transition route return',
+        (tester) async {
+      final gate = Completer<void>();
+      addTearDown(() {
+        if (!gate.isCompleted) gate.complete();
+      });
+      final store = CourseLearningWidgetStore()..loadGate = gate;
+      final router = GoRouter(
+        initialLocation: '/lesson',
+        routes: [
+          GoRoute(
+            path: '/lesson',
+            pageBuilder: (_, state) => CustomTransitionPage<void>(
+              key: state.pageKey,
+              transitionDuration: Duration.zero,
+              reverseTransitionDuration: Duration.zero,
+              child: const DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
+              transitionsBuilder: (_, __, ___, child) => child,
+            ),
+          ),
+          GoRoute(
+            path: '/other',
+            pageBuilder: (_, state) => CustomTransitionPage<void>(
+              key: state.pageKey,
+              transitionDuration: Duration.zero,
+              reverseTransitionDuration: Duration.zero,
+              child: const Text('upper page'),
+              transitionsBuilder: (_, __, ___, child) => child,
+            ),
+          ),
+        ],
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          courseAudioProvider.overrideWithValue(FakeAudio()),
+          courseLearningStoreProvider.overrideWithValue(store),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ));
+      await tester.pump();
+      router.push('/other');
+      await tester.pump();
+      gate.complete();
+      await tester.pump();
+      expect(find.text('upper page'), findsOneWidget);
+      router.pop();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Item 1 of 10'), findsOneWidget,
+          reason:
+              'route currentness changes must recover without animation ticks');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('nested zero-transition route recovers covered load',
+        (tester) async {
+      final gate = Completer<void>();
+      addTearDown(() {
+        if (!gate.isCompleted) gate.complete();
+      });
+      final store = CourseLearningWidgetStore()..loadGate = gate;
+      final navigatorKey = GlobalKey<NavigatorState>();
+      Route<dynamic> route(RouteSettings settings) => PageRouteBuilder<void>(
+            settings: settings,
+            transitionDuration: Duration.zero,
+            reverseTransitionDuration: Duration.zero,
+            pageBuilder: (_, __, ___) => settings.name == '/lesson'
+                ? const DiscoveryLessonScreen(lessonId: 'en-fr-u-y')
+                : const Text('nested upper'),
+          );
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          courseAudioProvider.overrideWithValue(FakeAudio()),
+          courseLearningStoreProvider.overrideWithValue(store),
+        ],
+        child: MaterialApp(
+          home: Navigator(
+            key: navigatorKey,
+            onGenerateRoute: route,
+            initialRoute: '/lesson',
+          ),
+        ),
+      ));
+      await tester.pump();
+      navigatorKey.currentState!.pushNamed('/other');
+      await tester.pump();
+      gate.complete();
+      await tester.pump();
+      expect(find.text('nested upper'), findsOneWidget);
+      navigatorKey.currentState!.pop();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Item 1 of 10'), findsOneWidget,
+          reason: 'the screen follows its actual nested Navigator route');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('covered audio completion requires fresh listening',
+        (tester) async {
+      final audio = QueuedGateAudio();
+      addTearDown(() {
+        for (final gate in audio.gates) {
+          if (!gate.isCompleted) gate.complete();
+        }
+      });
+      final store = CourseLearningWidgetStore();
+      final router = GoRouter(
+        initialLocation: '/lesson',
+        routes: [
+          GoRoute(
+            path: '/lesson',
+            builder: (_, __) => const DiscoveryLessonScreen(
+              lessonId: 'en-fr-u-y',
+            ),
+          ),
+          GoRoute(path: '/other', builder: (_, __) => const Text('upper page')),
+        ],
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          courseAudioProvider.overrideWithValue(audio),
+          courseLearningStoreProvider.overrideWithValue(store),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      router.push('/other');
+      await pumpRouteTransition(tester);
+      audio.gates[0].complete();
+      await tester.pumpAndSettle();
+      router.pop();
+      await tester.pumpAndSettle();
+      expect(choicesEnabled(tester), isFalse,
+          reason: 'a completion while covered cannot grant hearing');
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      expect(audio.gates, hasLength(2));
+      audio.gates[1].complete();
+      await tester.pumpAndSettle();
+      expect(choicesEnabled(tester), isTrue);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('return before old audio completion protects new playback',
+        (tester) async {
+      final audio = QueuedGateAudio();
+      addTearDown(() {
+        for (final gate in audio.gates) {
+          if (!gate.isCompleted) gate.complete();
+        }
+      });
+      final store = CourseLearningWidgetStore();
+      final router = GoRouter(
+        initialLocation: '/lesson',
+        routes: [
+          GoRoute(
+            path: '/lesson',
+            builder: (_, __) => const DiscoveryLessonScreen(
+              lessonId: 'en-fr-u-y',
+            ),
+          ),
+          GoRoute(path: '/other', builder: (_, __) => const Text('upper page')),
+        ],
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          courseAudioProvider.overrideWithValue(audio),
+          courseLearningStoreProvider.overrideWithValue(store),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      final upperPage = router.push('/other');
+      await pumpRouteTransition(tester);
+      router.pop();
+      await pumpRouteTransition(tester);
+      await upperPage;
+      expect(find.text('upper page'), findsNothing);
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      expect(audio.gates, hasLength(2));
+      audio.gates[1].complete();
+      await tester.pumpAndSettle();
+      expect(choicesEnabled(tester), isTrue);
+      audio.gates[0].complete();
+      await tester.pump();
+      expect(choicesEnabled(tester), isTrue,
+          reason: 'late old playback cannot replace the new grant');
+      expect(find.byType(CircularProgressIndicator), findsNothing,
+          reason: 'late old playback cannot strand the new playback state');
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
 
   group('first pass', () {
     testWidgets(
