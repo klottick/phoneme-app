@@ -32,6 +32,63 @@ void main() {
   setUp(() =>
       SharedPreferences.setMockInitialValues({'selected_course_id': 'en-fr'}));
 
+  testWidgets('comparison_retry_contains_catalogue_factory_failure',
+      (tester) async {
+    final v2State = _nonemptyV2State();
+    final v2Store = CourseLearningWidgetStore(initialState: v2State);
+    final persistence = _MemoryComparisonPersistence();
+    final tracker =
+        LearningAuthTracker(owner: LearningOwner.guest(), ready: true);
+    await tester.pumpWidget(ProviderScope(overrides: [
+      courseLearningStoreProvider.overrideWithValue(v2Store),
+      courseLearningStateProvider.overrideWith((ref) async => v2State),
+      learningAuthScopeProvider.overrideWith((ref) => tracker),
+      learningPersistenceProvider.overrideWithValue(persistence),
+      comparisonCatalogueProvider.overrideWith((ref) =>
+          throw const ComparisonUnavailableException(
+              FormatException('invalid comparison catalogue'))),
+    ], child: const LinguistApp()));
+    await tester.pumpAndSettle();
+    expect(find.text('Comparison alpha'), findsOneWidget);
+    expect(find.text('Unavailable'), findsOneWidget);
+    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
+    expect(find.text('Continue discovery'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Progress'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Retry comparison progress'), 200,
+        scrollable: find.byType(Scrollable).first);
+    await tester.ensureVisible(find.text('Retry comparison progress'));
+    await tester.pump();
+    expect(find.text('Retry comparison progress'), findsOneWidget);
+    expect(
+        find.text('Retry comparison progress').hitTestable(), findsOneWidget);
+    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
+    expect(find.text('Retry loading progress'), findsNothing);
+    expect(persistence.readCalls, 0);
+    expect(persistence.writeCalls, 0);
+    await tester.tap(find.text('Retry comparison progress'));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Retry comparison progress'), findsOneWidget);
+    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
+    expect(persistence.readCalls, 0);
+    expect(persistence.writeCalls, 0);
+    expect(v2Store.committedState, same(v2State));
+    expect(v2Store.prepareCalls, 0);
+    expect(v2Store.submitCalls, 0);
+
+    final router =
+        GoRouter.of(tester.element(find.text('Retry comparison progress')));
+    router.go('/home');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue discovery'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DiscoveryLessonScreen), findsOneWidget);
+    expect(persistence.readCalls, 0);
+    expect(persistence.writeCalls, 0);
+  });
+
   test('comparison_summary_counts_only_current_committed_evidence', () {
     final d = _Driver();
     final empty = ComparisonProgressSummary.fromState(
@@ -952,6 +1009,18 @@ void main() {
     final providerCommittedBefore =
         provider.read(comparisonLearningStateProvider).value!;
     final committedBefore = terminal;
+    final completionIdentity = fixture.tracker.current;
+    var notificationScopeAlive = true;
+    addTearDown(() => notificationScopeAlive = false);
+    fixture.commitNotification.listener = () {
+      final current = fixture.tracker.current;
+      if (!notificationScopeAlive ||
+          current.owner != completionIdentity.owner ||
+          current.generation != completionIdentity.generation) {
+        return;
+      }
+      provider.invalidate(comparisonLearningStateProvider);
+    };
     final prewriteSession = LessonSectionSession.fromJson(
         Map<String, dynamic>.from(committedBefore.slot!.checkpoint.sessionJson),
         itemIds: fixture.catalogue.exercises.map((e) => e.id).toList(),
@@ -974,6 +1043,14 @@ void main() {
     expect(find.byType(ComparisonLessonScreen), findsOneWidget);
     expect(popCount, 0);
     expect(committedBefore.completions, isEmpty);
+    final firstHeldProviderState =
+        provider.read(comparisonLearningStateProvider).value!;
+    expect(firstHeldProviderState.completions, isEmpty);
+    expect(
+        ComparisonProgressSummary.fromState(
+                state: firstHeldProviderState, catalogue: fixture.catalogue)
+            .completedRuns,
+        0);
     expect(
         ComparisonProgressSummary.fromState(
                 state: committedBefore, catalogue: fixture.catalogue)
@@ -989,6 +1066,8 @@ void main() {
     expect(find.text('Retry saving'), findsOneWidget);
     expect(find.byType(ComparisonLessonScreen), findsOneWidget);
     expect(popCount, 0);
+    expect(provider.read(comparisonLearningStateProvider).value!.completions,
+        isEmpty);
     expect((await _runRealAsync(tester, fixture.store.snapshot)).completions,
         isEmpty);
 
@@ -1003,14 +1082,44 @@ void main() {
     expect(fixture.store.commands.last, same(firstCommand));
     expect(find.byType(ComparisonLessonScreen), findsOneWidget);
     expect(popCount, 0);
+    final retryHeldProviderState =
+        provider.read(comparisonLearningStateProvider).value!;
+    expect(retryHeldProviderState.completions, isEmpty);
+    expect(
+        ComparisonProgressSummary.fromState(
+                state: retryHeldProviderState, catalogue: fixture.catalogue)
+            .completedRuns,
+        0);
     expect(fixture.persistence.values, rawBefore);
+    final refreshReadGate =
+        await _newPersistenceReadGate(tester, key: fixture.scope.storageKey);
+    addTearDown(() => refreshReadGate.releaseIfHeld());
+    fixture.persistence.readGates[fixture.scope.storageKey] = refreshReadGate;
+    final loadsBeforeRefresh = fixture.store.loadCalls;
     await _releasePersistenceWrite(tester, retryGate);
     await tester.runAsync(() => retryAck.future);
-    await tester.pump();
-    await tester.pumpAndSettle();
+    for (var frame = 0; frame < 30 && popCount == 0; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(popCount, 1);
+    for (var frame = 0;
+        frame < 30 && find.byType(ComparisonLessonScreen).evaluate().isNotEmpty;
+        frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
     expect(find.byType(ComparisonLessonScreen), findsNothing);
     expect(find.text('Comparison alpha'), findsOneWidget);
     expect(popCount, 1);
+    await _waitForLoadCall(tester, fixture.store, loadsBeforeRefresh + 1);
+    await tester.runAsync(() => refreshReadGate.entered.future);
+    await tester.pump();
+    expect(find.text('Comparison completion policies: 1'), findsNothing,
+        reason: 'the ACK-triggered reload is still held');
+    final autoRefresh = provider.read(comparisonLearningStateProvider.future);
+    await _releasePersistenceRead(tester, refreshReadGate);
+    await tester.runAsync(() => autoRefresh);
+    await tester.pumpAndSettle();
+    expect(find.text('Comparison completion policies: 1'), findsOneWidget);
     final durable = await _runRealAsync(tester, fixture.store.snapshot);
     expect(durable.completions, hasLength(1));
     final durableSummary = ComparisonProgressSummary.fromState(
@@ -1022,18 +1131,6 @@ void main() {
     expect(v2Store.submitCalls, v2SubmitBefore);
     expect(fixture.persistence.values['course.learning.v2.sentinel'], sentinel);
 
-    final homeContainer = ProviderScope.containerOf(
-        tester.element(find.text('Comparison alpha')));
-    final refreshedHomeAck =
-        await _runRealAsync(tester, () async => Completer<void>());
-    fixture.store.nextLoadAck = refreshedHomeAck;
-    final loadsBeforeRefresh = fixture.store.loadCalls;
-    homeContainer.invalidate(comparisonLearningStateProvider);
-    await tester.pump();
-    await _waitForLoadCall(tester, fixture.store, loadsBeforeRefresh + 1);
-    await tester.runAsync(() => refreshedHomeAck.future);
-    await tester.pumpAndSettle();
-    expect(find.text('Comparison completion policies: 1'), findsOneWidget);
     router.go('/course-progress');
     await tester.pumpAndSettle();
     expect(find.text('Comparison completion policies: 1'), findsOneWidget);
@@ -1771,10 +1868,13 @@ Future<T> _runRealAsync<T>(
 final class _MemoryComparisonPersistence implements LearningPersistence {
   final values = <String, String>{};
   final readGates = <String, _PersistenceReadGate>{};
+  int readCalls = 0;
+  int writeCalls = 0;
   bool failNextRead = false;
   _PersistenceWriteGate? nextWriteGate;
   @override
   Future<String?> read(String key) async {
+    readCalls++;
     final readGate = readGates.remove(key);
     if (readGate != null) {
       readGate.entered.complete();
@@ -1790,6 +1890,7 @@ final class _MemoryComparisonPersistence implements LearningPersistence {
 
   @override
   Future<void> write(String key, String value) async {
+    writeCalls++;
     final gate = nextWriteGate;
     nextWriteGate = null;
     if (gate != null) {
@@ -1939,13 +2040,19 @@ final class _RepositoryComparisonStore implements ComparisonLearningStore {
 }
 
 final class _RepositoryFixture {
-  _RepositoryFixture(
-      this.catalogue, this.scope, this.auth, this.persistence, this.store);
+  _RepositoryFixture(this.catalogue, this.scope, this.persistence, this.store,
+      this.tracker, this.commitNotification);
   final ComparisonCatalogue catalogue;
   final ComparisonProfileScope scope;
-  final LearningAuthScope auth;
   final _MemoryComparisonPersistence persistence;
   final _RepositoryComparisonStore store;
+  final LearningAuthTracker tracker;
+  final _CommitNotification commitNotification;
+}
+
+final class _CommitNotification {
+  void Function()? listener;
+  void notify() => listener?.call();
 }
 
 final class _OwnerRefreshFixture {
@@ -2028,22 +2135,28 @@ Future<_RepositoryFixture> _repositoryFixture(WidgetTester tester) =>
       final catalogue = loadFrenchComparisonCatalogue();
       final scope = ComparisonProfileScope(
           courseId: 'en-fr', owner: LearningOwner.guest());
-      final auth =
-          LearningAuthScope(owner: scope.owner, generation: 0, ready: true);
+      final tracker = LearningAuthTracker(owner: scope.owner, ready: true);
       final persistence = _MemoryComparisonPersistence();
+      final commitNotification = _CommitNotification();
       var tokenNumber = 0;
       final repository = ComparisonLearningRepository(
         scope: scope,
         authGeneration: 0,
-        currentAuth: () => auth,
-        backendOwner: () => scope.owner,
+        currentAuth: () => tracker.current,
+        backendOwner: () => tracker.current.owner,
         persistence: persistence,
         transitions: ComparisonLearningTransitionEngine(catalogue: catalogue),
         clock: () => DateTime.utc(2026, 10, 17),
         newToken: () => (++tokenNumber).toString().padLeft(22, '0'),
+        onCommitted: commitNotification.notify,
       );
-      return _RepositoryFixture(catalogue, scope, auth, persistence,
-          _RepositoryComparisonStore(repository, Zone.current));
+      return _RepositoryFixture(
+          catalogue,
+          scope,
+          persistence,
+          _RepositoryComparisonStore(repository, Zone.current),
+          tracker,
+          commitNotification);
     });
 
 Future<ComparisonLearningState> _seedDebrief(WidgetTester tester,
@@ -2188,8 +2301,7 @@ Future<void> _waitForCommandCount(
 List<Override> _repositoryOverrides(_RepositoryFixture fixture) => [
       courseLearningStoreProvider
           .overrideWithValue(CourseLearningWidgetStore()),
-      learningAuthScopeProvider.overrideWith((ref) =>
-          LearningAuthTracker(owner: fixture.scope.owner, ready: true)),
+      learningAuthScopeProvider.overrideWith((ref) => fixture.tracker),
       comparisonCatalogueProvider.overrideWithValue(fixture.catalogue),
       comparisonLearningStoreProvider.overrideWithValue(fixture.store),
     ];
@@ -2199,8 +2311,7 @@ List<Override> _progressRepositoryOverrides(_RepositoryFixture fixture,
     [
       courseLearningStoreProvider.overrideWithValue(v2Store),
       courseLearningStateProvider.overrideWith((ref) async => v2State),
-      learningAuthScopeProvider.overrideWith((ref) =>
-          LearningAuthTracker(owner: fixture.scope.owner, ready: true)),
+      learningAuthScopeProvider.overrideWith((ref) => fixture.tracker),
       comparisonCatalogueProvider.overrideWithValue(fixture.catalogue),
       comparisonLearningStoreProvider.overrideWithValue(fixture.store),
     ];

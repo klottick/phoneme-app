@@ -84,9 +84,9 @@ class _CourseProgressScreenState extends ConsumerState<CourseProgressScreen> {
 
   Future<void> _retryComparisonLoad() async {
     if (_retryingComparisonLoad) return;
-    final store = ref.read(comparisonLearningStoreProvider);
     setState(() => _retryingComparisonLoad = true);
     try {
+      final store = ref.read(comparisonLearningStoreProvider);
       await store.retryLoad();
       if (!mounted ||
           !identical(store, ref.read(comparisonLearningStoreProvider))) {
