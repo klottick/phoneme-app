@@ -36,7 +36,6 @@ class ComparisonSectionDebrief extends StatelessWidget {
   Widget build(BuildContext context) {
     final unresolvedNotes = catalogue.notesFor(session.unresolvedItemIds);
     final unavailable = error != null || conflict != null;
-    final reloadOnly = error?.contains('unavailable') ?? false;
     final canAct = !busy && !unavailable;
     final mayFinish = canFinish && session.canComplete && canAct;
     final mayReview = session.unresolvedItemIds.isNotEmpty && canAct;
@@ -68,16 +67,10 @@ class ComparisonSectionDebrief extends StatelessWidget {
         if (error != null) ...[
           const SizedBox(height: 12),
           Text(error!),
-          if (reloadOnly)
-            TextButton(
-              onPressed: busy ? null : onReload,
-              child: const Text('Reload saved progress'),
-            )
-          else
-            TextButton(
-              onPressed: busy ? null : onRetrySave,
-              child: const Text('Retry saving'),
-            ),
+          TextButton(
+            onPressed: busy ? null : onRetrySave,
+            child: const Text('Retry saving'),
+          ),
         ],
         if (conflict != null) ...[
           const SizedBox(height: 12),
@@ -87,28 +80,27 @@ class ComparisonSectionDebrief extends StatelessWidget {
             child: const Text('Reload saved progress'),
           ),
         ],
-        if (!reloadOnly) const SizedBox(height: 8),
-        if (!reloadOnly)
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              FilledButton(
-                onPressed: mayFinish ? onFinish : null,
-                child: const Text('Finish comparison'),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilledButton(
+              onPressed: mayFinish ? onFinish : null,
+              child: const Text('Finish comparison'),
+            ),
+            if (session.unresolvedItemIds.isNotEmpty)
+              OutlinedButton(
+                onPressed: mayReview ? onReview : null,
+                child: const Text('Review unresolved pairs'),
               ),
-              if (session.unresolvedItemIds.isNotEmpty)
-                OutlinedButton(
-                  onPressed: mayReview ? onReview : null,
-                  child: const Text('Review unresolved pairs'),
-                ),
-              if (onPractiseAgain != null)
-                OutlinedButton(
-                  onPressed: canAct ? onPractiseAgain : null,
-                  child: const Text('Practise again'),
-                ),
-            ],
-          ),
+            if (onPractiseAgain != null)
+              OutlinedButton(
+                onPressed: canAct ? onPractiseAgain : null,
+                child: const Text('Practise again'),
+              ),
+          ],
+        ),
         if (busy) const Text('Saving progress…'),
       ],
     );

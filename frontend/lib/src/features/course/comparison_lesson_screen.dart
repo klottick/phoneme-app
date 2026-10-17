@@ -119,6 +119,7 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
       return;
     }
     _widgetContextRevision++;
+    _explicitRetryRequired = false;
     _loadOperation++;
     _fence.replaceOwner();
     _grants.retire();
@@ -378,6 +379,7 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
       return;
     }
     _fence.replaceOwner();
+    _explicitRetryRequired = false;
     _grants.retire();
     _save?.retireOwner();
     _save = null;
@@ -427,6 +429,7 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
       _stopAudio();
       if (_save?.pendingCommand != null) _save?.orphanInFlight();
       if (ownerOrGenerationChanged) {
+        _explicitRetryRequired = false;
         _fence.replaceOwner();
       } else {
         _fence.suspend();
@@ -599,7 +602,6 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
       );
       setState(() {});
       _run(command);
-      _releaseInput();
     } catch (_) {
       _answered = false;
       _selected = null;
@@ -612,6 +614,8 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
               'Saved comparison progress is unavailable. Reload to continue.';
         });
       }
+    } finally {
+      _releaseInput();
     }
   }
 
@@ -688,6 +692,7 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
           !identical(_store, store)) {
         return;
       }
+      _explicitRetryRequired = false;
       if (owner.acknowledgementError != null) {
         setState(() {
           _busy = false;
@@ -695,6 +700,8 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
           _conflict =
               'This change was saved, but the screen could not update. Reload saved progress.';
         });
+      } else {
+        _explicitRetryRequired = false;
       }
     }, onError: (Object error) {
       if (!mounted ||
@@ -817,6 +824,7 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
       return;
     }
     _save?.onConflictReloaded();
+    _explicitRetryRequired = false;
     _save = null;
     _fence.replaceOwner();
     _stopAudio();
@@ -949,7 +957,9 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     _fence.resume();
     if (mounted) setState(() {});
     if (_save?.pendingCommand != null && _conflict == null) {
-      if (retryPendingSave && !_explicitRetryRequired) {
+      if (_loadFailed) {
+        if (mounted) setState(() => _busy = false);
+      } else if (retryPendingSave && !_explicitRetryRequired) {
         _explicitRetryRequired = false;
         unawaited(_retrySave());
       } else if (mounted) {
@@ -959,8 +969,11 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
           _error = _saveError;
         });
       }
-    } else if (_session == null && _loadFailed == false) {
-      unawaited(_load(store, ++_loadOperation));
+    } else {
+      _explicitRetryRequired = false;
+      if (_session == null && _loadFailed == false) {
+        unawaited(_load(store, ++_loadOperation));
+      }
     }
   }
 
@@ -1060,8 +1073,11 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
                           catalogue: catalogue,
                           session: session!,
                           busy: _busy,
-                          error: _error,
-                          conflict: _conflict,
+                          error: _loadFailed ? null : _error,
+                          conflict: _conflict ??
+                              (_loadFailed
+                                  ? 'Saved comparison progress is unavailable. Reload to continue.'
+                                  : null),
                           canFinish: session.canComplete,
                           onReview: _review,
                           onFinish: _finish,
