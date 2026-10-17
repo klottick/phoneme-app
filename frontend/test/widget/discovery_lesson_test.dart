@@ -63,6 +63,19 @@ class GateAudio extends FakeAudio {
   }
 }
 
+class QueuedGateAudio extends FakeAudio {
+  final List<Completer<void>> gates = [];
+
+  @override
+  Future<void> speak(String word) {
+    speaks++;
+    spoken.add(word);
+    final gate = Completer<void>();
+    gates.add(gate);
+    return gate.future;
+  }
+}
+
 class FailablePreferences extends InMemorySharedPreferencesStore {
   FailablePreferences() : super.withData(const {});
 
@@ -154,6 +167,168 @@ Future<void> suspendResume(WidgetTester tester) async {
 void main() {
   final section = frenchUySection;
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  group('shared_owner_preserves_discovery_frozen_retry_and_lifecycle', () {
+    testWidgets('legacy speak success grants only authored evidence',
+        (tester) async {
+      final audio = FakeAudio();
+      final store = CourseLearningWidgetStore();
+      await tester.pumpWidget(pumpLesson(tester, audio, store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      expect(audio.spoken, ['tout']);
+      expect(choicesEnabled(tester), isTrue);
+      audio.fail = true;
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      expect(choicesEnabled(tester), isFalse,
+          reason: 'a failed replay revokes this sample grant');
+      audio.fail = false;
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pumpAndSettle();
+      final answer = store.submitted.last.action as ChooseSound;
+      expect(answer.audioSource, AttemptAudioSource.pendingRecording);
+      expect(audio.spoken, ['tout', 'tout', 'tout']);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('paused late audio cannot revoke resumed playback grant',
+        (tester) async {
+      final audio = QueuedGateAudio();
+      final store = CourseLearningWidgetStore();
+      await tester.pumpWidget(pumpLesson(tester, audio, store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.scheduleForcedFrame();
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      expect(audio.gates, hasLength(2));
+      audio.gates[1].complete();
+      await tester.pumpAndSettle();
+      expect(choicesEnabled(tester), isTrue);
+      audio.gates[0].complete();
+      await tester.pump();
+      expect(choicesEnabled(tester), isTrue,
+          reason: 'old audio completion cannot alter the newer grant');
+      expect(actionCount(store, ChooseSound), 0);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('A to B to A repository changes keep owners isolated',
+        (tester) async {
+      final audio = FakeAudio();
+      final ownerA = CourseLearningWidgetStore();
+      final ownerB = CourseLearningWidgetStore();
+      Widget app(CourseLearningWidgetStore owner) => ProviderScope(
+            overrides: [
+              courseAudioProvider.overrideWithValue(audio),
+              courseLearningStoreProvider.overrideWithValue(owner),
+            ],
+            child: const MaterialApp(
+              home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
+            ),
+          );
+      await tester.pumpWidget(app(ownerA));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(app(ownerB));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(app(ownerA));
+      await tester.pumpAndSettle();
+      expect(find.text('Item 1 of 10'), findsOneWidget);
+      expect(choicesEnabled(tester), isFalse,
+          reason: 'returning to A must not restore its old transient grant');
+      expect(ownerB.discoverySession?.attemptCount, 0);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('same-owner held save retries the identical command on resume',
+        (tester) async {
+      final gate = Completer<void>();
+      addTearDown(() {
+        if (!gate.isCompleted) gate.complete();
+      });
+      final audio = FakeAudio();
+      final store = CourseLearningWidgetStore()
+        ..actionGates[ChooseSound] = gate;
+      await tester.pumpWidget(pumpLesson(tester, audio, store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('/u/'));
+      await tester.pump();
+      expect(actionCount(store, ChooseSound), 1);
+      final command = store.submitted.last;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.scheduleForcedFrame();
+      await tester.pump();
+      gate.complete();
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      final answers = store.submitted
+          .where((submitted) => submitted.action is ChooseSound)
+          .toList();
+      expect(answers, hasLength(2));
+      expect(identical(answers[0], command), isTrue);
+      expect(identical(answers[1], command), isTrue);
+      expect(store.discoverySession?.attemptCount, 1);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('auth generation change fences an in-flight acknowledgement',
+        (tester) async {
+      final gate = Completer<void>();
+      addTearDown(() {
+        if (!gate.isCompleted) gate.complete();
+      });
+      final tracker = LearningAuthTracker(
+        owner: LearningOwner.guest(),
+        ready: true,
+      );
+      final store = CourseLearningWidgetStore()
+        ..actionGates[FinishLearningActivity] = gate;
+      final session = LessonSectionSession(
+        itemIds: discoveryItemIds,
+        sessionId: 'auth-fence',
+      );
+      for (var i = 0; i < 10; i++) {
+        session.submit(true);
+        session.advance();
+      }
+      store.seedSession(session);
+      final router = lessonRouter();
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          courseAudioProvider.overrideWithValue(FakeAudio()),
+          courseLearningStoreProvider.overrideWithValue(store),
+          learningAuthScopeProvider.overrideWith((ref) => tracker),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Finish section'));
+      await tester.pump();
+      tracker.observe(
+          owner: LearningOwner.account('next-account'), ready: true);
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(router.routeInformationProvider.value.uri.path,
+          '/course-lesson/en-fr-u-y',
+          reason: 'a stale auth acknowledgement cannot navigate away');
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
 
   group('first pass', () {
     testWidgets(

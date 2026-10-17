@@ -17,6 +17,7 @@ import '../../core/course/lesson_policy.dart';
 import '../../core/course/lesson_section.dart';
 import '../../core/course/lesson_section_session.dart';
 import '../../core/course/lesson_debrief_content.dart';
+import 'lesson_exercise_owner.dart';
 import '../../core/course/french_lesson_teaching.dart';
 import 'discovery_section_view.dart';
 
@@ -25,18 +26,18 @@ import 'discovery_section_view.dart';
 /// a fresh-hearing requirement, per-action saves with retry, and owner-aware
 /// state.
 ///
-/// Each screen generation is bound to the [CourseLearningStore] captured when
-/// it loaded. When the store provider is replaced (for example, the signed-in
-/// account changes), the old owner's audio stops immediately, the departing
-/// generation's in-flight operations are invalidated, and the replacement
-/// owner's state is loaded; a pending save can never transfer a checkpoint
-/// between owners.
+/// The lifecycle fence and save owner are bound to the [CourseLearningStore],
+/// auth generation and route captured when it loaded. When the store provider
+/// is replaced (for example, the signed-in account changes), the old owner's
+/// audio stops immediately, the departing owner is retired, and the
+/// replacement owner's state is loaded; a pending save can never transfer a
+/// checkpoint between owners.
 ///
 /// Suspension (backgrounding) is only a playback invalidation: the current
 /// hearing is lost (a fresh completed playback is required) and in-flight
 /// completions that land while suspended are discarded, but the same-owner
-/// learnable save intent — the pending action/checkpoint and any save error —
-/// is preserved and the controls stay disabled until it settles. Explicit
+/// frozen save intent and any save error are preserved and the controls stay
+/// disabled until it settles. Explicit
 /// suspension tracking drives recovery: only a `resumed` event reopens
 /// foreground recovery (re-drives an interrupted load, or re-runs the pending
 /// save idempotently, coalesced so one action publishes/exits exactly once);
@@ -57,7 +58,8 @@ import 'discovery_section_view.dart';
 /// is different from a transient failure: the store's stored state has moved
 /// ahead of this screen's session, so resending the checkpoint can never
 /// succeed. The screen then exposes an explicit `Reload saved progress`
-/// action (and drops the stale pending save intent). Tapping it — the only
+/// action; the frozen helper retains its claim only until this explicit reload.
+/// Tapping it — the only
 /// path — abandons the stale in-memory draft, stops any pending hearing or
 /// playback, and reconciles the stored checkpoint through the same
 /// single-shot load guards as `Retry loading`.
@@ -132,41 +134,21 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   String? _corruptNotice;
   String? _saveError;
   String? _conflictError;
-  bool _heard = false;
   bool _busy = false;
   bool _playing = false;
   String? _selectedSound;
 
-  /// Bumped when the screen's identity changes (owner replacement,
-  /// disposal) and when the app suspends: in-flight save/playback
-  /// completions that land in those windows are stale and must not publish
-  /// or exit. For a same-owner suspension the retained pending action is
-  /// re-run idempotently when `resumed` reopens recovery; for an owner
-  /// replacement it is dropped (it stays reconciled in the old owner's
-  /// storage).
-  int _generation = 0;
-
-  /// Bumped whenever an in-flight playback must stop counting: suspension,
-  /// owner replacement, disposal. A late completion then never unlocks the
-  /// choices on a screen that no longer owns that playback.
-  int _playbackGeneration = 0;
-
-  /// True while paused/hidden/detached; cleared only by a `resumed` event.
-  /// Controls stay disabled while set (pending persistence must not
-  /// masquerade as committed), nothing may settle or navigate while set, and
-  /// neither `inactive` focus changes nor repeated `resumed` events without
-  /// a prior suspension replay work.
-  bool _suspended = false;
-
-  /// A save run is awaiting its store call. A new invocation (double tap
-  /// before the widget tree redraws) must not start a second run.
-  bool _saveInFlight = false;
-
-  /// Identity of the save run currently in flight (bumped when a run is
-  /// orphaned, e.g. by a resumed-window re-drive or owner replacement). An
-  /// orphaned run's late completion cannot settle the UI, clear a newer
-  /// pending action, or run a second exit.
-  int _saveOp = 0;
+  ExerciseLifecycleFence _fence = ExerciseLifecycleFence();
+  ExerciseAudioGrants<AttemptAudioSource> _hearingGrants =
+      ExerciseAudioGrants<AttemptAudioSource>(requiredSamples: {null});
+  FrozenExerciseSave<LearningCommand, LearningCommit>? _saveOwner;
+  CourseLearningStore? _ownerStore;
+  LearningOwner? _ownerAuth;
+  int? _ownerAuthGeneration;
+  String? _ownerRoute;
+  bool _ownerRouteCaptured = false;
+  String? _ownerLessonId;
+  bool? _ownerReview;
 
   /// A load call is awaiting its store read. A new retry (double tap before
   /// the widget tree redraws) must not start a competing load whose late
@@ -182,13 +164,6 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   int _loadOp = 0;
 
   CourseAudio? _activeAudio;
-
-  /// The pending save (answer/advance/review/finish), kept verbatim so that
-  /// `Retry saving` re-sends the very same checkpoint: same session, same
-  /// attempt, recorded at most once.
-  LearningCommand? _pendingCommand;
-  CourseLearningStore? _pendingStore;
-  FutureOr<void> Function()? _pendingOnSaved;
 
   @override
   void initState() {
@@ -218,12 +193,26 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     }
     final CourseLearningStore store = ref.read(courseLearningStoreProvider);
     _store = store;
+    _captureOwner(store, deferRouteCapture: true);
     if (!_teachingUnavailable) unawaited(_load(store));
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = _routeIdentity();
+    if ((!_ownerRouteCaptured || (_ownerRoute == null && route != null)) &&
+        _ownerStore != null) {
+      _ownerRoute = route;
+      _ownerRouteCaptured = true;
+    }
+  }
+
+  @override
   void dispose() {
-    _generation += 1;
+    _fence.dispose();
+    _hearingGrants.retire();
+    _saveOwner?.retireOwner();
     _stopAudio();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -249,16 +238,14 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   /// learner's recoverable save intent: the pending action/checkpoint and
   /// any save error stay in place and are reconciled only when `resumed`
   /// reopens foreground recovery. In-flight completions that land while
-  /// suspended are stale (generation guard) — they must not publish, unlock
+  /// suspended are stale (lifecycle-fence guard) — they must not publish, unlock
   /// controls, or exit.
   void _onSuspend() {
-    _generation += 1;
-    _playbackGeneration += 1;
-    _suspended = true;
+    _fence.suspend();
+    _hearingGrants.revoke(null);
     _stopAudio();
     if (mounted) {
       setState(() {
-        _heard = false;
         _busy = false;
         _playing = false;
       });
@@ -272,28 +259,32 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   /// once. A `resumed` without a prior suspension does nothing.
   void _onForeground() {
     if (_teachingUnavailable) return;
-    if (!_suspended) return;
+    if (!_fence.isSuspended) return;
     final CourseLearningStore? store = _store;
     if (store == null || !mounted) return;
-    _suspended = false;
+    _fence.resume();
     // The suspended flag was gating (disabling) the controls; clearing it
     // must schedule a rebuild of its own or the view stays frozen after
     // resume even when there is no pending work to re-drive.
     setState(() {});
-    final int expectedGeneration = _generation;
+    final fence = _fence;
+    final int expectedEpoch = fence.lifecycleEpoch;
     Future.microtask(() {
-      if (expectedGeneration != _generation || !mounted) return;
+      if (!identical(fence, _fence) ||
+          !fence.owns(expectedEpoch) ||
+          !_ownsCurrentOwner(store)) {
+        return;
+      }
       if (_session == null && _loadError == null) {
         // Orphan whatever load the suspended window left (even if still
         // hung) and re-drive: a load must never serialize the recovery
         // behind an orphaned call forever.
         if (_loadInFlight) _loadOp += 1;
         unawaited(_load(store));
-      } else if (_pendingCommand != null) {
+      } else if (_saveOwner?.pendingCommand != null) {
         // Orphan whatever run the suspended window left in flight; its late
         // completion must not settle the UI or run an exit alongside this one.
-        if (_saveInFlight) _saveOp += 1;
-        unawaited(_startSave());
+        unawaited(_retrySave());
       }
     });
   }
@@ -303,32 +294,82 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     if (identical(previous, next)) return;
     if (_teachingUnavailable) return;
     // The owner changed: stop the old owner's audio immediately, invalidate
-    // the departed generation's playback and publications, orphan its
-    // in-flight save run, and drop its pending save intent — it stays
+    // the departed owner's playback and publications, retire its save owner,
+    // and drop its pending save intent — it stays
     // reconciled in the old owner's storage and must never be re-sent by the
     // replacement screen. Then load the replacement owner's state.
-    _generation += 1;
-    _playbackGeneration += 1;
-    _saveOp += 1; // orphan the old owner's in-flight run
-    _saveInFlight = false;
+    _fence.replaceOwner();
+    _hearingGrants.retire();
+    _saveOwner?.retireOwner();
+    _saveOwner = null;
     _loadOp += 1; // orphan the old owner's in-flight load
     _loadInFlight = false;
-    _pendingCommand = null;
-    _pendingStore = null;
-    _pendingOnSaved = null;
     _stopAudio();
     _playing = false;
     _selectedSound = null;
     _store = next;
+    _fence = ExerciseLifecycleFence();
+    _hearingGrants = ExerciseAudioGrants<AttemptAudioSource>(
+      requiredSamples: {null},
+    );
+    _captureOwner(next);
     if (!mounted) return;
-    final int expectedGeneration = _generation;
+    final fence = _fence;
+    final int expectedEpoch = fence.lifecycleEpoch;
     Future.microtask(() {
-      if (expectedGeneration != _generation || !mounted) return;
+      if (!identical(fence, _fence) ||
+          !fence.owns(expectedEpoch) ||
+          !_ownsCurrentOwner(next)) {
+        return;
+      }
       unawaited(_load(next));
     });
   }
 
   static String get _activityId => 'lesson:${frenchUySection.lessonId}';
+
+  String? _routeIdentity() {
+    try {
+      return GoRouter.of(context)
+          .routerDelegate
+          .currentConfiguration
+          .uri
+          .toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _captureOwner(CourseLearningStore store,
+      {bool deferRouteCapture = false}) {
+    final auth = ref.read(learningAuthScopeProvider);
+    _ownerStore = store;
+    _ownerAuth = auth.owner;
+    _ownerAuthGeneration = auth.generation;
+    _ownerRoute = deferRouteCapture ? null : _routeIdentity();
+    _ownerRouteCaptured = !deferRouteCapture;
+    _ownerLessonId = widget.lessonId;
+    _ownerReview = widget.review;
+  }
+
+  bool _ownsCurrentOwner(CourseLearningStore store) {
+    if (!mounted ||
+        !identical(_store, store) ||
+        !identical(_ownerStore, store) ||
+        widget.lessonId != _ownerLessonId ||
+        widget.review != _ownerReview ||
+        _routeIdentity() != _ownerRoute) {
+      return false;
+    }
+    try {
+      final auth = ref.read(learningAuthScopeProvider);
+      final matches =
+          auth.owner == _ownerAuth && auth.generation == _ownerAuthGeneration;
+      return matches;
+    } catch (_) {
+      return false;
+    }
+  }
 
   Future<void> _load(CourseLearningStore store, {bool retry = false}) async {
     if (_teachingUnavailable) return;
@@ -336,7 +377,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     if (section == null) return;
     _loadInFlight = true;
     final int op = _loadOp;
-    final int generation = _generation;
+    final fence = _fence;
+    final int epoch = fence.lifecycleEpoch;
     if (mounted) {
       setState(() {
         _session = null;
@@ -345,7 +387,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
         _corruptNotice = null;
         _saveError = null;
         _conflictError = null;
-        _heard = false;
+        _hearingGrants.revoke(null);
         _busy = true;
         _playing = false;
         _selectedSound = null;
@@ -365,7 +407,11 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     _loadInFlight = false;
     // Stale after suspension/owner replacement/disposal: a completed load
     // must not publish either; resumed recovery re-drives it if needed.
-    if (generation != _generation || _suspended || !mounted) return;
+    if (!identical(fence, _fence) ||
+        !fence.owns(epoch) ||
+        !_ownsCurrentOwner(store)) {
+      return;
+    }
     if (failure != null) {
       setState(() {
         _busy = false;
@@ -382,9 +428,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
         action: StartLearningRun(options: RunOptions(policy: widget.policy)),
       );
       _session = (command.candidate as DiscoveryCheckpoint).session;
-      _pendingCommand = command;
-      _pendingStore = store;
-      await _startSave();
+      _runSave(command);
       return;
     }
     if (slot.contentRevision != section.contentRevision ||
@@ -402,11 +446,11 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   void _publish(
       LessonSectionSession session, LessonSection section, String? notice) {
     if (!mounted) return;
+    _hearingGrants.beginPrompt(_promptFor(session));
     setState(() {
       _session = session;
       _corruptNotice = notice;
       _busy = false;
-      _heard = false;
       _playing = false;
       _selectedSound = null;
     });
@@ -429,10 +473,18 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     return authoredAudioSource(source) ?? AttemptAudioSource.notApplicable;
   }
 
+  ExercisePromptIdentity _promptFor(LessonSectionSession session) =>
+      ExercisePromptIdentity(
+        activityId: _activityId,
+        runGeneration: session.sessionId.hashCode,
+        round: session.round,
+        itemId: session.currentItemId ?? 'debrief',
+      );
+
   // ---------------------------------------------------------------- playback
 
   Future<void> _onListen() async {
-    if (_suspended) return;
+    if (_fence.isSuspended) return;
     final session = _session;
     if (session == null ||
         session.phase != LessonSectionPhase.exercise ||
@@ -445,23 +497,34 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
         _conflictError != null) {
       return;
     }
-    final int generation = _generation;
-    final int playback = _playbackGeneration;
-    final String word = _currentItem(session).word;
+    final item = _currentItem(session);
+    final String word = item.word;
+    final ownerStore = _store;
+    if (ownerStore == null || !_ownsCurrentOwner(ownerStore)) return;
+    final fence = _fence;
+    final prompt = _promptFor(session);
+    _hearingGrants.beginPrompt(prompt);
+    final request = ExerciseRequestIdentity(
+      prompt: prompt,
+      sample: null,
+      referenceId: item.id,
+      lifecycleEpoch: fence.lifecycleEpoch,
+      playbackNonce: fence.beginPlayback(),
+    );
+    _hearingGrants.beginSample(request);
     // Claim playback synchronously, before provider acquisition can throw or
     // a second callback can arrive before the next frame.
     setState(() {
       _busy = true;
       _playing = true;
-      _heard = false;
     });
     CourseAudio audio;
     try {
       audio = ref.read(courseAudioProvider);
     } catch (error) {
-      if (generation == _generation &&
-          playback == _playbackGeneration &&
-          mounted) {
+      if (identical(fence, _fence) &&
+          fence.owns(request.lifecycleEpoch) &&
+          _ownsCurrentOwner(ownerStore)) {
         _showSnackBar(_audioErrorText);
         setState(() {
           _busy = false;
@@ -477,9 +540,9 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     } on CourseAudioCancelledException {
       // A user/system stop invalidates playback: quiet, retryable — it is
       // neither a success (no fresh-hearing) nor an audio failure.
-      if (generation == _generation &&
-          playback == _playbackGeneration &&
-          mounted) {
+      if (identical(fence, _fence) &&
+          fence.owns(request.lifecycleEpoch) &&
+          _ownsCurrentOwner(ownerStore)) {
         setState(() {
           _busy = false;
           _playing = false;
@@ -491,9 +554,11 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     }
     // A late completion (suspension, owner replacement, disposal) must not
     // unlock the choices or clear busy on a screen that no longer owns it.
-    if (generation != _generation ||
-        playback != _playbackGeneration ||
-        !mounted) {
+    final store = _store;
+    if (store == null ||
+        !identical(fence, _fence) ||
+        !fence.owns(request.lifecycleEpoch) ||
+        !_ownsCurrentOwner(store)) {
       return;
     }
     if (failure != null) {
@@ -506,18 +571,24 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       });
       return;
     }
+    final accepted = _hearingGrants.acceptSuccess(
+      request: request,
+      actualReferenceId: item.id,
+      outcome: CourseAudioOutcome.completed,
+      actualSource: _audioSourceForCurrentItem(session),
+    );
+    if (!accepted) return;
     setState(() {
       _busy = false;
       _playing = false;
-      _heard = true;
     });
   }
 
   void _stopAudio() {
     final CourseAudio? audio = _activeAudio;
     if (audio == null) return;
-    unawaited(audio.stop().catchError((Object _) {}));
     _activeAudio = null;
+    unawaited(audio.stop().catchError((Object _) {}));
   }
 
   // ------------------------------------------------------------------- saves
@@ -530,111 +601,96 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   }
 
   void _runSave(LearningCommand command, {FutureOr<void> Function()? onSaved}) {
-    // Single-shot: nothing while suspended, and no second run for the same
-    // identity — a double tap before the widget tree redraws must not start
-    // a duplicate save (duplicate completion, duplicate exit, ...).
-    if (_suspended || _saveInFlight) return;
-    _pendingCommand = command;
-    _pendingStore = _store;
-    _pendingOnSaved = onSaved;
-    unawaited(_startSave());
+    final store = _store;
+    if (store == null ||
+        _fence.isSuspended ||
+        _saveOwner?.claimed == true ||
+        !_ownsCurrentOwner(store)) {
+      return;
+    }
+    final fence = _fence;
+    late final FrozenExerciseSave<LearningCommand, LearningCommit> owner;
+    owner = FrozenExerciseSave<LearningCommand, LearningCommit>(
+      fence: fence,
+      submit: store.submit,
+      stillOwnsStoreAuthRoute: () => _ownsCurrentOwner(store),
+      onAcknowledged: (commit) => _onSaveAcknowledged(
+        owner: owner,
+        store: store,
+        fence: fence,
+        command: command,
+        onSaved: onSaved,
+        commit: commit,
+      ),
+    );
+    _saveOwner = owner;
+    setState(() {
+      _busy = true;
+      _saveError = null;
+      _conflictError = null;
+    });
+    unawaited(_settleSave(owner, owner.claimAndSubmit(command), store));
   }
 
-  Future<void> _startSave() async {
-    final command = _pendingCommand;
-    final onSaved = _pendingOnSaved;
-    final CourseLearningStore? owner = _pendingStore;
-    if (command == null || owner == null) return;
-    _saveInFlight = true;
-    final int op = _saveOp;
-    final int generation = _generation;
+  Future<void> _retrySave() async {
+    final owner = _saveOwner;
+    final store = _store;
+    if (owner == null ||
+        store == null ||
+        owner.pendingCommand == null ||
+        _fence.isSuspended ||
+        !_ownsCurrentOwner(store)) {
+      return;
+    }
     if (mounted) {
       setState(() {
         _busy = true;
         _saveError = null;
-        _conflictError = null;
       });
     }
-    Object? failure;
-    LearningCommit? committed;
+    unawaited(_settleSave(owner, owner.retry(), store));
+  }
+
+  Future<void> _settleSave(
+    FrozenExerciseSave<LearningCommand, LearningCommit> owner,
+    Future<LearningCommit?> operation,
+    CourseLearningStore store,
+  ) async {
+    LearningCommit? commit;
     try {
-      committed = await owner.submit(command);
+      commit = await operation;
     } catch (error) {
-      failure = error;
-    }
-    // Orphaned (a resumed re-drive or owner replacement superseded this run):
-    // it must not settle the UI, clear a newer pending action, or exit.
-    if (op != _saveOp) return;
-    _saveInFlight = false;
-    // Stale after suspension/owner replacement/disposal: settle nothing —
-    // publish nothing, navigate nowhere. Same-owner recovery re-runs the
-    // retained pending action when `resumed` reopens foreground.
-    if (generation != _generation || _suspended || !mounted) return;
-    if (failure != null) {
-      if (failure is LearningConflictException ||
-          failure is LearningContentChangedException) {
-        // A typed conflict: the store's stored state moved ahead of this
-        // session, so resending the same checkpoint can never succeed. The
-        // stale in-memory draft is abandoned only by the explicit
-        // `Reload saved progress` action, which reconciles the stored
-        // checkpoint; drop the pending save intent so it is never re-sent.
-        _pendingCommand = null;
-        _pendingStore = null;
-        _pendingOnSaved = null;
-        setState(() {
-          _busy = false;
-          _saveError = null;
-          _conflictError = _conflictText;
-        });
+      if (!identical(owner, _saveOwner) || !_ownsCurrentOwner(store)) {
         return;
       }
-      if (failure is LearningUnavailableException) {
-        _pendingCommand = null;
-        _pendingStore = null;
-        _pendingOnSaved = null;
-        setState(() {
-          _busy = false;
-          _saveError = null;
-          _conflictError = null;
-          _loadError = _loadErrorText;
-          _session = null;
-        });
-        return;
-      }
-      if (failure is LearningInvalidCommandException ||
-          failure is LearningOwnerChangedException) {
-        _pendingCommand = null;
-        _pendingStore = null;
-        _pendingOnSaved = null;
-        setState(() {
-          _busy = false;
-          _saveError = null;
-          _conflictError = _invalidCommandText;
-        });
-        return;
-      }
-      if (failure is! LearningSaveException) {
-        _pendingCommand = null;
-        _pendingStore = null;
-        _pendingOnSaved = null;
-        setState(() {
-          _busy = false;
-          _saveError = null;
-          _conflictError = _invalidCommandText;
-        });
-        return;
-      }
-      // Persistence only: the view's error/Retry path. The pending action is
-      // retained so `Retry saving` (and resumed recovery) re-sends the very
-      // same checkpoint — the store records it at most once.
-      setState(() {
-        _busy = false;
-        _saveError = _saveErrorText;
-        _conflictError = null;
-      });
+      _handleSaveFailure(owner, error);
       return;
     }
-    final LearningCommit commit = committed!;
+    if (commit == null ||
+        !identical(owner, _saveOwner) ||
+        !_ownsCurrentOwner(store)) {
+      return;
+    }
+    final callbackError = owner.acknowledgementError;
+    if (callbackError != null && mounted) {
+      _showSnackBar(
+          'Your progress was saved, but the screen could not update.');
+    }
+  }
+
+  Future<void> _onSaveAcknowledged({
+    required FrozenExerciseSave<LearningCommand, LearningCommit> owner,
+    required CourseLearningStore store,
+    required ExerciseLifecycleFence fence,
+    required LearningCommand command,
+    required FutureOr<void> Function()? onSaved,
+    required LearningCommit commit,
+  }) async {
+    if (!identical(owner, _saveOwner) ||
+        !identical(fence, _fence) ||
+        !_ownsCurrentOwner(store)) {
+      return;
+    }
     _learningState = commit.state;
     if (commit.slot.snapshot case DiscoveryCheckpoint(:final session)) {
       if (command.action is! AdvanceLesson &&
@@ -647,23 +703,58 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       _saveError = null;
       _conflictError = null;
     });
-    // Refresh before the (possibly exiting) publish so navigating away and
-    // disposing cannot skip the refresh.
     ref.invalidate(courseLearningStateProvider);
-    // A successful write settles the pending action; a later resume must not
-    // re-run it. Failed/uncertain ones are retained above.
-    _pendingCommand = null;
-    _pendingStore = null;
-    _pendingOnSaved = null;
-    if (onSaved != null) {
-      await onSaved();
+    if (onSaved != null) await onSaved();
+  }
+
+  void _handleSaveFailure(
+    FrozenExerciseSave<LearningCommand, LearningCommit> owner,
+    Object failure,
+  ) {
+    if (failure is LearningConflictException ||
+        failure is LearningContentChangedException) {
+      setState(() {
+        _busy = false;
+        _saveError = null;
+        _conflictError = _conflictText;
+      });
+      return;
     }
+    if (failure is LearningUnavailableException) {
+      owner.retireOwner();
+      _saveOwner = null;
+      setState(() {
+        _busy = false;
+        _saveError = null;
+        _conflictError = null;
+        _loadError = _loadErrorText;
+        _session = null;
+      });
+      return;
+    }
+    if (failure is LearningInvalidCommandException ||
+        failure is LearningOwnerChangedException ||
+        failure is! LearningSaveException) {
+      owner.retireOwner();
+      _saveOwner = null;
+      setState(() {
+        _busy = false;
+        _saveError = null;
+        _conflictError = _invalidCommandText;
+      });
+      return;
+    }
+    setState(() {
+      _busy = false;
+      _saveError = _saveErrorText;
+      _conflictError = null;
+    });
   }
 
   Future<void> _onAnswer(String sound) async {
     final session = _session;
     if (session == null || session.answered) return;
-    if (!_heard ||
+    if (!_hearingGrants.canAnswer ||
         _busy ||
         _saveError != null ||
         _loadError != null ||
@@ -697,7 +788,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
           _session = draft;
           // `heard` refers to the current item; a new item requires a fresh
           // completed playback before it can be answered.
-          _heard = false;
+          _hearingGrants.beginPrompt(_promptFor(draft));
           _playing = false;
           _selectedSound = null;
         });
@@ -716,7 +807,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       if (mounted) {
         setState(() {
           _session = draft;
-          _heard = false;
+          _hearingGrants.beginPrompt(_promptFor(draft));
           _playing = false;
           _selectedSound = null;
         });
@@ -734,17 +825,16 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   }
 
   void _onRetrySave() {
-    if (_pendingCommand == null) {
+    if (_saveOwner?.pendingCommand == null) {
       // Nothing pending: reload through the captured owner (coalesced with
       // any load already in flight).
       final CourseLearningStore? store = _store;
-      if (store != null && !_suspended && !_saveInFlight && !_loadInFlight) {
+      if (store != null && !_fence.isSuspended && !_busy && !_loadInFlight) {
         unawaited(_load(store, retry: true));
       }
       return;
     }
-    if (_suspended || _saveInFlight) return;
-    unawaited(_startSave());
+    unawaited(_retrySave());
   }
 
   /// Explicit `Reload saved progress` for a typed stale-session conflict:
@@ -752,13 +842,13 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   /// reconciles the stored checkpoint under the existing single-shot load
   /// guards (a double tap before redraw cannot start a competing load).
   /// Cancellation of any pending hearing/playback is part of the reload;
-  /// the retained pending save intent is dropped so the stale checkpoint is
-  /// never re-submitted.
+  /// the helper's retained claim is cleared so the stale checkpoint is never
+  /// re-submitted.
   void _onReload() {
-    if (_suspended || _saveInFlight || _loadInFlight) return;
-    _pendingCommand = null;
-    _pendingStore = null;
-    _pendingOnSaved = null;
+    if (_fence.isSuspended || _busy || _loadInFlight) return;
+    _saveOwner?.onConflictReloaded();
+    _saveOwner = null;
+    _hearingGrants.revoke(null);
     _stopAudio();
     _conflictError = null;
     final CourseLearningStore? store = _store;
@@ -790,7 +880,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
         setState(() {
           _session = fresh;
           // A fresh item requires a fresh completed playback.
-          _heard = false;
+          _hearingGrants.beginPrompt(_promptFor(fresh));
           _playing = false;
           _selectedSound = null;
         });
@@ -803,14 +893,19 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     // Single-shot: a double tap before the busy state redraws (and any tap
     // while suspended) must not start a competing load whose late result
     // could publish over newer UI state.
-    if (store == null || _suspended || _loadInFlight) return;
+    if (store == null || _fence.isSuspended || _loadInFlight) return;
     unawaited(_load(store, retry: true));
   }
 
   void _onStartNewRun() {
     final store = _store;
     final state = _learningState;
-    if (store == null || state == null || !_contentChanged || _saveInFlight) {
+    if (store == null ||
+        state == null ||
+        !_contentChanged ||
+        _busy ||
+        _fence.isSuspended ||
+        !_ownsCurrentOwner(store)) {
       return;
     }
     final command = store.prepare(
@@ -819,6 +914,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
       action: StartLearningRun(options: RunOptions(policy: widget.policy)),
     );
     _session = (command.candidate as DiscoveryCheckpoint).session;
+    _hearingGrants.beginPrompt(_promptFor(_session!));
     _loadError = null;
     _contentChanged = false;
     _runSave(command);
@@ -919,8 +1015,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     return DiscoverySectionView(
       section: section,
       session: session,
-      heard: _heard,
-      busy: _busy || _suspended,
+      heard: _hearingGrants.canAnswer,
+      busy: _busy || _fence.isSuspended,
       playing: _playing,
       selectedSound: _selectedSound,
       error: _saveError,
