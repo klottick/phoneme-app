@@ -520,6 +520,202 @@ void main() {
     expect(() => d.codec.decode(jsonEncode(raw), d.scope, d.catalogue),
         throwsA(isA<ComparisonUnavailableException>()));
   });
+
+  test('advance checkpoint outcomes agree with latest current-run answers', () {
+    final d = _CodecDriver(LearningOwner.guest());
+    d.submit(
+        StartComparisonRun(sessionId: 'advance-facts', policy: LessonPolicy()));
+    d.answerFirstPair();
+    d.submit(const AdvanceComparisonPair());
+    final raw = jsonDecode(d.codec.encode(d.state)) as Map<String, Object?>;
+    final session = (((raw['slot'] as Map<String, Object?>)['checkpoint']
+        as Map<String, Object?>)['session'] as Map<String, Object?>);
+    (session['latestAnswers'] as Map<String, Object?>)['fr07b-pair-01'] = true;
+    session['lastCorrect'] = true;
+    expect(() => d.codec.decode(jsonEncode(raw), d.scope, d.catalogue),
+        throwsA(isA<ComparisonUnavailableException>()));
+  });
+
+  test('review checkpoint preserves corrected latest evidence', () {
+    final d = _CodecDriver(LearningOwner.guest());
+    d.submit(
+        StartComparisonRun(sessionId: 'review-facts', policy: LessonPolicy()));
+    for (var index = 0; index < d.catalogue.exercises.length; index++) {
+      d.answerCurrent(index > 1);
+      d.submit(const AdvanceComparisonPair());
+    }
+    d.submit(const ReviewComparisonPairs());
+    d.answerCurrent(true);
+    d.submit(const AdvanceComparisonPair());
+    final raw = jsonDecode(d.codec.encode(d.state)) as Map<String, Object?>;
+    expect(d.codec.decode(jsonEncode(raw), d.scope, d.catalogue).checkpoint,
+        isNotNull);
+    final session = (((raw['slot'] as Map<String, Object?>)['checkpoint']
+        as Map<String, Object?>)['session'] as Map<String, Object?>);
+    (session['latestAnswers'] as Map<String, Object?>)['fr07b-pair-01'] = false;
+    session['lastCorrect'] = false;
+    expect(() => d.codec.decode(jsonEncode(raw), d.scope, d.catalogue),
+        throwsA(isA<ComparisonUnavailableException>()));
+  });
+
+  test('latest finish checkpoint agrees with all available answer evidence',
+      () {
+    final d = _CodecDriver(LearningOwner.guest());
+    d.submit(
+        StartComparisonRun(sessionId: 'finish-facts', policy: LessonPolicy()));
+    for (var index = 0; index < d.catalogue.exercises.length; index++) {
+      d.answerCurrent(true);
+      d.submit(const AdvanceComparisonPair());
+    }
+    d.submit(const FinishComparisonRun(recordCompletion: true));
+    final raw = jsonDecode(d.codec.encode(d.state)) as Map<String, Object?>;
+    final session = (((raw['slot'] as Map<String, Object?>)['checkpoint']
+        as Map<String, Object?>)['session'] as Map<String, Object?>);
+    (session['latestAnswers'] as Map<String, Object?>)['fr07b-pair-01'] = false;
+    expect(() => d.codec.decode(jsonEncode(raw), d.scope, d.catalogue),
+        throwsA(isA<ComparisonUnavailableException>()));
+  });
+
+  test(
+      'new run ignores prior-generation outcomes and pruned evidence stays optional',
+      () {
+    final d = _CodecDriver(LearningOwner.guest());
+    d.submit(StartComparisonRun(sessionId: 'old-run', policy: LessonPolicy()));
+    d.answerFirstPair();
+    d.submit(StartComparisonRun(sessionId: 'new-run', policy: LessonPolicy()));
+    expect(
+        d.codec
+            .decode(d.codec.encode(d.state), d.scope, d.catalogue)
+            .checkpoint!
+            .sessionJson['latestAnswers'],
+        isEmpty);
+
+    d.answerFirstPair();
+    d.submit(const AdvanceComparisonPair());
+    final raw = jsonDecode(d.codec.encode(d.state)) as Map<String, Object?>;
+    raw['attempts'] = <Object?>[];
+    raw['receipts'] = <Object?>[];
+    expect(d.codec.decode(jsonEncode(raw), d.scope, d.catalogue).checkpoint,
+        isNotNull);
+  });
+
+  test('completion contradicted by retained initial Start receipt is rejected',
+      () {
+    final d = _CodecDriver(LearningOwner.guest());
+    d.submit(StartComparisonRun(sessionId: 'phantom', policy: LessonPolicy()));
+    final raw = jsonDecode(d.codec.encode(d.state)) as Map<String, Object?>;
+    raw['completions'] = [
+      {
+        'activityId': d.catalogue.activityId,
+        'contentRevision': d.catalogue.contentRevision,
+        'policyRevision': 1,
+        'thresholdPercent': 80,
+        'committedAt': '2026-01-01T00:00:00.000Z'
+      }
+    ];
+    expect(() => d.codec.decode(jsonEncode(raw), d.scope, d.catalogue),
+        throwsA(isA<ComparisonUnavailableException>()));
+  });
+
+  test('latest ordinal-one Start header proves pruned history cannot finish',
+      () {
+    final d = _CodecDriver(LearningOwner.guest());
+    d.submit(StartComparisonRun(
+        sessionId: 'phantom-pruned', policy: LessonPolicy()));
+    final raw = jsonDecode(d.codec.encode(d.state)) as Map<String, Object?>;
+    raw['receipts'] = <Object?>[];
+    raw['completions'] = [
+      {
+        'activityId': d.catalogue.activityId,
+        'contentRevision': d.catalogue.contentRevision,
+        'policyRevision': 1,
+        'thresholdPercent': 80,
+        'committedAt': '2026-01-01T00:00:00.000Z'
+      }
+    ];
+    expect(() => d.codec.decode(jsonEncode(raw), d.scope, d.catalogue),
+        throwsA(isA<ComparisonUnavailableException>()));
+  });
+
+  test('retained Finish completion must match the run start threshold', () {
+    final d = _CodecDriver(LearningOwner.guest());
+    d.submit(StartComparisonRun(
+        sessionId: 'threshold-finish', policy: LessonPolicy()));
+    for (var index = 0; index < d.catalogue.exercises.length; index++) {
+      d.answerCurrent(true);
+      d.submit(const AdvanceComparisonPair());
+    }
+    d.submit(const FinishComparisonRun(recordCompletion: true));
+    final raw = jsonDecode(d.codec.encode(d.state)) as Map<String, Object?>;
+    ((raw['completions'] as List).single
+        as Map<String, Object?>)['thresholdPercent'] = 90;
+    expect(() => d.codec.decode(jsonEncode(raw), d.scope, d.catalogue),
+        throwsA(isA<ComparisonUnavailableException>()));
+  });
+
+  test('complete receipt history justifies completion by its run policy', () {
+    final d = _CodecDriver(LearningOwner.guest());
+    d.submit(
+        StartComparisonRun(sessionId: 'completed-80', policy: LessonPolicy()));
+    for (var index = 0; index < d.catalogue.exercises.length; index++) {
+      d.answerCurrent(true);
+      d.submit(const AdvanceComparisonPair());
+    }
+    d.submit(const FinishComparisonRun(recordCompletion: true));
+    d.submit(StartComparisonRun(
+        sessionId: 'unfinished-90',
+        policy: LessonPolicy(completionThresholdPercent: 90)));
+    final raw = jsonDecode(d.codec.encode(d.state)) as Map<String, Object?>;
+    expect(d.codec.decode(jsonEncode(raw), d.scope, d.catalogue).completions,
+        hasLength(1));
+    final pruned = jsonDecode(jsonEncode(raw)) as Map<String, Object?>;
+    pruned['receipts'] = <Object?>[];
+    expect(d.codec.decode(jsonEncode(pruned), d.scope, d.catalogue).completions,
+        hasLength(1),
+        reason: 'older completion may predate pruned receipt history');
+    final mismatchedFinish =
+        jsonDecode(jsonEncode(raw)) as Map<String, Object?>;
+    ((mismatchedFinish['completions'] as List).single
+        as Map<String, Object?>)['thresholdPercent'] = 90;
+    expect(
+        () =>
+            d.codec.decode(jsonEncode(mismatchedFinish), d.scope, d.catalogue),
+        throwsA(isA<ComparisonUnavailableException>()));
+    final completions = raw['completions'] as List;
+    completions.add({
+      'activityId': d.catalogue.activityId,
+      'contentRevision': d.catalogue.contentRevision,
+      'policyRevision': 1,
+      'thresholdPercent': 90,
+      'committedAt': '2026-01-01T00:05:00.000Z'
+    });
+    expect(() => d.codec.decode(jsonEncode(raw), d.scope, d.catalogue),
+        throwsA(isA<ComparisonUnavailableException>()));
+  });
+
+  test('Finish false cannot justify completion in complete receipt history',
+      () {
+    final d = _CodecDriver(LearningOwner.guest());
+    d.submit(
+        StartComparisonRun(sessionId: 'review-only', policy: LessonPolicy()));
+    for (var index = 0; index < d.catalogue.exercises.length; index++) {
+      d.answerCurrent(true);
+      d.submit(const AdvanceComparisonPair());
+    }
+    d.submit(const FinishComparisonRun(recordCompletion: false));
+    final raw = jsonDecode(d.codec.encode(d.state)) as Map<String, Object?>;
+    raw['completions'] = [
+      {
+        'activityId': d.catalogue.activityId,
+        'contentRevision': d.catalogue.contentRevision,
+        'policyRevision': 1,
+        'thresholdPercent': 80,
+        'committedAt': '2026-01-01T00:05:00.000Z'
+      }
+    ];
+    expect(() => d.codec.decode(jsonEncode(raw), d.scope, d.catalogue),
+        throwsA(isA<ComparisonUnavailableException>()));
+  });
 }
 
 final class _CodecDriver {

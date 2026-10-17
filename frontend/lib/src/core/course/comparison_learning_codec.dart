@@ -886,19 +886,116 @@ final class ComparisonLearningCodec {
               'Latest recorded finish lacks eligible completion evidence.');
         }
       }
+      _validateCurrentRunAnswers(state, slot, catalogue);
     }
-    for (final receipt in state.receipts) {
+    _validateCompletions(state, catalogue);
+  }
+
+  void _validateCurrentRunAnswers(ComparisonLearningState state,
+      ComparisonSlot slot, ComparisonCatalogue catalogue) {
+    final factsBySequence = <int, (String, bool)>{};
+    final latestByPair = <String, (int, bool)>{};
+    void record(int generation, int sequence, String pairId, bool correct) {
+      if (generation != slot.cursor.generation) return;
+      final fact = (pairId, correct);
+      final priorAtSequence = factsBySequence[sequence];
+      if (priorAtSequence != null && priorAtSequence != fact) {
+        throw const FormatException(
+            'Conflicting current-generation answer facts.');
+      }
+      factsBySequence[sequence] = fact;
+      final priorForPair = latestByPair[pairId];
+      if (priorForPair == null || sequence > priorForPair.$1) {
+        latestByPair[pairId] = (sequence, correct);
+      }
+    }
+
+    void readReceipt(ComparisonReceipt receipt) {
+      if (receipt.generation != slot.cursor.generation) return;
       final command =
           _readCanonicalCommand(receipt.canonicalCommand, state.scope);
-      if (command.action case FinishComparisonRun(recordCompletion: true)) {
-        if (!state.completions.any((completion) =>
-            completion.activityId == command.activityId &&
-            completion.contentRevision == catalogue.contentRevision &&
-            completion.policyRevision == 1)) {
-          throw const FormatException(
-              'Recorded finish receipt lacks matching completion evidence.');
-        }
+      if (command.action case AnswerComparisonPair(:final answer)) {
+        record(
+            receipt.generation,
+            receipt.sequence,
+            answer.observations.first.pairId,
+            answer.selectedRelation == answer.expectedRelationSnapshot);
       }
+    }
+
+    for (final receipt in state.receipts) {
+      readReceipt(receipt);
+    }
+    readReceipt(slot.latestReceipt);
+    for (final attempt in state.attempts) {
+      record(attempt.runGeneration, attempt.sequence, attempt.pairId,
+          attempt.correct);
+    }
+    final session = _checkpointSession(slot, catalogue);
+    for (final entry in latestByPair.entries) {
+      if (session.latestAnswers[entry.key] != entry.value.$2) {
+        throw const FormatException(
+            'Checkpoint latest answer differs from available run evidence.');
+      }
+    }
+  }
+
+  void _validateCompletions(
+      ComparisonLearningState state, ComparisonCatalogue catalogue) {
+    final slot = state.slot;
+    if (slot == null) return;
+    final receipts = <ComparisonReceipt>[
+      ...state.receipts,
+      if (state.receipts.isEmpty) slot.latestReceipt
+    ];
+    final policiesByGeneration = <int, int>{};
+    final finishes = <(String, int, int, int)>{};
+    for (final receipt in receipts) {
+      final command =
+          _readCanonicalCommand(receipt.canonicalCommand, state.scope);
+      switch (command.action) {
+        case StartComparisonRun(:final policy):
+          final previous = policiesByGeneration[receipt.generation];
+          if (previous != null &&
+              previous != policy.completionThresholdPercent) {
+            throw const FormatException(
+                'One run has conflicting saved start policies.');
+          }
+          policiesByGeneration[receipt.generation] =
+              policy.completionThresholdPercent;
+        case FinishComparisonRun(recordCompletion: true):
+          final threshold = policiesByGeneration[receipt.generation];
+          if (threshold != null) {
+            finishes.add(
+                (command.activityId, catalogue.contentRevision, 1, threshold));
+          }
+          if (!state.completions.any((completion) =>
+              completion.activityId == command.activityId &&
+              completion.contentRevision == catalogue.contentRevision &&
+              completion.policyRevision == 1 &&
+              (threshold == null ||
+                  completion.thresholdPercent == threshold))) {
+            throw const FormatException(
+                'Recorded finish receipt lacks matching completion evidence.');
+          }
+        case _:
+          break;
+      }
+    }
+
+    final completeHistory = state.receipts.isNotEmpty
+        ? state.receipts.first.commitOrdinal == 1 &&
+            state.receipts.last.commitOrdinal == state.commitOrdinal
+        : slot.latestReceipt.commitOrdinal == 1 && state.commitOrdinal == 1;
+    if (completeHistory &&
+        state.completions.any((completion) => !finishes.contains((
+              completion.activityId,
+              completion.contentRevision,
+              completion.policyRevision,
+              completion.thresholdPercent
+            )))) {
+      throw const FormatException(
+          'Complete receipt history does not justify stored completion.');
     }
   }
 
