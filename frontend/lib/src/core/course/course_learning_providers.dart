@@ -4,6 +4,11 @@ import 'dart:math';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_service.dart';
+import 'comparison_content.dart';
+import 'comparison_learning_state.dart';
+import 'comparison_learning_store.dart';
+import 'comparison_learning_transition.dart';
+import 'french_comparison_content.dart';
 import 'backend.dart';
 import 'course_attempt.dart';
 import 'course_learning_persistence.dart';
@@ -111,4 +116,52 @@ final FutureProvider<CourseLearningState> courseLearningStateProvider =
     FutureProvider<CourseLearningState>((ref) {
   ref.watch(_courseLearningStateRevisionProvider);
   return ref.watch(courseLearningStoreProvider).load();
+});
+
+final _comparisonLearningStateRevisionProvider = StateProvider<int>((ref) => 0);
+
+final comparisonCatalogueProvider =
+    Provider<ComparisonCatalogue>((ref) => loadFrenchComparisonCatalogue());
+
+final comparisonLearningStoreProvider =
+    Provider<ComparisonLearningStore>((ref) {
+  var isAlive = true;
+  ref.onDispose(() => isAlive = false);
+  final identity = ref.watch(learningAuthScopeProvider
+      .select((auth) => (owner: auth.owner, generation: auth.generation)));
+  final tracker = ref.read(learningAuthScopeProvider.notifier);
+  final stateRevision =
+      ref.read(_comparisonLearningStateRevisionProvider.notifier);
+  final persistence = ref.watch(learningPersistenceProvider);
+  final catalogue = ref.read(comparisonCatalogueProvider);
+  return ComparisonLearningRepository(
+      scope: ComparisonProfileScope(courseId: 'en-fr', owner: identity.owner),
+      authGeneration: identity.generation,
+      currentAuth: () => tracker.current,
+      backendOwner: _backendOwner,
+      persistence: persistence,
+      transitions: ComparisonLearningTransitionEngine(catalogue: catalogue),
+      clock: () => DateTime.now().toUtc(),
+      newToken: _newToken,
+      onCommitted: () {
+        if (!isAlive) return;
+        final current = tracker.current;
+        if (current.owner != identity.owner ||
+            current.generation != identity.generation) {
+          return;
+        }
+        if (_backendOwner() != identity.owner) return;
+        try {
+          stateRevision.state++;
+        } catch (_) {
+          // Notification is best-effort; the durable commit is already ACKed.
+        }
+      });
+});
+
+final FutureProvider<ComparisonLearningState> comparisonLearningStateProvider =
+    FutureProvider<ComparisonLearningState>((ref) {
+  ref.watch(_comparisonLearningStateRevisionProvider);
+  ref.watch(comparisonCatalogueProvider);
+  return ref.watch(comparisonLearningStoreProvider).load();
 });
