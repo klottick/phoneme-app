@@ -121,6 +121,33 @@ void main() {
         reason: 'the portable counter boundary cannot be advanced or written');
   });
 
+  test('v2 profile bytes and receipts remain exact', () async {
+    expect(store.scope.storageKey, 'course.learning.v2.ZW4tZnI.g');
+    final empty = await store.load();
+    expect(const LearningDocumentCodec().encode(empty),
+        '{"schemaVersion":2,"courseId":"en-fr","owner":{"kind":"guest"},"revision":0,"commitOrdinal":0,"history":[],"activities":[],"mistakes":[],"summaries":[],"completions":[],"bestScores":{},"pending":[]}');
+    final started = await store.submit(store.prepare(
+        state: empty,
+        activityId: activity,
+        action: StartLearningRun(options: RunOptions())));
+    final command = store.prepare(
+        state: started.state,
+        activityId: activity,
+        action: ChooseSound(
+            selectedSound: 'u',
+            audioSource: AttemptAudioSource.pendingRecording));
+    expect(const LearningDocumentCodec().canonicalCommand(command),
+        '{"action":{"audioSource":"pendingRecording","kind":"chooseSound","selectedSound":"u"},"activityId":"lesson:en-fr-u-y","authGeneration":0,"candidate":{"kind":"discovery","session":{"answered":true,"attemptCount":1,"contentRevision":1,"itemIds":["tout","tu","rouge","rue","vous","lune","doux","jus","loup","mur"],"lastCorrect":true,"latestAnswers":{"tout":true},"phase":"exercise","policy":{"completionThresholdPercent":80},"position":0,"queue":["tout","tu","rouge","rue","vous","lune","doux","jus","loup","mur"],"round":1,"sessionId":"AAAAAAAAAAAAAAAAAAAA01","submittedThisRound":["tout"],"version":1}},"draws":[],"expected":{"generation":1,"revision":0,"sequence":1},"feedback":{"bonus":0,"cascades":0,"correct":true,"message":"Correct","points":0},"scope":"course.learning.v2.ZW4tZnI.g","submittedAt":"2026-10-15T12:00:00.000Z","token":"AAAAAAAAAAAAAAAAAAAA02"}');
+    final first = await store.submit(command);
+    final writes = persistence.writeCount;
+    final duplicate = await store.submit(command);
+    expect(duplicate.duplicate, isTrue);
+    expect(duplicate.state.revision, first.state.revision);
+    expect(duplicate.state.commitOrdinal, first.state.commitOrdinal);
+    expect(duplicate.state.history, hasLength(1));
+    expect(persistence.writeCount, writes);
+  });
+
   test('drill resumes only with nonempty pair IDs in current authored order',
       () async {
     const drillId = 'drill:minimal-pairs';
