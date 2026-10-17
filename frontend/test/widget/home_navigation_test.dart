@@ -2,8 +2,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:linguist/src/app.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
+import 'package:linguist/src/core/course/comparison_learning_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../support/course_learning_widget_store.dart';
+
+Override _comparisonStateOverride() =>
+    comparisonLearningStateProvider.overrideWith((ref) async =>
+        ComparisonLearningState.empty(ComparisonProfileScope(
+            courseId: 'en-fr', owner: LearningOwner.guest())));
 
 void main() {
   setUp(() =>
@@ -13,6 +19,7 @@ void main() {
     await tester.pumpWidget(ProviderScope(overrides: [
       courseLearningStoreProvider
           .overrideWithValue(CourseLearningWidgetStore()),
+      _comparisonStateOverride(),
     ], child: const LinguistApp()));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Continue discovery'));
@@ -24,6 +31,7 @@ void main() {
     await tester.pumpWidget(ProviderScope(overrides: [
       courseLearningStoreProvider
           .overrideWithValue(CourseLearningWidgetStore()),
+      _comparisonStateOverride(),
     ], child: const LinguistApp()));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Settings'));

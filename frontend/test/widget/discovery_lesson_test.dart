@@ -13,6 +13,7 @@ import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/course_learning_command.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
+import 'package:linguist/src/core/course/comparison_learning_state.dart';
 import 'package:linguist/src/core/course/lesson_policy.dart';
 import 'package:linguist/src/core/course/lesson_section.dart';
 import 'package:linguist/src/core/course/lesson_section_session.dart';
@@ -2322,6 +2323,9 @@ void main() {
       final container = ProviderContainer(overrides: [
         courseAudioProvider.overrideWithValue(audio),
         courseLearningStoreProvider.overrideWithValue(store),
+        comparisonLearningStateProvider.overrideWith((ref) async =>
+            ComparisonLearningState.empty(ComparisonProfileScope(
+                courseId: 'en-fr', owner: LearningOwner.guest()))),
       ]);
       addTearDown(container.dispose);
       await tester.pumpWidget(UncontrolledProviderScope(

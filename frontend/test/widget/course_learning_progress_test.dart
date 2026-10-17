@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:linguist/src/core/course/course_attempt.dart';
+import 'package:linguist/src/core/course/comparison_learning_state.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/course/course_learning_registry.dart';
@@ -42,6 +43,11 @@ class _HeldSyncStore extends CourseLearningWidgetStore {
     return result.future;
   }
 }
+
+Override _comparisonPresentationOverride() =>
+    comparisonLearningStateProvider.overrideWith((ref) async =>
+        ComparisonLearningState.empty(ComparisonProfileScope(
+            courseId: 'en-fr', owner: LearningOwner.guest())));
 
 SupabaseClient _authenticatedBackend() =>
     SupabaseClient('https://progress.example.invalid', 'public-test-key',
@@ -89,8 +95,9 @@ void main() {
 
   testWidgets('progress explains the new format and assessment boundary',
       (tester) async {
-    await tester.pumpWidget(const ProviderScope(
-      child: MaterialApp(home: CourseProgressScreen()),
+    await tester.pumpWidget(ProviderScope(
+      overrides: [_comparisonPresentationOverride()],
+      child: const MaterialApp(home: CourseProgressScreen()),
     ));
     await tester.pumpAndSettle();
 
@@ -155,7 +162,8 @@ void main() {
     );
     await tester.pumpWidget(ProviderScope(
       overrides: [
-        courseLearningStateProvider.overrideWith((ref) async => state)
+        courseLearningStateProvider.overrideWith((ref) async => state),
+        _comparisonPresentationOverride(),
       ],
       child: const MaterialApp(home: CourseProgressScreen()),
     ));
@@ -213,6 +221,7 @@ void main() {
     await tester.pumpWidget(ProviderScope(
       overrides: [
         courseLearningStateProvider.overrideWith((ref) async => state),
+        _comparisonPresentationOverride(),
       ],
       child: const MaterialApp(home: CourseProgressScreen()),
     ));
@@ -239,6 +248,7 @@ void main() {
       overrides: [
         courseLearningStoreProvider.overrideWithValue(store),
         courseLearningStateProvider.overrideWith((ref) async => state),
+        _comparisonPresentationOverride(),
       ],
       child: const MaterialApp(home: CourseProgressScreen()),
     ));
@@ -283,6 +293,7 @@ void main() {
       courseLearningStoreProvider
           .overrideWith((ref) => ref.watch(selectedStore)),
       courseLearningStateProvider.overrideWith((ref) async => state),
+      _comparisonPresentationOverride(),
     ]);
     addTearDown(container.dispose);
     await tester.pumpWidget(UncontrolledProviderScope(
@@ -348,7 +359,8 @@ void main() {
     );
     await tester.pumpWidget(ProviderScope(
       overrides: [
-        courseLearningStateProvider.overrideWith((ref) async => state)
+        courseLearningStateProvider.overrideWith((ref) async => state),
+        _comparisonPresentationOverride()
       ],
       child: const MaterialApp(home: HomeScreen()),
     ));
@@ -362,7 +374,10 @@ void main() {
       (tester) async {
     final store = CourseLearningWidgetStore()..failLoad = true;
     await tester.pumpWidget(ProviderScope(
-      overrides: [courseLearningStoreProvider.overrideWithValue(store)],
+      overrides: [
+        courseLearningStoreProvider.overrideWithValue(store),
+        _comparisonPresentationOverride()
+      ],
       child: const MaterialApp(home: HomeScreen()),
     ));
     await tester.pumpAndSettle();
@@ -377,7 +392,10 @@ void main() {
       (tester) async {
     final store = CourseLearningWidgetStore()..failLoad = true;
     await tester.pumpWidget(ProviderScope(
-      overrides: [courseLearningStoreProvider.overrideWithValue(store)],
+      overrides: [
+        courseLearningStoreProvider.overrideWithValue(store),
+        _comparisonPresentationOverride()
+      ],
       child: const MaterialApp(home: CourseProgressScreen()),
     ));
     await tester.pumpAndSettle();
@@ -415,6 +433,7 @@ void main() {
         }),
         courseLearningStoreProvider
             .overrideWith((ref) => ref.watch(selectedStore)),
+        _comparisonPresentationOverride(),
       ]);
       addTearDown(container.dispose);
       final page =
@@ -475,7 +494,8 @@ void main() {
     );
     await tester.pumpWidget(ProviderScope(
       overrides: [
-        courseLearningStateProvider.overrideWith((ref) async => state)
+        courseLearningStateProvider.overrideWith((ref) async => state),
+        _comparisonPresentationOverride(),
       ],
       child: const MaterialApp(home: CourseProgressScreen(review: true)),
     ));

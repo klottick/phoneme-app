@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/course/course_learning_providers.dart';
+import '../../core/course/comparison_content.dart';
 import '../../core/course/french_course.dart';
 import '../course/course_completion_summary.dart';
+import '../course/comparison_progress_summary.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -47,6 +49,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final progress = ref.watch(courseLearningStateProvider);
+    final comparisonProgress = ref.watch(comparisonLearningStateProvider);
     final registry = ref.watch(learningRegistryProvider);
     final completedExistingLessonIds = progress.when(
       skipLoadingOnRefresh: false,
@@ -123,6 +126,67 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
               ),
             ),
+            comparisonProgress.when(
+              skipLoadingOnRefresh: false,
+              loading: () => Card(
+                  child: _ComparisonUnavailableCard(
+                      onOpen: () => context.push(
+                          '/course-comparison/en-fr-phoneme-comparison'))),
+              error: (_, __) => Card(
+                  child: _ComparisonUnavailableCard(
+                      onOpen: () => context.push(
+                          '/course-comparison/en-fr-phoneme-comparison'))),
+              data: (state) {
+                ComparisonCatalogue? comparisonCatalogue;
+                try {
+                  comparisonCatalogue = ref.watch(comparisonCatalogueProvider);
+                } catch (_) {
+                  // Corrupt comparison content must not replace discovery or legacy Home.
+                }
+                if (comparisonCatalogue == null) {
+                  return Card(
+                      child: _ComparisonUnavailableCard(
+                          onOpen: () => context.push(
+                              '/course-comparison/en-fr-phoneme-comparison')));
+                }
+                final summary = ComparisonProgressSummary.fromState(
+                    state: state, catalogue: comparisonCatalogue);
+                final review = summary.hasCurrentRevisionCompletion;
+                const base = '/course-comparison/en-fr-phoneme-comparison';
+                return Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Comparison alpha',
+                            style: Theme.of(context).textTheme.titleLarge),
+                        const SizedBox(height: 6),
+                        Text(summary.practiceLabel),
+                        Text(summary.pairsLabel),
+                        Text(summary.answersLabel),
+                        Text(summary.afterDebriefLabel),
+                        Text(summary.completionLabel),
+                        Text(summary.unresolvedLabel),
+                        const SizedBox(height: 8),
+                        if (review) ...[
+                          OutlinedButton(
+                              onPressed: () =>
+                                  context.push('$base?review=true'),
+                              child: const Text('Review comparison')),
+                          TextButton(
+                              onPressed: () => context.push(base),
+                              child: const Text('Practise again')),
+                        ] else
+                          FilledButton(
+                              onPressed: () => context.push(base),
+                              child: const Text('Continue comparison')),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
             const SizedBox(height: 12),
             Wrap(spacing: 12, runSpacing: 8, children: [
               OutlinedButton.icon(
@@ -173,4 +237,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
     );
   }
+}
+
+class _ComparisonUnavailableCard extends StatelessWidget {
+  const _ComparisonUnavailableCard({this.onOpen});
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) => Column(children: [
+        const ListTile(
+            title: Text('Comparison alpha'), subtitle: Text('Unavailable')),
+        TextButton(
+            onPressed: onOpen ??
+                () =>
+                    context.push('/course-comparison/en-fr-phoneme-comparison'),
+            child: const Text('Open comparison recovery')),
+      ]);
 }
