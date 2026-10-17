@@ -1,6 +1,5 @@
-enum ComparisonSample { a, b }
-
-enum PhonemeRelation { same, different }
+export '../../../core/course/comparison_content.dart'
+    show ComparisonSample, PhonemeRelation;
 
 enum ListeningFeedback { correct, notYet }
 

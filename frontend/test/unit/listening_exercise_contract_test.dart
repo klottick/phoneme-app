@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/features/course/exercises/listening_exercise_contract.dart';
+import 'package:linguist/src/core/course/comparison_content.dart' as core;
 import '../support/listening_comparison_harness.dart';
 
 ListeningChoiceOption _option(String id, String label) =>
@@ -19,6 +20,16 @@ SoundComparisonPrompt _comparison({
     );
 
 void main() {
+  test('comparison enums re-export core declarations', () {
+    core.ComparisonSample acceptSample(core.ComparisonSample value) => value;
+    core.PhonemeRelation acceptRelation(core.PhonemeRelation value) => value;
+    const core.ComparisonSample sample = ComparisonSample.a;
+    const core.PhonemeRelation relation = PhonemeRelation.same;
+    expect(identical(sample, core.ComparisonSample.a), isTrue);
+    expect(acceptSample(sample), core.ComparisonSample.a);
+    expect(identical(relation, core.PhonemeRelation.same), isTrue);
+    expect(acceptRelation(relation), core.PhonemeRelation.same);
+  });
   test('choice option rejects blank id', () {
     expect(() => _option(' ', 'label'), throwsArgumentError);
   });
