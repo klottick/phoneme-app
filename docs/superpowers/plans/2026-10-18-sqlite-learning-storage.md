@@ -21,7 +21,7 @@
 - Scope-wide matching-token lookup precedes expected-revision rejection. Command identity includes activity ID and the full canonical payload. An identical proven command is a no-op duplicate resolved against current typed state; changed activity or payload is invalid; an unproven stale/pruned command conflicts. Retain at most 2,000 receipt-history rows plus each activity's latest receipt; do not promise unbounded token proof.
 - Retain at most 2,000 attempts and 2,000 receipts per owner/course/family. Trim whole course answer batches. Keep each current run's latest receipt after receipt pruning. Keep summaries, mistakes, completions, and exposure independent of detail pruning. Cap each applicable aggregate collection at 4,096 identities and reject overflow atomically.
 - Do not impose the historical 36 MiB serialized-document/codec limit as a SQLite database or row limit.
-- Preserve `course_learning_sync.dart`'s exact existing projection: supported course answer/lesson/score events only; unchanged `id`/`user_id`/`course_id`/`kind` envelope and answer fields; `record_course_events`; batches of at most 100; acknowledge delivered IDs. Add no comparison/sentence events or selected/expected answer, checkpoint, or full-attempt uploads.
+- Preserve `course_learning_sync.dart`'s exact existing projection: supported course answer/lesson/score events only; unchanged `id`/`user_id`/`course_id`/`kind` envelope and answer fields; `record_course_events`; batches of at most 100; acknowledge delivered IDs. Persist FIFO order locally by `(enqueue_commit_ordinal, enqueue_event_index)` and use that order for every pending read; these columns are not uploaded and event IDs are not ordering keys. Add no comparison/sentence events or selected/expected answer, checkpoint, or full-attempt uploads.
 - Guest/account identities remain distinct; account IDs are stored exactly, never delimiter-concatenated. Captured auth generation is fenced, including A→B→A; old work affects only its captured owner and cannot notify replacement providers.
 - A new database is empty only after successful open, schema setup, and query. Loading, open/query failure, corruption, quota denial, unsupported backend, and unknown version are not zero/not-started. Do not restore playback, hearing grants, timers, microphone state, or autoplay authorization.
 - Keep SharedPreferences for unrelated settings/auth state. Preserve unpublished Sound Match work, approvals, licences, release gates, other worktrees, and durable evidence.
@@ -36,6 +36,7 @@
 - Two connections commit from one snapshot, or auth switches A→B→A during work: one divergent writer conflicts; no cross-owner write or stale provider notification. Tests: Task 4 `independent_connections_commit_one_divergent_command`; Task 8 `aba_write_stays_in_captured_scope`; Task 9 actual two-tab test.
 - SQL fails after candidate rows start, or caller loses commit acknowledgment: reopen shows the full prior or full committed state; exact retry creates one attempt. Tests: Task 4 `sql_trigger_failure_rolls_back_all_rows`; Task 9 `injected_sql_failure_rolls_back_and_lost_ack_retry_is_once` repeats exact-token retry across independent connections and actual runtimes.
 - Attempt/receipt pruning crosses a batch boundary, or an aggregate reaches 4,096: retain latest receipt/checkpoint and cumulative summary; reject overflow without partial credit. Course exposure identity/counts remain isolated by activity slot even for identical item/sound keys. Tests: Task 5 `course_exposure_is_activity_scoped_and_independent_after_reopen`; Task 9 `all_families_reopen_at_limits_without_summary_drift` on file-backed and actual platform backends.
+- Pending course events are reconstructed or retried in event-ID order, or partial ACK compacts/reorders the remaining queue: read and sync in durable `(enqueue_commit_ordinal, enqueue_event_index)` FIFO order; ACK deletes only delivered IDs and never renumbers. Order metadata is local-only. Test: Task 5 `course_outbox_fifo_survives_reopen_failed_send_partial_ack_and_retry`.
 
 ---
 
@@ -59,7 +60,8 @@ All paths below are future implementation paths. The documentation task creates 
 | `frontend/build.yaml`, `frontend/test/support/sqlite_learning_test_harness.dart`, `learning_migration_failure_probe.dart`, `frontend/test/unit/learning_database_schema_test.dart` | Generator config, file-backed tests, injected failed-migration probe, schema/unknown-version tests. |
 | `frontend/lib/src/core/course/storage/learning_storage_scope.dart`, `learning_sql_transaction.dart` | Fully typed scope/receipt/adapter/coordinator contracts, scope-wide receipt/latest-token lookup, receipt-first lock/CAS transaction, course outbox ACK. |
 | `frontend/test/unit/learning_sql_transaction_test.dart` | Scope-wide token/latest lookup, current-state duplicate replay, owner identity, multi-connection CAS, rollback, unknown ACK, notification and ACK ordinal tests. |
-| `frontend/lib/src/core/course/storage/course_learning_sql_adapter.dart`, `course_learning_sql_repository.dart`, `course_learning_state_validator.dart`, `course_learning_checkpoint_codec.dart` | Inactive course SQL implementation; existing transition preserved; normalized mapping with per-activity-slot exposure, validation, bounded checkpoint. |
+| `frontend/lib/src/core/course/storage/course_learning_sql_adapter.dart`, `course_learning_sql_repository.dart`, `course_learning_state_validator.dart`, `course_learning_checkpoint_codec.dart` | Inactive course SQL implementation; existing transition preserved; normalized mapping with per-activity-slot exposure and durable FIFO outbox order, validation, bounded checkpoint. |
+| `frontend/test/unit/course_learning_sql_adapter_test.dart` | Inactive reopen/rollback, per-activity exposure independence, course values/summaries/mistakes, outbox FIFO/retry/partial-ACK, and content-change assertions. |
 | `frontend/lib/src/core/course/storage/comparison_learning_sql_adapter.dart`, `comparison_learning_sql_repository.dart`, `comparison_learning_storage_validator.dart`, `comparison_learning_command_codec.dart`, `comparison_learning_checkpoint_codec.dart` | Inactive comparison SQL implementation and typed validation/checkpoint mapping. |
 | `frontend/lib/src/core/course/storage/sentence_hunt_learning_sql_adapter.dart`, `sentence_hunt_learning_sql_repository.dart`, `sentence_hunt_learning_storage_validator.dart`, `sentence_hunt_learning_command_codec.dart`, `sentence_hunt_learning_checkpoint_codec.dart` | Inactive sentence-hunt SQL implementation, including `runStartRound` persistence. |
 | `frontend/lib/src/core/course/course_learning_providers.dart`, `sentence_hunt_learning_providers.dart`, `frontend/lib/src/features/home/home_screen.dart`, `frontend/lib/src/features/course/course_progress_screen.dart` | One atomic provider switch to SQL, loading/unavailable/verified-empty/retry behavior. |
@@ -161,7 +163,7 @@ expect(canonical['expectedScopeRevision'], state.revision);
 - File-backed helper: `Future<LearningDatabase> openFileLearningTestDatabase(File file)`.
 - A test-only migration probe uses the same `MigrationStrategy` transaction with a v1→v2 callback that writes a marker then throws. It is not a production v2 schema or a forward migration.
 
-- [ ] **Step 1: Add red file-backed schema tests.** Test exact tables/index/trigger names, row-local checks, trigger-enforced owner/family rules, same-scope relation constraints, verified-empty after schema plus query, nonempty reopen, unknown `user_version=99` preserving marker/schema, and failed synthetic migration preserving v1 data/version and rolling back its marker. Include rejected wrong-family and account/course outbox writes, an attempted scope owner/family identity update, duplicate latest-receipt tokens across activities in one scope, a run referencing another scope's content binding, and attempt-value/evidence rows referencing an attempt under a different scope; test both inserts and updates where applicable.
+- [ ] **Step 1: Add red file-backed schema tests.** Test exact tables/index/trigger names, including `ux_supported_sync_outbox_scope_enqueue_order`, and `supported_sync_outbox.enqueue_commit_ordinal`/`enqueue_event_index` columns, their positive/nonnegative safe-integer checks, unique `(scope_id, enqueue_commit_ordinal, enqueue_event_index)` ordering identity, row-local checks, trigger-enforced owner/family rules, same-scope relation constraints, verified-empty after schema plus query, nonempty reopen, unknown `user_version=99` preserving marker/schema, and failed synthetic migration preserving v1 data/version and rolling back its marker. Include rejected wrong-family and account/course outbox writes, duplicate outbox order tuples, an attempted scope owner/family identity update, duplicate latest-receipt tokens across activities in one scope, a run referencing another scope's content binding, and attempt-value/evidence rows referencing an attempt under a different scope; test both inserts and updates where applicable.
 
 ```dart
 expect(await tableNames(db), orderedEquals(<String>[
@@ -191,7 +193,7 @@ expect(await pragmaUserVersion(db), 1);
   - `learning_completions`: `scope_id`, `activity_id`, `content_revision`, `policy_kind`, `policy_revision`, `threshold_percent`, `committed_at_us`; row-local CHECK requires threshold `-1` or `1..100`; `trg_learning_completions_scope_family_*` enforces the family-specific policy semantics (including that `-1` is only the current course `legacyOnePass` no-threshold policy). Unique full completion identity.
   - `learning_exposure`: `scope_id`, `family`, nullable `activity_id`, nullable `item_id`, nullable `target_sound`, nullable `section_id`, nullable `content_revision`, nullable `presentations`, nullable `assistance_mask`. Row-local CHECKs constrain family identity and value ranges; the paired scope-family trigger requires `family` to match the owning scope. Course rows require `activity_id`, `item_id`, and `target_sound`, with `section_id` and `content_revision` null, nonnegative `presentations`, and the exact assistance mask; their identity is `(scope_id, course, activity_id, item_id, target_sound)`. `activity_id` is the `ActivitySlot` identity: the same item/sound in different activities has independent exposure counts and assistance. Sentence-hunt rows require `activity_id`, `item_id`, `target_sound`, `presentations`, and `assistance_mask` null and nonnull `section_id`/`content_revision`, using identity `(scope_id, sentence-hunt, section_id, content_revision)`; row existence represents exposure and there is no count. Comparison has no exposure rows. `ux_learning_exposure_identity` is unique on complete family identity, including course `activity_id`, after null normalization.
   - `learning_best_scores`: `scope_id`, `activity_id`, nonnegative safe `score`; primary key `(scope_id, activity_id)`.
-  - `supported_sync_outbox`: `scope_id`, `event_id`, `user_id`, `course_id`, `kind`, nullable `sound`, nullable `skill`, nullable `correct`, nullable `activity`, nullable `lesson_id`, nullable `game`, nullable `score`. Unique `(scope_id, event_id)`. Row-local CHECK requires exactly the existing answer/lesson/score payload columns for each kind; `trg_supported_sync_outbox_account_course_*` requires authenticated-account course scope and exact `user_id`/`course_id` agreement with the scope. No selected/expected values or additional wire fields.
+  - `supported_sync_outbox`: `scope_id`, `event_id`, `enqueue_commit_ordinal`, `enqueue_event_index`, `user_id`, `course_id`, `kind`, nullable `sound`, nullable `skill`, nullable `correct`, nullable `activity`, nullable `lesson_id`, nullable `game`, nullable `score`. Require positive safe `enqueue_commit_ordinal` (the learner commit ordinal) and nonnegative safe `enqueue_event_index` (zero-based position in that command's projected event list). Unique `(scope_id, event_id)` and `(scope_id, enqueue_commit_ordinal, enqueue_event_index)` via the named indexes below. Every pending read uses `ORDER BY enqueue_commit_ordinal ASC, enqueue_event_index ASC`; event IDs and timestamps are not ordering keys. Row-local CHECK requires exactly the existing answer/lesson/score payload columns for each kind; `trg_supported_sync_outbox_account_course_*` requires authenticated-account course scope and exact `user_id`/`course_id` agreement with the scope. Ordering columns remain local metadata: do not add them to the cloud envelope or wire payload, and add no selected/expected values or other wire fields.
 
 - [ ] **Step 4: Name the indexes exactly.** Create these unique indexes:
   - `ux_learning_scopes_owner_course_family` on `learning_scopes(owner_kind, owner_id, course_id, family)`;
@@ -208,10 +210,11 @@ expect(await pragmaUserVersion(db), 1);
   - `ux_learning_completions_identity` on `(scope_id, activity_id, content_revision, policy_kind, policy_revision, threshold_percent)`;
   - `ux_learning_exposure_identity` on `(scope_id, family, COALESCE(activity_id,''), COALESCE(item_id,''), COALESCE(target_sound,''), COALESCE(section_id,''), COALESCE(content_revision,-1))`; course identities include `activity_id`, sentence-hunt identities require it null, and mutable `presentations`/`assistance_mask` are not identity columns.
   - `ux_learning_best_scores_scope_activity` on `learning_best_scores(scope_id, activity_id)`;
-  - `ux_supported_sync_outbox_scope_event` on `supported_sync_outbox(scope_id, event_id)`.
-  Add ordered lookups `ix_learning_attempts_scope_commit_batch` on `(scope_id, commit_ordinal, activity_id, run_generation, command_sequence, batch_index)`, `ix_learning_receipts_scope_commit_ordinal` on `learning_command_receipts(scope_id, commit_ordinal, activity_id, after_generation, after_sequence)`, `ix_learning_runs_scope_cursor` on `(scope_id, activity_id, run_generation, sequence, cursor_revision)`, and `ix_supported_sync_outbox_scope_pending` on `(scope_id, event_id)`.
+  - `ux_supported_sync_outbox_scope_event` on `supported_sync_outbox(scope_id, event_id)`;
+  - `ux_supported_sync_outbox_scope_enqueue_order` on `supported_sync_outbox(scope_id, enqueue_commit_ordinal, enqueue_event_index)`; this unique ordered index also serves all pending FIFO lookups.
+  Add ordered lookups `ix_learning_attempts_scope_commit_batch` on `(scope_id, commit_ordinal, activity_id, run_generation, command_sequence, batch_index)`, `ix_learning_receipts_scope_commit_ordinal` on `learning_command_receipts(scope_id, commit_ordinal, activity_id, after_generation, after_sequence)`, and `ix_learning_runs_scope_cursor` on `(scope_id, activity_id, run_generation, sequence, cursor_revision)`.
 - [ ] **Step 5: Implement the handle and migration test hook.** Configure Drift generation; add create-v1 only, strict unknown-version refusal, verified-empty query, shared lazy handle, close, and reopen. In `learning_migration_failure_probe.dart`, open a v1 file through `LearningDatabase.forTesting(targetSchemaVersion: 2, migrationRunner: ...)`; have the callback execute `migrator.database.customStatement('CREATE TABLE migration_failure_probe (id INTEGER)')` and throw. Reopen with the production v1 constructor and assert original rows/version remain and the marker table is absent.
-- [ ] **Step 6: Generate safely and run focused plus whole-app gates.** Inspect `build/` and generated-file status; run `cd frontend && dart run build_runner build` and the schema test. Then run `cd frontend && flutter analyze` and `cd frontend && flutter test`; expected: exact 13 relations, indexes, row-local checks and named triggers, unknown v99 unchanged, synthetic failure rolled back, all previous tests pass.
+- [ ] **Step 6: Generate safely and run focused plus whole-app gates.** Inspect `build/` and generated-file status; run `cd frontend && dart run build_runner build` and the schema test. Then run `cd frontend && flutter analyze` and `cd frontend && flutter test`; expected: exact 13 relations, indexes (including `ux_supported_sync_outbox_scope_enqueue_order`), row-local checks and named triggers, FIFO outbox columns/constraints, unknown v99 unchanged, synthetic failure rolled back, all previous tests pass.
 - [ ] **Step 7: Commit schema scope.** Stage the exact Task 3 files and commit `feat: define normalized learning schema v1`.
 
 ## Task 4: Add the shared typed SQL command coordinator
@@ -237,7 +240,7 @@ expect(await pragmaUserVersion(db), 1);
   - `LearningSqlTransition<S,R> evaluate({required S before, required C command, required int nextRevision, required int nextCommitOrdinal, required DateTime committedAt})`;
   - `Future<void> persist(LearningDatabase db, int scopeId, S before, C command, S after)`;
   - `R duplicateResult({required S current, required C command})`.
-- `SqliteLearningCommandCoordinator<S,C,R>` requires typed constructor fields `LearningDatabaseHandle database`, `SqliteLearningProfileAdapter<S,C,R> adapter`, `int authGeneration`, `LearningAuthScope Function() currentAuth`, `LearningOwner Function() backendOwner`, `DateTime Function() clock`, and optional `void Function()? onCommitted`. Its methods are `Future<S> load()`, `Future<S> retryLoad()`, `Future<R> submit(C command)`, `Future<List<SupportedCloudEvent>> readSupportedCourseEvents()`, and `Future<void> acknowledgeSupportedCourseEvents(Set<String> ids)`; the final two reject non-course scope.
+- `SqliteLearningCommandCoordinator<S,C,R>` requires typed constructor fields `LearningDatabaseHandle database`, `SqliteLearningProfileAdapter<S,C,R> adapter`, `int authGeneration`, `LearningAuthScope Function() currentAuth`, `LearningOwner Function() backendOwner`, `DateTime Function() clock`, and optional `void Function()? onCommitted`. Its methods are `Future<S> load()`, `Future<S> retryLoad()`, `Future<R> submit(C command)`, `Future<List<SupportedCloudEvent>> readSupportedCourseEvents()`, and `Future<void> acknowledgeSupportedCourseEvents(Set<String> ids)`; the final two reject non-course scope. `readSupportedCourseEvents()` and typed `state.pending` reconstruction order every row by `enqueue_commit_ordinal ASC, enqueue_event_index ASC`, never by event ID; ACK deletes only matching IDs and does not renumber survivors.
 - Exceptions are the existing typed classes from `course_learning_error.dart`: `LearningUnavailableException`, `LearningSaveException`, `LearningConflictException`, `LearningOwnerChangedException`, `LearningInvalidCommandException`, `LearningCorruptException`, `LearningUnsupportedVersionException`, and `LearningContentChangedException`.
 
 - [ ] **Step 1: Write `receipt_retry_precedes_stale_scope_revision_and_changed_payload_is_invalid`, `duplicate_retry_after_ack_uses_current_state_without_outbox_or_notification`, `scope_token_reuse_for_different_activity_is_invalid_in_retained_history`, `scope_token_reuse_for_different_activity_is_invalid_after_history_pruning`, `inconsistent_retained_and_latest_receipt_is_corrupt`, `independent_connections_commit_one_divergent_command`, `load_reads_one_consistent_normalized_snapshot`, `sql_trigger_failure_rolls_back_all_rows`, `outbox_ack_revision_conflicts_stale_snapshot_then_reloaded_command_succeeds`, and unknown-ACK tests RED against two file connections.** The typed test adapter's result carries state on a normal commit and captures the `current` state passed to `duplicateResult`.
@@ -312,8 +315,8 @@ expect(await countReceipts(db, scope), receiptsBeforeReuse);
 - [ ] **Step 2: Run the focused tests RED.** `cd frontend && flutter test test/unit/learning_sql_transaction_test.dart`; expected: missing coordinator/adapter contract.
 - [ ] **Step 3: Implement scope, receipts, and lock/CAS wrappers.** Implement `LearningDatabase.ensureScope` as an exact-identity insert-on-conflict-no-op followed by selecting that row. Add `Future<int> acquireLearningScopeWriteLock(int scopeId)` as the first no-op `UPDATE learning_scopes SET revision=revision WHERE id=?` inside every learner mutation transaction; require one matching scope row. Add `Future<int> compareAndSwapLearningScope({required int scopeId, required int expectedRevision, required int expectedCommitOrdinal, required int nextRevision, required int nextCommitOrdinal})`, returning the affected-row count. Scope insert/open is unique by owner/course/family; never concatenate owner IDs.
 - [ ] **Step 4: Implement receipt-first transaction order.** A public `load()` reads the scope row and every normalized relation used to rebuild typed state inside one SQLite read transaction/snapshot, so a concurrent commit cannot produce a mixed-version state. For each learner mutation, in one SQLite write transaction: acquire the SQLite write lock; verify captured owner/course/family/auth generation before any possible return; read the current scope revision/ordinal; find the token scope-wide in retained receipt history and all activity-run latest receipts; reconcile duplicate representations exactly, treating disagreement as `LearningCorruptException`; if found, reject a different activity ID or full canonical payload with `LearningInvalidCommandException`, otherwise load typed state at the current revision/ordinal inside this same transaction and pass that state to `duplicateResult`, with no writes or `onCommitted` notification. This duplicate branch precedes expected-revision rejection and uses current state, not the receipt-time snapshot, so a replay after outbox ACK returns current pending outbox/state. If no receipt proof exists, compare required expected scope revision; stale/pruned unproven commands conflict. Then load typed rows at the current revision/ordinal, compare the current activity cursor, evaluate with next revision/ordinal, persist attempt/value/evidence/checkpoint/receipt/aggregates/completion/exposure/best-score/outbox, enforce capacity, CAS exactly one scope row from the old revision/ordinal to the next values, and commit. Any throw or zero-row CAS rolls back all rows. No process-wide future queue is a correctness mechanism.
-- [ ] **Step 5: Implement ACK and notification semantics.** Invoke `onCommitted` after learner-command commit only and swallow observer errors. Course ACK deletes only IDs pending in this course/account scope; unknown/already-ACKed IDs are a no-op with no revision/ordinal change. A nonempty ACK increments scope revision but not learner `commit_ordinal` and emits no learner notification. Because this invalidates pre-ACK snapshots, verify that the normal conflict/reload path obtains the new scope revision before another command is prepared; do not silently accept a stale snapshot.
-- [ ] **Step 6: Run focused and full gates.** Assert same-token stale-revision replay succeeds before revision rejection; replay after ACK returns current state/revision with the ACKed outbox still empty, unchanged attempt/receipt counts, and no notification; same-scope token reuse by another activity is invalid from retained history and from another activity's preserved latest receipt after history pruning; inconsistent history/latest representations are corruption; an unproven pruned replay conflicts; two actual file connections yield one commit; `load_reads_one_consistent_normalized_snapshot` cannot combine rows from opposite sides of a concurrent commit; `sql_trigger_failure_rolls_back_all_rows` leaves no partial rows; unknown ACK is a no-op; ACK ordinal is stable; and an old-snapshot new command conflicts after nonempty ACK while a reloaded command succeeds. Run `cd frontend && flutter analyze` and `cd frontend && flutter test`; all must pass.
+- [ ] **Step 5: Implement ACK and notification semantics.** Invoke `onCommitted` after learner-command commit only and swallow observer errors. Every pending read for `readSupportedCourseEvents()` and typed `state.pending` reconstruction orders by `enqueue_commit_ordinal ASC, enqueue_event_index ASC`. Course ACK deletes only matching IDs pending in this course/account scope; unknown/already-ACKed IDs are a no-op with no revision/ordinal change, and deletion never renumbers or changes the order columns on remaining rows. A nonempty ACK increments scope revision but not learner `commit_ordinal` and emits no learner notification. Because this invalidates pre-ACK snapshots, verify that the normal conflict/reload path obtains the new scope revision before another command is prepared; do not silently accept a stale snapshot.
+- [ ] **Step 6: Run focused and full gates.** Assert same-token stale-revision replay succeeds before revision rejection; replay after ACK returns current state/revision with the ACKed outbox still empty, unchanged attempt/receipt counts, and no notification; same-scope token reuse by another activity is invalid from retained history and from another activity's preserved latest receipt after history pruning; inconsistent history/latest representations are corruption; an unproven pruned replay conflicts; two actual file connections yield one commit; `load_reads_one_consistent_normalized_snapshot` cannot combine rows from opposite sides of a concurrent commit; `sql_trigger_failure_rolls_back_all_rows` leaves no partial rows; unknown ACK is a no-op; ACK ordinal is stable; and an old-snapshot new command conflicts after nonempty ACK while a reloaded command succeeds. Outbox reads return exact FIFO ordering after ACK leaves ordinal gaps. Run `cd frontend && flutter analyze` and `cd frontend && flutter test`; all must pass.
 - [ ] **Step 7: Commit the coordinator.** Stage exact Task 4 paths and commit `feat: add transactional SQLite learning command core`.
 
 ## Task 5: Add inactive course SQL adapter and repository
@@ -331,13 +334,21 @@ expect(await countReceipts(db, scope), receiptsBeforeReuse);
 - SQL receipts store `CourseLearningCommandCodec.canonicalCommand(command)` (including required scope revision). When `loadState` rebuilds domain receipt objects, decode that SQL payload and populate their legacy `canonicalCommand` field using `legacyCanonicalCommand`; do not put either receipt history or SQL identity into `checkpoint_json`.
 - The existing `CourseLearningRepository` remains the sole production implementation until Task 8; SQL tests instantiate `SqliteCourseLearningRepository` directly. Neither instance dual-writes nor falls back.
 
-- [ ] **Step 1: Write the failing SQL repository tests.** `course_answer_checkpoint_aggregates_and_outbox_reopen_together` starts and answers an account lesson, closes/reopens the file, and asserts selected/expected values, cursor, summary, mistake, and one existing supported answer outbox row. Also assert `prepare` captures nonzero `state.revision` into the required command field. Add `course_exposure_is_activity_scoped_and_independent_after_reopen`: seed two `ActivitySlot`s with the same `ItemContextKey` but different presentation counts and assistance sets; assert two `learning_exposure` rows keyed by their distinct `activity_id`s and independent values after close/reopen; restart only activity A, reopen again, and assert activity B's exact count and assistance set is unchanged.
+- [ ] **Step 1: Write the failing SQL repository tests.** `course_answer_checkpoint_aggregates_and_outbox_reopen_together` starts and answers an account lesson, captures and submits that exact command, then replays it to simulate a lost caller commit acknowledgment; assert one outbox row remains with identical `(event_id, enqueue_commit_ordinal, enqueue_event_index)` and no duplicate/reordered event. Close/reopen and assert selected/expected values, cursor, summary, mistake, and the same supported answer outbox row with the learner `commit_ordinal` and event index `0`. Also assert `prepare` captures nonzero `state.revision` into the required command field. Add `course_exposure_is_activity_scoped_and_independent_after_reopen` using the explicit valid registry fixture below; construct its transition engine with `LearningTransitionEngine(registry)`. Add `course_outbox_fifo_survives_reopen_failed_send_partial_ack_and_retry`: use a valid account/course scope and 102 ordered outbox fixtures representing two projected events at each of 51 commit ordinals, with deliberately nonlexical IDs (`event-101` through `event-000`) and indexes `0` and `1`; seed the fixture scope at revision/learner ordinal 51. Reopen and assert database reads plus reconstructed `state.pending` preserve that order; a failed send retries the same first 100 IDs; successful ACK of those 100 followed by a failed send leaves the final two rows at their original ordinal/index values; reopening and retrying sends those last two in order and ACKs only them. Compare delivered wire projections byte-for-byte/field-for-field with the existing event fixture, confirming the local ordering columns never enter the wire payload and event IDs are preserved.
 
 ```dart
 final command = repository.prepare(state: state, activityId: lessonId,
     action: answerAction);
 expect(command.expectedScopeRevision, state.revision);
-await repository.submit(command);
+final committed = await repository.submit(command);
+final outboxAfterCommit = await outboxIdentityRows(db, scope);
+expect(outboxAfterCommit, hasLength(1));
+expect(outboxAfterCommit.single.enqueueCommitOrdinal,
+    committed.state.commitOrdinal);
+expect(outboxAfterCommit.single.enqueueEventIndex, 0);
+final replay = await repository.submit(command); // Simulated lost caller ACK.
+expect(replay.duplicate, isTrue);
+expect(await outboxIdentityRows(db, scope), outboxAfterCommit);
 await database.close();
 final reopened = await handle.reopen();
 expect((await repository.load()).activities[lessonId]!.cursor,
@@ -346,35 +357,114 @@ expect(await answerValueRows(reopened), expectedSelectedAndExpectedValues);
 ```
 
 ```dart
+final registry = LearningRegistry.french();
+const activityA = 'lesson:en-fr-vowels';
+const activityB = 'lesson:en-fr-nasal';
+const sharedItemId = 'beau';
+const sharedSound = 'o';
+final definitionA = registry.require(activityA);
+final definitionB = registry.require(activityB);
+expect(definitionA.kind, LearningActivityKind.legacyLesson);
+expect(definitionB.kind, LearningActivityKind.legacyLesson);
+expect(definitionA.items.any((item) => item.id == sharedItemId &&
+    item.targetSounds.contains(sharedSound)), isTrue);
+expect(definitionB.items.any((item) => item.id == sharedItemId &&
+    item.targetSounds.contains(sharedSound)), isTrue);
+
+Future<LearningCommit> submitAction(
+    String activityId, LearningAction action) async {
+  final state = await repository.load();
+  return repository.submit(repository.prepare(
+      state: state, activityId: activityId, action: action));
+}
+
+await submitAction(activityA,
+    StartLearningRun(options: RunOptions()));
+await submitAction(activityB,
+    StartLearningRun(options: RunOptions()));
+await submitAction(activityB, ChooseSound(
+    selectedSound: sharedSound,
+    audioSource: AttemptAudioSource.pendingRecording));
+await submitAction(activityB, ObserveAssistance(
+    items: {ItemContextKey(itemId: sharedItemId, targetSound: sharedSound)},
+    flags: {AssistanceFlag.graphemeHint}));
+
 final key = ItemContextKey(itemId: sharedItemId, targetSound: sharedSound);
+await database.close();
 final firstReopen = await handle.reopen();
 final beforeRestart = await repository.load();
 final exposureA = beforeRestart.activities[activityA]!.exposures[key]!;
 final exposureB = beforeRestart.activities[activityB]!.exposures[key]!;
-expect(exposureA.presentations, isNot(equals(exposureB.presentations)));
-expect(exposureA.assistance, isNot(equals(exposureB.assistance)));
+expect(exposureA.presentations, 0);
+expect(exposureA.assistance, equals({AssistanceFlag.explanationVisible}));
+expect(exposureB.presentations, 1);
+expect(exposureB.assistance, equals({
+  AssistanceFlag.explanationVisible,
+  AssistanceFlag.graphemeHint,
+}));
 expect(await exposureActivityIds(firstReopen, scope, key), unorderedEquals([activityA, activityB]));
 
-final restartedA = await repository.submit(restartCommandForA);
+final restartedA = await submitAction(activityA,
+    StartLearningRun(options: RunOptions()));
 final expectedA = restartedA.state.activities[activityA]!.exposures[key];
+expect(expectedA, isNotNull);
+expect(expectedA!.presentations, 0);
+expect(expectedA!.assistance, equals({AssistanceFlag.explanationVisible}));
 final finalReopen = await handle.reopen();
 final reopenedState = await repository.load();
-expect(reopenedState.activities[activityA]!.exposures[key]?.presentations,
-    expectedA?.presentations);
-expect(reopenedState.activities[activityA]!.exposures[key]?.assistance,
-    expectedA?.assistance);
-expect(reopenedState.activities[activityB]!.exposures[key]!.presentations,
+final restartedExposureA =
+    reopenedState.activities[activityA]!.exposures[key];
+expect(restartedExposureA, isNotNull);
+expect(restartedExposureA!.presentations, 0);
+expect(restartedExposureA!.assistance,
+    equals({AssistanceFlag.explanationVisible}));
+final reopenedExposureB = reopenedState.activities[activityB]!.exposures[key]!;
+expect(reopenedExposureB.presentations,
     exposureB.presentations);
-expect(reopenedState.activities[activityB]!.exposures[key]!.assistance,
+expect(reopenedExposureB.assistance,
     exposureB.assistance);
 expect(await exposureActivityIds(finalReopen, scope, key), unorderedEquals([activityA, activityB]));
 ```
 
+The FIFO test fixture assigns groups as `enqueue_commit_ordinal = 1 + eventIndexInFixture ~/ 2` and `enqueue_event_index = eventIndexInFixture % 2`; expected IDs are `List.generate(102, (i) => 'event-${(101 - i).toString().padLeft(3, '0')}')`. Assert the raw `(enqueue_commit_ordinal, enqueue_event_index, event_id)` rows in that order, then assert the ordered IDs from both `coordinator.readSupportedCourseEvents()` and `repository.load().pending`. Use a fake transport that fails call 1, succeeds call 2, fails call 3, and succeeds call 4. The calls must contain IDs `[0..99]`, `[0..99]`, `[100..101]`, `[100..101]`; after call 3's partial ACK and reopen, the remaining raw rows must still have ordinal `51` and event indexes `0,1` (no compaction). A failed send must not add, remove, or reorder rows. The fixture's expected server envelopes contain only the existing event IDs and supported event payload fields.
+
+```dart
+final expectedIds = List.generate(
+    102, (i) => 'event-${(101 - i).toString().padLeft(3, '0')}');
+expect((await coordinator.readSupportedCourseEvents()).map((event) => event.id),
+    orderedEquals(expectedIds));
+expect((await repository.load()).pending.map((event) => event.id),
+    orderedEquals(expectedIds));
+
+expect((await repository.sync()).remainingEvents, 102); // Send call 1 fails.
+await handle.reopen();
+final partial = await repository.sync(); // Call 2 sends/ACKs 100; call 3 fails.
+expect(partial.status, SupportedSyncStatus.pending);
+expect(partial.remainingEvents, 2);
+final reopenedForTail = await handle.reopen();
+final tail = expectedIds.skip(100).toList();
+expect((await repository.load()).pending.map((event) => event.id),
+    orderedEquals(tail));
+expect(await outboxOrderRows(reopenedForTail, scope), orderedEquals([
+  (51, 0, expectedIds[100]),
+  (51, 1, expectedIds[101]),
+]));
+expect((await repository.sync()).status, SupportedSyncStatus.synced); // Call 4.
+expect(transport.batchIds, orderedEquals([
+  expectedIds.take(100).toList(),
+  expectedIds.take(100).toList(),
+  tail,
+  tail,
+]));
+```
+
+Also compare the fake transport's existing wire projection for each batch to the fixture payloads and assert no `enqueue_commit_ordinal` or `enqueue_event_index` field is serialized.
+
 - [ ] **Step 2: Run the focused test RED.** Run `cd frontend && flutter test test/unit/course_learning_sql_adapter_test.dart`; expected: SQL repository does not exist.
 - [ ] **Step 3: Implement the independent SQL adapter/repository.** Reuse `LearningTransitionEngine` only; build a new repository and adapter alongside the preferences class. Scope revision comes from the required command field already introduced in Task 2; use `CourseLearningCommandCodec.canonicalCommand` for SQL receipts. On load, decode SQL receipt payloads and derive the unchanged legacy canonical projection for domain receipt objects; on commit, keep the SQL receipt canonical only in normalized receipt/latest-run columns. Reconstruct typed state from rows and validate before publication.
-- [ ] **Step 4: Map course rows and retention.** Map each `AttemptAnswer` variant, selected/expected IDs, choices and ordered target sounds to `learning_attempt_values`; preserve batch indices and trim oldest whole command batches at 2,000 attempts. Map exposure rows from each `ActivitySlot` separately, setting `activity_id` from that slot and preserving each slot's `ItemContextKey` counts/assistance; never collapse equal item/sound keys across activities. Starting/restarting one activity updates only that slot's exposure rows. Upsert mistakes/summaries/completions/exposure/best score independently; cap each aggregate identity collection at 4,096 and retain each current activity's latest receipt. Encode only one bounded `ActivitySnapshot` in `checkpoint_json`.
-- [ ] **Step 5: Preserve exact sync projection.** Reconstruct only current `SupportedCloudEvent` objects from `supported_sync_outbox`, and use coordinator transactional ACK. Keep `course_learning_sync.dart`, transport, allowlist, envelope, 100-event batching, retry, and account/course filter unchanged; comparison/sentence events remain absent.
-- [ ] **Step 6: Run focused and full gates.** Run `cd frontend && flutter test test/unit/course_learning_sql_adapter_test.dart test/unit/course_learning_game_transition_test.dart test/unit/course_learning_lesson_transition_test.dart test/unit/course_learning_sync_test.dart`, then `cd frontend && flutter analyze` and `cd frontend && flutter test`. Confirm the preferences constructor and current providers are unchanged and no SQL repository is active in production.
+- [ ] **Step 4: Map course rows and retention.** Map each `AttemptAnswer` variant, selected/expected IDs, choices and ordered target sounds to `learning_attempt_values`; preserve batch indices and trim oldest whole command batches at 2,000 attempts. Map exposure rows from each `ActivitySlot` separately, setting `activity_id` from that slot and preserving each slot's `ItemContextKey` counts/assistance; never collapse equal item/sound keys across activities. Starting/restarting one activity updates only that slot's exposure rows. For each learner commit, persist each newly projected supported event with `enqueue_commit_ordinal` equal to that commit's learner ordinal and `enqueue_event_index` equal to its zero-based position in the projector's event list; preserve that list order even when IDs sort differently. Reconstruct all pending outbox events and `CourseLearningState.pending` by `ORDER BY enqueue_commit_ordinal ASC, enqueue_event_index ASC`. Exact duplicate command replay performs no outbox insert and cannot change an existing event's order. Upsert mistakes/summaries/completions/exposure/best score independently; cap each aggregate identity collection at 4,096 and retain each current activity's latest receipt. Encode only one bounded `ActivitySnapshot` in `checkpoint_json`.
+- [ ] **Step 5: Preserve exact sync projection.** Reconstruct only current `SupportedCloudEvent` objects from `supported_sync_outbox` in `(enqueue_commit_ordinal, enqueue_event_index)` order, and use coordinator transactional ACK. ACK removes only acknowledged IDs; it never updates/renumbers remaining order columns. Keep `course_learning_sync.dart`, transport, allowlist, envelope, 100-event batching, retry, and account/course filter unchanged; ordering columns are storage-only and are never included in wire data; comparison/sentence events remain absent.
+- [ ] **Step 6: Run focused and full gates.** Run `cd frontend && flutter test test/unit/course_learning_sql_adapter_test.dart test/unit/course_learning_game_transition_test.dart test/unit/course_learning_lesson_transition_test.dart test/unit/course_learning_sync_test.dart`, including `course_exposure_is_activity_scoped_and_independent_after_reopen` and `course_outbox_fifo_survives_reopen_failed_send_partial_ack_and_retry`, then `cd frontend && flutter analyze` and `cd frontend && flutter test`. Confirm the preferences constructor and current providers are unchanged and no SQL repository is active in production.
 - [ ] **Step 7: Commit course SQL staging.** Stage exact Task 5 paths and commit `feat: stage course learning SQLite repository`.
 
 ## Task 6: Add inactive comparison SQL adapter and repository
