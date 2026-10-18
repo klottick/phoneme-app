@@ -102,8 +102,13 @@ class _SentenceHuntProgressSectionState
 
       // Store acquisition is intentionally inside this guarded recovery path:
       // it may await both the catalogue and owner-scoped persistence setup.
-      final SentenceHuntLearningStore store =
-          await ref.read(sentenceHuntLearningStoreProvider.future);
+      final AsyncValue<SentenceHuntLearningStore> storeState =
+          ref.read(sentenceHuntLearningStoreProvider);
+      final Future<SentenceHuntLearningStore> storeAcquisition =
+          storeState.hasError && !storeState.isLoading
+              ? ref.refresh(sentenceHuntLearningStoreProvider.future)
+              : ref.read(sentenceHuntLearningStoreProvider.future);
+      final SentenceHuntLearningStore store = await storeAcquisition;
       if (!_ownsRetry(operation, captured) ||
           store.scope.owner != captured.owner) {
         return;

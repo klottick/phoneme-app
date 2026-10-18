@@ -664,6 +664,193 @@ void main() {
     expect(find.bySemanticsLabel('Word 1 of 5: Vous'), findsOneWidget,
         reason: 'the review link opens the exact saved mistake item');
   });
+
+  testWidgets('sentence_progress_retry_does_not_duplicate_pending_acquisition',
+      (tester) async {
+    final SentenceHuntCatalogue catalogue = syntheticSentenceCatalogue();
+    final SentenceHuntProfileScope scope = SentenceHuntProfileScope(
+        courseId: 'en-fr', owner: LearningOwner.guest());
+    final Completer<SentenceHuntLearningStore> pendingAcquisition =
+        Completer<SentenceHuntLearningStore>();
+    final _HeldSentenceStore store = _HeldSentenceStore(scope)..releaseRetry();
+    var storeFactories = 0;
+
+    await tester.pumpWidget(ProviderScope(
+        overrides: [
+          learningAuthScopeProvider.overrideWith((ref) =>
+              LearningAuthTracker(owner: LearningOwner.guest(), ready: true)),
+          sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
+          sentenceHuntLearningStoreProvider.overrideWith((ref) async {
+            storeFactories++;
+            return pendingAcquisition.future;
+          }),
+          sentenceHuntLearningStateProvider.overrideWith((ref) async {
+            throw StateError('synthetic sentence state unavailable');
+          }),
+        ],
+        child: const MaterialApp(
+            home: Scaffold(body: SentenceHuntProgressSection()))));
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pumpAndSettle();
+    expect(find.text('Retry sentence progress'), findsOneWidget);
+    final TextButton initialRetryButton = tester.widget<TextButton>(
+        find.ancestor(
+            of: find.text('Retry sentence progress'),
+            matching: find.byType(TextButton)));
+    final VoidCallback retryAgain = initialRetryButton.onPressed!;
+
+    await tester.tap(find.text('Retry sentence progress'));
+    await tester.pumpAndSettle();
+    expect(storeFactories, 1);
+    expect(find.text('Retrying sentence progress…'), findsOneWidget);
+    final TextButton retryButton = tester.widget<TextButton>(find.ancestor(
+      of: find.text('Retrying sentence progress…'),
+      matching: find.byType(TextButton),
+    ));
+    expect(retryButton.onPressed, isNull,
+        reason: 'a pending acquisition cannot start a second retry');
+    retryAgain();
+    await tester.pump();
+    expect(storeFactories, 1,
+        reason: 'a duplicate tap must not reacquire a pending store');
+
+    pendingAcquisition.complete(store);
+    await tester.pumpAndSettle();
+    await tester.runAsync(() => store.retryFinished.future);
+    await tester.pumpAndSettle();
+    expect(storeFactories, 1);
+    expect(store.retryCalls, 1);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('sentence_retry_disposal_fences_pending_store_acquisition',
+      (tester) async {
+    final SentenceHuntCatalogue catalogue = syntheticSentenceCatalogue();
+    final LearningAuthTracker auth =
+        LearningAuthTracker(owner: LearningOwner.guest(), ready: true);
+    final SentenceHuntProfileScope scope = SentenceHuntProfileScope(
+        courseId: 'en-fr', owner: LearningOwner.guest());
+    final Completer<void> acquisitionEntered = Completer<void>();
+    final Completer<SentenceHuntLearningStore> acquisition =
+        Completer<SentenceHuntLearningStore>();
+    final _HeldSentenceStore store = _HeldSentenceStore(scope);
+    var storeFactories = 0;
+    var stateBuilds = 0;
+    final ProviderContainer container = ProviderContainer(overrides: [
+      learningAuthScopeProvider.overrideWith((ref) => auth),
+      sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
+      sentenceHuntLearningStoreProvider.overrideWith((ref) async {
+        storeFactories++;
+        if (storeFactories == 1) {
+          throw StateError('initial store acquisition failure');
+        }
+        acquisitionEntered.complete();
+        return acquisition.future;
+      }),
+      sentenceHuntLearningStateProvider.overrideWith((ref) async {
+        stateBuilds++;
+        await ref.watch(sentenceHuntLearningStoreProvider.future);
+        throw StateError('sentence state remains unavailable');
+      }),
+    ]);
+    final ProviderSubscription<AsyncValue<SentenceHuntState>>
+        stateSubscription =
+        container.listen(sentenceHuntLearningStateProvider, (_, __) {});
+    addTearDown(() {
+      stateSubscription.close();
+      container.dispose();
+    });
+
+    await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+            home: Scaffold(body: SentenceHuntProgressSection()))));
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pumpAndSettle();
+    expect(find.text('Sentence progress is unavailable.'), findsOneWidget);
+    expect(storeFactories, 1);
+
+    await tester.tap(find.text('Retry sentence progress'));
+    await tester.pump();
+    await tester.runAsync(() => acquisitionEntered.future);
+    await tester.pump();
+    expect(storeFactories, 2);
+    expect(find.text('Sentence progress is loading.'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    final int stateBuildsAtDisposal = stateBuilds;
+    acquisition.complete(store);
+    await tester.runAsync(() => acquisition.future);
+    await tester.pumpAndSettle();
+
+    expect(store.retryCalls, 0,
+        reason: 'a disposed retry must not advance into store repair');
+    expect(stateBuilds, stateBuildsAtDisposal,
+        reason: 'a disposed retry must not invalidate progress state');
+  });
+
+  testWidgets(
+      'sentence_progress_retry_reacquires_repeated_failed_store_acquisitions',
+      (tester) async {
+    final SentenceHuntCatalogue catalogue = syntheticSentenceCatalogue();
+    final SentenceHuntProfileScope scope = SentenceHuntProfileScope(
+        courseId: 'en-fr', owner: LearningOwner.guest());
+    final _HeldSentenceStore store = _HeldSentenceStore(scope)..releaseRetry();
+    final Completer<void> pendingAcquisitionEntered = Completer<void>();
+    final Completer<SentenceHuntLearningStore> pendingAcquisition =
+        Completer<SentenceHuntLearningStore>();
+    var storeFactories = 0;
+
+    await tester.pumpWidget(ProviderScope(
+        overrides: [
+          learningAuthScopeProvider.overrideWith((ref) =>
+              LearningAuthTracker(owner: LearningOwner.guest(), ready: true)),
+          sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
+          sentenceHuntLearningStoreProvider.overrideWith((ref) async {
+            storeFactories++;
+            if (storeFactories < 3) {
+              throw StateError('transient store acquisition $storeFactories');
+            }
+            pendingAcquisitionEntered.complete();
+            return pendingAcquisition.future;
+          }),
+        ],
+        child: const MaterialApp(
+            home: Scaffold(body: SentenceHuntProgressSection()))));
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sentence progress is unavailable.'), findsOneWidget);
+    expect(storeFactories, 1);
+
+    await tester.tap(find.text('Retry sentence progress'));
+    await tester.pumpAndSettle();
+    expect(storeFactories, 2,
+        reason: 'explicit retry must reacquire after a failed store future');
+    expect(find.text('Sentence progress is unavailable.'), findsOneWidget);
+
+    await tester.tap(find.text('Retry sentence progress'));
+    await tester.pump();
+    await tester.runAsync(() => pendingAcquisitionEntered.future);
+    await tester.pump();
+    expect(storeFactories, 3);
+    expect(find.text('Sentence progress is loading.'), findsOneWidget,
+        reason: 'a pending retry acquisition remains unknown');
+
+    pendingAcquisition.complete(store);
+    await tester.runAsync(() => store.retryFinished.future);
+    await tester.pumpAndSettle();
+    expect(storeFactories, 3,
+        reason: 'a successful store acquisition is reused');
+    expect(store.retryCalls, 1);
+    expect(find.text('Sentence sections completed: 0/3'), findsOneWidget,
+        reason: 'the real state provider loads the reacquired store state');
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+  });
 }
 
 SentenceHuntCatalogue _catalogueWithVowelsOnlyAvailable() {
@@ -736,7 +923,6 @@ Future<void> _exerciseCorruptSentenceRecovery(
   await tester.pumpAndSettle();
   await tester.tap(find.byTooltip('Progress'));
   await tester.pumpAndSettle();
-
   expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
   expect(find.text('Existing lessons (includes discovery pilot): 0/5 complete'),
       findsOneWidget);
