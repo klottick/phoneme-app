@@ -15,6 +15,7 @@ _TSV_FIELDS = (
 )
 _ASCII_DECIMAL = re.compile(r"[0-9]+\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_TSV_RECORD_SEPARATOR = re.compile(r"\r?\n")
 
 
 def _nonblank(value):
@@ -26,7 +27,7 @@ def parse_fleurs_train_tsv(text):
         raise SentencePackageError("TSV input must be text")
     rows = []
     seen = set()
-    for line_number, line in enumerate(text.splitlines(), 1):
+    for line_number, line in enumerate(_TSV_RECORD_SEPARATOR.split(text), 1):
         if not line.strip():
             continue
         columns = line.split("\t")

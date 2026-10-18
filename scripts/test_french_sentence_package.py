@@ -24,6 +24,17 @@ class FrenchSentencePackageTests(unittest.TestCase):
             "num_samples": "2", "gender": "female",
         })
 
+    def test_tsv_preserves_unicode_separators_and_splits_only_record_terminators(self):
+        content = "line\u2028para\u2029nel\x85vertical\x0bform\x0cfile\x1cgroup\x1drecord\x1e"
+        first = f"1\ta.wav\traw\t{content}\tx\t1\tf"
+        second = "2\tb.wav\traw\tsecond\tx\t1\tf"
+        rows = parse_fleurs_train_tsv(first + "\r\n" + second + "\n")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["transcription"], content)
+        self.assertEqual(rows[1]["transcription"], "second")
+        with self.assertRaisesRegex(SentencePackageError, "line 3"):
+            parse_fleurs_train_tsv(first + "\n" + second + "\r\npartial\trow")
+
     def test_tsv_identity_is_id_and_filename(self):
         rows = parse_fleurs_train_tsv(
             "7\ta.wav\traw a\ttext a\tx\t1\tf\n"
