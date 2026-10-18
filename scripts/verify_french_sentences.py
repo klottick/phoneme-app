@@ -125,6 +125,16 @@ def _is_int(value):
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+def _is_unicode_scalar_string(value):
+    if not isinstance(value, str):
+        return False
+    try:
+        value.encode("utf-8", errors="strict")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def _nonblank(value):
     return isinstance(value, str) and bool(value.strip())
 
@@ -342,6 +352,9 @@ class _Verifier:
         if not isinstance(value, str) or (nonblank and not value.strip()):
             qualifier = "nonblank " if nonblank else ""
             self.error(path, f"must be a {qualifier}string")
+            return False
+        if not _is_unicode_scalar_string(value):
+            self.error(path, "must contain only valid Unicode scalar values")
             return False
         return True
 
@@ -982,6 +995,9 @@ class _Verifier:
         except SentencePackageError as exc:
             self.error(path, f"cannot compute final annotation hash ({exc})")
             valid = False
+        except UnicodeEncodeError:
+            self.error(f"{path}.text", "annotation contains invalid Unicode scalar data")
+            valid = False
         if actual_hash is not None:
             if item.get("annotationHash") != actual_hash:
                 self.error(f"{path}.annotationHash", "manifest annotationHash does not match computed final annotation hash")
@@ -1001,7 +1017,8 @@ class _Verifier:
                 valid = False
             self._sha(tool.get("inputSha256"), f"{entry_path}.tool.inputSha256")
             text = item.get("text")
-            if isinstance(text, str) and hashlib.sha256(text.encode("utf-8")).hexdigest() != tool.get("inputSha256"):
+            if (isinstance(text, str) and _is_unicode_scalar_string(text)
+                    and hashlib.sha256(text.encode("utf-8")).hexdigest() != tool.get("inputSha256")):
                 self.error(f"{entry_path}.tool.inputSha256", "tool.inputSha256 does not match exact sentence text")
                 valid = False
         else:
@@ -1217,6 +1234,9 @@ class _Verifier:
         if not isinstance(value, str) or not value or "\\" in value or "\x00" in value:
             self.error(label, f"{label.split('.')[-1]} must be a safe relative path under {expected_directory}/")
             return None
+        if not _is_unicode_scalar_string(value):
+            self.error(label, f"{label.split('.')[-1]} contains invalid Unicode scalar data")
+            return None
         pure = PurePosixPath(value)
         parts = value.split("/")
         if (pure.is_absolute() or not parts or parts[0] != expected_directory
@@ -1329,21 +1349,29 @@ class _Verifier:
             self.error("manifest.json.sections[2].items", "mixed section must revisit a prior consonant target")
 
 
+def _guarded_verification(root, require_reviewed=False):
+    try:
+        verifier = _Verifier(root, require_reviewed)
+        errors = verifier.run()
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError, IndexError,
+            OverflowError, RecursionError, wave.Error, EOFError) as exc:
+        # Malformed package bytes/types are user input, never a CLI traceback.
+        return None, [f"package: malformed input prevented verification ({type(exc).__name__})"]
+    return verifier, errors
+
+
 def verify_package(root: Path, require_reviewed: bool = False) -> list[str]:
     """Return deterministic diagnostics; an empty list means technical validity only."""
     if not isinstance(require_reviewed, bool):
         return ["require_reviewed: must be a boolean"]
-    try:
-        return _Verifier(root, require_reviewed).run()
-    except (OSError, UnicodeError, ValueError, TypeError, KeyError, IndexError,
-            OverflowError, RecursionError, wave.Error, EOFError) as exc:
-        # Malformed package bytes/types are user input, never a CLI traceback.
-        return [f"package: malformed input prevented verification ({type(exc).__name__})"]
+    _, errors = _guarded_verification(root, require_reviewed)
+    return errors
 
 
 def _summary(root):
-    verifier = _Verifier(root, False)
-    errors = verifier.run()
+    verifier, errors = _guarded_verification(root)
+    if verifier is None:
+        return errors, 0, 0, 0, 0
     qualified = sum(bool(value) for value in verifier.item_results.values())
     candidates = len(verifier.items)
     pending = max(0, candidates - qualified)

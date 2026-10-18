@@ -987,10 +987,85 @@ class VerifyFrenchSentenceTests(unittest.TestCase):
 
     def test_malformed_array_types_return_field_diagnostics_without_traceback(self):
         self._rewrite("manifest.json", lambda value: value["sections"][2]["items"][0].update(targetSound=["a"]))
-        self._contains(self._verify(), "targetSound: must be a known sentence-local IPA phoneme")
+        before = _snapshot(self.root)
+        with mock.patch("urllib.request.build_opener", side_effect=AssertionError("network edge used")), \
+                mock.patch("urllib.request.urlopen", side_effect=AssertionError("network edge used")), \
+                mock.patch("subprocess.run", side_effect=AssertionError("subprocess edge used")):
+            errors = self._verify()
+            self.assertEqual(errors, self._verify())
+            stdout, stderr, status = self._run_cli()
+            stdout_again, stderr_again, status_again = self._run_cli()
+        self._contains(errors, "targetSound: must be a known sentence-local IPA phoneme")
+        self.assertEqual(status, 1)
+        self.assertEqual((stdout_again, stderr_again, status_again),
+                         (stdout, stderr, status))
+        self.assertIn("targetSound: must be a known sentence-local IPA phoneme", stderr)
+        self.assertNotIn("Traceback", stderr)
+        self.assertEqual(_snapshot(self.root), before)
         self.setUp()
         self._rewrite("manifest.json", lambda value: value["sections"][0].update(id=["wrong-shape"]))
         self._contains(self._verify(), "manifest.json.sections[0].id: must be 'en-fr-sentence-hunt-vowels'")
+
+    def test_lone_surrogates_in_manifest_paths_and_text_fail_cleanly_in_api_and_cli(self):
+        for field in ("originalPath", "clipPath", "text"):
+            for surrogate in ("\ud800", "\udfff"):
+                with self.subTest(field=field, codepoint=ord(surrogate)):
+                    self.setUp()
+                    manifest_path = self.root / "manifest.json"
+                    manifest = _json(manifest_path)
+                    item = manifest["sections"][0]["items"][0]
+                    if field == "text":
+                        item[field] = f"chat {surrogate} non."
+                    else:
+                        directory = "originals" if field == "originalPath" else "clips"
+                        item[field] = f"{directory}/invalid-{surrogate}.wav"
+                    manifest_path.write_text(
+                        json.dumps(manifest, ensure_ascii=True, allow_nan=True,
+                                   separators=(",", ":")) + "\n",
+                        encoding="utf-8")
+
+                    before = _snapshot(self.root)
+                    cli_exception = None
+                    with mock.patch(
+                            "urllib.request.build_opener",
+                            side_effect=AssertionError("network edge used")), \
+                            mock.patch(
+                                "urllib.request.urlopen",
+                                side_effect=AssertionError("network edge used")), \
+                            mock.patch(
+                                "subprocess.run",
+                                side_effect=AssertionError("subprocess edge used")):
+                        errors = self._verify()
+                        self.assertEqual(errors, self._verify())
+                        cli_runs = []
+                        for _ in range(2):
+                            try:
+                                cli_runs.append(self._run_cli())
+                            except Exception as exc:
+                                cli_exception = exc
+                                cli_runs.append(("", "", None))
+                        stdout, stderr, status = cli_runs[0]
+
+                    field_path = f"manifest.json.sections[0].items[0].{field}"
+                    failures = []
+                    if not any(field_path in error and "Unicode" in error for error in errors):
+                        failures.append(f"API lacks field diagnostic: {errors!r}")
+                    if cli_exception is not None:
+                        failures.append(
+                            f"CLI main raised {type(cli_exception).__name__}: {cli_exception}")
+                    if status != 1:
+                        failures.append(f"CLI status is {status!r}, expected 1")
+                    if cli_runs[0] != cli_runs[1]:
+                        failures.append(f"CLI diagnostics are not deterministic: {cli_runs!r}")
+                    if field_path not in stderr or "Unicode" not in stderr:
+                        failures.append(f"CLI lacks field diagnostic: {stderr!r}")
+                    if "Traceback" in stderr:
+                        failures.append("CLI stderr contains a traceback")
+                    if stdout:
+                        failures.append(f"CLI wrote unexpected stdout: {stdout!r}")
+                    if _snapshot(self.root) != before:
+                        failures.append("verification mutated the package")
+                    self.assertEqual(failures, [])
 
     def test_diagnostics_keep_authored_order_across_repeated_runs(self):
         self._rewrite("manifest.json", lambda value: value["sections"][0]["items"][0].update(targetSound="unknown"))
