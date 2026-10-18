@@ -47,15 +47,18 @@ Included:
 - Local owner isolation, transactional saves, retries, revision conflicts,
   bounded retention, committed-only progress, and future SQLite schema upgrades.
 - Preserve the existing supported course-progress sync projection and its
-  delivery boundary exactly; it remains an explicit exception to local-only
-  detailed history, not a new learning-data upload.
+  delivery boundary exactly, without adding fields or event types. The existing
+  limited projection continues; it is not a new or expanded upload.
 
 Not included:
 
 - Importers or compatibility handling for old preferences, JSON documents,
   preference keys, or database formats; old keys are not deleted.
-- New cloud storage, cloud history downloads/merges, learner-answer uploads,
-  backup fallback, or new comparison/sentence-hunt sync events.
+- New cloud storage, cloud history downloads/merges, learner-data uploads beyond
+  the existing allowlisted course-learning event projection, backup fallback, or
+  new comparison/sentence-hunt sync events. Selected/expected answer values,
+  full local attempt records, and checkpoints remain local; the existing
+  projection carries only its allowlisted fields.
 - Changes to exercise content, scoring, completion rules, French approval,
   audio policy, routes, or unrelated settings/authentication storage.
 - Reworking or integrating unpublished Sound Match work.
@@ -114,8 +117,10 @@ The storage boundary consists conceptually of:
   “not started.”
 - **Current sync adapter:** only the existing course-learning supported-event
   projection reads committed outbox rows and sends the current allowlisted wire
-  events through `record_course_events`. Detailed answers/checkpoints remain
-  local. Comparison and sentence hunt remain without cloud event delivery.
+  events through `record_course_events`. Selected/expected answer values,
+  full-detail attempt records, and checkpoints remain local; only the existing
+  allowlisted event fields are projected. Comparison and sentence hunt remain
+  without cloud event delivery.
 
 ### 4.2 Platform strategy and qualification
 
@@ -165,7 +170,7 @@ foreign keys rather than being repeated as mutable JSON documents.
 | `learning_summaries` | Typed cumulative buckets and counts, including first/repeat and assistance dimensions where currently used. This is committed progress, not a value recomputed from pruned attempts. |
 | `learning_completions` | Idempotent completion records keyed by activity/content/policy identity and threshold where applicable. Historical completion remains distinct from currently registered completion. |
 | `learning_exposure` and `learning_best_scores` | Durable teaching exposure and current game best-score identities where the existing family uses them. |
-| `supported_sync_outbox` | Only the existing supported course-learning event IDs and allowlisted summary payload fields, scoped to the authenticated account/course. No answer selection, expected answer, detailed history, checkpoint, recording, or new event family. |
+| `supported_sync_outbox` | Only the existing supported course-learning event IDs and allowlisted event payload fields, scoped to the authenticated account/course. No selected/expected answer values, full attempt records beyond those projected fields, checkpoints, recordings, or new event family. |
 
 Use foreign keys and unique constraints for scope, attempt, receipt, run, and
 aggregate identities. Validate decoded checkpoint snapshots with their existing
@@ -272,8 +277,10 @@ committed-only progress. The new store is not permission to change French
 content, assessment, or audio qualification.
 
 The checked `course_learning_sync.dart` currently projects only supported
-course-learning answer/lesson/score events for authenticated users, sends them
-through `record_course_events`, batches at 100, and acknowledges delivered IDs.
+course-learning answer/lesson/score events for authenticated users. Its existing
+per-attempt answer event contains only `sound`, `skill`, `correct`, and `activity`;
+the current sender passes those fields unchanged through `record_course_events`,
+in batches of at most 100, and acknowledges delivered IDs.
 The comparison and sentence-hunt repositories currently have no corresponding
 cloud event outbox. Preserve that distinction: keep the existing supported
 course sync behavior and wire payload allowlist, persist/ack its outbox rows
@@ -300,7 +307,7 @@ platform remains unqualified; do not mark the row passed by inference.
 | Account boundaries | Exercise guest, account A/B, A→B→A, sign-out during held read/write, and provider replacement. No data crosses scopes and stale work cannot update the visible new owner's progress. |
 | Migration and unknown versions | Test every supported schema upgrade with retained rows, plus unknown newer version and failed migration. Upgrade is atomic; unknown/failed data stays untouched and unavailable. Literal old preference formats are neither read, changed, nor deleted. |
 | Provider/Home state | Verify database opening is loading/unknown, a verified new database is empty, and errors/unsupported backends show unavailable/retry—not zero, reset, or “not started.” After reload, only committed progress is published; there is no restored autoplay/hearing grant. |
-| Existing behavior and sync | Run current course, comparison, sentence-hunt, Home, and progress regressions through the real repositories. Confirm current course sync event allowlist, IDs/payload contract, 100-event batching, acknowledgment/retry, and no new comparison/sentence events or detailed-answer uploads. |
+| Existing behavior and sync | Run current course, comparison, sentence-hunt, Home, and progress regressions through the real repositories. Confirm current course sync event allowlist, IDs/payload contract, 100-event batching, acknowledgment/retry, and no new comparison/sentence events. Beyond that unchanged projection, selected/expected values, full local attempt records, and checkpoints are not uploaded. |
 | Real platform matrix | On each declared supported browser, qualify the actual selected persistent Drift backend, multiple-tab coordination, worker/WASM loading, MIME/CSP/deployment headers, restart, and full retention. Exercise native iOS and Android application database/restart paths. A platform not run remains OPEN and cannot be advertised as supported by this change. |
 
 Historical capacity evidence explains the replacement but sets no SQLite
