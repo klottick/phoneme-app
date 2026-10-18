@@ -647,6 +647,9 @@ final class SentenceHuntLearningState {
   final Set<SentenceHuntExposureKey> teachingExposure;
 }
 
+/// Contracted Task 5 name retained alongside the original implementation name.
+typedef SentenceHuntState = SentenceHuntLearningState;
+
 bool _sameReceipt(SentenceHuntReceipt a, SentenceHuntReceipt b) =>
     a.scope == b.scope &&
     a.sectionId == b.sectionId &&

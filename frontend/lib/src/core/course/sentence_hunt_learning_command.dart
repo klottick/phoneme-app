@@ -85,6 +85,9 @@ final class SentenceHuntLearningCommand {
   final SentenceHuntAction action;
 }
 
+/// Contracted Task 5 name retained alongside the original implementation name.
+typedef SentenceHuntCommand = SentenceHuntLearningCommand;
+
 /// Ordered canonical JSON for receipt identity. Selection IDs are expected to
 /// have been normalized by the registered item in prepare/evaluate first.
 String sentenceHuntCanonicalCommand(SentenceHuntLearningCommand command) {

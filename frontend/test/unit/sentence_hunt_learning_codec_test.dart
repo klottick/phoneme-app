@@ -167,6 +167,205 @@ void main() {
     expect(codec.encode(decoded), raw);
   });
 
+  test('sentence_codec_encode_rejects_incomplete_committed_receipt_history',
+      () {
+    final SentenceHuntProfileScope scope = SentenceHuntProfileScope(
+      courseId: 'en-fr',
+      owner: LearningOwner.guest(),
+    );
+    final SentenceHuntLearningState structurallyIncomplete =
+        SentenceHuntLearningState(
+      scope: scope,
+      revision: 1,
+      commitOrdinal: 1,
+      slots: const <String, SentenceHuntSlot>{},
+      attempts: const <SentenceHuntAttempt>[],
+      receipts: const <SentenceHuntReceipt>[],
+      mistakes: const <SentenceHuntMistakeKey, SentenceHuntMistake>{},
+      summaries: const <SentenceHuntSummaryKey, SentenceHuntSummary>{},
+      completions: const <SentenceHuntCompletion>[],
+      teachingExposure: const <SentenceHuntExposureKey>{},
+    );
+
+    expect(
+      () => const SentenceHuntLearningCodec().encode(structurallyIncomplete),
+      throwsA(isA<SentenceHuntUnavailableException>()),
+    );
+    expect(structurallyIncomplete.commitOrdinal, 1);
+    expect(structurallyIncomplete.receipts, isEmpty);
+  });
+
+  test('sentence_codec_encode_rejects_receipt_tail_gaps', () {
+    final _CodecDriver driver = _CodecDriver();
+    for (var index = 0; index < fixtureSectionIds.length; index++) {
+      driver.start(index);
+    }
+    const SentenceHuntLearningLimits limits =
+        SentenceHuntLearningLimits(maxReceipts: 2);
+    final SentenceHuntLearningState state = SentenceHuntLearningState(
+      scope: driver.state.scope,
+      revision: driver.state.revision,
+      commitOrdinal: driver.state.commitOrdinal,
+      slots: driver.state.slots,
+      attempts: driver.state.attempts,
+      receipts: <SentenceHuntReceipt>[
+        driver.state.receipts.first,
+        driver.state.receipts.last,
+      ],
+      mistakes: driver.state.mistakes,
+      summaries: driver.state.summaries,
+      completions: driver.state.completions,
+      teachingExposure: driver.state.teachingExposure,
+    );
+
+    expect(
+      () => const SentenceHuntLearningCodec(limits: limits).encode(state),
+      throwsA(isA<SentenceHuntUnavailableException>()),
+    );
+  });
+
+  test('sentence_codec_encode_rejects_unreadable_trimmed_slot_receipt', () {
+    final _CodecDriver driver = _CodecDriver();
+    for (var index = 0; index < fixtureSectionIds.length; index++) {
+      driver.start(index);
+    }
+    final SentenceHuntSlot prior = driver.state.slots[fixtureSectionIds.first]!;
+    final SentenceHuntReceipt unreadableLatest = SentenceHuntReceipt(
+      scope: prior.latestReceipt.scope,
+      sectionId: prior.latestReceipt.sectionId,
+      token: prior.latestReceipt.token,
+      canonicalCommand: '{not-json',
+      before: prior.latestReceipt.before,
+      after: prior.latestReceipt.after,
+      commitOrdinal: prior.latestReceipt.commitOrdinal,
+    );
+    final Map<String, SentenceHuntSlot> slots =
+        Map<String, SentenceHuntSlot>.of(driver.state.slots)
+          ..[fixtureSectionIds.first] = SentenceHuntSlot(
+            sectionId: prior.sectionId,
+            checkpoint: prior.checkpoint,
+            cursor: prior.cursor,
+            latestReceipt: unreadableLatest,
+          );
+    final SentenceHuntLearningState state = SentenceHuntLearningState(
+      scope: driver.state.scope,
+      revision: driver.state.revision,
+      commitOrdinal: driver.state.commitOrdinal,
+      slots: slots,
+      attempts: driver.state.attempts,
+      receipts: driver.state.receipts.skip(1).toList(),
+      mistakes: driver.state.mistakes,
+      summaries: driver.state.summaries,
+      completions: driver.state.completions,
+      teachingExposure: driver.state.teachingExposure,
+    );
+    const SentenceHuntLearningLimits limits =
+        SentenceHuntLearningLimits(maxReceipts: 2);
+
+    expect(
+      () => const SentenceHuntLearningCodec(limits: limits).encode(state),
+      throwsA(isA<SentenceHuntUnavailableException>()),
+    );
+  });
+
+  test('sentence_codec_encode_does_not_require_implicit_catalogue_membership',
+      () {
+    final SentenceHuntCatalogue futureCatalogue =
+        _catalogueAtContentRevision(fixtureSectionIds.first, 2);
+    final _CodecDriver driver = _CodecDriver(catalogue: futureCatalogue);
+    driver.start(0);
+    const SentenceHuntLearningCodec codec = SentenceHuntLearningCodec();
+    final String raw = codec.encode(driver.state);
+
+    expect(raw, isNotEmpty);
+    expect(
+      () => codec.decode(raw, driver.scope, syntheticSentenceCatalogue()),
+      throwsA(isA<SentenceHuntUnavailableException>()),
+      reason: 'decode still requires the caller\'s matching catalogue',
+    );
+    final SentenceHuntLearningState restored =
+        codec.decode(raw, driver.scope, futureCatalogue);
+    expect(restored.slots.values.single.checkpoint.contentRevision, 2);
+    expect(codec.encode(restored), raw);
+  });
+
+  test('sentence_codec_rejects_saved_and_receipt_policy_outside_descriptor',
+      () {
+    final _CodecDriver driver = _CodecDriver();
+    driver.start(0);
+    const SentenceHuntLearningCodec codec = SentenceHuntLearningCodec();
+    for (final String forgedField in <String>[
+      'checkpoint',
+      'session',
+      'start-receipt',
+    ]) {
+      final Map<String, Object?> forged =
+          jsonDecode(codec.encode(driver.state)) as Map<String, Object?>;
+      final Map<String, Object?> slot =
+          (forged['slots'] as Map<String, Object?>)[fixtureSectionIds.first]
+              as Map<String, Object?>;
+      final Map<String, Object?> checkpoint =
+          slot['checkpoint'] as Map<String, Object?>;
+
+      if (forgedField == 'checkpoint') {
+        (checkpoint['policy']
+            as Map<String, Object?>)['completionThresholdPercent'] = 1;
+      } else if (forgedField == 'session') {
+        final Map<String, Object?> session =
+            checkpoint['session'] as Map<String, Object?>;
+        (session['policy']
+            as Map<String, Object?>)['completionThresholdPercent'] = 1;
+      } else {
+        void forgeStartPolicy(Map<String, Object?> receipt) {
+          final Map<String, Object?> command =
+              jsonDecode(receipt['canonicalCommand'] as String)
+                  as Map<String, Object?>;
+          (((command['action'] as Map<String, Object?>)['policy']
+              as Map<String, Object?>))['completionThresholdPercent'] = 1;
+          receipt['canonicalCommand'] = jsonEncode(command);
+        }
+
+        forgeStartPolicy(slot['latestReceipt'] as Map<String, Object?>);
+        forgeStartPolicy((forged['receipts'] as List<Object?>).single
+            as Map<String, Object?>);
+      }
+
+      final String raw = jsonEncode(forged);
+      expect(
+        () => codec.decode(raw, driver.scope, driver.catalogue),
+        throwsA(isA<SentenceHuntUnavailableException>()),
+        reason: 'forged saved $forgedField policy',
+      );
+      expect(jsonEncode(forged), raw, reason: '$forgedField input unchanged');
+      expect(codec.encode(driver.state), isNot(raw),
+          reason: '$forgedField did not mutate prior state');
+    }
+  });
+
+  test('sentence_codec_round_trips_registered_versioned_start_policy', () {
+    final SentenceHuntCatalogue catalogue = _catalogueWithVersionedPolicy();
+    final _CodecDriver driver = _CodecDriver(catalogue: catalogue);
+    final String sectionId = fixtureSectionIds.first;
+    driver.start(0);
+    for (var index = 0; index < 5; index++) {
+      driver.answerCurrent(sectionId, correct: index < 4);
+      driver.advance(sectionId);
+    }
+    driver.act(sectionId, const FinishSentenceHuntRun());
+    const SentenceHuntLearningCodec codec = SentenceHuntLearningCodec();
+    final String raw = codec.encode(driver.state);
+    final SentenceHuntLearningState restored =
+        codec.decode(raw, driver.scope, catalogue);
+
+    expect(restored.completions, hasLength(1));
+    expect(restored.completions.single.policyRevision, 2);
+    expect(restored.completions.single.thresholdPercent, 70);
+    expect(
+        restored.slots[sectionId]!.checkpoint.policy.completionThresholdPercent,
+        70);
+    expect(codec.encode(restored), raw);
+  });
+
   test('sentence_codec_round_trips_three_independent_slots_and_receipts', () {
     final _CodecDriver driver = _CodecDriver();
     for (var index = 0; index < fixtureSectionIds.length; index++) {
@@ -494,27 +693,43 @@ void main() {
       throwsStateError,
     );
 
-    final SentenceHuntLearningCommand start = currentEngine.prepare(
-      state: restored,
-      sectionId: sectionId,
-      action: StartSentenceHuntRun(
-        sessionId: 'revision-two-run',
-        policy: withHistory.section(sectionId).policy,
-        mode: SentenceHuntRunMode.practice,
-      ),
-      authGeneration: 0,
-      token: 'currentrun000000000000',
-      submittedAt: DateTime.utc(2026),
+    final StartSentenceHuntRun replacement = StartSentenceHuntRun(
+      sessionId: 'revision-two-run',
+      policy: withHistory.section(sectionId).policy,
+      mode: SentenceHuntRunMode.practice,
+      replaceExisting: true,
     );
-    final SentenceHuntLearningState next = currentEngine
-        .evaluate(
-          state: restored,
-          command: start,
-          committedAt: DateTime.utc(2026),
-        )
-        .nextState;
-    expect(next.slots[sectionId]!.checkpoint.contentRevision, 2);
-    expect(next.completions, restored.completions);
+    expect(
+      () => currentEngine.prepare(
+        state: restored,
+        sectionId: sectionId,
+        action: replacement,
+        authGeneration: 0,
+        token: 'currentrun000000000000',
+        submittedAt: DateTime.utc(2026),
+      ),
+      throwsStateError,
+    );
+    expect(
+      () => currentEngine.evaluate(
+        state: restored,
+        command: SentenceHuntLearningCommand(
+          scope: restored.scope,
+          authGeneration: 0,
+          sectionId: sectionId,
+          sectionFingerprint: withHistory.section(sectionId).sectionFingerprint,
+          expected: restored.slots[sectionId]!.cursor,
+          token: 'currentrun000000000001',
+          submittedAt: DateTime.utc(2026),
+          action: replacement,
+        ),
+        committedAt: DateTime.utc(2026),
+      ),
+      throwsStateError,
+    );
+    expect(codec.encode(restored), raw);
+    expect(restored.completions.single.contentRevision, 1);
+    expect(restored.slots[sectionId]!.checkpoint.contentRevision, 1);
   });
 
   test('sentence_codec_refuses_unknown_and_future_bytes_without_repair', () {
@@ -985,6 +1200,20 @@ SentenceHuntCatalogue _catalogueAtContentRevision(
   (fixture.manifest['sections'] as List<Map<String, dynamic>>).firstWhere(
       (Map<String, dynamic> row) =>
           row['id'] == sectionId)['contentRevision'] = revision;
+  return decodeFrenchSentencePackage(
+    manifestJson: fixture.manifestJson,
+    provenanceJson: fixture.provenanceJson,
+    annotationsJson: fixture.annotationsJson,
+    sourceEvidenceJson: fixture.sourceEvidenceJson,
+  );
+}
+
+SentenceHuntCatalogue _catalogueWithVersionedPolicy() {
+  final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+  final Map<String, dynamic> section =
+      (fixture.manifest['sections'] as List<Map<String, dynamic>>).first;
+  section['policyRevision'] = 2;
+  section['completionThresholdPercent'] = 70;
   return decodeFrenchSentencePackage(
     manifestJson: fixture.manifestJson,
     provenanceJson: fixture.provenanceJson,

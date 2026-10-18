@@ -29,7 +29,7 @@ final class SentenceHuntLearningCodec {
   String encode(SentenceHuntLearningState state) {
     try {
       limits.validate();
-      _validateBounds(state, limits);
+      _validateStateStructure(state, limits);
       final String raw = jsonEncode(_document(state));
       final int encodedBytes = utf8.encode(raw).length;
       if (encodedBytes > limits.maxDocumentBytes) {
@@ -44,6 +44,10 @@ final class SentenceHuntLearningCodec {
     } on ArgumentError catch (error) {
       throw SentenceHuntUnavailableException(error);
     } on FormatException catch (error) {
+      throw SentenceHuntUnavailableException(error);
+    } on StateError catch (error) {
+      throw SentenceHuntUnavailableException(error);
+    } on TypeError catch (error) {
       throw SentenceHuntUnavailableException(error);
     }
   }
@@ -105,7 +109,6 @@ final class SentenceHuntLearningCodec {
         return _readReceipt(
           _object(value, 'receipt'),
           scope,
-          descriptors,
         );
       }).toList(growable: false);
       final List<SentenceHuntAttempt> attempts = _array(
@@ -351,6 +354,10 @@ final class SentenceHuntLearningCodec {
       );
       final LessonPolicy policy =
           _readPolicy(checkpointRaw['policy'], 'checkpoint.policy');
+      if (policy.completionThresholdPercent != descriptor.thresholdPercent) {
+        throw const FormatException(
+            'Checkpoint policy differs from its registered descriptor.');
+      }
       final String sessionId =
           _string(checkpointRaw['sessionId'], 'checkpoint.sessionId');
       final SentenceHuntRunMode mode = _enum(
@@ -392,7 +399,6 @@ final class SentenceHuntLearningCodec {
       final SentenceHuntReceipt latest = _readReceipt(
         _object(rawSlot['latestReceipt'], 'slot.latestReceipt'),
         scope,
-        descriptors,
       );
       if (latest.sectionId != sectionId || latest.after != cursor) {
         throw const FormatException('Slot latest receipt/cursor mismatch.');
@@ -468,7 +474,6 @@ final class SentenceHuntLearningCodec {
   SentenceHuntReceipt _readReceipt(
     Map<String, Object?> value,
     SentenceHuntProfileScope scope,
-    Map<String, _SentenceSectionDescriptor> descriptors,
   ) {
     _exactKeys(
       value,
@@ -492,17 +497,6 @@ final class SentenceHuntLearningCodec {
         _readCursor(_object(value['after'], 'receipt.after'));
     final int ordinal =
         _positive(value['commitOrdinal'], 'receipt.commitOrdinal');
-    final SentenceHuntLearningCommand command = _readCanonicalCommand(
-      canonical,
-      scope,
-      descriptors,
-    );
-    if (command.sectionId != sectionId ||
-        command.token != token ||
-        command.expected != before ||
-        !_reachableActionCursor(command.action, before, after)) {
-      throw const FormatException('Receipt command/cursor mismatch.');
-    }
     return SentenceHuntReceipt(
       scope: scope,
       sectionId: sectionId,
@@ -517,7 +511,7 @@ final class SentenceHuntLearningCodec {
   SentenceHuntLearningCommand _readCanonicalCommand(
     String raw,
     SentenceHuntProfileScope scope,
-    Map<String, _SentenceSectionDescriptor> descriptors,
+    Map<String, _SentenceSectionDescriptor>? descriptors,
   ) {
     final Map<String, Object?> value = _object(jsonDecode(raw), 'command');
     const List<String> orderedFields = <String>[
@@ -545,11 +539,9 @@ final class SentenceHuntLearningCodec {
     final String sectionId = _string(value['sectionId'], 'command.sectionId');
     final String fingerprint =
         _string(value['sectionFingerprint'], 'command.sectionFingerprint');
-    final _SentenceSectionDescriptor descriptor = _descriptorByFingerprint(
-      descriptors,
-      sectionId,
-      fingerprint,
-    );
+    final _SentenceSectionDescriptor? descriptor = descriptors == null
+        ? null
+        : _descriptorByFingerprint(descriptors, sectionId, fingerprint);
     final Map<String, Object?> actionRaw = _object(value['action'], 'action');
     final String kind = _string(actionRaw['kind'], 'action.kind');
     final SentenceHuntAction action;
@@ -610,10 +602,12 @@ final class SentenceHuntLearningCodec {
           expectedTokenIdsSnapshot: expected,
           playback: playback,
         ));
-        _validateAnswerAgainstDescriptor(
-          action as AnswerSentenceHuntItem,
-          descriptor,
-        );
+        if (descriptor != null) {
+          _validateAnswerAgainstDescriptor(
+            action as AnswerSentenceHuntItem,
+            descriptor,
+          );
+        }
         break;
       case 'advance':
         _exactKeys(actionRaw, const <String>['kind'], 'action');
@@ -650,7 +644,7 @@ final class SentenceHuntLearningCodec {
     }
     // Descriptor lookup is intentionally done even for non-answer actions; a
     // historical receipt must remain bound to a retained immutable identity.
-    if (descriptor.sectionId != sectionId) {
+    if (descriptor != null && descriptor.sectionId != sectionId) {
       throw const FormatException('Unknown command section identity.');
     }
     return command;
@@ -1312,71 +1306,84 @@ void _validateAnswerAgainstDescriptor(
   }
 }
 
-void _validateState(
+final class _SentenceHuntStructuralIndex {
+  const _SentenceHuntStructuralIndex({
+    required this.receiptsById,
+    required this.commandsById,
+    required this.latestCommandsBySection,
+  });
+
+  final Map<String, SentenceHuntReceipt> receiptsById;
+  final Map<String, SentenceHuntLearningCommand> commandsById;
+  final Map<String, SentenceHuntLearningCommand> latestCommandsBySection;
+}
+
+/// Checks document-wide consistency without deciding whether any content key
+/// is registered. It is shared by encode and decode; registry membership stays
+/// in the decode-side validation below, which has an explicit catalogue.
+_SentenceHuntStructuralIndex _validateStateStructure(
   SentenceHuntLearningState state,
-  Map<String, _SentenceSectionDescriptor> descriptors,
   SentenceHuntLearningLimits limits,
 ) {
   _validateBounds(state, limits);
+  if (state.revision != state.commitOrdinal) {
+    throw const FormatException('Document counters are inconsistent.');
+  }
   final int retainedReceiptCount = state.commitOrdinal < limits.maxReceipts
       ? state.commitOrdinal
       : limits.maxReceipts;
   if (state.receipts.length != retainedReceiptCount) {
     throw const FormatException('Receipt history is incomplete.');
   }
+
+  final Map<String, SentenceHuntReceipt> receiptsById =
+      <String, SentenceHuntReceipt>{};
+  final Map<String, SentenceHuntLearningCommand> commandsById =
+      <String, SentenceHuntLearningCommand>{};
+  final Map<String, SentenceHuntLearningCommand> latestCommandsBySection =
+      <String, SentenceHuntLearningCommand>{};
+  final Map<String, SentenceHuntReceipt> previousReceiptBySection =
+      <String, SentenceHuntReceipt>{};
+  final Set<String> tokens = <String>{};
   var expectedReceiptOrdinal = state.commitOrdinal - state.receipts.length + 1;
   for (final SentenceHuntReceipt receipt in state.receipts) {
     if (receipt.commitOrdinal != expectedReceiptOrdinal) {
       throw const FormatException('Receipt history has a gap.');
     }
     expectedReceiptOrdinal++;
-  }
-  final Map<String, SentenceHuntReceipt> receiptsByToken =
-      <String, SentenceHuntReceipt>{};
-  final Map<String, SentenceHuntReceipt> receiptsById =
-      <String, SentenceHuntReceipt>{};
-  final Map<String, SentenceHuntReceipt> previousReceiptBySection =
-      <String, SentenceHuntReceipt>{};
-  for (final SentenceHuntReceipt receipt in state.receipts) {
     final SentenceHuntReceipt? previous =
         previousReceiptBySection[receipt.sectionId];
     if (previous != null && previous.after != receipt.before) {
       throw const FormatException('Receipt cursors are discontinuous.');
     }
-    final SentenceHuntLearningCommand command = _readCommandForValidation(
-      receipt.canonicalCommand,
-      state.scope,
-      descriptors,
-    );
-    _validateReceiptCommand(command, receipt, descriptors);
+    final SentenceHuntLearningCommand command =
+        _readCommandForStructure(receipt.canonicalCommand, state.scope);
+    _validateReceiptCommandStructure(command, receipt);
     final String id = _attemptId(
       receipt.sectionId,
       receipt.after.generation,
       receipt.after.sequence,
     );
-    if (receiptsByToken.containsKey(receipt.token) ||
-        receiptsById.containsKey(id)) {
+    if (!tokens.add(receipt.token) || receiptsById.containsKey(id)) {
       throw const FormatException('Duplicate sentence-hunt receipt.');
     }
-    receiptsByToken[receipt.token] = receipt;
     receiptsById[id] = receipt;
+    commandsById[id] = command;
     previousReceiptBySection[receipt.sectionId] = receipt;
+    latestCommandsBySection[receipt.sectionId] = command;
+    if (!state.slots.containsKey(receipt.sectionId)) {
+      throw const FormatException('Receipt has no retained section slot.');
+    }
   }
+
   for (final SentenceHuntAttempt attempt in state.attempts) {
-    final SentenceHuntItemDescriptor item =
-        _resolveIdentity(descriptors, attempt.content);
-    if (!_sameList(attempt.expectedTokenIds, item.expectedTokenIds) ||
-        !_sameList(_canonicalStoredSelection(item, attempt.selectedTokenIds),
-            attempt.selectedTokenIds) ||
-        attempt.correct !=
-            _equalSet(attempt.selectedTokenIds, item.expectedTokenIds) ||
+    if (attempt.sequence > state.commitOrdinal ||
         attempt.playback.scope != state.scope ||
         attempt.playback.content != attempt.content ||
         attempt.playback.referenceId != attempt.content.audioRefId ||
         attempt.playback.outcome != CourseAudioOutcome.completed ||
         attempt.playback.source != CourseAudioSource.reviewedRecording) {
-      throw const FormatException(
-          'Attempt is not bound to known sentence content.');
+      throw const FormatException('Attempt has invalid structural evidence.');
     }
     final SentenceHuntExposureKey exposureKey = SentenceHuntExposureKey(
       scope: state.scope,
@@ -1388,17 +1395,14 @@ void _validateState(
       throw const FormatException(
           'Attempt exposure lacks durable section exposure.');
     }
-    final SentenceHuntReceipt? receipt = receiptsById[_attemptId(
+    final String id = _attemptId(
       attempt.content.sectionId,
       attempt.runGeneration,
       attempt.sequence,
-    )];
+    );
+    final SentenceHuntReceipt? receipt = receiptsById[id];
     if (receipt != null) {
-      final SentenceHuntLearningCommand command = _readCommandForValidation(
-        receipt.canonicalCommand,
-        state.scope,
-        descriptors,
-      );
+      final SentenceHuntLearningCommand command = commandsById[id]!;
       if (command.action is! AnswerSentenceHuntItem ||
           command.sectionId != attempt.content.sectionId ||
           receipt.after.generation != attempt.runGeneration ||
@@ -1418,6 +1422,119 @@ void _validateState(
     }
   }
   _validateSummaryCoverage(state);
+  for (final SentenceHuntSlot slot in state.slots.values) {
+    final SentenceHuntReceipt latest = slot.latestReceipt;
+    final String id = _attemptId(
+      latest.sectionId,
+      latest.after.generation,
+      latest.after.sequence,
+    );
+    final SentenceHuntReceipt? retained = receiptsById[id];
+    if (latest.sectionId != slot.sectionId ||
+        latest.scope != state.scope ||
+        latest.commitOrdinal > state.commitOrdinal ||
+        latest.after != slot.cursor ||
+        (retained != null && !_sameReceipt(retained, latest))) {
+      throw const FormatException('Slot latest receipt is inconsistent.');
+    }
+    for (final SentenceHuntReceipt receipt in state.receipts) {
+      if (receipt.sectionId == slot.sectionId &&
+          receipt.commitOrdinal > latest.commitOrdinal) {
+        throw const FormatException(
+            'Slot receipt is not latest for its section.');
+      }
+    }
+    final SentenceHuntLearningCommand command = commandsById[id] ??
+        _readCommandForStructure(latest.canonicalCommand, state.scope);
+    _validateReceiptCommandStructure(command, latest);
+    if (command.sectionFingerprint != slot.checkpoint.sectionFingerprint) {
+      throw const FormatException('Slot receipt and checkpoint keys differ.');
+    }
+    final Object? rawItemIds = slot.checkpoint.sessionJson['itemIds'];
+    if (rawItemIds is! List ||
+        rawItemIds.length != 5 ||
+        rawItemIds.any((Object? value) => value is! String)) {
+      throw const FormatException('Checkpoint session item ids are invalid.');
+    }
+    final List<String> itemIds = rawItemIds.cast<String>();
+    if (itemIds.toSet().length != itemIds.length) {
+      throw const FormatException(
+          'Checkpoint session item ids are duplicated.');
+    }
+    final LessonSectionSession session = LessonSectionSession.fromJson(
+      _mutableJson(slot.checkpoint.sessionJson) as Map<String, dynamic>,
+      itemIds: itemIds,
+      contentRevision: slot.checkpoint.contentRevision,
+    );
+    if (session.sessionId != slot.checkpoint.sessionId ||
+        session.contentRevision != slot.checkpoint.contentRevision ||
+        session.policy.completionThresholdPercent !=
+            slot.checkpoint.policy.completionThresholdPercent ||
+        slot.checkpoint.runStartRound > session.round ||
+        (slot.checkpoint.finished &&
+            session.phase != LessonSectionPhase.debrief)) {
+      throw const FormatException(
+          'Checkpoint/session metadata is inconsistent.');
+    }
+    _validateLatestSlotStructure(state, slot, command, session);
+    latestCommandsBySection[slot.sectionId] = command;
+  }
+  return _SentenceHuntStructuralIndex(
+    receiptsById: receiptsById,
+    commandsById: commandsById,
+    latestCommandsBySection: latestCommandsBySection,
+  );
+}
+
+void _validateState(
+  SentenceHuntLearningState state,
+  Map<String, _SentenceSectionDescriptor> descriptors,
+  SentenceHuntLearningLimits limits,
+) {
+  final _SentenceHuntStructuralIndex structural =
+      _validateStateStructure(state, limits);
+  for (final SentenceHuntReceipt receipt in state.receipts) {
+    final String id = _attemptId(
+      receipt.sectionId,
+      receipt.after.generation,
+      receipt.after.sequence,
+    );
+    _validateReceiptCommand(
+      structural.commandsById[id]!,
+      receipt,
+      descriptors,
+    );
+  }
+  for (final SentenceHuntAttempt attempt in state.attempts) {
+    final SentenceHuntItemDescriptor item =
+        _resolveIdentity(descriptors, attempt.content);
+    if (!_sameList(attempt.expectedTokenIds, item.expectedTokenIds) ||
+        !_sameList(_canonicalStoredSelection(item, attempt.selectedTokenIds),
+            attempt.selectedTokenIds) ||
+        attempt.correct !=
+            _equalSet(attempt.selectedTokenIds, item.expectedTokenIds)) {
+      throw const FormatException(
+          'Attempt is not bound to known sentence content.');
+    }
+    if (structural.receiptsById.containsKey(_attemptId(
+      attempt.content.sectionId,
+      attempt.runGeneration,
+      attempt.sequence,
+    ))) {
+      final String id = _attemptId(
+        attempt.content.sectionId,
+        attempt.runGeneration,
+        attempt.sequence,
+      );
+      final SentenceHuntReceipt receipt = structural.receiptsById[id]!;
+      final SentenceHuntLearningCommand command = structural.commandsById[id]!;
+      if (command.action is! AnswerSentenceHuntItem ||
+          receipt.after.generation != attempt.runGeneration ||
+          receipt.after.sequence != attempt.sequence) {
+        throw const FormatException('Attempt links to a non-answer receipt.');
+      }
+    }
+  }
   for (final SentenceHuntMistake mistake in state.mistakes.values) {
     _resolveIdentity(descriptors, mistake.content);
   }
@@ -1444,7 +1561,14 @@ void _validateState(
       slot.checkpoint.contentRevision,
       slot.checkpoint.sectionFingerprint,
     );
-    _validateLatestSlot(state, slot, descriptor, descriptors, receiptsById);
+    _validateLatestSlot(
+      state,
+      slot,
+      descriptor,
+      descriptors,
+      structural.receiptsById,
+      structural.latestCommandsBySection[slot.sectionId]!,
+    );
   }
 }
 
@@ -1501,28 +1625,18 @@ void _validateSummaryCoverage(SentenceHuntLearningState state) {
   }
 }
 
-SentenceHuntLearningCommand _readCommandForValidation(
+SentenceHuntLearningCommand _readCommandForStructure(
   String raw,
   SentenceHuntProfileScope scope,
-  Map<String, _SentenceSectionDescriptor> descriptors,
 ) =>
-    const SentenceHuntLearningCodec()._readCanonicalCommand(
-      raw,
-      scope,
-      descriptors,
-    );
+    const SentenceHuntLearningCodec()._readCanonicalCommand(raw, scope, null);
 
 void _validateReceiptCommand(
   SentenceHuntLearningCommand command,
   SentenceHuntReceipt receipt,
   Map<String, _SentenceSectionDescriptor> descriptors,
 ) {
-  if (command.sectionId != receipt.sectionId ||
-      command.token != receipt.token ||
-      command.expected != receipt.before ||
-      !_reachableActionCursor(command.action, receipt.before, receipt.after)) {
-    throw const FormatException('Receipt header is not reachable.');
-  }
+  _validateReceiptCommandStructure(command, receipt);
   final _SentenceSectionDescriptor descriptor = _descriptorByFingerprint(
     descriptors,
     command.sectionId,
@@ -1533,6 +1647,131 @@ void _validateReceiptCommand(
     if (answer.answer.playback.runGeneration != receipt.after.generation) {
       throw const FormatException('Receipt answer generation mismatch.');
     }
+  } else if (command.action case StartSentenceHuntRun(:final policy)) {
+    if (policy.completionThresholdPercent != descriptor.thresholdPercent) {
+      throw const FormatException(
+          'Start policy differs from its registered descriptor.');
+    }
+  }
+}
+
+void _validateReceiptCommandStructure(
+  SentenceHuntLearningCommand command,
+  SentenceHuntReceipt receipt,
+) {
+  if (command.scope != receipt.scope ||
+      command.sectionId != receipt.sectionId ||
+      command.token != receipt.token ||
+      command.expected != receipt.before ||
+      !_reachableActionCursor(command.action, receipt.before, receipt.after)) {
+    throw const FormatException('Receipt header is not reachable.');
+  }
+  if (command.action case AnswerSentenceHuntItem(:final answer)) {
+    _validateAnswerStructure(answer, command.scope);
+    if (answer.content.sectionId != command.sectionId ||
+        answer.playback.runGeneration != receipt.after.generation) {
+      throw const FormatException('Receipt answer identity is inconsistent.');
+    }
+  }
+}
+
+void _validateAnswerStructure(
+  SentenceHuntAnswer answer,
+  SentenceHuntProfileScope scope,
+) {
+  final SentenceHuntPlaybackObservation playback = answer.playback;
+  if (answer.expectedTokenIdsSnapshot.isEmpty ||
+      answer.selectedTokenIds.toSet().length !=
+          answer.selectedTokenIds.length ||
+      answer.expectedTokenIdsSnapshot.toSet().length !=
+          answer.expectedTokenIdsSnapshot.length ||
+      answer.selectedTokenIds.any((String id) => id.trim().isEmpty) ||
+      answer.expectedTokenIdsSnapshot.any((String id) => id.trim().isEmpty) ||
+      playback.scope != scope ||
+      playback.content != answer.content ||
+      playback.referenceId != answer.content.audioRefId ||
+      playback.outcome != CourseAudioOutcome.completed ||
+      playback.source != CourseAudioSource.reviewedRecording) {
+    throw const FormatException('Answer has invalid structural evidence.');
+  }
+}
+
+void _validateLatestSlotStructure(
+  SentenceHuntLearningState state,
+  SentenceHuntSlot slot,
+  SentenceHuntLearningCommand command,
+  LessonSectionSession session,
+) {
+  switch (command.action) {
+    case final StartSentenceHuntRun start:
+      if (slot.checkpoint.finished ||
+          slot.checkpoint.sessionId != start.sessionId ||
+          slot.checkpoint.mode != start.mode ||
+          slot.checkpoint.policy.completionThresholdPercent !=
+              start.policy.completionThresholdPercent ||
+          session.policy.completionThresholdPercent !=
+              start.policy.completionThresholdPercent) {
+        throw const FormatException('Latest Start metadata differs from slot.');
+      }
+      if (start.mode == SentenceHuntRunMode.practice) {
+        final Object? rawItemIds = slot.checkpoint.sessionJson['itemIds'];
+        final List<String> itemIds = (rawItemIds as List).cast<String>();
+        final LessonSectionSession fresh = LessonSectionSession(
+          itemIds: itemIds,
+          sessionId: start.sessionId,
+          contentRevision: slot.checkpoint.contentRevision,
+          policy: start.policy,
+        );
+        if (jsonEncode(fresh.toJson()) != jsonEncode(session.toJson())) {
+          throw const FormatException('Latest practice Start is not fresh.');
+        }
+      } else if (session.round != slot.checkpoint.runStartRound ||
+          session.phase != LessonSectionPhase.exercise ||
+          session.round < 2) {
+        throw const FormatException('Latest review-only Start is unreachable.');
+      }
+    case AnswerSentenceHuntItem(:final answer):
+      final String? currentId = session.currentItemId;
+      final bool correct =
+          _equalSet(answer.selectedTokenIds, answer.expectedTokenIdsSnapshot);
+      if (slot.checkpoint.finished ||
+          currentId != answer.content.itemId ||
+          answer.content.sectionId != slot.sectionId ||
+          !session.answered ||
+          session.round != answer.playback.round ||
+          session.lastCorrect != correct ||
+          session.latestAnswers[currentId] != correct) {
+        throw const FormatException('Latest answer consequences mismatch.');
+      }
+    case AdvanceSentenceHuntItem():
+      if (slot.checkpoint.finished ||
+          session.answered ||
+          session.position == 0) {
+        throw const FormatException(
+            'Latest Advance lacks a submitted queue prefix.');
+      }
+    case ReviewSentenceHuntMistakes():
+      if (slot.checkpoint.finished ||
+          session.phase != LessonSectionPhase.exercise ||
+          session.round < 2) {
+        throw const FormatException(
+            'Latest Review did not start a review round.');
+      }
+    case FinishSentenceHuntRun():
+      if (!slot.checkpoint.finished ||
+          session.phase != LessonSectionPhase.debrief) {
+        throw const FormatException('Latest Finish is not a finished debrief.');
+      }
+      if (slot.checkpoint.mode == SentenceHuntRunMode.practice &&
+          session.canComplete &&
+          !state.completions.any((SentenceHuntCompletion completion) =>
+              completion.sectionId == slot.sectionId &&
+              completion.contentRevision == slot.checkpoint.contentRevision &&
+              completion.thresholdPercent ==
+                  slot.checkpoint.policy.completionThresholdPercent)) {
+        throw const FormatException(
+            'Eligible practice finish lacks completion.');
+      }
   }
 }
 
@@ -1579,6 +1818,7 @@ void _validateLatestSlot(
   _SentenceSectionDescriptor descriptor,
   Map<String, _SentenceSectionDescriptor> descriptors,
   Map<String, SentenceHuntReceipt> receiptsById,
+  SentenceHuntLearningCommand command,
 ) {
   final SentenceHuntReceipt receipt = slot.latestReceipt;
   if (receipt.commitOrdinal > state.commitOrdinal ||
@@ -1586,11 +1826,6 @@ void _validateLatestSlot(
       receipt.sectionId != slot.sectionId) {
     throw const FormatException('Slot latest receipt is inconsistent.');
   }
-  final SentenceHuntLearningCommand command = _readCommandForValidation(
-    receipt.canonicalCommand,
-    state.scope,
-    descriptors,
-  );
   _validateReceiptCommand(command, receipt, descriptors);
   if (command.sectionFingerprint != descriptor.fingerprint) {
     throw const FormatException('Slot receipt and checkpoint keys differ.');

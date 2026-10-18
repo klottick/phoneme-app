@@ -2,10 +2,12 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/course_audio_contract.dart';
+import 'package:linguist/src/core/course/course_learning_transaction.dart';
 import 'package:linguist/src/core/course/lesson_policy.dart';
 import 'package:linguist/src/core/course/lesson_section_session.dart';
 import 'package:linguist/src/core/course/sentence_hunt_content.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_command.dart';
+import 'package:linguist/src/core/course/sentence_hunt_learning_codec.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_transition.dart';
 import '../support/sentence_hunt_fixtures.dart';
@@ -28,6 +30,73 @@ void main() {
     expect(guest, isNot(account));
   });
 
+  test('contracted SentenceHuntState and SentenceHuntCommand aliases work', () {
+    final SentenceHuntProfileScope scope = SentenceHuntProfileScope(
+      courseId: 'en-fr',
+      owner: LearningOwner.guest(),
+    );
+    final SentenceHuntState empty = SentenceHuntState.empty(scope);
+    final SentenceHuntState constructed = SentenceHuntState(
+      scope: scope,
+      revision: empty.revision,
+      commitOrdinal: empty.commitOrdinal,
+      slots: empty.slots,
+      attempts: empty.attempts,
+      receipts: empty.receipts,
+      mistakes: empty.mistakes,
+      summaries: empty.summaries,
+      completions: empty.completions,
+      teachingExposure: empty.teachingExposure,
+    );
+    final SentenceHuntCatalogue catalogue = syntheticSentenceCatalogue();
+    final SentenceHuntTransitionEngine engine =
+        SentenceHuntTransitionEngine(catalogue: catalogue);
+    final SentenceHuntCommand prepared = engine.prepare(
+      state: empty,
+      sectionId: fixtureSectionIds.first,
+      action: StartSentenceHuntRun(
+        sessionId: 'contract-api-run',
+        policy: catalogue.section(fixtureSectionIds.first).policy,
+        mode: SentenceHuntRunMode.practice,
+      ),
+      authGeneration: 0,
+      token: 'contractprepared000000',
+      submittedAt: DateTime.utc(2026),
+    );
+    final SentenceHuntCommand direct = SentenceHuntCommand(
+      scope: scope,
+      authGeneration: 0,
+      sectionId: fixtureSectionIds.first,
+      sectionFingerprint:
+          catalogue.section(fixtureSectionIds.first).sectionFingerprint,
+      expected:
+          const LearningCursorPosition(generation: 0, sequence: 0, revision: 0),
+      token: 'contractdirect00000000',
+      submittedAt: DateTime.utc(2026),
+      action: StartSentenceHuntRun(
+        sessionId: 'contract-api-direct',
+        policy: catalogue.section(fixtureSectionIds.first).policy,
+        mode: SentenceHuntRunMode.practice,
+      ),
+    );
+    const SentenceHuntLearningCodec codec = SentenceHuntLearningCodec();
+    expect(codec.canonicalCommand(prepared), isNotEmpty);
+    expect(codec.canonicalCommand(direct), isNotEmpty);
+    expect(codec.encode(constructed), codec.encode(empty));
+
+    final SentenceHuntTransition transition = engine.evaluate(
+      state: empty,
+      command: direct,
+      committedAt: DateTime.utc(2026),
+    );
+    final SentenceHuntState next = transition.nextState;
+    final String raw = codec.encode(next);
+    final SentenceHuntState restored = codec.decode(raw, scope, catalogue);
+    expect(restored.slots.values.single.checkpoint.sessionId,
+        'contract-api-direct');
+    expect(codec.encode(restored), raw);
+  });
+
   test('sentence_start_creates_only_registered_independent_slot', () {
     final _Driver driver = _Driver();
     driver.start(0);
@@ -40,6 +109,415 @@ void main() {
     expect(slot.checkpoint.sessionId, 'run-0');
     expect(slot.checkpoint.mode, SentenceHuntRunMode.practice);
     expect(slot.checkpoint.finished, isFalse);
+  });
+
+  test(
+      'sentence_practice_start_requires_registered_policy_for_prepare_and_evaluate',
+      () {
+    final _Driver driver = _Driver();
+    final SentenceHuntLearningState empty = driver.state;
+    final StartSentenceHuntRun forgedStart = StartSentenceHuntRun(
+      sessionId: 'forged-policy',
+      policy: LessonPolicy(completionThresholdPercent: 1),
+      mode: SentenceHuntRunMode.practice,
+    );
+
+    final bool prepareRejected = _throwsArgumentError(
+      () => driver.engine.prepare(
+        state: empty,
+        sectionId: fixtureSectionIds.first,
+        action: forgedStart,
+        authGeneration: 0,
+        token: 'policy0000000000000000',
+        submittedAt: driver.now(),
+      ),
+    );
+    final bool evaluateRejected = _throwsArgumentError(
+      () => driver.engine.evaluate(
+        state: empty,
+        command: driver.command(
+          sectionId: fixtureSectionIds.first,
+          action: forgedStart,
+        ),
+        committedAt: driver.now(),
+      ),
+    );
+    expect(identical(driver.state, empty), isTrue);
+    expect(_stateSnapshot(driver.state), _stateSnapshot(empty));
+    expect(<bool>[prepareRejected, evaluateRejected], everyElement(isTrue));
+  });
+
+  test('sentence_versioned_registered_policy_remains_finishable', () {
+    final SentenceHuntCatalogue versioned = _catalogueWithVersionedPolicy();
+    expect(versioned.section(fixtureSectionIds.first).policyRevision, 2);
+    expect(
+        versioned
+            .section(fixtureSectionIds.first)
+            .policy
+            .completionThresholdPercent,
+        70);
+    final _Driver versionedDriver = _Driver(catalogue: versioned);
+    versionedDriver.start(0);
+    for (var index = 0; index < 5; index++) {
+      versionedDriver.answerCurrent(fixtureSectionIds.first,
+          correct: index < 4);
+      versionedDriver.advance(fixtureSectionIds.first);
+    }
+    versionedDriver.act(fixtureSectionIds.first, const FinishSentenceHuntRun());
+    expect(versionedDriver.state.completions, hasLength(1));
+    expect(versionedDriver.state.completions.single.policyRevision, 2);
+    expect(versionedDriver.state.completions.single.thresholdPercent, 70);
+  });
+
+  test('sentence_practice_start_cannot_replace_stale_finished_or_active_slot',
+      () {
+    final List<String> failures = <String>[];
+    for (final String checkpointStatus in <String>['unfinished', 'finished']) {
+      final _Driver original = _Driver();
+      original.start(0);
+      if (checkpointStatus == 'finished') {
+        for (var index = 0; index < 5; index++) {
+          original.answerCurrent(fixtureSectionIds.first);
+          original.advance(fixtureSectionIds.first);
+        }
+        original.act(fixtureSectionIds.first, const FinishSentenceHuntRun());
+      }
+      final SentenceHuntLearningState prior = original.state;
+      final String before = _stateSnapshot(prior);
+
+      for (final String identityChange in <String>[
+        'key',
+        'context',
+        'annotation',
+        'asset',
+      ]) {
+        final SentenceHuntCatalogue changed =
+            _catalogueWithFingerprintMutation(identityChange);
+        final SentenceHuntSection oldSection =
+            original.catalogue.section(fixtureSectionIds.first);
+        final SentenceHuntSection newSection =
+            changed.section(fixtureSectionIds.first);
+        expect(changed.isAvailable(fixtureSectionIds.first), isTrue,
+            reason: identityChange);
+        expect(newSection.contentRevision, oldSection.contentRevision,
+            reason: identityChange);
+        expect(
+            newSection.sectionFingerprint, isNot(oldSection.sectionFingerprint),
+            reason: identityChange);
+        final StartSentenceHuntRun replacement = StartSentenceHuntRun(
+          sessionId: 'replacement-$identityChange',
+          policy: newSection.policy,
+          mode: SentenceHuntRunMode.practice,
+          replaceExisting: true,
+        );
+        final SentenceHuntTransitionEngine changedEngine =
+            SentenceHuntTransitionEngine(catalogue: changed);
+
+        if (!_throwsStateError(
+          () => changedEngine.prepare(
+            state: prior,
+            sectionId: fixtureSectionIds.first,
+            action: replacement,
+            authGeneration: 0,
+            token: 'staleprep${identityChange.padRight(13, '0')}',
+            submittedAt: DateTime.utc(2026),
+          ),
+        )) {
+          failures.add('$checkpointStatus/$identityChange prepare accepted');
+        }
+        if (!_throwsStateError(
+          () => changedEngine.evaluate(
+            state: prior,
+            command: original.command(
+              sectionId: fixtureSectionIds.first,
+              action: replacement,
+              sectionFingerprint: newSection.sectionFingerprint,
+              tokenOverride: 'staleeval${identityChange.padRight(13, '0')}',
+            ),
+            committedAt: DateTime.utc(2026),
+          ),
+        )) {
+          failures.add('$checkpointStatus/$identityChange evaluate accepted');
+        }
+        expect(identical(original.state, prior), isTrue);
+        expect(_stateSnapshot(prior), before);
+      }
+    }
+
+    expect(failures, isEmpty);
+
+    final _Driver current = _Driver();
+    current.start(0);
+    final SentenceHuntLearningState prior = current.state;
+    final SentenceHuntTransition replaced = current.act(
+      fixtureSectionIds.first,
+      StartSentenceHuntRun(
+        sessionId: 'same-identity-replacement',
+        policy: current.catalogue.section(fixtureSectionIds.first).policy,
+        mode: SentenceHuntRunMode.practice,
+        replaceExisting: true,
+      ),
+    );
+    expect(replaced.slot.checkpoint.sessionId, 'same-identity-replacement');
+    expect(replaced.slot.cursor.generation,
+        prior.slots.values.single.cursor.generation + 1);
+    expect(replaced.nextState.attempts, prior.attempts);
+  });
+
+  test('sentence_answer_prepare_and_direct_evaluate_reject_forged_matrix', () {
+    final _Driver driver = _Driver();
+    driver.start(0);
+    final String sectionId = fixtureSectionIds.first;
+    final SentenceHuntSlot slot = driver.state.slots[sectionId]!;
+    final SentenceHuntItem item =
+        driver.catalogue.item(sectionId, driver.session(slot).currentItemId!);
+    final SentenceHuntContentIdentity wrongAnnotation = _copyIdentity(
+        item.identity,
+        annotationHash: List<String>.filled(64, 'a').join());
+    final SentenceHuntContentIdentity wrongSection =
+        _copyIdentity(item.identity, sectionId: fixtureSectionIds[1]);
+    final SentenceHuntPlaybackObservation goodPlayback =
+        driver.playback(slot, item);
+    final List<({String name, SentenceHuntAnswer answer})> forged =
+        <({String name, SentenceHuntAnswer answer})>[
+      (
+        name: 'unknown selection',
+        answer: driver
+            .answer(item, slot, selected: <String>['not-a-selectable-token']),
+      ),
+      (
+        name: 'non-word selection',
+        answer: driver
+            .answer(item, slot, selected: <String>[item.identity.sentenceId]),
+      ),
+      (
+        name: 'duplicate selection',
+        answer: driver.answer(item, slot, selected: <String>[
+          item.expectedTokenIds.first,
+          item.expectedTokenIds.first,
+        ]),
+      ),
+      (
+        name: 'wrong item identity',
+        answer: driver.answer(item, slot, content: wrongSection),
+      ),
+      (
+        name: 'wrong annotation key',
+        answer: driver.answer(item, slot, content: wrongAnnotation),
+      ),
+      (
+        name: 'wrong expected-key snapshot',
+        answer: driver.answer(item, slot,
+            expectedSnapshot: item.expectedTokenIds.take(1).toList()),
+      ),
+      (
+        name: 'wrong audio reference',
+        answer: driver.answer(item, slot,
+            playback: driver.playback(slot, item, referenceId: 'other-audio')),
+      ),
+      (
+        name: 'cancelled playback',
+        answer: driver.answer(item, slot,
+            playback: driver.playback(slot, item,
+                outcome: CourseAudioOutcome.cancelled)),
+      ),
+      (
+        name: 'failed playback',
+        answer: driver.answer(item, slot,
+            playback: driver.playback(slot, item,
+                outcome: CourseAudioOutcome.failed)),
+      ),
+      (
+        name: 'unverified source',
+        answer: driver.answer(item, slot,
+            playback: driver.playback(slot, item,
+                source: CourseAudioSource.unverifiedRecording)),
+      ),
+      (
+        name: 'practice TTS source',
+        answer: driver.answer(item, slot,
+            playback: driver.playback(slot, item,
+                source: CourseAudioSource.practiceTts)),
+      ),
+      (
+        name: 'playback scope mismatch',
+        answer: driver.answer(item, slot,
+            playback: driver.playback(
+              slot,
+              item,
+              scope: SentenceHuntProfileScope(
+                  courseId: 'en-fr', owner: LearningOwner.account('other')),
+            )),
+      ),
+      (
+        name: 'playback run mismatch',
+        answer: driver.answer(item, slot,
+            playback: driver.playback(slot, item,
+                runGeneration: slot.cursor.generation + 1)),
+      ),
+      (
+        name: 'playback round mismatch',
+        answer: driver.answer(item, slot,
+            playback: driver.playback(slot, item,
+                round: driver.session(slot).round + 1)),
+      ),
+    ];
+
+    for (final ({String name, SentenceHuntAnswer answer}) row in forged) {
+      final SentenceHuntLearningState before = driver.state;
+      final String snapshot = _stateSnapshot(before);
+      expect(
+        () => driver.engine.prepare(
+          state: before,
+          sectionId: sectionId,
+          action: AnswerSentenceHuntItem(row.answer),
+          authGeneration: 0,
+          token: 'forgedprep${forged.indexOf(row).toString().padLeft(12, '0')}',
+          submittedAt: driver.now(),
+        ),
+        throwsA(anything),
+        reason: '${row.name} prepare',
+      );
+      expect(
+        () => driver.engine.evaluate(
+          state: before,
+          command: driver.command(
+            sectionId: sectionId,
+            action: AnswerSentenceHuntItem(row.answer),
+            tokenOverride:
+                'forgedeval${forged.indexOf(row).toString().padLeft(12, '0')}',
+          ),
+          committedAt: driver.now(),
+        ),
+        throwsA(anything),
+        reason: '${row.name} direct evaluate',
+      );
+      expect(identical(driver.state, before), isTrue, reason: row.name);
+      expect(_stateSnapshot(before), snapshot, reason: row.name);
+    }
+
+    final SentenceHuntLearningState beforeScopeMismatch = driver.state;
+    expect(
+      () => driver.engine.evaluate(
+        state: beforeScopeMismatch,
+        command: driver.command(
+          sectionId: sectionId,
+          action: AnswerSentenceHuntItem(driver.answer(item, slot)),
+          commandScope: SentenceHuntProfileScope(
+              courseId: 'en-fr', owner: LearningOwner.account('other')),
+        ),
+        committedAt: driver.now(),
+      ),
+      throwsArgumentError,
+      reason: 'command owner/scope mismatch is rejected by evaluate',
+    );
+    expect(identical(driver.state, beforeScopeMismatch), isTrue);
+
+    final SentenceHuntLearningCommand staleCursor = driver.command(
+      sectionId: sectionId,
+      action: AnswerSentenceHuntItem(driver.answer(item, slot)),
+      expected:
+          const LearningCursorPosition(generation: 0, sequence: 0, revision: 0),
+    );
+    expect(
+      () => driver.engine.evaluate(
+        state: beforeScopeMismatch,
+        command: staleCursor,
+        committedAt: driver.now(),
+      ),
+      throwsArgumentError,
+      reason: 'stale expected cursor is rejected by evaluate',
+    );
+    final SentenceHuntLearningCommand staleFingerprint = driver.command(
+      sectionId: sectionId,
+      action: AnswerSentenceHuntItem(driver.answer(item, slot)),
+      sectionFingerprint: 'stale-content-fingerprint',
+    );
+    expect(
+      () => driver.engine.evaluate(
+        state: beforeScopeMismatch,
+        command: staleFingerprint,
+        committedAt: driver.now(),
+      ),
+      throwsArgumentError,
+      reason: 'stale current content fingerprint is rejected by evaluate',
+    );
+    expect(
+      () => SentenceHuntProfileScope(
+          courseId: 'fr-fr', owner: LearningOwner.guest()),
+      throwsArgumentError,
+      reason: 'a foreign course identity cannot be constructed',
+    );
+    expect(
+      () => SentenceHuntPlaybackObservation(
+        scope: driver.scope,
+        content: item.identity,
+        runGeneration: slot.cursor.generation,
+        round: driver.session(slot).round,
+        uiGeneration: -1,
+        referenceId: item.identity.audioRefId,
+        outcome: CourseAudioOutcome.completed,
+        source: CourseAudioSource.reviewedRecording,
+      ),
+      throwsArgumentError,
+      reason: 'UI generation remains domain-bounded',
+    );
+    expect(
+      () => driver.command(
+        sectionId: sectionId,
+        action: AnswerSentenceHuntItem(driver.answer(item, slot)),
+        authGeneration: -1,
+      ),
+      throwsArgumentError,
+      reason: 'auth generation remains domain-bounded',
+    );
+
+    final SentenceHuntTransition emptySelection = driver.engine.evaluate(
+      state: beforeScopeMismatch,
+      command: driver.command(
+        sectionId: sectionId,
+        action: AnswerSentenceHuntItem(
+          driver.answer(item, slot, selected: const <String>[]),
+        ),
+      ),
+      committedAt: driver.now(),
+    );
+    expect(emptySelection.attempts, hasLength(1));
+    expect(emptySelection.attempts.single.correct, isFalse);
+
+    final SentenceHuntTransition valid = driver.engine.evaluate(
+      state: beforeScopeMismatch,
+      command: driver.command(
+        sectionId: sectionId,
+        action: AnswerSentenceHuntItem(
+          driver.answer(item, slot,
+              selected: item.expectedTokenIds, playback: goodPlayback),
+        ),
+      ),
+      committedAt: driver.now(),
+    );
+    expect(valid.attempts, hasLength(1));
+    expect(valid.attempts.single.correct, isTrue);
+    expect(valid.nextState.attempts, hasLength(1));
+
+    final SentenceHuntTransition answered = valid;
+    final SentenceHuntLearningState answeredState = answered.nextState;
+    final String answeredSnapshot = _stateSnapshot(answeredState);
+    final SentenceHuntLearningCommand reanswer = driver.command(
+      sectionId: sectionId,
+      action: AnswerSentenceHuntItem(driver.answer(item, slot)),
+      expected: answeredState.slots[sectionId]!.cursor,
+    );
+    expect(
+      () => driver.engine.evaluate(
+        state: answeredState,
+        command: reanswer,
+        committedAt: driver.now(),
+      ),
+      throwsStateError,
+      reason: 'the same already-answered item cannot be answered twice',
+    );
+    expect(_stateSnapshot(answeredState), answeredSnapshot);
   });
 
   test('sentence_exact_set_answer_derives_one_attempt', () {
@@ -258,11 +736,11 @@ void main() {
 }
 
 final class _Driver {
-  _Driver()
-      : catalogue = syntheticSentenceCatalogue(),
+  _Driver({SentenceHuntCatalogue? catalogue})
+      : catalogue = catalogue ?? syntheticSentenceCatalogue(),
         scope = SentenceHuntProfileScope(
             courseId: 'en-fr', owner: LearningOwner.guest()) {
-    engine = SentenceHuntTransitionEngine(catalogue: catalogue);
+    engine = SentenceHuntTransitionEngine(catalogue: this.catalogue);
     state = SentenceHuntLearningState.empty(scope);
   }
 
@@ -387,6 +865,223 @@ final class _Driver {
       submittedAt: submittedAt ?? now(),
     );
   }
+
+  SentenceHuntPlaybackObservation playback(
+    SentenceHuntSlot slot,
+    SentenceHuntItem item, {
+    SentenceHuntProfileScope? scope,
+    SentenceHuntContentIdentity? content,
+    int? runGeneration,
+    int? round,
+    int uiGeneration = 17,
+    String? referenceId,
+    CourseAudioOutcome outcome = CourseAudioOutcome.completed,
+    CourseAudioSource source = CourseAudioSource.reviewedRecording,
+  }) {
+    final LessonSectionSession restored = session(slot);
+    return SentenceHuntPlaybackObservation(
+      scope: scope ?? this.scope,
+      content: content ?? item.identity,
+      runGeneration: runGeneration ?? slot.cursor.generation,
+      round: round ?? restored.round,
+      uiGeneration: uiGeneration,
+      referenceId: referenceId ?? item.identity.audioRefId,
+      outcome: outcome,
+      source: source,
+    );
+  }
+
+  SentenceHuntAnswer answer(
+    SentenceHuntItem item,
+    SentenceHuntSlot slot, {
+    List<String>? selected,
+    List<String>? expectedSnapshot,
+    SentenceHuntContentIdentity? content,
+    SentenceHuntPlaybackObservation? playback,
+  }) =>
+      SentenceHuntAnswer(
+        content: content ?? item.identity,
+        selectedTokenIds: selected ?? item.expectedTokenIds,
+        expectedTokenIdsSnapshot: expectedSnapshot ?? item.expectedTokenIds,
+        playback: playback ?? this.playback(slot, item, content: content),
+      );
+
+  SentenceHuntLearningCommand command({
+    required String sectionId,
+    required SentenceHuntAction action,
+    SentenceHuntProfileScope? commandScope,
+    String? sectionFingerprint,
+    LearningCursorPosition? expected,
+    String? tokenOverride,
+    int authGeneration = 0,
+  }) {
+    final SentenceHuntSlot? slot = state.slots[sectionId];
+    return SentenceHuntLearningCommand(
+      scope: commandScope ?? scope,
+      authGeneration: authGeneration,
+      sectionId: sectionId,
+      sectionFingerprint:
+          sectionFingerprint ?? catalogue.section(sectionId).sectionFingerprint,
+      expected: expected ??
+          slot?.cursor ??
+          const LearningCursorPosition(generation: 0, sequence: 0, revision: 0),
+      token: tokenOverride ?? token(),
+      submittedAt: now(),
+      action: action,
+    );
+  }
+}
+
+SentenceHuntContentIdentity _copyIdentity(
+  SentenceHuntContentIdentity identity, {
+  String? sectionId,
+  String? annotationHash,
+}) =>
+    SentenceHuntContentIdentity(
+      sectionId: sectionId ?? identity.sectionId,
+      itemId: identity.itemId,
+      sentenceId: identity.sentenceId,
+      audioRefId: identity.audioRefId,
+      annotationHash: annotationHash ?? identity.annotationHash,
+      contentRevision: identity.contentRevision,
+      annotationRevision: identity.annotationRevision,
+    );
+
+SentenceHuntCatalogue _catalogueWithVersionedPolicy() {
+  final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+  final Map<String, dynamic> section =
+      (fixture.manifest['sections'] as List<Map<String, dynamic>>).first;
+  section['policyRevision'] = 2;
+  section['completionThresholdPercent'] = 70;
+  return decodeFrenchSentencePackage(
+    manifestJson: fixture.manifestJson,
+    provenanceJson: fixture.provenanceJson,
+    annotationsJson: fixture.annotationsJson,
+    sourceEvidenceJson: fixture.sourceEvidenceJson,
+  );
+}
+
+SentenceHuntCatalogue _catalogueWithFingerprintMutation(String change) {
+  final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+  final Map<String, dynamic> section =
+      (fixture.manifest['sections'] as List<Map<String, dynamic>>).first;
+  final Map<String, dynamic> item =
+      (section['items'] as List<Map<String, dynamic>>).first;
+  final String itemId = item['id'] as String;
+  final Map<String, dynamic> annotation =
+      (fixture.annotations['entries'] as List<Map<String, dynamic>>)
+          .firstWhere((Map<String, dynamic> row) => row['itemId'] == itemId);
+  final Map<String, dynamic> provenance =
+      (fixture.provenance['entries'] as List<Map<String, dynamic>>)
+          .firstWhere((Map<String, dynamic> row) => row['itemId'] == itemId);
+
+  switch (change) {
+    case 'key':
+      final List<Map<String, dynamic>> tokens =
+          (item['tokens'] as List<Map<String, dynamic>>);
+      final String sound = item['targetSound'] as String;
+      tokens[0]['phonemes'] = <String>['t'];
+      tokens[1]['phonemes'] = <String>['v', sound];
+      final List<String> expected = <String>[
+        tokens[1]['id'] as String,
+        tokens[3]['id'] as String,
+      ];
+      item['expectedTokenIds'] = expected;
+      final List<Map<String, dynamic>> drafts =
+          annotation['draftTokenPhonemes'] as List<Map<String, dynamic>>;
+      drafts[0]['phonemes'] = <String>['t'];
+      drafts[1]['phonemes'] = <String>['v', sound];
+      break;
+    case 'context':
+      item['debriefNote'] = 'Updated synthetic context for fingerprint test.';
+      break;
+    case 'annotation':
+      const String changedHash =
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      item['annotationHash'] = changedHash;
+      annotation['annotationHash'] = changedHash;
+      (annotation['frenchAudioReview']
+          as Map<String, dynamic>)['annotationHash'] = changedHash;
+      (provenance['rightsReview'] as Map<String, dynamic>)['annotationHash'] =
+          changedHash;
+      break;
+    case 'asset':
+      const String changedHash =
+          'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+      item['clipSha256'] = changedHash;
+      (provenance['clip'] as Map<String, dynamic>)['sha256'] = changedHash;
+      (annotation['frenchAudioReview'] as Map<String, dynamic>)['clipSha256'] =
+          changedHash;
+      (provenance['rightsReview'] as Map<String, dynamic>)['clipSha256'] =
+          changedHash;
+      break;
+    default:
+      throw ArgumentError.value(change, 'change');
+  }
+
+  return decodeFrenchSentencePackage(
+    manifestJson: fixture.manifestJson,
+    provenanceJson: fixture.provenanceJson,
+    annotationsJson: fixture.annotationsJson,
+    sourceEvidenceJson: fixture.sourceEvidenceJson,
+  );
+}
+
+String _stateSnapshot(SentenceHuntLearningState state) => jsonEncode(
+      <String, Object?>{
+        'revision': state.revision,
+        'commitOrdinal': state.commitOrdinal,
+        'slots': <String, Object?>{
+          for (final MapEntry<String, SentenceHuntSlot> entry
+              in state.slots.entries)
+            entry.key: <String, Object?>{
+              'cursor': <int>[
+                entry.value.cursor.generation,
+                entry.value.cursor.sequence,
+                entry.value.cursor.revision,
+              ],
+              'session': jsonEncode(entry.value.checkpoint.sessionJson),
+              'latestReceipt': entry.value.latestReceipt.commitOrdinal,
+            },
+        },
+        'attempts': state.attempts
+            .map((SentenceHuntAttempt attempt) => <Object?>[
+                  attempt.content.itemId,
+                  attempt.sequence,
+                  attempt.selectedTokenIds,
+                  attempt.correct,
+                ])
+            .toList(),
+        'receipts': state.receipts
+            .map((SentenceHuntReceipt receipt) => receipt.commitOrdinal)
+            .toList(),
+        'mistakes': state.mistakes.length,
+        'summaries': state.summaries.length,
+        'completions': state.completions.length,
+        'exposure': state.teachingExposure.length,
+      },
+    );
+
+bool _throwsArgumentError(void Function() action) {
+  try {
+    action();
+  } on ArgumentError {
+    return true;
+  } catch (_) {
+    return false;
+  }
+  return false;
+}
+
+bool _throwsStateError(void Function() action) {
+  try {
+    action();
+  } on StateError {
+    return true;
+  } catch (_) {
+    return false;
+  }
+  return false;
 }
 
 Object? _deepMutable(Object? value) {

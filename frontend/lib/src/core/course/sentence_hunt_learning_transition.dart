@@ -44,6 +44,8 @@ final class SentenceHuntTransitionEngine {
     // including a Start; pending packages cannot create partial sessions.
     final SentenceHuntSection section = _registeredSection(sectionId);
     final SentenceHuntSlot? slot = state.slots[sectionId];
+    if (slot != null) _activeSlot(state, section, slot);
+    _validateStartPolicy(section, action);
     SentenceHuntAction normalizedAction = action;
     if (action case AnswerSentenceHuntItem(:final answer)) {
       final SentenceHuntSlot active = _activeSlot(state, section, slot);
@@ -103,10 +105,13 @@ final class SentenceHuntTransitionEngine {
       throw ArgumentError('Sentence-hunt content fingerprint is stale.');
     }
     final SentenceHuntSlot? beforeSlot = state.slots[command.sectionId];
+    final SentenceHuntSlot? validatedBeforeSlot =
+        beforeSlot == null ? null : _activeSlot(state, section, beforeSlot);
+    _validateStartPolicy(section, command.action);
 
     if (command.action case final StartSentenceHuntRun start) {
       final LessonSectionSession session =
-          _startSession(state, section, beforeSlot, start);
+          _startSession(state, section, validatedBeforeSlot, start);
       return _commit(
         state: state,
         command: command,
@@ -125,7 +130,8 @@ final class SentenceHuntTransitionEngine {
       );
     }
 
-    final SentenceHuntSlot active = _activeSlot(state, section, beforeSlot);
+    final SentenceHuntSlot active =
+        validatedBeforeSlot ?? _activeSlot(state, section, beforeSlot);
     if (active.checkpoint.finished) {
       throw StateError('Finished sentence-hunt runs cannot be resumed.');
     }
@@ -280,6 +286,20 @@ final class SentenceHuntTransitionEngine {
       throw StateError('Sentence-hunt section is not fully available.');
     }
     return section;
+  }
+
+  void _validateStartPolicy(
+    SentenceHuntSection section,
+    SentenceHuntAction action,
+  ) {
+    if (action case StartSentenceHuntRun(:final policy)) {
+      if (policy.completionThresholdPercent !=
+          section.policy.completionThresholdPercent) {
+        throw ArgumentError(
+          'Sentence-hunt Start policy differs from the registered section.',
+        );
+      }
+    }
   }
 
   SentenceHuntSlot _activeSlot(
