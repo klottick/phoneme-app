@@ -105,6 +105,50 @@ void main() {
       }
     });
 
+    test('an unreferenced duplicate evidence root retries on the same loader',
+        () async {
+      final SentenceHuntPackageFixture repairedFixture =
+          syntheticSentencePackage();
+      final SentenceHuntPackageFixture invalidFixture = repairedFixture.copy();
+      final Map<String, dynamic> duplicate = <String, dynamic>{
+        'id': 'fixture-root-duplicate',
+        'url': 'https://example.test/root-duplicate',
+        'retrievedAt': '2026-01-01T00:00:00Z',
+        'sha256': List<String>.filled(64, 'a').join(),
+        'text': 'Synthetic duplicate root record.',
+        'scope': 'dataset',
+        'itemIds': <String>[],
+      };
+      (invalidFixture.sourceEvidence['entries'] as List)
+        ..add(<String, dynamic>{...duplicate})
+        ..add(
+            <String, dynamic>{...duplicate, 'text': 'Conflicting duplicate.'});
+      final _FixtureBundle bundle = _FixtureBundle(invalidFixture);
+      final FrenchSentencePackageLoader loader =
+          FrenchSentencePackageLoader(bundle: bundle);
+
+      final SentenceHuntCatalogue invalid = await loader.load();
+
+      expect(invalid.hasValidRoot, isFalse);
+      expect(invalid.sections, isEmpty);
+      expect(bundle.loads, hasLength(4));
+      expect(
+        invalid.diagnostics.any((SentenceHuntDiagnostic diagnostic) =>
+            diagnostic.code == 'duplicate_record' &&
+            diagnostic.recordId == 'source-evidence'),
+        isTrue,
+      );
+
+      bundle.contents['assets/audio/fr-sentences/source-evidence.json'] =
+          repairedFixture.sourceEvidenceJson;
+      final SentenceHuntCatalogue repaired = await loader.load();
+
+      expect(repaired.hasValidRoot, isTrue);
+      expect(repaired.sections, hasLength(3));
+      expect(bundle.loads, hasLength(8));
+      expect(bundle.loads.every((load) => !load.cache), isTrue);
+    });
+
     test('a valid pending catalogue is cached after one coalesced read',
         () async {
       final _FixtureBundle bundle = _FixtureBundle(

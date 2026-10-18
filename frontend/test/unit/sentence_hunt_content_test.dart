@@ -425,6 +425,163 @@ void main() {
       }
     });
 
+    test(
+        'unreferenced duplicate evidence IDs invalidate the root regardless of order or count',
+        () {
+      const String duplicateId = 'fixture-unreferenced-duplicate';
+      Map<String, dynamic> evidenceRecord({
+        required String url,
+        required String shaDigit,
+        required String text,
+      }) =>
+          <String, dynamic>{
+            'id': duplicateId,
+            'url': url,
+            'retrievedAt': '2026-01-01T00:00:00Z',
+            'sha256': List<String>.filled(64, shaDigit).join(),
+            'text': text,
+            'scope': 'dataset',
+            'itemIds': <String>[],
+          };
+      final Map<String, dynamic> first = evidenceRecord(
+        url: 'https://example.test/evidence-first',
+        shaDigit: 'a',
+        text: 'First conflicting unreferenced evidence record.',
+      );
+      final Map<String, dynamic> second = evidenceRecord(
+        url: 'https://example.test/evidence-second',
+        shaDigit: 'b',
+        text: 'Second conflicting unreferenced evidence record.',
+      );
+      final Map<String, dynamic> third = evidenceRecord(
+        url: 'https://example.test/evidence-third',
+        shaDigit: 'c',
+        text: 'Third conflicting unreferenced evidence record.',
+      );
+      final List<List<Map<String, dynamic>>> duplicateLayouts =
+          <List<Map<String, dynamic>>>[
+        <Map<String, dynamic>>[first, second],
+        <Map<String, dynamic>>[second, first],
+        <Map<String, dynamic>>[third, first, second],
+      ];
+
+      for (final List<Map<String, dynamic>> duplicates in duplicateLayouts) {
+        final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+        (fixture.sourceEvidence['entries'] as List).addAll(duplicates);
+
+        final SentenceHuntCatalogue catalogue = _decode(fixture);
+
+        expect(catalogue.hasValidRoot, isFalse);
+        expect(catalogue.sections, isEmpty);
+        expect(
+          fixtureSectionIds.every((String id) => !catalogue.isAvailable(id)),
+          isTrue,
+        );
+        expect(
+          fixtureItemIds.expand((List<String> itemIds) => itemIds).every(
+              (String itemId) =>
+                  catalogue.recordingMetadataFor('$itemId-audio') == null),
+          isTrue,
+        );
+        final List<SentenceHuntDiagnostic> duplicateDiagnostics = catalogue
+            .diagnostics
+            .where((SentenceHuntDiagnostic diagnostic) =>
+                diagnostic.code == 'duplicate_record' &&
+                diagnostic.recordId == 'source-evidence')
+            .toList(growable: false);
+        expect(duplicateDiagnostics, hasLength(1));
+        expect(duplicateDiagnostics.single.message, contains(duplicateId));
+      }
+    });
+
+    test('accepts a unique valid unreferenced source-evidence record', () {
+      final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+      (fixture.sourceEvidence['entries'] as List).add(<String, dynamic>{
+        'id': 'fixture-unique-unused',
+        'url': 'https://example.test/unique-unused',
+        'retrievedAt': '2026-01-01T00:00:00Z',
+        'sha256': List<String>.filled(64, 'a').join(),
+        'text': 'A unique valid unreferenced record remains legal.',
+        'scope': 'dataset',
+        'itemIds': <String>[],
+      });
+
+      final SentenceHuntCatalogue catalogue = _decode(fixture);
+
+      expect(catalogue.hasValidRoot, isTrue);
+      expect(catalogue.sections, hasLength(3));
+      expect(
+        fixtureSectionIds.every((String id) => catalogue.isAvailable(id)),
+        isTrue,
+      );
+      expect(
+        catalogue.diagnostics.any((SentenceHuntDiagnostic diagnostic) =>
+            diagnostic.code == 'duplicate_record'),
+        isFalse,
+      );
+    });
+
+    test('keeps duplicate referenced evidence local without choosing a row',
+        () {
+      final List<List<int>> duplicateOrders = <List<int>>[
+        <int>[0, 1, 2],
+        <int>[1, 2, 0],
+        <int>[2, 0, 1],
+      ];
+
+      for (final List<int> order in duplicateOrders) {
+        final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+        final String evidenceId = 'fixture-item-${fixtureItemIds[0][0]}';
+        final Map<String, dynamic> original = _evidence(fixture, evidenceId);
+        final Map<String, dynamic> malformed = <String, dynamic>{
+          ...original,
+          'url': 'http://example.test/conflicting-duplicate',
+          'text': 'Conflicting malformed synthetic duplicate record.',
+        };
+        final Map<String, dynamic> conflicting = <String, dynamic>{
+          ...original,
+          'url': 'https://example.test/conflicting-duplicate',
+          'text': 'Conflicting but structurally valid synthetic duplicate.',
+          'sha256': List<String>.filled(64, 'f').join(),
+        };
+        final List<Map<String, dynamic>> variants = <Map<String, dynamic>>[
+          original,
+          malformed,
+          conflicting,
+        ];
+        final List<dynamic> evidenceEntries =
+            fixture.sourceEvidence['entries'] as List;
+        evidenceEntries.remove(original);
+        evidenceEntries.insertAll(
+          evidenceEntries.indexWhere((Object? entry) =>
+                  entry is Map && entry['id'] == 'fixture-dataset') +
+              1,
+          <Map<String, dynamic>>[
+            for (final int index in order) variants[index],
+          ],
+        );
+
+        final SentenceHuntCatalogue catalogue = _decode(fixture);
+
+        expect(catalogue.hasValidRoot, isTrue);
+        expect(catalogue.isAvailable(fixtureSectionIds[0]), isFalse);
+        expect(catalogue.isAvailable(fixtureSectionIds[1]), isTrue);
+        expect(catalogue.isAvailable(fixtureSectionIds[2]), isTrue);
+        expect(
+          fixtureItemIds[0].every((String itemId) =>
+              catalogue.recordingMetadataFor('$itemId-audio') == null),
+          isTrue,
+        );
+        expect(
+          catalogue.diagnosticsFor(fixtureSectionIds[0]).any(
+              (SentenceHuntDiagnostic diagnostic) =>
+                  diagnostic.code == 'duplicate_record' &&
+                  diagnostic.recordId == evidenceId),
+          isTrue,
+        );
+      }
+    });
+
     test('keeps malformed referenced evidence local to its item section', () {
       final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
       _evidence(fixture, 'fixture-item-${fixtureItemIds[0][0]}')['url'] =

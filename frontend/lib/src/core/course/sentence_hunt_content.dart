@@ -469,6 +469,12 @@ SentenceHuntCatalogue decodeFrenchSentencePackage({
     annotationIndex,
     provenanceIndex,
   );
+  for (final String duplicateId in evidenceIndex.duplicateIds) {
+    // Without a surviving item reference, this root-level record cannot be
+    // attributed safely. Referenced duplicates are rejected locally by
+    // _recordFor, which also prevents selecting an arbitrary duplicate row.
+    if (!referencedEvidenceIds.contains(duplicateId)) rootValid = false;
+  }
   for (final MapEntry<String, Map<String, dynamic>> entry
       in evidenceIndex.byId.entries) {
     if (referencedEvidenceIds.contains(entry.key)) continue;
