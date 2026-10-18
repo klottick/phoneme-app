@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import os
+import struct
 import tempfile
 import unittest
 import wave
@@ -11,6 +12,7 @@ from unittest import mock
 
 import prepare_french_sentences as preparation
 from french_sentence_package import annotation_hash
+from french_sentence_wav import parse_wav_bytes
 
 try:
     from verify_french_sentences import main, verify_package
@@ -31,6 +33,16 @@ SOURCE_FRAMES = 20
 RETRIEVED_AT = "2026-10-17T12:00:00Z"
 REVIEWED_AT = "2026-10-17T13:00:00Z"
 LICENSE_URL = "https://creativecommons.org/licenses/by/4.0/"
+FLOAT_SOURCE_SAMPLES = (
+    -1.0, -0.875, -0.75, -0.625, -0.5, -0.375, -0.25, -0.125,
+    0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875,
+    1.0, -0.0, 1 / 65536, -1 / 65536,
+)
+FLOAT_SOURCE_PCM16 = (
+    -32768, -28672, -24576, -20480, -16384, -12288, -8192, -4096,
+    0, 4096, 8192, 12288, 16384, 20480, 24576, 28672,
+    32767, 0, 0, 0,
+)
 
 
 def _wav_bytes(frames, rate=SAMPLE_RATE, channels=CHANNELS, width=SAMPLE_WIDTH):
@@ -43,19 +55,31 @@ def _wav_bytes(frames, rate=SAMPLE_RATE, channels=CHANNELS, width=SAMPLE_WIDTH):
     return output.getvalue()
 
 
+def _float_wav_bytes(samples, rate=SAMPLE_RATE, channels=CHANNELS):
+    frames = struct.pack("<" + "f" * len(samples), *samples)
+    raw = bytearray(_wav_bytes(frames, rate, channels, 4))
+    raw[20:22] = (3).to_bytes(2, "little")
+    return bytes(raw)
+
+
+def _signed_24_bytes(values):
+    return b"".join(value.to_bytes(3, "little", signed=True) for value in values)
+
+
 def _measure(path):
     data = path.read_bytes()
-    with wave.open(str(path), "rb") as wav:
-        return {
-            "path": path.relative_to(path.parents[1]).as_posix(),
-            "sha256": hashlib.sha256(data).hexdigest(),
-            "byteLength": len(data),
-            "sampleRate": wav.getframerate(),
-            "channels": wav.getnchannels(),
-            "sampleWidth": wav.getsampwidth(),
-            "frameCount": wav.getnframes(),
-            "durationSeconds": wav.getnframes() / wav.getframerate(),
-        }
+    wav = parse_wav_bytes(data)
+    return {
+        "path": path.relative_to(path.parents[1]).as_posix(),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "byteLength": len(data),
+        "sampleRate": wav.sample_rate,
+        "channels": wav.channels,
+        "sampleWidth": wav.sample_width,
+        "sampleEncoding": wav.sample_encoding,
+        "frameCount": wav.frame_count,
+        "durationSeconds": wav.frame_count / wav.sample_rate,
+    }
 
 
 def _write_json(path, value):
@@ -117,8 +141,7 @@ class SentencePackageFixture:
             "SYNTHETIC TEST FIXTURE ONLY — not legal advice or production evidence.\n"
             "Creative Commons Attribution 4.0 International (CC BY 4.0)\n"
             f"{LICENSE_URL}\n", encoding="utf-8")
-        source_frames = bytes(range(SOURCE_FRAMES * CHANNELS * SAMPLE_WIDTH))
-        source_blob = _wav_bytes(source_frames)
+        source_blob = _float_wav_bytes(FLOAT_SOURCE_SAMPLES)
         evidence_entries = [{
             "id": "dataset-source",
             "url": "https://huggingface.co/datasets/google/fleurs",
@@ -173,9 +196,9 @@ class SentencePackageFixture:
                 original_path.write_bytes(source_blob)
                 start_frame = (section_index * 5 + item_index - 1) % 5
                 end_frame = start_frame + 6
-                clip_frames = source_frames[
-                    start_frame * CHANNELS * SAMPLE_WIDTH:
-                    end_frame * CHANNELS * SAMPLE_WIDTH]
+                clip_frames = b"".join(
+                    struct.pack("<h", sample)
+                    for sample in FLOAT_SOURCE_PCM16[start_frame:end_frame])
                 clip_path = self.root / clip_relative
                 clip_path.write_bytes(_wav_bytes(clip_frames))
                 original_measure = _measure(original_path)
@@ -253,10 +276,11 @@ class SentencePackageFixture:
                     "derivation": {
                         "startFrame": start_frame,
                         "endFrame": end_frame,
+                        "conversionPolicy": "pcm16-v1",
                         "tool": "Python wave (synthetic fixture)",
                         "version": "test-only",
-                        "settings": ["sample-preserving half-open crop"],
-                        "changes": ["SYNTHETIC TEST crop; not source production"],
+                        "settings": ["half-open frame crop", "pcm16-v1 quantization"],
+                        "changes": ["SYNTHETIC float32 to PCM16 conversion; not source production"],
                         "transcriptCorrectionRationale": "",
                     },
                     "credit": {
@@ -639,7 +663,112 @@ class VerifyFrenchSentenceTests(unittest.TestCase):
         clip.write_bytes(_wav_bytes(bytes(samples), params.framerate,
                                     params.nchannels, params.sampwidth))
         self.fixture.refresh_audio_measurements(item_id, "clip")
-        self._contains(self._verify(), "clip PCM is not the exact claimed source frame slice")
+        self._contains(self._verify(),
+                       "clip PCM does not match pcm16-v1 conversion of claimed source frame range")
+
+    def test_float_originals_and_pcm16_delivery_pass_pending_and_accepted_fixtures(self):
+        item_id = self._first_id()
+        provenance = self.fixture.provenance_entry(item_id)
+        self.assertEqual(provenance["original"]["sampleEncoding"], "ieee-float32le")
+        self.assertEqual(provenance["clip"]["sampleEncoding"], "pcm-s16le")
+        self.assertEqual(provenance["derivation"]["conversionPolicy"], "pcm16-v1")
+        self.assertEqual(provenance["derivation"]["changes"], [
+            "SYNTHETIC float32 to PCM16 conversion; not source production"])
+        self.assertEqual(self._verify(), [])
+        self.fixture.accept_all()
+        self.assertEqual(self._verify(), [])
+        self.assertEqual(self._verify(require_reviewed=True), [])
+
+    def test_pcm16_clip_transformation_is_verified_after_self_hash_refresh(self):
+        self.fixture.accept_all()
+        item_id = self._first_id()
+        clip = self.root / self.fixture.item(item_id)["clipPath"]
+        parsed = parse_wav_bytes(clip.read_bytes())
+        changed = bytearray(parsed.frame_data)
+        changed[0] ^= 1
+        clip.write_bytes(_wav_bytes(bytes(changed), parsed.sample_rate,
+                                    parsed.channels, parsed.sample_width))
+        self.fixture.refresh_audio_measurements(item_id, "clip")
+        self.assertEqual(
+            self.fixture.provenance_entry(item_id)["clip"]["sha256"],
+            self.fixture.item(item_id)["clipSha256"],
+        )
+        errors = self._verify()
+        self._contains(errors,
+                       "clip PCM does not match pcm16-v1 conversion of claimed source frame range")
+
+    def test_measurements_require_actual_sample_encodings_and_policy(self):
+        self._rewrite("provenance.json", lambda value: value["entries"][0]["original"].pop("sampleEncoding"))
+        self._contains(self._verify(), "original: missing required field 'sampleEncoding'")
+        self.setUp()
+        self._rewrite("provenance.json", lambda value: value["entries"][0]["clip"].update(sampleEncoding="pcm-s24le"))
+        self._contains(self._verify(), ".clip.sampleEncoding: does not match actual WAV")
+        self.setUp()
+        self._rewrite("provenance.json", lambda value: value["entries"][0]["derivation"].update(conversionPolicy="other"))
+        self._contains(self._verify(), "conversionPolicy: must be 'pcm16-v1'")
+        self.setUp()
+        self._rewrite("provenance.json", lambda value: value["entries"][0]["derivation"].pop("conversionPolicy"))
+        self._contains(self._verify(), "derivation: missing required field 'conversionPolicy'")
+
+    def test_pcm16_delivery_requires_nonempty_conversion_notice(self):
+        self._rewrite("provenance.json", lambda value: value["entries"][0]["derivation"].update(changes=[]))
+        self._contains(self._verify(), "conversion policy requires a nonempty change notice")
+
+    def test_float_source_rejects_nonfinite_and_out_of_range_samples(self):
+        item = self.fixture.item(self._first_id())
+        source = self.root / item["originalPath"]
+        source.write_bytes(_float_wav_bytes([float("nan")] + list(FLOAT_SOURCE_SAMPLES[1:])))
+        self._contains(self._verify(), "IEEE-float32 WAV samples must be finite")
+        source.write_bytes(_float_wav_bytes([1.01] + list(FLOAT_SOURCE_SAMPLES[1:])))
+        self._contains(self._verify(), "IEEE-float32 WAV samples must be within [-1, +1]")
+
+    def test_integer_source_conversion_is_supported_and_provenanced(self):
+        item_id = self._first_id()
+        item = self.fixture.item(item_id)
+        provenance = self.fixture.provenance_entry(item_id)
+        original = self.root / item["originalPath"]
+        clip = self.root / item["clipPath"]
+        source_samples = [value * 256 for value in range(-10, 10)]
+        original.write_bytes(_wav_bytes(_signed_24_bytes(source_samples),
+                                        SAMPLE_RATE, CHANNELS, 3))
+        start = provenance["derivation"]["startFrame"]
+        end = provenance["derivation"]["endFrame"]
+        converted_samples = [value // 256 for value in source_samples[start:end]]
+        clip.write_bytes(_wav_bytes(
+            b"".join(struct.pack("<h", value) for value in converted_samples),
+            SAMPLE_RATE, CHANNELS, 2))
+        self.fixture.refresh_audio_measurements(item_id, "original")
+        self.fixture.refresh_audio_measurements(item_id, "clip")
+        self.assertEqual(self.fixture.provenance_entry(item_id)["original"]["sampleEncoding"],
+                         "pcm-s24le")
+        self.assertEqual(self._verify(), [])
+
+    def test_changed_valid_crop_invalidates_old_review_clip_hash(self):
+        self.fixture.accept_all()
+        item_id = self._first_id()
+        item = self.fixture.item(item_id)
+        entry = self.fixture.provenance_entry(item_id)
+        old_review_hash = entry["rightsReview"]["clipSha256"]
+        start = entry["derivation"]["startFrame"] + 1
+        end = entry["derivation"]["endFrame"] + 1
+        entry["derivation"].update(startFrame=start, endFrame=end)
+        expected = b"".join(
+            struct.pack("<h", sample)
+            for sample in FLOAT_SOURCE_PCM16[start:end])
+        clip = self.root / item["clipPath"]
+        clip.write_bytes(_wav_bytes(expected))
+        measurement = _measure(clip)
+        entry["clip"].update(measurement)
+        item["clipSha256"] = measurement["sha256"]
+        self.fixture.bind_annotation(item_id)
+        self.fixture.write_all()
+        self.assertNotEqual(old_review_hash, item["clipSha256"])
+        errors = self._verify()
+        self._contains(errors, "rightsReview.clipSha256 does not match item clipSha256")
+        self.assertNotIn(
+            "clip PCM does not match pcm16-v1 conversion of claimed source frame range",
+            "\n".join(errors),
+        )
 
     def test_original_and_clip_hashes_lengths_and_truncation_are_checked(self):
         self._rewrite("manifest.json", lambda value: value["sections"][0]["items"][0].update(originalSha256="f" * 64))
@@ -648,7 +777,7 @@ class VerifyFrenchSentenceTests(unittest.TestCase):
         item_id = self._first_id()
         original = self.root / self.fixture.item(item_id)["originalPath"]
         original.write_bytes(original.read_bytes()[:-1])
-        self._contains(self._verify(), "original WAV frame data is truncated")
+        self._contains(self._verify(), "RIFF size does not match the complete WAV file")
 
     def test_symlinked_audio_path_is_rejected_even_when_resolved_inside_root(self):
         item_id = self._first_id()
@@ -907,11 +1036,17 @@ class VerifyFrenchSentenceTests(unittest.TestCase):
         clip = self.root / self.fixture.item(item_id)["clipPath"]
         clip.write_bytes(_wav_bytes(bytes(range(12)), channels=2))
         self.fixture.refresh_audio_measurements(item_id, "clip")
-        self._contains(self._verify(), "clip PCM rate/channels/sample width differ from source")
+        self._contains(self._verify(), "delivery clip sample rate and channels must match source")
+        self.setUp()
+        item_id = self._first_id()
+        clip = self.root / self.fixture.item(item_id)["clipPath"]
+        clip.write_bytes(_wav_bytes(bytes(18), channels=CHANNELS, width=3))
+        self.fixture.refresh_audio_measurements(item_id, "clip")
+        self._contains(self._verify(), "delivery clip must be pcm-s16le with sampleWidth 2")
         self.setUp()
         original = self.root / self.fixture.item(self._first_id())["originalPath"]
         raw = bytearray(original.read_bytes())
-        raw[20:22] = (3).to_bytes(2, "little")
+        raw[20:22] = (6).to_bytes(2, "little")
         original.write_bytes(raw)
         self._contains(self._verify(), "invalid or unsupported WAV")
 
@@ -925,7 +1060,7 @@ class VerifyFrenchSentenceTests(unittest.TestCase):
     def test_actual_original_binary_hash_is_checked_even_if_manifest_claims_repeat(self):
         original = self.root / self.fixture.item(self._first_id())["originalPath"]
         raw = bytearray(original.read_bytes())
-        raw[-1] ^= 0x55
+        raw[-4] ^= 0x01
         original.write_bytes(raw)
         self._contains(self._verify(), ".original.sha256: does not match SHA-256")
 
