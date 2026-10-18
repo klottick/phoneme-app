@@ -1,0 +1,1854 @@
+{
+  "schemaVersion": 1,
+  "language": "fr",
+  "courseId": "en-fr",
+  "sections": [
+    {
+      "id": "en-fr-sentence-hunt-vowels",
+      "kind": "vowels",
+      "title": "French vowel practice",
+      "contentRevision": 1,
+      "policyRevision": 1,
+      "completionThresholdPercent": 80,
+      "items": [
+        {
+          "id": "fr08-vowel-01",
+          "sentenceId": "fr08-vowel-01-sentence",
+          "audioRefId": "fr08-vowel-01-audio",
+          "purpose": "practice",
+          "reviewState": "pending",
+          "targetSound": "ɑ̃",
+          "targetLabel": "French vowel /ɑ̃/",
+          "text": "Une enquête a été ouverte.",
+          "debriefNote": "Draft only: eSpeak NG 1.52.0 word-level mapping proposes “enquête” for /ɑ̃/. This is not confirmation of the recorded pronunciation or French target membership. Qualified French/audio review must verify the transcript, target token(s), accent and context before any scored use.",
+          "annotationRevision": 1,
+          "annotationHash": "1552c0de4a098385241bf4705e88dd0d44264dc2785d9de118c8be807220429d",
+          "tokens": [
+            {
+              "id": "fr08-vowel-01-token-01",
+              "text": "Une",
+              "phonemes": [
+                "y",
+                "n"
+              ]
+            },
+            {
+              "id": "fr08-vowel-01-token-02",
+              "text": "enquête",
+              "phonemes": [
+                "ɑ̃",
+                "k",
+                "ɛ",
+                "t"
+              ]
+            },
+            {
+              "id": "fr08-vowel-01-token-03",
+              "text": "a",
+              "phonemes": [
+                "a"
+              ]
+            },
+            {
+              "id": "fr08-vowel-01-token-04",
+              "text": "été",
+              "phonemes": [
+                "e",
+                "t"
+              ]
+            },
+            {
+              "id": "fr08-vowel-01-token-05",
+              "text": "ouverte",
+              "phonemes": [
+                "u",
+                "v",
+                "ɛ",
+                "ʁ",
+                "t"
+              ]
+            }
+          ],
+          "expectedTokenIds": [
+            "fr08-vowel-01-token-02"
+          ],
+          "originalPath": "originals/fr08-vowel-01.wav",
+          "clipPath": "clips/fr08-vowel-01.wav",
+          "originalSha256": "8ccda5e60d39824b6fb28ca77b8dbe8dd2e240cb6270c94f5ad85fcf60a928aa",
+          "clipSha256": "14bb70d0041c868bb919968d296ed68a8f6984fa98e2e58d04c0192f71e4dda4"
+        },
+        {
+          "id": "fr08-vowel-02",
+          "sentenceId": "fr08-vowel-02-sentence",
+          "audioRefId": "fr08-vowel-02-audio",
+          "purpose": "practice",
+          "reviewState": "pending",
+          "targetSound": "y",
+          "targetLabel": "French vowel /y/",
+          "text": "Cependant, le conducteur a été grièvement blessé à la tête.",
+          "debriefNote": "Draft only: eSpeak NG 1.52.0 word-level mapping proposes “conducteur” for /y/. This is not confirmation of the recorded pronunciation or French target membership. Qualified French/audio review must verify the transcript, target token(s), accent and context before any scored use.",
+          "annotationRevision": 1,
+          "annotationHash": "67f1326f7f39f93df10f0383bcf27383f13943f365afac026c04015fed6d0f7a",
+          "tokens": [
+            {
+              "id": "fr08-vowel-02-token-01",
+              "text": "Cependant",
+              "phonemes": [
+                "s",
+                "ə",
+                "p",
+                "ɑ̃",
+                "d"
+              ]
+            },
+            {
+              "id": "fr08-vowel-02-token-02",
+              "text": "le",
+              "phonemes": [
+                "l",
+                "ə"
+              ]
+            },
+            {
+              "id": "fr08-vowel-02-token-03",
+              "text": "conducteur",
+              "phonemes": [
+                "k",
+                "ɔ̃",
+                "d",
+                "y",
+                "t",
+                "œ",
+                "ʁ"
+              ]
+            },
+            {
+              "id": "fr08-vowel-02-token-04",
+              "text": "a",
+              "phonemes": [
+                "a"
+              ]
+            },
+            {
+              "id": "fr08-vowel-02-token-05",
+              "text": "été",
+              "phonemes": [
+                "e",
+                "t"
+              ]
+            },
+            {
+              "id": "fr08-vowel-02-token-06",
+              "text": "grièvement",
+              "phonemes": [
+                "ɡ",
+                "ʁ",
+                "i",
+                "ɛ",
+                "v",
+                "m",
+                "ɑ̃"
+              ]
+            },
+            {
+              "id": "fr08-vowel-02-token-07",
+              "text": "blessé",
+              "phonemes": [
+                "b",
+                "l",
+                "ɛ",
+                "s",
+                "e"
+              ]
+            },
+            {
+              "id": "fr08-vowel-02-token-08",
+              "text": "à",
+              "phonemes": [
+                "a"
+              ]
+            },
+            {
+              "id": "fr08-vowel-02-token-09",
+              "text": "la",
+              "phonemes": [
+                "l",
+                "a"
+              ]
+            },
+            {
+              "id": "fr08-vowel-02-token-10",
+              "text": "tête",
+              "phonemes": [
+                "t",
+                "ɛ"
+              ]
+            }
+          ],
+          "expectedTokenIds": [
+            "fr08-vowel-02-token-03"
+          ],
+          "originalPath": "originals/fr08-vowel-02.wav",
+          "clipPath": "clips/fr08-vowel-02.wav",
+          "originalSha256": "acce10ca9257ed7b2ae84439d387354aaf8b66418add1a5c4878a9c7085cac5e",
+          "clipSha256": "b20bb2568126c563d9126e7e9c5b3ac8cfc6a450f3ed40dd6ee870c3a9acf091"
+        },
+        {
+          "id": "fr08-vowel-03",
+          "sentenceId": "fr08-vowel-03-sentence",
+          "audioRefId": "fr08-vowel-03-audio",
+          "purpose": "practice",
+          "reviewState": "pending",
+          "targetSound": "u",
+          "targetLabel": "French vowel /u/",
+          "text": "La capsule ressemblera beaucoup à une étoile filante qui traverse le ciel.",
+          "debriefNote": "Draft only: eSpeak NG 1.52.0 word-level mapping proposes “beaucoup” for /u/. This is not confirmation of the recorded pronunciation or French target membership. Qualified French/audio review must verify the transcript, target token(s), accent and context before any scored use.",
+          "annotationRevision": 1,
+          "annotationHash": "b6fd6128e9e2a2634650437e719e6597a83f72012c3789b4ee573728578fc168",
+          "tokens": [
+            {
+              "id": "fr08-vowel-03-token-01",
+              "text": "La",
+              "phonemes": [
+                "l",
+                "a"
+              ]
+            },
+            {
+              "id": "fr08-vowel-03-token-02",
+              "text": "capsule",
+              "phonemes": [
+                "k",
+                "a",
+                "p",
+                "s",
+                "y",
+                "l"
+              ]
+            },
+            {
+              "id": "fr08-vowel-03-token-03",
+              "text": "ressemblera",
+              "phonemes": [
+                "ʁ",
+                "ə",
+                "s",
+                "ɑ̃",
+                "b",
+                "l",
+                "a"
+              ]
+            },
+            {
+              "id": "fr08-vowel-03-token-04",
+              "text": "beaucoup",
+              "phonemes": [
+                "b",
+                "o",
+                "k",
+                "u",
+                "p"
+              ]
+            },
+            {
+              "id": "fr08-vowel-03-token-05",
+              "text": "à",
+              "phonemes": [
+                "a"
+              ]
+            },
+            {
+              "id": "fr08-vowel-03-token-06",
+              "text": "une",
+              "phonemes": [
+                "y",
+                "n"
+              ]
+            },
+            {
+              "id": "fr08-vowel-03-token-07",
+              "text": "étoile",
+              "phonemes": [
+                "e",
+                "t",
+                "w",
+                "a",
+                "l"
+              ]
+            },
+            {
+              "id": "fr08-vowel-03-token-08",
+              "text": "filante",
+              "phonemes": [
+                "f",
+                "i",
+                "l",
+                "ɑ̃",
+                "t"
+              ]
+            },
+            {
+              "id": "fr08-vowel-03-token-09",
+              "text": "qui",
+              "phonemes": [
+                "k",
+                "i"
+              ]
+            },
+            {
+              "id": "fr08-vowel-03-token-10",
+              "text": "traverse",
+              "phonemes": [
+                "t",
+                "ʁ",
+                "a",
+                "v",
+                "ɛ",
+                "s"
+              ]
+            },
+            {
+              "id": "fr08-vowel-03-token-11",
+              "text": "le",
+              "phonemes": [
+                "l",
+                "ə"
+              ]
+            },
+            {
+              "id": "fr08-vowel-03-token-12",
+              "text": "ciel",
+              "phonemes": [
+                "s",
+                "j",
+                "ɛ",
+                "l"
+              ]
+            }
+          ],
+          "expectedTokenIds": [
+            "fr08-vowel-03-token-04"
+          ],
+          "originalPath": "originals/fr08-vowel-03.wav",
+          "clipPath": "clips/fr08-vowel-03.wav",
+          "originalSha256": "516e608745ab12bac3534346526e2a6823aefcd5a57d68db94300a492e1deed9",
+          "clipSha256": "a444f9377544c7fa49653e3537cc2b663dce11955b978c3171b999511236ee75"
+        },
+        {
+          "id": "fr08-vowel-04",
+          "sentenceId": "fr08-vowel-04-sentence",
+          "audioRefId": "fr08-vowel-04-audio",
+          "purpose": "practice",
+          "reviewState": "pending",
+          "targetSound": "ɛ̃",
+          "targetLabel": "French vowel /ɛ̃/",
+          "text": "Personne n'était à l'intérieur de l'appartement.",
+          "debriefNote": "Draft only: eSpeak NG 1.52.0 word-level mapping proposes “l'intérieur” for /ɛ̃/. This is not confirmation of the recorded pronunciation or French target membership. Qualified French/audio review must verify the transcript, target token(s), accent and context before any scored use.",
+          "annotationRevision": 1,
+          "annotationHash": "be1af6c7b76eabb4537c304719b59c26738182d47f2543593e8fd493aa01f9df",
+          "tokens": [
+            {
+              "id": "fr08-vowel-04-token-01",
+              "text": "Personne",
+              "phonemes": [
+                "p",
+                "ɛ",
+                "ʁ",
+                "s",
+                "ɔ",
+                "n"
+              ]
+            },
+            {
+              "id": "fr08-vowel-04-token-02",
+              "text": "n'était",
+              "phonemes": [
+                "n",
+                "e",
+                "t",
+                "ɛ"
+              ]
+            },
+            {
+              "id": "fr08-vowel-04-token-03",
+              "text": "à",
+              "phonemes": [
+                "a"
+              ]
+            },
+            {
+              "id": "fr08-vowel-04-token-04",
+              "text": "l'intérieur",
+              "phonemes": [
+                "l",
+                "ɛ̃",
+                "t",
+                "e",
+                "ʁ",
+                "j",
+                "œ"
+              ]
+            },
+            {
+              "id": "fr08-vowel-04-token-05",
+              "text": "de",
+              "phonemes": [
+                "d",
+                "ə"
+              ]
+            },
+            {
+              "id": "fr08-vowel-04-token-06",
+              "text": "l'appartement",
+              "phonemes": [
+                "l",
+                "a",
+                "p",
+                "ʁ",
+                "t",
+                "ə",
+                "m",
+                "ɑ̃"
+              ]
+            }
+          ],
+          "expectedTokenIds": [
+            "fr08-vowel-04-token-04"
+          ],
+          "originalPath": "originals/fr08-vowel-04.wav",
+          "clipPath": "clips/fr08-vowel-04.wav",
+          "originalSha256": "09904a3ffa535887f1fa8864dbcae0d8e1a6222ca0c3d9b9ed3272ddfe128fc1",
+          "clipSha256": "92a9888fd358bf0f5c90c4978635068d4d30f4440e6745418f34204b541f3a0e"
+        },
+        {
+          "id": "fr08-vowel-05",
+          "sentenceId": "fr08-vowel-05-sentence",
+          "audioRefId": "fr08-vowel-05-audio",
+          "purpose": "practice",
+          "reviewState": "pending",
+          "targetSound": "œ̃",
+          "targetLabel": "French vowel /œ̃/",
+          "text": "Le sommet de la tour était un sanctuaire spécial pour le dieu.",
+          "debriefNote": "Draft only: eSpeak NG 1.52.0 word-level mapping proposes “un” for /œ̃/. This is not confirmation of the recorded pronunciation or French target membership. Qualified French/audio review must verify the transcript, target token(s), accent and context before any scored use.",
+          "annotationRevision": 1,
+          "annotationHash": "e0f849aa828eae85f992dc59cb477df9b5145a5dc4e163d89f178d8df99c2190",
+          "tokens": [
+            {
+              "id": "fr08-vowel-05-token-01",
+              "text": "Le",
+              "phonemes": [
+                "l",
+                "ə"
+              ]
+            },
+            {
+              "id": "fr08-vowel-05-token-02",
+              "text": "sommet",
+              "phonemes": [
+                "s",
+                "ɔ",
+                "m",
+                "ɛ"
+              ]
+            },
+            {
+              "id": "fr08-vowel-05-token-03",
+              "text": "de",
+              "phonemes": [
+                "d",
+                "ə"
+              ]
+            },
+            {
+              "id": "fr08-vowel-05-token-04",
+              "text": "la",
+              "phonemes": [
+                "l",
+                "a"
+              ]
+            },
+            {
+              "id": "fr08-vowel-05-token-05",
+              "text": "tour",
+              "phonemes": [
+                "t",
+                "u",
+                "ʁ"
+              ]
+            },
+            {
+              "id": "fr08-vowel-05-token-06",
+              "text": "était",
+              "phonemes": [
+                "e",
+                "t",
+                "ɛ"
+              ]
+            },
+            {
+              "id": "fr08-vowel-05-token-07",
+              "text": "un",
+              "phonemes": [
+                "œ̃"
+              ]
+            },
+            {
+              "id": "fr08-vowel-05-token-08",
+              "text": "sanctuaire",
+              "phonemes": [
+                "s",
+                "ɑ̃",
+                "k",
+                "t",
+                "y",
+                "ɛ",
+                "ʁ"
+              ]
+            },
+            {
+              "id": "fr08-vowel-05-token-09",
+              "text": "spécial",
+              "phonemes": [
+                "s",
+                "p",
+                "e",
+                "j",
+                "a",
+                "l"
+              ]
+            },
+            {
+              "id": "fr08-vowel-05-token-10",
+              "text": "pour",
+              "phonemes": [
+                "p",
+                "u",
+                "ʁ"
+              ]
+            },
+            {
+              "id": "fr08-vowel-05-token-11",
+              "text": "le",
+              "phonemes": [
+                "l",
+                "ə"
+              ]
+            },
+            {
+              "id": "fr08-vowel-05-token-12",
+              "text": "dieu",
+              "phonemes": [
+                "d",
+                "j",
+                "ø"
+              ]
+            }
+          ],
+          "expectedTokenIds": [
+            "fr08-vowel-05-token-07"
+          ],
+          "originalPath": "originals/fr08-vowel-05.wav",
+          "clipPath": "clips/fr08-vowel-05.wav",
+          "originalSha256": "b7f5e9b879c2efb0a2d0cf19e417c2fa3a3911c08563a46a5764eef68813362f",
+          "clipSha256": "e763b5f5b785fcea10dfb177e2dc5b7cda6f6d44ae67b1c723a474ec96971cc9"
+        }
+      ]
+    },
+    {
+      "id": "en-fr-sentence-hunt-consonants",
+      "kind": "consonants",
+      "title": "French consonant practice",
+      "contentRevision": 1,
+      "policyRevision": 1,
+      "completionThresholdPercent": 80,
+      "items": [
+        {
+          "id": "fr08-consonant-01",
+          "sentenceId": "fr08-consonant-01-sentence",
+          "audioRefId": "fr08-consonant-01-audio",
+          "purpose": "practice",
+          "reviewState": "pending",
+          "targetSound": "z",
+          "targetLabel": "French consonant /z/",
+          "text": "Une fois l'agent arrivé sur place, l'appartement a explosé.",
+          "debriefNote": "Draft only: eSpeak NG 1.52.0 word-level mapping proposes “explosé” for /z/. This is not confirmation of the recorded pronunciation or French target membership. Qualified French/audio review must verify the transcript, target token(s), accent and context before any scored use.",
+          "annotationRevision": 1,
+          "annotationHash": "9bae88775c3eb0740fddc21ac224efecf773511f649225710f8c0c6a20f024af",
+          "tokens": [
+            {
+              "id": "fr08-consonant-01-token-01",
+              "text": "Une",
+              "phonemes": [
+                "y",
+                "n"
+              ]
+            },
+            {
+              "id": "fr08-consonant-01-token-02",
+              "text": "fois",
+              "phonemes": [
+                "f",
+                "w",
+                "a"
+              ]
+            },
+            {
+              "id": "fr08-consonant-01-token-03",
+              "text": "l'agent",
+              "phonemes": [
+                "l",
+                "a",
+                "ʒ",
+                "ɑ̃"
+              ]
+            },
+            {
+              "id": "fr08-consonant-01-token-04",
+              "text": "arrivé",
+              "phonemes": [
+                "a",
+                "ʁ",
+                "i",
+                "v",
+                "e"
+              ]
+            },
+            {
+              "id": "fr08-consonant-01-token-05",
+              "text": "sur",
+              "phonemes": [
+                "s",
+                "y",
+                "ʁ"
+              ]
+            },
+            {
+              "id": "fr08-consonant-01-token-06",
+              "text": "place",
+              "phonemes": [
+                "p",
+                "l",
+                "a",
+                "s"
+              ]
+            },
+            {
+              "id": "fr08-consonant-01-token-07",
+              "text": "l'appartement",
+              "phonemes": [
+                "l",
+                "a",
+                "p",
+                "ʁ",
+                "t",
+                "ə",
+                "m",
+                "ɑ̃"
+              ]
+            },
+            {
+              "id": "fr08-consonant-01-token-08",
+              "text": "a",
+              "phonemes": [
+                "a"
+              ]
+            },
+            {
+              "id": "fr08-consonant-01-token-09",
+              "text": "explosé",
+              "phonemes": [
+                "ɛ",
+                "k",
+                "s",
+                "p",
+                "l",
+                "o",
+                "z",
+                "e"
+              ]
+            }
+          ],
+          "expectedTokenIds": [
+            "fr08-consonant-01-token-09"
+          ],
+          "originalPath": "originals/fr08-consonant-01.wav",
+          "clipPath": "clips/fr08-consonant-01.wav",
+          "originalSha256": "d910a3fa5077e686c943cb6c2d686fac9cc1f45d874ad24d04fbbe6eac39c47d",
+          "clipSha256": "b4bd1437ab098b94a6192c01f7ffc838d24716db772c45f7573a14b01ae1a0dd"
+        },
+        {
+          "id": "fr08-consonant-02",
+          "sentenceId": "fr08-consonant-02-sentence",
+          "audioRefId": "fr08-consonant-02-audio",
+          "purpose": "practice",
+          "reviewState": "pending",
+          "targetSound": "ʃ",
+          "targetLabel": "French consonant /ʃ/",
+          "text": "Leurs prédécesseurs, les australopithèques, ne marchaient pas debout comme d’habitude.",
+          "debriefNote": "Draft only: eSpeak NG 1.52.0 word-level mapping proposes “marchaient” for /ʃ/. This is not confirmation of the recorded pronunciation or French target membership. Qualified French/audio review must verify the transcript, target token(s), accent and context before any scored use.",
+          "annotationRevision": 1,
+          "annotationHash": "514aa4ea17060aa537e5b78a6e2b535747e5b6eb0005f70f492faf30708be0f1",
+          "tokens": [
+            {
+              "id": "fr08-consonant-02-token-01",
+              "text": "Leurs",
+              "phonemes": [
+                "l",
+                "œ",
+                "ʁ"
+              ]
+            },
+            {
+              "id": "fr08-consonant-02-token-02",
+              "text": "prédécesseurs",
+              "phonemes": [
+                "p",
+                "ʁ",
+                "e",
+                "d",
+                "s",
+                "ɛ",
+                "œ"
+              ]
+            },
+            {
+              "id": "fr08-consonant-02-token-03",
+              "text": "les",
+              "phonemes": [
+                "l",
+                "e",
+                "z"
+              ]
+            },
+            {
+              "id": "fr08-consonant-02-token-04",
+              "text": "australopithèques",
+              "phonemes": [
+                "o",
+                "s",
+                "t",
+                "ʁ",
+                "a",
+                "l",
+                "p",
+                "i",
+                "ɛ",
+                "k"
+              ]
+            },
+            {
+              "id": "fr08-consonant-02-token-05",
+              "text": "ne",
+              "phonemes": [
+                "n",
+                "ə"
+              ]
+            },
+            {
+              "id": "fr08-consonant-02-token-06",
+              "text": "marchaient",
+              "phonemes": [
+                "m",
+                "a",
+                "ʁ",
+                "ʃ",
+                "ɛ"
+              ]
+            },
+            {
+              "id": "fr08-consonant-02-token-07",
+              "text": "pas",
+              "phonemes": [
+                "p",
+                "a"
+              ]
+            },
+            {
+              "id": "fr08-consonant-02-token-08",
+              "text": "debout",
+              "phonemes": [
+                "d",
+                "ə",
+                "b",
+                "u"
+              ]
+            },
+            {
+              "id": "fr08-consonant-02-token-09",
+              "text": "comme",
+              "phonemes": [
+                "k",
+                "ɔ",
+                "m"
+              ]
+            },
+            {
+              "id": "fr08-consonant-02-token-10",
+              "text": "d’habitude",
+              "phonemes": [
+                "d",
+                "a",
+                "b",
+                "i",
+                "t",
+                "y"
+              ]
+            }
+          ],
+          "expectedTokenIds": [
+            "fr08-consonant-02-token-06"
+          ],
+          "originalPath": "originals/fr08-consonant-02.wav",
+          "clipPath": "clips/fr08-consonant-02.wav",
+          "originalSha256": "0ea4fc540910148ba69c30956b0b4478a0efa3744083e44bd960ba05f5138045",
+          "clipSha256": "6d5ca87315963eb8bcf071ea353ca56ead0f031e18958f80a00bd7a0c35aa366"
+        },
+        {
+          "id": "fr08-consonant-03",
+          "sentenceId": "fr08-consonant-03-sentence",
+          "audioRefId": "fr08-consonant-03-audio",
+          "purpose": "practice",
+          "reviewState": "pending",
+          "targetSound": "v",
+          "targetLabel": "French consonant /v/",
+          "text": "Avec cet arrangement en place, cette liberté pourrait prendre fin.",
+          "debriefNote": "Draft only: eSpeak NG 1.52.0 word-level mapping proposes “Avec” for /v/. This is not confirmation of the recorded pronunciation or French target membership. Qualified French/audio review must verify the transcript, target token(s), accent and context before any scored use.",
+          "annotationRevision": 1,
+          "annotationHash": "8354fb6abc5f0b5ffcff0713be3abb4acc13d8b296fe07d14910a9e7fcf31561",
+          "tokens": [
+            {
+              "id": "fr08-consonant-03-token-01",
+              "text": "Avec",
+              "phonemes": [
+                "a",
+                "v",
+                "ɛ",
+                "k"
+              ]
+            },
+            {
+              "id": "fr08-consonant-03-token-02",
+              "text": "cet",
+              "phonemes": [
+                "s",
+                "ɛ",
+                "t"
+              ]
+            },
+            {
+              "id": "fr08-consonant-03-token-03",
+              "text": "arrangement",
+              "phonemes": [
+                "a",
+                "ʁ",
+                "ɑ̃",
+                "ʒ",
+                "m"
+              ]
+            },
+            {
+              "id": "fr08-consonant-03-token-04",
+              "text": "en",
+              "phonemes": [
+                "ɑ̃"
+              ]
+            },
+            {
+              "id": "fr08-consonant-03-token-05",
+              "text": "place",
+              "phonemes": [
+                "p",
+                "l",
+                "a",
+                "s"
+              ]
+            },
+            {
+              "id": "fr08-consonant-03-token-06",
+              "text": "cette",
+              "phonemes": [
+                "s",
+                "ɛ",
+                "t"
+              ]
+            },
+            {
+              "id": "fr08-consonant-03-token-07",
+              "text": "liberté",
+              "phonemes": [
+                "l",
+                "i",
+                "b",
+                "ɛ",
+                "ʁ",
+                "t",
+                "e"
+              ]
+            },
+            {
+              "id": "fr08-consonant-03-token-08",
+              "text": "pourrait",
+              "phonemes": [
+                "p",
+                "u",
+                "ʁ",
+                "ɛ"
+              ]
+            },
+            {
+              "id": "fr08-consonant-03-token-09",
+              "text": "prendre",
+              "phonemes": [
+                "p",
+                "ʁ",
+                "ɑ̃",
+                "d"
+              ]
+            },
+            {
+              "id": "fr08-consonant-03-token-10",
+              "text": "fin",
+              "phonemes": [
+                "f",
+                "ɛ̃"
+              ]
+            }
+          ],
+          "expectedTokenIds": [
+            "fr08-consonant-03-token-01"
+          ],
+          "originalPath": "originals/fr08-consonant-03.wav",
+          "clipPath": "clips/fr08-consonant-03.wav",
+          "originalSha256": "cf9b0ef77660439c2efa70387220655be82442e9d4330936c7832b326c2d932f",
+          "clipSha256": "530aa75881bee8e409be9e8bb279d2685524dd486efa6295cbd7289c4b573098"
+        },
+        {
+          "id": "fr08-consonant-04",
+          "sentenceId": "fr08-consonant-04-sentence",
+          "audioRefId": "fr08-consonant-04-audio",
+          "purpose": "practice",
+          "reviewState": "pending",
+          "targetSound": "m",
+          "targetLabel": "French consonant /m/",
+          "text": "Cellule vient du mot latin cella signifiant petite pièce.",
+          "debriefNote": "Draft only: eSpeak NG 1.52.0 word-level mapping proposes “mot” for /m/. This is not confirmation of the recorded pronunciation or French target membership. Qualified French/audio review must verify the transcript, target token(s), accent and context before any scored use.",
+          "annotationRevision": 1,
+          "annotationHash": "3d71332c04124dcc1a97fa4fab029342f6041520f40d56ab300416a8588fabfb",
+          "tokens": [
+            {
+              "id": "fr08-consonant-04-token-01",
+              "text": "Cellule",
+              "phonemes": [
+                "s",
+                "ɛ",
+                "l",
+                "y"
+              ]
+            },
+            {
+              "id": "fr08-consonant-04-token-02",
+              "text": "vient",
+              "phonemes": [
+                "v",
+                "j",
+                "ɛ̃"
+              ]
+            },
+            {
+              "id": "fr08-consonant-04-token-03",
+              "text": "du",
+              "phonemes": [
+                "d",
+                "y"
+              ]
+            },
+            {
+              "id": "fr08-consonant-04-token-04",
+              "text": "mot",
+              "phonemes": [
+                "m",
+                "o"
+              ]
+            },
+            {
+              "id": "fr08-consonant-04-token-05",
+              "text": "latin",
+              "phonemes": [
+                "l",
+                "a",
+                "t",
+                "ɛ̃"
+              ]
+            },
+            {
+              "id": "fr08-consonant-04-token-06",
+              "text": "cella",
+              "phonemes": [
+                "s",
+                "ɛ",
+                "l",
+                "a"
+              ]
+            },
+            {
+              "id": "fr08-consonant-04-token-07",
+              "text": "signifiant",
+              "phonemes": [
+                "s",
+                "i",
+                "ɲ",
+                "f",
+                "j",
+                "ɑ̃"
+              ]
+            },
+            {
+              "id": "fr08-consonant-04-token-08",
+              "text": "petite",
+              "phonemes": [
+                "p",
+                "ə",
+                "t",
+                "i"
+              ]
+            },
+            {
+              "id": "fr08-consonant-04-token-09",
+              "text": "pièce",
+              "phonemes": [
+                "p",
+                "j",
+                "ɛ",
+                "s"
+              ]
+            }
+          ],
+          "expectedTokenIds": [
+            "fr08-consonant-04-token-04"
+          ],
+          "originalPath": "originals/fr08-consonant-04.wav",
+          "clipPath": "clips/fr08-consonant-04.wav",
+          "originalSha256": "45e0cb1df951917352d031a220440c6df34e802c0c539521a55995aaddc5b61d",
+          "clipSha256": "124658e5b3335da1a8f02669ae7132819e8bc8a0fd3cdfef4b13b75a8a463253"
+        },
+        {
+          "id": "fr08-consonant-05",
+          "sentenceId": "fr08-consonant-05-sentence",
+          "audioRefId": "fr08-consonant-05-audio",
+          "purpose": "practice",
+          "reviewState": "pending",
+          "targetSound": "p",
+          "targetLabel": "French consonant /p/",
+          "text": "Ils le font en émettant une minuscule particule de lumière appelée « photon ».",
+          "debriefNote": "Draft only: eSpeak NG 1.52.0 word-level mapping proposes “particule”, “appelée” for /p/. This is not confirmation of the recorded pronunciation or French target membership. Qualified French/audio review must verify the transcript, target token(s), accent and context before any scored use.",
+          "annotationRevision": 1,
+          "annotationHash": "ccf60242002470eb10dc415f7ba1f7bad9270a58db15e04a7a27cedee27fa032",
+          "tokens": [
+            {
+              "id": "fr08-consonant-05-token-01",
+              "text": "Ils",
+              "phonemes": [
+                "i",
+                "l"
+              ]
+            },
+            {
+              "id": "fr08-consonant-05-token-02",
+              "text": "le",
+              "phonemes": [
+                "l",
+                "ə"
+              ]
+            },
+            {
+              "id": "fr08-consonant-05-token-03",
+              "text": "font",
+              "phonemes": [
+                "f",
+                "ɔ̃",
+                "t"
+              ]
+            },
+            {
+              "id": "fr08-consonant-05-token-04",
+              "text": "en",
+              "phonemes": [
+                "ɑ̃",
+                "n"
+              ]
+            },
+            {
+              "id": "fr08-consonant-05-token-05",
+              "text": "émettant",
+              "phonemes": [
+                "e",
+                "m",
+                "ɛ",
+                "t",
+                "ɑ̃"
+              ]
+            },
+            {
+              "id": "fr08-consonant-05-token-06",
+              "text": "une",
+              "phonemes": [
+                "y",
+                "n"
+              ]
+            },
+            {
+              "id": "fr08-consonant-05-token-07",
+              "text": "minuscule",
+              "phonemes": [
+                "m",
+                "i",
+                "n",
+                "y",
+                "s",
+                "k",
+                "l"
+              ]
+            },
+            {
+              "id": "fr08-consonant-05-token-08",
+              "text": "particule",
+              "phonemes": [
+                "p",
+                "a",
+                "ʁ",
+                "t",
+                "i",
+                "k",
+                "y",
+                "l"
+              ]
+            },
+            {
+              "id": "fr08-consonant-05-token-09",
+              "text": "de",
+              "phonemes": [
+                "d",
+                "ə"
+              ]
+            },
+            {
+              "id": "fr08-consonant-05-token-10",
+              "text": "lumière",
+              "phonemes": [
+                "l",
+                "y",
+                "m",
+                "j",
+                "ɛ",
+                "ʁ"
+              ]
+            },
+            {
+              "id": "fr08-consonant-05-token-11",
+              "text": "appelée",
+              "phonemes": [
+                "a",
+                "p",
+                "l",
+                "e"
+              ]
+            },
+            {
+              "id": "fr08-consonant-05-token-12",
+              "text": "photon",
+              "phonemes": [
+                "f",
+                "o",
+                "t",
+                "ɔ̃"
+              ]
+            }
+          ],
+          "expectedTokenIds": [
+            "fr08-consonant-05-token-08",
+            "fr08-consonant-05-token-11"
+          ],
+          "originalPath": "originals/fr08-consonant-05.wav",
+          "clipPath": "clips/fr08-consonant-05.wav",
+          "originalSha256": "5d2d74bbb71a6b5fe6e38a5770a7f1acf48e00093d6cfccf8cafdb7ade036c69",
+          "clipSha256": "3b1d0fbd2ba93df594703eb2a79549c38ee1fabe7b2a950614693e67483e363a"
+        }
+      ]
+    },
+    {
+      "id": "en-fr-sentence-hunt-mixed",
+      "kind": "mixed",
+      "title": "Mixed sound revisits",
+      "contentRevision": 1,
+      "policyRevision": 1,
+      "completionThresholdPercent": 80,
+      "items": [
+        {
+          "id": "fr08-mixed-01",
+          "sentenceId": "fr08-mixed-01-sentence",
+          "audioRefId": "fr08-mixed-01-audio",
+          "purpose": "practice",
+          "reviewState": "pending",
+          "targetSound": "ɑ̃",
+          "targetLabel": "French vowel /ɑ̃/",
+          "text": "Pour quelques pièces de monnaie, des enfants vous raconteront l’histoire.",
+          "debriefNote": "Draft only: eSpeak NG 1.52.0 word-level mapping proposes “enfants” for /ɑ̃/. This is not confirmation of the recorded pronunciation or French target membership. Qualified French/audio review must verify the transcript, target token(s), accent and context before any scored use.",
+          "annotationRevision": 1,
+          "annotationHash": "f6a42318ca531c75ccd411f574296b4075dbbfd5a2d50af33de7cb18cd5fabb8",
+          "tokens": [
+            {
+              "id": "fr08-mixed-01-token-01",
+              "text": "Pour",
+              "phonemes": [
+                "p",
+                "u",
+                "ʁ"
+              ]
+            },
+            {
+              "id": "fr08-mixed-01-token-02",
+              "text": "quelques",
+              "phonemes": [
+                "k",
+                "ɛ",
+                "l",
+                "ə"
+              ]
+            },
+            {
+              "id": "fr08-mixed-01-token-03",
+              "text": "pièces",
+              "phonemes": [
+                "p",
+                "j",
+                "ɛ",
+                "s"
+              ]
+            },
+            {
+              "id": "fr08-mixed-01-token-04",
+              "text": "de",
+              "phonemes": [
+                "d",
+                "ə"
+              ]
+            },
+            {
+              "id": "fr08-mixed-01-token-05",
+              "text": "monnaie",
+              "phonemes": [
+                "m",
+                "ɔ",
+                "n",
+                "ɛ"
+              ]
+            },
+            {
+              "id": "fr08-mixed-01-token-06",
+              "text": "des",
+              "phonemes": [
+                "d",
+                "e",
+                "z"
+              ]
+            },
+            {
+              "id": "fr08-mixed-01-token-07",
+              "text": "enfants",
+              "phonemes": [
+                "ɑ̃",
+                "f"
+              ]
+            },
+            {
+              "id": "fr08-mixed-01-token-08",
+              "text": "vous",
+              "phonemes": [
+                "v",
+                "u"
+              ]
+            },
+            {
+              "id": "fr08-mixed-01-token-09",
+              "text": "raconteront",
+              "phonemes": [
+                "ʁ",
+                "a",
+                "k",
+                "ɔ̃",
+                "t"
+              ]
+            },
+            {
+              "id": "fr08-mixed-01-token-10",
+              "text": "l’histoire",
+              "phonemes": [
+                "l",
+                "i",
+                "s",
+                "t",
+                "w",
+                "a",
+                "ʁ"
+              ]
+            }
+          ],
+          "expectedTokenIds": [
+            "fr08-mixed-01-token-07"
+          ],
+          "originalPath": "originals/fr08-mixed-01.wav",
+          "clipPath": "clips/fr08-mixed-01.wav",
+          "originalSha256": "433dd48ae8d256d6219112574c25bb3555ae2205457d366a6fae58f8e2e3ebf5",
+          "clipSha256": "580d95d76f2bd0601ff2d4b872431aff876675f2fae6e724fdab613b3f114f97"
+        },
+        {
+          "id": "fr08-mixed-02",
+          "sentenceId": "fr08-mixed-02-sentence",
+          "audioRefId": "fr08-mixed-02-audio",
+          "purpose": "practice",
+          "reviewState": "pending",
+          "targetSound": "y",
+          "targetLabel": "French vowel /y/",
+          "text": "Les photons sont même plus petits que les particules formant les atomes !",
+          "debriefNote": "Draft only: eSpeak NG 1.52.0 word-level mapping proposes “plus”, “particules” for /y/. This is not confirmation of the recorded pronunciation or French target membership. Qualified French/audio review must verify the transcript, target token(s), accent and context before any scored use.",
+          "annotationRevision": 1,
+          "annotationHash": "97a478f166b2a663a5ecc029f7c55393a0259582b48039b8b21525356d6e6b85",
+          "tokens": [
+            {
+              "id": "fr08-mixed-02-token-01",
+              "text": "Les",
+              "phonemes": [
+                "l",
+                "e"
+              ]
+            },
+            {
+              "id": "fr08-mixed-02-token-02",
+              "text": "photons",
+              "phonemes": [
+                "f",
+                "o",
+                "t",
+                "ɔ̃"
+              ]
+            },
+            {
+              "id": "fr08-mixed-02-token-03",
+              "text": "sont",
+              "phonemes": [
+                "s",
+                "ɔ̃"
+              ]
+            },
+            {
+              "id": "fr08-mixed-02-token-04",
+              "text": "même",
+              "phonemes": [
+                "m",
+                "ɛ"
+              ]
+            },
+            {
+              "id": "fr08-mixed-02-token-05",
+              "text": "plus",
+              "phonemes": [
+                "p",
+                "l",
+                "y"
+              ]
+            },
+            {
+              "id": "fr08-mixed-02-token-06",
+              "text": "petits",
+              "phonemes": [
+                "p",
+                "ə",
+                "t",
+                "i"
+              ]
+            },
+            {
+              "id": "fr08-mixed-02-token-07",
+              "text": "que",
+              "phonemes": [
+                "k",
+                "ə"
+              ]
+            },
+            {
+              "id": "fr08-mixed-02-token-08",
+              "text": "les",
+              "phonemes": [
+                "l",
+                "e"
+              ]
+            },
+            {
+              "id": "fr08-mixed-02-token-09",
+              "text": "particules",
+              "phonemes": [
+                "p",
+                "a",
+                "ʁ",
+                "t",
+                "i",
+                "k",
+                "y",
+                "l"
+              ]
+            },
+            {
+              "id": "fr08-mixed-02-token-10",
+              "text": "formant",
+              "phonemes": [
+                "f",
+                "ɔ",
+                "ʁ",
+                "m",
+                "ɑ̃"
+              ]
+            },
+            {
+              "id": "fr08-mixed-02-token-11",
+              "text": "les",
+              "phonemes": [
+                "l",
+                "e",
+                "z"
+              ]
+            },
+            {
+              "id": "fr08-mixed-02-token-12",
+              "text": "atomes",
+              "phonemes": [
+                "a",
+                "t",
+                "o",
+                "m"
+              ]
+            }
+          ],
+          "expectedTokenIds": [
+            "fr08-mixed-02-token-05",
+            "fr08-mixed-02-token-09"
+          ],
+          "originalPath": "originals/fr08-mixed-02.wav",
+          "clipPath": "clips/fr08-mixed-02.wav",
+          "originalSha256": "43533351b9a277e18c47b9378b8cfbe43a7120da51b451f032f892bed7985f01",
+          "clipSha256": "0a147189cf0481d4ee3c1614bf63d02125ff8f840cfa1d0cd1e4abd4cb8017f6"
+        },
+        {
+          "id": "fr08-mixed-03",
+          "sentenceId": "fr08-mixed-03-sentence",
+          "audioRefId": "fr08-mixed-03-audio",
+          "purpose": "practice",
+          "reviewState": "pending",
+          "targetSound": "z",
+          "targetLabel": "French consonant /z/",
+          "text": "Le gaz se raréfie à mesure que l'on s'éloigne du centre du Soleil.",
+          "debriefNote": "Draft only: eSpeak NG 1.52.0 word-level mapping proposes “gaz”, “mesure” for /z/. This is not confirmation of the recorded pronunciation or French target membership. Qualified French/audio review must verify the transcript, target token(s), accent and context before any scored use.",
+          "annotationRevision": 1,
+          "annotationHash": "02edc50155bf6021e4e17aa47bf280a05791034ecc69a047471a7f1164f510d5",
+          "tokens": [
+            {
+              "id": "fr08-mixed-03-token-01",
+              "text": "Le",
+              "phonemes": [
+                "l",
+                "ə"
+              ]
+            },
+            {
+              "id": "fr08-mixed-03-token-02",
+              "text": "gaz",
+              "phonemes": [
+                "ɡ",
+                "a",
+                "z"
+              ]
+            },
+            {
+              "id": "fr08-mixed-03-token-03",
+              "text": "se",
+              "phonemes": [
+                "s",
+                "ə"
+              ]
+            },
+            {
+              "id": "fr08-mixed-03-token-04",
+              "text": "raréfie",
+              "phonemes": [
+                "ʁ",
+                "a",
+                "e",
+                "f",
+                "i"
+              ]
+            },
+            {
+              "id": "fr08-mixed-03-token-05",
+              "text": "à",
+              "phonemes": [
+                "a"
+              ]
+            },
+            {
+              "id": "fr08-mixed-03-token-06",
+              "text": "mesure",
+              "phonemes": [
+                "m",
+                "ə",
+                "z",
+                "y",
+                "ʁ"
+              ]
+            },
+            {
+              "id": "fr08-mixed-03-token-07",
+              "text": "que",
+              "phonemes": [
+                "k",
+                "ə"
+              ]
+            },
+            {
+              "id": "fr08-mixed-03-token-08",
+              "text": "l'on",
+              "phonemes": [
+                "l",
+                "ɔ̃"
+              ]
+            },
+            {
+              "id": "fr08-mixed-03-token-09",
+              "text": "s'éloigne",
+              "phonemes": [
+                "s",
+                "e",
+                "l",
+                "w",
+                "a",
+                "ɲ"
+              ]
+            },
+            {
+              "id": "fr08-mixed-03-token-10",
+              "text": "du",
+              "phonemes": [
+                "d",
+                "y"
+              ]
+            },
+            {
+              "id": "fr08-mixed-03-token-11",
+              "text": "centre",
+              "phonemes": [
+                "s",
+                "ɑ̃",
+                "t",
+                "ʁ"
+              ]
+            },
+            {
+              "id": "fr08-mixed-03-token-12",
+              "text": "du",
+              "phonemes": [
+                "d",
+                "y"
+              ]
+            },
+            {
+              "id": "fr08-mixed-03-token-13",
+              "text": "Soleil",
+              "phonemes": [
+                "s",
+                "o",
+                "l",
+                "ɛ",
+                "j"
+              ]
+            }
+          ],
+          "expectedTokenIds": [
+            "fr08-mixed-03-token-02",
+            "fr08-mixed-03-token-06"
+          ],
+          "originalPath": "originals/fr08-mixed-03.wav",
+          "clipPath": "clips/fr08-mixed-03.wav",
+          "originalSha256": "ef3d41b18deb49d94a7f9d1423e2fb1c4bcb0b891e97a6b5f77edb3de1d60504",
+          "clipSha256": "030ed9c2d3ae775adf2bce19b98d05c0075142525814d0436943092bafb0a0be"
+        },
+        {
+          "id": "fr08-mixed-04",
+          "sentenceId": "fr08-mixed-04-sentence",
+          "audioRefId": "fr08-mixed-04-audio",
+          "purpose": "practice",
+          "reviewState": "pending",
+          "targetSound": "ʃ",
+          "targetLabel": "French consonant /ʃ/",
+          "text": "« Nous étions tous simplement sous le choc », a déclaré la mère.",
+          "debriefNote": "Draft only: eSpeak NG 1.52.0 word-level mapping proposes “choc” for /ʃ/. This is not confirmation of the recorded pronunciation or French target membership. Qualified French/audio review must verify the transcript, target token(s), accent and context before any scored use.",
+          "annotationRevision": 1,
+          "annotationHash": "65d75a17fbd0d16f5921d84584b7138331b593916be6c9a24b3c84635a9625c0",
+          "tokens": [
+            {
+              "id": "fr08-mixed-04-token-01",
+              "text": "Nous",
+              "phonemes": [
+                "n",
+                "u",
+                "z"
+              ]
+            },
+            {
+              "id": "fr08-mixed-04-token-02",
+              "text": "étions",
+              "phonemes": [
+                "e",
+                "t",
+                "j",
+                "ɔ̃"
+              ]
+            },
+            {
+              "id": "fr08-mixed-04-token-03",
+              "text": "tous",
+              "phonemes": [
+                "t",
+                "u",
+                "s"
+              ]
+            },
+            {
+              "id": "fr08-mixed-04-token-04",
+              "text": "simplement",
+              "phonemes": [
+                "s",
+                "ɛ̃",
+                "p",
+                "l",
+                "ə",
+                "m",
+                "ɑ̃"
+              ]
+            },
+            {
+              "id": "fr08-mixed-04-token-05",
+              "text": "sous",
+              "phonemes": [
+                "s",
+                "u"
+              ]
+            },
+            {
+              "id": "fr08-mixed-04-token-06",
+              "text": "le",
+              "phonemes": [
+                "l",
+                "ə"
+              ]
+            },
+            {
+              "id": "fr08-mixed-04-token-07",
+              "text": "choc",
+              "phonemes": [
+                "ʃ",
+                "ɔ",
+                "k"
+              ]
+            },
+            {
+              "id": "fr08-mixed-04-token-08",
+              "text": "a",
+              "phonemes": [
+                "a"
+              ]
+            },
+            {
+              "id": "fr08-mixed-04-token-09",
+              "text": "déclaré",
+              "phonemes": [
+                "d",
+                "e",
+                "k",
+                "l",
+                "a",
+                "ʁ"
+              ]
+            },
+            {
+              "id": "fr08-mixed-04-token-10",
+              "text": "la",
+              "phonemes": [
+                "l",
+                "a"
+              ]
+            },
+            {
+              "id": "fr08-mixed-04-token-11",
+              "text": "mère",
+              "phonemes": [
+                "m",
+                "ɛ",
+                "ʁ"
+              ]
+            }
+          ],
+          "expectedTokenIds": [
+            "fr08-mixed-04-token-07"
+          ],
+          "originalPath": "originals/fr08-mixed-04.wav",
+          "clipPath": "clips/fr08-mixed-04.wav",
+          "originalSha256": "52cd915b679e54f9655f0e331ddb1f4e56c5edc62951cd237e488fa145f668d6",
+          "clipSha256": "7a2ef2f9be083f2695a943c38bf9b4b0620914df44a526097bd59479bc1d2c27"
+        },
+        {
+          "id": "fr08-mixed-05",
+          "sentenceId": "fr08-mixed-05-sentence",
+          "audioRefId": "fr08-mixed-05-audio",
+          "purpose": "practice",
+          "reviewState": "pending",
+          "targetSound": "v",
+          "targetLabel": "French consonant /v/",
+          "text": "La région abrite également une très grande variété d'espèces animales et d'oiseaux.",
+          "debriefNote": "Draft only: eSpeak NG 1.52.0 word-level mapping proposes “variété” for /v/. This is not confirmation of the recorded pronunciation or French target membership. Qualified French/audio review must verify the transcript, target token(s), accent and context before any scored use.",
+          "annotationRevision": 1,
+          "annotationHash": "2cdbc48fc76e982583fda6fb7d9002814d5bf0f7a1a19bfbf559632cc0cd9eb9",
+          "tokens": [
+            {
+              "id": "fr08-mixed-05-token-01",
+              "text": "La",
+              "phonemes": [
+                "l",
+                "a"
+              ]
+            },
+            {
+              "id": "fr08-mixed-05-token-02",
+              "text": "région",
+              "phonemes": [
+                "ʁ",
+                "e",
+                "ʒ",
+                "j",
+                "ɔ̃"
+              ]
+            },
+            {
+              "id": "fr08-mixed-05-token-03",
+              "text": "abrite",
+              "phonemes": [
+                "a",
+                "b",
+                "ʁ",
+                "i",
+                "t"
+              ]
+            },
+            {
+              "id": "fr08-mixed-05-token-04",
+              "text": "également",
+              "phonemes": [
+                "e",
+                "ɡ",
+                "a",
+                "l",
+                "m",
+                "ɑ̃"
+              ]
+            },
+            {
+              "id": "fr08-mixed-05-token-05",
+              "text": "une",
+              "phonemes": [
+                "y",
+                "n"
+              ]
+            },
+            {
+              "id": "fr08-mixed-05-token-06",
+              "text": "très",
+              "phonemes": [
+                "t",
+                "ʁ",
+                "ɛ"
+              ]
+            },
+            {
+              "id": "fr08-mixed-05-token-07",
+              "text": "grande",
+              "phonemes": [
+                "ɡ",
+                "ʁ",
+                "ɑ̃",
+                "d"
+              ]
+            },
+            {
+              "id": "fr08-mixed-05-token-08",
+              "text": "variété",
+              "phonemes": [
+                "v",
+                "a",
+                "ʁ",
+                "j",
+                "e",
+                "t"
+              ]
+            },
+            {
+              "id": "fr08-mixed-05-token-09",
+              "text": "d'espèces",
+              "phonemes": [
+                "d",
+                "ɛ",
+                "s",
+                "p",
+                "z"
+              ]
+            },
+            {
+              "id": "fr08-mixed-05-token-10",
+              "text": "animales",
+              "phonemes": [
+                "a",
+                "n",
+                "i",
+                "m",
+                "l",
+                "z"
+              ]
+            },
+            {
+              "id": "fr08-mixed-05-token-11",
+              "text": "et",
+              "phonemes": [
+                "e"
+              ]
+            },
+            {
+              "id": "fr08-mixed-05-token-12",
+              "text": "d'oiseaux",
+              "phonemes": [
+                "d",
+                "w",
+                "a",
+                "z",
+                "o"
+              ]
+            }
+          ],
+          "expectedTokenIds": [
+            "fr08-mixed-05-token-08"
+          ],
+          "originalPath": "originals/fr08-mixed-05.wav",
+          "clipPath": "clips/fr08-mixed-05.wav",
+          "originalSha256": "5bcaabefa6e10fbca0016fcf7d351fd20dcb955678c2ef79c2be17a5b5e2b491",
+          "clipSha256": "cb7429308511da2a52c3af487f4aef41f287e50fd30a7e0d8a19b381480bb00d"
+        }
+      ]
+    }
+  ],
+  "historicalSections": []
+}
