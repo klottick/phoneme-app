@@ -15,10 +15,17 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
-import wave
 from pathlib import Path
 
 from french_sentence_package import SentencePackageError, canonical_json, parse_fleurs_train_tsv
+from french_sentence_wav import (
+    MAX_WAV_BYTES,
+    PCM16_ENCODING,
+    PCM16_POLICY,
+    convert_to_pcm16,
+    read_wav,
+    write_wav,
+)
 
 REVISION = "d7c758a6dceecd54a98cac43404d3d576e721f07"
 TSV_URL = f"https://huggingface.co/datasets/google/fleurs/resolve/{REVISION}/data/fr_fr/train.tsv"
@@ -236,24 +243,33 @@ def fetch_source(cache):
             shutil.rmtree(staging)
 
 
-def crop_pcm(source, destination, start_frame, end_frame):
+def crop_pcm(source, destination, start_frame, end_frame, *, output_encoding=None):
     destination = _fresh_target(destination)
     if any(isinstance(v, bool) or not isinstance(v, int) for v in (start_frame, end_frame)):
         raise SentencePackageError("crop offsets must be integers")
+    if output_encoding not in (None, PCM16_ENCODING):
+        raise SentencePackageError("output_encoding must be omitted or 'pcm-s16le'")
     try:
-        with wave.open(str(source), "rb") as inp:
-            params = inp.getparams()
-            if params.comptype != "NONE" or params.sampwidth not in (1, 2, 3, 4):
-                raise SentencePackageError("only uncompressed integer PCM WAV is supported")
-            total, frame_size = params.nframes, params.nchannels * params.sampwidth
-            if start_frame < 0 or end_frame <= start_frame or end_frame > total:
-                raise SentencePackageError("crop range must be a valid nonempty half-open frame range")
-            inp.setpos(start_frame)
-            data = inp.readframes(end_frame - start_frame)
-            if len(data) != (end_frame - start_frame) * frame_size:
-                raise SentencePackageError("WAV data is truncated")
-    except (wave.Error, EOFError, OSError) as exc:
-        raise SentencePackageError(f"invalid or unsupported WAV: {exc}") from exc
+        wav = read_wav(source, max_bytes=MAX_WAV_BYTES)
+    except SentencePackageError:
+        raise
+    if start_frame < 0 or end_frame <= start_frame or end_frame > wav.frame_count:
+        raise SentencePackageError("crop range must be a valid nonempty half-open frame range")
+    if output_encoding is None:
+        if wav.sample_encoding == "ieee-float32le":
+            raise SentencePackageError(
+                "IEEE-float32 WAV requires explicit output_encoding='pcm-s16le' conversion")
+        frame_size = wav.channels * wav.sample_width
+        data = wav.frame_data[start_frame * frame_size:end_frame * frame_size]
+        output_sample_encoding = wav.sample_encoding
+    else:
+        data = convert_to_pcm16(wav, start_frame, end_frame)
+        output_sample_encoding = PCM16_ENCODING
+    try:
+        output_data = write_wav(data, wav.sample_rate, wav.channels,
+                                output_sample_encoding)
+    except SentencePackageError:
+        raise
     try:
         staging_fd, staging_name = tempfile.mkstemp(
             prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent)
@@ -265,9 +281,7 @@ def crop_pcm(source, destination, start_frame, end_frame):
     try:
         staging_identity = _staging_identity(staging_fd)
         with os.fdopen(os.dup(staging_fd), "wb") as raw:
-            with wave.open(raw, "wb") as out:
-                out.setparams(params)
-                out.writeframes(data)
+            raw.write(output_data)
         _publish_staging(staging, destination, staging_identity)
         published = True
     finally:
@@ -278,10 +292,29 @@ def crop_pcm(source, destination, start_frame, end_frame):
             os.close(staging_fd)
     size, digest = _identity(destination)
     count = end_frame - start_frame
-    return {"path": str(destination), "sha256": digest, "byteLength": size,
-            "frameCount": count, "sampleRate": params.framerate, "channels": params.nchannels,
-            "sampleWidth": params.sampwidth, "durationSeconds": count / params.framerate,
-            "startFrame": start_frame, "endFrame": end_frame}
+    metadata = {
+        "path": str(destination), "sha256": digest, "byteLength": size,
+        "frameCount": count, "sampleRate": wav.sample_rate, "channels": wav.channels,
+        "sampleWidth": 2 if output_encoding else wav.sample_width,
+        "sampleEncoding": output_sample_encoding,
+        "durationSeconds": count / wav.sample_rate,
+        "startFrame": start_frame, "endFrame": end_frame,
+    }
+    if output_encoding is not None:
+        metadata["conversionPolicy"] = PCM16_POLICY
+    return metadata
+
+
+def preflight_source(source):
+    """Report the supported WAV shape without generating or changing audio."""
+    wav = read_wav(source, max_bytes=MAX_WAV_BYTES)
+    return {
+        "sampleEncoding": wav.sample_encoding,
+        "sampleRate": wav.sample_rate,
+        "channels": wav.channels,
+        "frameCount": wav.frame_count,
+        "supportedDeliveryPolicy": PCM16_POLICY,
+    }
 
 
 def draft_phonemes(text, executable, data_parent):
@@ -321,6 +354,9 @@ def main(argv=None):
     select.add_argument("--selection", required=True, type=Path); select.add_argument("--cache", required=True, type=Path); select.add_argument("--output", required=True, type=Path)
     crop = commands.add_parser("crop")
     crop.add_argument("--source", required=True, type=Path); crop.add_argument("--destination", required=True, type=Path); crop.add_argument("--start-frame", required=True, type=int); crop.add_argument("--end-frame", required=True, type=int)
+    crop.add_argument("--output-encoding", choices=(PCM16_ENCODING,))
+    preflight = commands.add_parser("preflight")
+    preflight.add_argument("--source", required=True, type=Path)
     annotate = commands.add_parser("annotate")
     annotate.add_argument("--text-file", required=True, type=Path); annotate.add_argument("--executable", required=True, type=Path); annotate.add_argument("--data-parent", required=True, type=Path); annotate.add_argument("--output", required=True, type=Path)
     try:
@@ -335,7 +371,10 @@ def main(argv=None):
                 raise SentencePackageError("selection JSON must be a nonempty list of unique archive member-name strings")
             result = select_originals(args.cache / "train.tar.gz", selection, args.output)
         elif args.command == "crop":
-            result = crop_pcm(args.source, args.destination, args.start_frame, args.end_frame)
+            result = crop_pcm(args.source, args.destination, args.start_frame,
+                              args.end_frame, output_encoding=args.output_encoding)
+        elif args.command == "preflight":
+            result = preflight_source(args.source)
         else:
             text = args.text_file.read_text(encoding="utf-8")
             result = draft_phonemes(text, args.executable, args.data_parent)

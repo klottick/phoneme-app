@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import struct
 import tarfile
 import tempfile
 import unittest
@@ -23,6 +24,14 @@ def make_wav(path, frames, channels=2, width=2, rate=16000):
         out.setsampwidth(width)
         out.setframerate(rate)
         out.writeframes(frames)
+
+
+def make_float_wav(path, samples, channels=1, rate=8000):
+    frames = struct.pack("<" + "f" * len(samples), *samples)
+    make_wav(path, frames, channels, 4, rate)
+    data = bytearray(path.read_bytes())
+    data[20:22] = (3).to_bytes(2, "little")
+    path.write_bytes(data)
 
 
 def archive_bytes(entries):
@@ -60,9 +69,15 @@ class PreparationTests(unittest.TestCase):
                         mock.patch.object(prep, 'ARCHIVE_SIZE', len(tar)),
                         mock.patch.object(prep, 'ARCHIVE_SHA256', hashlib.sha256(tar).hexdigest()),
                         mock.patch.object(prep, '_fetch_to', side_effect=lambda url, path, *_: Path(path).write_bytes(payloads[url])))
-            elif operation_name == 'crop':
-                source = root / 'source.wav'; make_wav(source, b'\x00\x00', channels=1, width=2)
-                operation = lambda: prep.crop_pcm(source, destination, 0, 1)
+            elif operation_name in ('crop', 'crop-convert'):
+                source = root / 'source.wav'
+                if operation_name == 'crop-convert':
+                    make_float_wav(source, [0.0, 1.0])
+                    operation = lambda: prep.crop_pcm(
+                        source, destination, 0, 1, output_encoding='pcm-s16le')
+                else:
+                    make_wav(source, b'\x00\x00', channels=1, width=2)
+                    operation = lambda: prep.crop_pcm(source, destination, 0, 1)
                 pins = ()
             else:
                 operation = lambda: prep._write_json(destination, {'draft': True})
@@ -98,7 +113,7 @@ class PreparationTests(unittest.TestCase):
             self.assertFalse(any(p.name.startswith('.destination.') for p in root.iterdir()))
 
     def test_atomic_publication_refuses_racing_files_directories_and_symlinks(self):
-        for operation in ('select', 'fetch', 'crop', 'json'):
+        for operation in ('select', 'fetch', 'crop', 'crop-convert', 'json'):
             for target_type in ('file', 'directory', 'symlink'):
                 with self.subTest(operation=operation, target_type=target_type):
                     self._run_publication_race(operation, target_type)
@@ -149,8 +164,11 @@ class PreparationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             source = root / 'source.wav'
-            make_wav(source, b'\x01\x02', channels=1, width=2)
-            destination = root / ('result.wav' if operation_name == 'crop' else 'result.json')
+            if operation_name == 'crop-convert':
+                make_float_wav(source, [0.0, 1.0])
+            else:
+                make_wav(source, b'\x01\x02', channels=1, width=2)
+            destination = root / ('result.wav' if operation_name in ('crop', 'crop-convert') else 'result.json')
             sentinel = root / 'outside-sentinel'
             sentinel.write_bytes(b'preserve-this-target')
             actual_publish = prep._publish_staging
@@ -192,9 +210,13 @@ class PreparationTests(unittest.TestCase):
                         descriptor_retained_during_cleanup.append(False)
                 return actual_lstat(path, *args, **kwargs)
 
-            operation = (lambda: prep.crop_pcm(source, destination, 0, 1)
-                         if operation_name == 'crop'
-                         else prep._write_json(destination, {'draft': True}))
+            if operation_name == 'crop-convert':
+                operation = lambda: prep.crop_pcm(
+                    source, destination, 0, 1, output_encoding='pcm-s16le')
+            elif operation_name == 'crop':
+                operation = lambda: prep.crop_pcm(source, destination, 0, 1)
+            else:
+                operation = lambda: prep._write_json(destination, {'draft': True})
             with mock.patch.object(prep.tempfile, 'mkstemp', side_effect=capture_staging_fd), \
                  mock.patch.object(prep, '_publish_staging', side_effect=substitute), \
                  mock.patch.object(Path, 'lstat', new=observe_cleanup_lstat):
@@ -221,9 +243,10 @@ class PreparationTests(unittest.TestCase):
                 self.assertEqual(substitute_path.resolve(), sentinel)
 
     def test_crop_refuses_replaced_staging_path_before_publication(self):
-        for replacement in ('regular', 'symlink'):
-            with self.subTest(replacement=replacement):
-                self._run_staging_substitution('crop', replacement, 'publish')
+        for operation in ('crop', 'crop-convert'):
+            for replacement in ('regular', 'symlink'):
+                with self.subTest(operation=operation, replacement=replacement):
+                    self._run_staging_substitution(operation, replacement, 'publish')
 
     def test_json_refuses_replaced_staging_path_before_publication(self):
         for replacement in ('regular', 'symlink'):
@@ -231,9 +254,10 @@ class PreparationTests(unittest.TestCase):
                 self._run_staging_substitution('json', replacement, 'publish')
 
     def test_crop_cleanup_preserves_replaced_staging_path(self):
-        for replacement in ('regular', 'symlink'):
-            with self.subTest(replacement=replacement):
-                self._run_staging_substitution('crop', replacement, 'cleanup')
+        for operation in ('crop', 'crop-convert'):
+            for replacement in ('regular', 'symlink'):
+                with self.subTest(operation=operation, replacement=replacement):
+                    self._run_staging_substitution(operation, replacement, 'cleanup')
 
     def test_json_cleanup_preserves_replaced_staging_path(self):
         for replacement in ('regular', 'symlink'):
@@ -311,6 +335,145 @@ class PreparationTests(unittest.TestCase):
                 prep.crop_pcm(source, root / 'bad.wav', True, 2)
             with self.assertRaises(SentencePackageError):
                 prep.crop_pcm(source, dest, 0, 1)
+
+    def test_float_crop_requires_explicit_deterministic_pcm16_conversion(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "float.wav"
+            implicit = root / "implicit.wav"
+            first = root / "first.wav"
+            second = root / "second.wav"
+            samples = [-1.0, -0.5, 1.0, 1 / 65536, 3 / 65536, 5 / 65536,
+                       -1 / 65536, -3 / 65536, -5 / 65536, -0.0, 0.25]
+            make_float_wav(source, samples)
+            source_before = source.read_bytes()
+            with self.assertRaisesRegex(SentencePackageError, "explicit.*pcm-s16le"):
+                prep.crop_pcm(source, implicit, 0, 1)
+            self.assertFalse(implicit.exists())
+
+            expected = [-32768, -16384, 32767, 0, 2, 2, 0, -2, -2, 0, 8192]
+            metadata = prep.crop_pcm(source, first, 0, len(samples),
+                                     output_encoding="pcm-s16le")
+            prep.crop_pcm(source, second, 0, len(samples), output_encoding="pcm-s16le")
+            with wave.open(str(first), "rb") as converted:
+                self.assertEqual((converted.getnchannels(), converted.getframerate(),
+                                  converted.getsampwidth(), converted.getnframes()),
+                                 (1, 8000, 2, len(samples)))
+                self.assertEqual(converted.readframes(len(samples)),
+                                 b"".join(value.to_bytes(2, "little", signed=True)
+                                          for value in expected))
+            self.assertEqual(first.read_bytes(), second.read_bytes())
+            before_existing_target = first.read_bytes()
+            with self.assertRaises(SentencePackageError):
+                prep.crop_pcm(source, first, 0, len(samples),
+                              output_encoding="pcm-s16le")
+            self.assertEqual(first.read_bytes(), before_existing_target)
+            self.assertEqual(metadata["sampleEncoding"], "pcm-s16le")
+            self.assertEqual(metadata["conversionPolicy"], "pcm16-v1")
+            self.assertEqual((metadata["startFrame"], metadata["endFrame"],
+                              metadata["frameCount"], metadata["sampleWidth"]),
+                             (0, len(samples), len(samples), 2))
+            self.assertEqual(source.read_bytes(), source_before)
+
+    def test_integer_source_can_be_explicitly_converted_to_pcm16(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source, destination = root / "integer24.wav", root / "delivery.wav"
+            samples = [-8388608, -384, -128, 0, 128, 384, 640, 8388607]
+            frames = b"".join(value.to_bytes(3, "little", signed=True)
+                               for value in samples)
+            make_wav(source, frames, channels=2, width=3, rate=22050)
+            before = source.read_bytes()
+            result = prep.crop_pcm(source, destination, 1, 3,
+                                   output_encoding="pcm-s16le")
+            with wave.open(str(destination), "rb") as converted:
+                self.assertEqual(converted.readframes(2), b"\0\0\0\0\0\0\x02\0")
+                self.assertEqual((converted.getnchannels(), converted.getframerate()),
+                                 (2, 22050))
+            self.assertEqual(result["sampleEncoding"], "pcm-s16le")
+            self.assertEqual(result["conversionPolicy"], "pcm16-v1")
+            self.assertEqual(source.read_bytes(), before)
+
+    def test_float_reader_rejects_nonfinite_and_out_of_range_samples(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for index, sample in enumerate((float("nan"), float("inf"),
+                                             float("-inf"), 1.0001, -1.0001)):
+                source = root / f"invalid-{index}.wav"
+                destination = root / f"invalid-{index}-crop.wav"
+                make_float_wav(source, [sample])
+                with self.subTest(sample=sample):
+                    with self.assertRaises(SentencePackageError):
+                        prep.crop_pcm(source, destination, 0, 1)
+                    self.assertFalse(destination.exists())
+
+    def test_preflight_reports_real_format_read_only_and_never_uses_external_tools(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "float.wav"
+            make_float_wav(source, [-1.0, 0.25, 1.0])
+            before = source.read_bytes()
+            stdout, stderr = io.StringIO(), io.StringIO()
+            try:
+                with mock.patch("sys.stdout", stdout), mock.patch("sys.stderr", stderr), \
+                     mock.patch.object(prep.subprocess, "run",
+                                       side_effect=AssertionError("unexpected subprocess")), \
+                     mock.patch.object(prep.urllib.request, "build_opener",
+                                       side_effect=AssertionError("unexpected network")):
+                    status = prep.main(["preflight", "--source", str(source)])
+            except SystemExit as exc:
+                self.fail(f"preflight command is not implemented (argparse exit {exc.code})")
+            self.assertEqual(status, 0, stderr.getvalue())
+            result = json.loads(stdout.getvalue())
+            self.assertEqual(result["sampleEncoding"], "ieee-float32le")
+            self.assertEqual((result["sampleRate"], result["channels"],
+                              result["frameCount"], result["supportedDeliveryPolicy"]),
+                             (8000, 1, 3, "pcm16-v1"))
+            self.assertEqual(source.read_bytes(), before)
+            self.assertEqual(list(root.iterdir()), [source])
+
+    def test_preflight_rejects_unsupported_wav_without_mutation_or_traceback(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "unsupported.wav"
+            make_wav(source, b"\0\0", channels=1, width=2)
+            raw = bytearray(source.read_bytes())
+            raw[:4] = b"RIFX"
+            source.write_bytes(raw)
+            before = source.read_bytes()
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with mock.patch("sys.stdout", stdout), mock.patch("sys.stderr", stderr), \
+                 mock.patch.object(prep.subprocess, "run",
+                                   side_effect=AssertionError("unexpected subprocess")), \
+                 mock.patch.object(prep.urllib.request, "build_opener",
+                                   side_effect=AssertionError("unexpected network")):
+                status = prep.main(["preflight", "--source", str(source)])
+            self.assertEqual(status, 1)
+            self.assertIn("unsupported big-endian RIFX", stderr.getvalue())
+            self.assertNotIn("Traceback", stderr.getvalue())
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertEqual(source.read_bytes(), before)
+            self.assertEqual(list(root.iterdir()), [source])
+
+    def test_crop_cli_accepts_explicit_output_encoding(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source, destination = root / "float.wav", root / "converted.wav"
+            make_float_wav(source, [-1.0, 0.5, 1.0])
+            stdout, stderr = io.StringIO(), io.StringIO()
+            try:
+                with mock.patch("sys.stdout", stdout), mock.patch("sys.stderr", stderr):
+                    status = prep.main([
+                        "crop", "--source", str(source), "--destination", str(destination),
+                        "--start-frame", "1", "--end-frame", "3",
+                        "--output-encoding", "pcm-s16le",
+                    ])
+            except SystemExit as exc:
+                self.fail(f"crop --output-encoding is not implemented (argparse exit {exc.code})")
+            self.assertEqual(status, 0, stderr.getvalue())
+            self.assertEqual(json.loads(stdout.getvalue())["sampleEncoding"], "pcm-s16le")
+            with wave.open(str(destination), "rb") as converted:
+                self.assertEqual(converted.readframes(2), b"\x00\x40\xff\x7f")
 
     def test_draft_annotations_never_qualify_content(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -580,11 +743,7 @@ class PreparationTests(unittest.TestCase):
                 with self.assertRaises(SentencePackageError): prep.crop_pcm(source, existing, 0, 1)
                 self.assertEqual(existing.read_bytes(), before)
             failed_output = root / 'write-failed.wav'
-            real_wave_open = wave.open
-            def fail_output(path, mode='rb'):
-                if mode == 'wb': raise OSError('synthetic write failure')
-                return real_wave_open(path, mode)
-            with mock.patch.object(prep.wave, 'open', side_effect=fail_output):
+            with mock.patch.object(prep, 'write_wav', side_effect=OSError('synthetic write failure')):
                 with self.assertRaises(OSError): prep.crop_pcm(source, failed_output, 0, 1)
             self.assertFalse(failed_output.exists())
 

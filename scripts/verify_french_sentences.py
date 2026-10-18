@@ -2,7 +2,6 @@
 
 import argparse
 import hashlib
-import io
 import json
 import math
 import os
@@ -10,7 +9,6 @@ import re
 import stat
 import sys
 import unicodedata
-import wave
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
@@ -21,11 +19,18 @@ from french_sentence_package import (
     parse_fleurs_train_tsv,
     valid_sha256,
 )
+from french_sentence_wav import (
+    MAX_WAV_BYTES,
+    PCM16_ENCODING,
+    PCM16_POLICY,
+    convert_to_pcm16,
+    parse_wav_bytes,
+)
 from prepare_french_sentences import REVISION, TSV_URL
 
 
 MAX_JSON_BYTES = 16 * 1024 * 1024
-MAX_AUDIO_BYTES = 100 * 1024 * 1024
+MAX_AUDIO_BYTES = MAX_WAV_BYTES
 MAX_LICENSE_BYTES = 2 * 1024 * 1024
 MAX_EVIDENCE_TEXT_BYTES = 2 * 1024 * 1024
 
@@ -73,10 +78,10 @@ SOURCE_FIELDS = (
 )
 MEASUREMENT_FIELDS = (
     "path", "sha256", "byteLength", "sampleRate", "channels", "sampleWidth",
-    "frameCount", "durationSeconds",
+    "sampleEncoding", "frameCount", "durationSeconds",
 )
 DERIVATION_FIELDS = (
-    "startFrame", "endFrame", "tool", "version", "settings", "changes",
+    "startFrame", "endFrame", "conversionPolicy", "tool", "version", "settings", "changes",
     "transcriptCorrectionRationale",
 )
 CREDIT_FIELDS = (
@@ -823,8 +828,8 @@ class _Verifier:
             if audio is None:
                 valid = False
                 continue
-            actual, frames = audio
-            measurements[role] = (actual, frames)
+            actual, wav = audio
+            measurements[role] = (actual, wav)
             for field, actual_value in actual.items():
                 if field == "path":
                     continue
@@ -845,30 +850,36 @@ class _Verifier:
                 valid = False
 
         if "original" in measurements and "clip" in measurements:
-            original, original_frames = measurements["original"]
-            clip, clip_frames = measurements["clip"]
+            original, original_wav = measurements["original"]
+            clip, clip_wav = measurements["clip"]
             derivation = entry.get("derivation")
             derivation_path = f"{entry_path}.derivation"
             derivation_valid = self._validate_derivation(derivation, derivation_path)
             if derivation_valid:
                 start, end = derivation["startFrame"], derivation["endFrame"]
-                if start < 0 or end <= start or end > original["frameCount"]:
+                if start < 0 or end <= start or end > original_wav.frame_count:
                     self.error(derivation_path, "frame range must be bounded in source and nonempty")
                     valid = False
                 else:
                     if (original["sampleRate"] != clip["sampleRate"]
-                            or original["channels"] != clip["channels"]
-                            or original["sampleWidth"] != clip["sampleWidth"]):
-                        self.error(f"{entry_path}.clip", "clip PCM rate/channels/sample width differ from source")
+                            or original["channels"] != clip["channels"]):
+                        self.error(f"{entry_path}.clip",
+                                   "delivery clip sample rate and channels must match source")
                         valid = False
-                    frame_size = original["channels"] * original["sampleWidth"]
+                    if (clip["sampleEncoding"] != PCM16_ENCODING
+                            or clip["sampleWidth"] != 2):
+                        self.error(f"{entry_path}.clip",
+                                   "delivery clip must be pcm-s16le with sampleWidth 2")
+                        valid = False
                     if clip["frameCount"] != end - start:
                         self.error(f"{entry_path}.clip.frameCount",
                                    "must equal derivation endFrame - startFrame")
                         valid = False
-                    expected_frames = original_frames[start * frame_size:end * frame_size]
-                    if clip_frames != expected_frames:
-                        self.error(f"{entry_path}.clip", "clip PCM is not the exact claimed source frame slice")
+                    expected_frames = convert_to_pcm16(original_wav, start, end)
+                    if clip_wav.frame_data != expected_frames:
+                        self.error(
+                            f"{entry_path}.clip",
+                            "clip PCM does not match pcm16-v1 conversion of claimed source frame range")
                         valid = False
             else:
                 valid = False
@@ -973,6 +984,12 @@ class _Verifier:
         changes = value.get("changes")
         if not isinstance(changes, list) or any(not _nonblank(item) for item in changes):
             self.error(f"{path}.changes", "must be an ordered list of nonblank strings")
+            valid = False
+        elif not changes:
+            self.error(f"{path}.changes", "conversion policy requires a nonempty change notice")
+            valid = False
+        if value.get("conversionPolicy") != PCM16_POLICY:
+            self.error(f"{path}.conversionPolicy", f"must be '{PCM16_POLICY}'")
             valid = False
         rationale = value.get("transcriptCorrectionRationale")
         if not isinstance(rationale, str):
@@ -1280,34 +1297,22 @@ class _Verifier:
             return None
         digest = hashlib.sha256(raw).hexdigest()
         try:
-            with wave.open(io.BytesIO(raw), "rb") as wav:
-                params = wav.getparams()
-                if params.comptype != "NONE" or params.sampwidth not in (1, 2, 3, 4):
-                    self.error(label, "only uncompressed integer PCM WAV is supported")
-                    return None
-                if params.nchannels <= 0 or params.framerate <= 0 or params.nframes <= 0:
-                    self.error(label, "WAV channels, sample rate, and frame count must be positive")
-                    return None
-                frame_bytes = wav.readframes(params.nframes)
-                expected_length = params.nframes * params.nchannels * params.sampwidth
-                if len(frame_bytes) != expected_length:
-                    role = "original" if ".original" in label else "clip"
-                    self.error(label, f"{role} WAV frame data is truncated")
-                    return None
-        except (wave.Error, EOFError, OSError) as exc:
-            self.error(label, f"invalid or unsupported WAV ({type(exc).__name__})")
+            wav = parse_wav_bytes(raw, max_bytes=MAX_WAV_BYTES)
+        except SentencePackageError as exc:
+            self.error(label, f"invalid or unsupported WAV: {exc}")
             return None
         actual = {
             "path": None,
             "sha256": digest,
             "byteLength": len(raw),
-            "sampleRate": params.framerate,
-            "channels": params.nchannels,
-            "sampleWidth": params.sampwidth,
-            "frameCount": params.nframes,
-            "durationSeconds": params.nframes / params.framerate,
+            "sampleRate": wav.sample_rate,
+            "channels": wav.channels,
+            "sampleWidth": wav.sample_width,
+            "sampleEncoding": wav.sample_encoding,
+            "frameCount": wav.frame_count,
+            "durationSeconds": wav.frame_count / wav.sample_rate,
         }
-        return actual, frame_bytes
+        return actual, wav
 
     def _validate_mixed_contexts(self):
         sections = self._sections()
@@ -1354,7 +1359,7 @@ def _guarded_verification(root, require_reviewed=False):
         verifier = _Verifier(root, require_reviewed)
         errors = verifier.run()
     except (OSError, UnicodeError, ValueError, TypeError, KeyError, IndexError,
-            OverflowError, RecursionError, wave.Error, EOFError) as exc:
+            OverflowError, RecursionError, SentencePackageError, EOFError) as exc:
         # Malformed package bytes/types are user input, never a CLI traceback.
         return None, [f"package: malformed input prevented verification ({type(exc).__name__})"]
     return verifier, errors
