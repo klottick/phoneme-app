@@ -333,6 +333,49 @@ void main() {
     expect(identical(typed.failure!.cause, sourcePhase), isTrue);
   });
 
+  test('raw resolver timeout is conservative and preserves source diagnostics',
+      () async {
+    final TimeoutException cause =
+        TimeoutException('sentence resolver source timeout');
+    final StackTrace sourceStack = StackTrace.fromString(
+        '#0 sentence resolver source\n#1 synthetic source boundary');
+    var wordLoads = 0;
+    final _DirectHarness harness = _DirectHarness(
+      loadCatalog: () async {
+        wordLoads++;
+        return CourseAudioCatalog(
+            references: const <CourseAudioReference>[],
+            entries: const <CourseAudioEntry>[]);
+      },
+      loadReferenceCatalog: (_) =>
+          Future<CourseAudioCatalog>.error(cause, sourceStack),
+      firstRecordings: <FakeCourseRecordingSession>[
+        FakeCourseRecordingSession(),
+      ],
+      firstSpeeches: <FakeCourseSpeechSession>[FakeCourseSpeechSession()],
+    );
+    addTearDown(harness.facade.dispose);
+
+    final CourseAudioResult result = await harness.facade.playReference(
+      _sentenceReferenceId,
+      use: CourseAudioUse.alphaPractice,
+      variant: CourseAudioVariant.normal,
+      allowPracticeTts: true,
+    );
+
+    expect(result.outcome, CourseAudioOutcome.failed);
+    expect(result.failure!.reason, CourseAudioFailureReason.unsupportedPlayback,
+        reason: 'a raw source TimeoutException is not an owned phase expiry');
+    expect(identical(result.failure!.cause, cause), isTrue);
+    expect(identical(result.failure!.stackTrace, sourceStack), isTrue);
+    expect(wordLoads, 0,
+        reason: 'resolver failure must not fall through to the word loader');
+    expect(harness.counts.recordings, isEmpty,
+        reason: 'resolver failure cannot select or construct a recording');
+    expect(harness.counts.speeches, isEmpty,
+        reason: 'resolver failure cannot fall back to practice speech');
+  });
+
   test('reviewedOnly rejects an unexpected sentence source before factories',
       () async {
     final _DirectHarness harness = _DirectHarness(

@@ -12,6 +12,7 @@ import '../../core/course/course_skill_summary.dart';
 import '../../core/course/french_course.dart';
 import 'course_completion_summary.dart';
 import 'comparison_progress_summary.dart';
+import 'sentence_hunt_progress_section.dart';
 
 class CourseProgressScreen extends ConsumerStatefulWidget {
   const CourseProgressScreen({super.key, this.review = false});
@@ -129,6 +130,8 @@ class _CourseProgressScreenState extends ConsumerState<CourseProgressScreen> {
           retrying: _retryingComparisonLoad,
           onRetry: _retryComparisonLoad,
         ),
+        const Divider(height: 32),
+        const SentenceHuntProgressSection(),
       ]),
     );
   }

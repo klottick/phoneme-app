@@ -363,6 +363,30 @@ void main() {
       ),
     ];
 
+    final SentenceHuntLearningState validBefore = driver.state;
+    final String validSnapshot = _stateSnapshot(validBefore);
+    final SentenceHuntLearningCommand validCommand = driver.engine.prepare(
+      state: validBefore,
+      sectionId: sectionId,
+      action: AnswerSentenceHuntItem(driver.answer(item, slot)),
+      authGeneration: 0,
+      token: driver.token(),
+      submittedAt: driver.now(),
+    );
+    expect(validCommand.action, isA<AnswerSentenceHuntItem>());
+    expect(identical(driver.state, validBefore), isTrue);
+    expect(_stateSnapshot(validBefore), validSnapshot,
+        reason: 'prepare must leave the source snapshot unchanged');
+    final SentenceHuntTransition validTransition = driver.engine.evaluate(
+      state: validBefore,
+      command: validCommand,
+      committedAt: driver.now(),
+    );
+    expect(validTransition.attempts.single.correct, isTrue);
+    expect(identical(driver.state, validBefore), isTrue);
+    expect(_stateSnapshot(validBefore), validSnapshot,
+        reason: 'evaluate must leave the source snapshot unchanged');
+
     for (final ({String name, SentenceHuntAnswer answer}) row in forged) {
       final SentenceHuntLearningState before = driver.state;
       final String snapshot = _stateSnapshot(before);
@@ -375,7 +399,7 @@ void main() {
           token: 'forgedprep${forged.indexOf(row).toString().padLeft(12, '0')}',
           submittedAt: driver.now(),
         ),
-        throwsA(anything),
+        throwsA(isA<ArgumentError>()),
         reason: '${row.name} prepare',
       );
       expect(
@@ -389,7 +413,7 @@ void main() {
           ),
           committedAt: driver.now(),
         ),
-        throwsA(anything),
+        throwsA(isA<ArgumentError>()),
         reason: '${row.name} direct evaluate',
       );
       expect(identical(driver.state, before), isTrue, reason: row.name);
