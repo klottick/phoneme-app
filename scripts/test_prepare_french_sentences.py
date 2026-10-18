@@ -69,7 +69,7 @@ class PreparationTests(unittest.TestCase):
                 pins = ()
 
             actual_publish = prep._publish_staging
-            def create_competing_target(staging, target):
+            def create_competing_target(staging, target, *args, **kwargs):
                 if target_kind == 'file':
                     target.write_bytes(b'concurrent-file')
                 elif target_kind == 'directory':
@@ -77,7 +77,7 @@ class PreparationTests(unittest.TestCase):
                 else:
                     sentinel.write_bytes(b'symlink-target')
                     target.symlink_to(sentinel)
-                return actual_publish(staging, target)
+                return actual_publish(staging, target, *args, **kwargs)
 
             with mock.patch.object(prep, '_publish_staging', side_effect=create_competing_target):
                 with ExitStack() as stack:
@@ -144,6 +144,101 @@ class PreparationTests(unittest.TestCase):
 
     def test_json_ignores_predictable_staging_file_and_symlink(self):
         self._assert_predictable_staging_ignored('json')
+
+    def _run_staging_substitution(self, operation_name, replacement_kind, phase):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / 'source.wav'
+            make_wav(source, b'\x01\x02', channels=1, width=2)
+            destination = root / ('result.wav' if operation_name == 'crop' else 'result.json')
+            sentinel = root / 'outside-sentinel'
+            sentinel.write_bytes(b'preserve-this-target')
+            actual_publish = prep._publish_staging
+            replaced_path = []
+            created_fds = []
+            descriptor_retained_at_boundary = []
+            descriptor_retained_during_cleanup = []
+            actual_mkstemp = prep.tempfile.mkstemp
+            actual_lstat = Path.lstat
+
+            def capture_staging_fd(*args, **kwargs):
+                fd, name = actual_mkstemp(*args, **kwargs)
+                created_fds.append(fd)
+                return fd, name
+
+            def substitute(staging, target, *args, **kwargs):
+                try:
+                    os.fstat(created_fds[0])
+                    descriptor_retained = True
+                except OSError:
+                    descriptor_retained = False
+                descriptor_retained_at_boundary.append(descriptor_retained)
+                staging.unlink()
+                if replacement_kind == 'regular':
+                    staging.write_bytes(b'unrelated-replacement')
+                else:
+                    staging.symlink_to(sentinel)
+                replaced_path.append(staging)
+                if phase == 'cleanup':
+                    raise OSError('injected failure after staging substitution')
+                return actual_publish(staging, target, *args, **kwargs)
+
+            def observe_cleanup_lstat(path, *args, **kwargs):
+                if phase == 'cleanup' and replaced_path and path == replaced_path[0]:
+                    try:
+                        os.fstat(created_fds[0])
+                        descriptor_retained_during_cleanup.append(True)
+                    except OSError:
+                        descriptor_retained_during_cleanup.append(False)
+                return actual_lstat(path, *args, **kwargs)
+
+            operation = (lambda: prep.crop_pcm(source, destination, 0, 1)
+                         if operation_name == 'crop'
+                         else prep._write_json(destination, {'draft': True}))
+            with mock.patch.object(prep.tempfile, 'mkstemp', side_effect=capture_staging_fd), \
+                 mock.patch.object(prep, '_publish_staging', side_effect=substitute), \
+                 mock.patch.object(Path, 'lstat', new=observe_cleanup_lstat):
+                error = OSError if phase == 'cleanup' else SentencePackageError
+                with self.assertRaises(error):
+                    operation()
+
+            self.assertEqual(len(created_fds), 1)
+            with self.assertRaises(OSError):
+                os.fstat(created_fds[0])
+            self.assertFalse(destination.exists())
+            self.assertEqual(sentinel.read_bytes(), b'preserve-this-target')
+            self.assertEqual(len(replaced_path), 1)
+            self.assertEqual(descriptor_retained_at_boundary, [True])
+            if phase == 'cleanup':
+                self.assertEqual(descriptor_retained_during_cleanup, [True])
+            substitute_path = replaced_path[0]
+            if replacement_kind == 'regular':
+                self.assertTrue(substitute_path.is_file())
+                self.assertFalse(substitute_path.is_symlink())
+                self.assertEqual(substitute_path.read_bytes(), b'unrelated-replacement')
+            else:
+                self.assertTrue(substitute_path.is_symlink())
+                self.assertEqual(substitute_path.resolve(), sentinel)
+
+    def test_crop_refuses_replaced_staging_path_before_publication(self):
+        for replacement in ('regular', 'symlink'):
+            with self.subTest(replacement=replacement):
+                self._run_staging_substitution('crop', replacement, 'publish')
+
+    def test_json_refuses_replaced_staging_path_before_publication(self):
+        for replacement in ('regular', 'symlink'):
+            with self.subTest(replacement=replacement):
+                self._run_staging_substitution('json', replacement, 'publish')
+
+    def test_crop_cleanup_preserves_replaced_staging_path(self):
+        for replacement in ('regular', 'symlink'):
+            with self.subTest(replacement=replacement):
+                self._run_staging_substitution('crop', replacement, 'cleanup')
+
+    def test_json_cleanup_preserves_replaced_staging_path(self):
+        for replacement in ('regular', 'symlink'):
+            with self.subTest(replacement=replacement):
+                self._run_staging_substitution('json', replacement, 'cleanup')
 
     def test_archive_rejects_traversal_links_and_duplicate_members(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -60,7 +61,41 @@ def _fresh_target(path):
     return path
 
 
-def _publish_staging(staging, target):
+def _staging_identity(fd):
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode):
+        raise SentencePackageError("staging descriptor is not a regular file")
+    return info.st_dev, info.st_ino
+
+
+def _verify_staging_identity(staging, expected_identity):
+    try:
+        info = Path(staging).lstat()
+    except OSError as exc:
+        raise SentencePackageError("staging path disappeared before publication") from exc
+    if (not stat.S_ISREG(info.st_mode)
+            or (info.st_dev, info.st_ino) != expected_identity):
+        raise SentencePackageError("staging path was substituted; refusing publication")
+
+
+def _cleanup_staging(staging, expected_identity):
+    if expected_identity is None:
+        return
+    try:
+        info = Path(staging).lstat()
+    except OSError:
+        return
+    if (stat.S_ISREG(info.st_mode)
+            and (info.st_dev, info.st_ino) == expected_identity):
+        try:
+            Path(staging).unlink()
+        except OSError:
+            pass
+
+
+def _publish_staging(staging, target, expected_identity=None):
+    if expected_identity is not None:
+        _verify_staging_identity(staging, expected_identity)
     try:
         _renameat2(staging, target)
     except OSError as exc:
@@ -225,17 +260,22 @@ def crop_pcm(source, destination, start_frame, end_frame):
     except OSError as exc:
         raise SentencePackageError(f"cannot create private crop staging file: {exc}") from exc
     staging = Path(staging_name)
+    staging_identity = None
     published = False
     try:
-        with os.fdopen(staging_fd, "wb") as raw:
+        staging_identity = _staging_identity(staging_fd)
+        with os.fdopen(os.dup(staging_fd), "wb") as raw:
             with wave.open(raw, "wb") as out:
                 out.setparams(params)
                 out.writeframes(data)
-        _publish_staging(staging, destination)
+        _publish_staging(staging, destination, staging_identity)
         published = True
     finally:
-        if not published:
-            staging.unlink(missing_ok=True)
+        try:
+            if not published:
+                _cleanup_staging(staging, staging_identity)
+        finally:
+            os.close(staging_fd)
     size, digest = _identity(destination)
     count = end_frame - start_frame
     return {"path": str(destination), "sha256": digest, "byteLength": size,
@@ -317,15 +357,20 @@ def _write_json(path, value):
     except OSError as exc:
         raise SentencePackageError(f"cannot create private JSON staging file: {exc}") from exc
     staging = Path(staging_name)
+    staging_identity = None
     published = False
     try:
-        with os.fdopen(staging_fd, "w", encoding="utf-8", errors="strict") as out:
+        staging_identity = _staging_identity(staging_fd)
+        with os.fdopen(os.dup(staging_fd), "w", encoding="utf-8", errors="strict") as out:
             out.write(canonical_json(value) + "\n")
-        _publish_staging(staging, path)
+        _publish_staging(staging, path, staging_identity)
         published = True
     finally:
-        if not published:
-            staging.unlink(missing_ok=True)
+        try:
+            if not published:
+                _cleanup_staging(staging, staging_identity)
+        finally:
+            os.close(staging_fd)
     return value
 
 
