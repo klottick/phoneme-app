@@ -64,6 +64,28 @@ const List<List<String>> fixtureTargetSounds = <List<String>>[
   <String>['ɑ̃', 'y', 'z', 'ʃ', 'v'],
 ];
 
+const List<String> _fixtureSentenceTexts = <String>[
+  'Tu vois tout, tu souris.',
+  'Elle chante avec un ami.',
+  'Nous avons deux chats noirs.',
+  'Il mange une pomme verte.',
+  'Vous aimez ce grand jardin.',
+  'Zoé cherche son vieux vélo.',
+  'Paul pêche près du pont.',
+  'Victor voit la montagne bleue.',
+  'Maman marche dans le parc.',
+  'Pierre parle pour ses amis.',
+  'Pourtant, André revient avec nous.',
+  'Jules a vu un cygne.',
+  'Zélie cherche son sac rouge.',
+  'Charlie marche sous ce pont.',
+  'Victor vend des pommes mûres.',
+];
+
+final RegExp _fixtureWordPattern = RegExp(
+  r"[A-Za-zÀ-ÖØ-öø-ÿŒœÆæ]+(?:['’ʼ\-‐‑][A-Za-zÀ-ÖØ-öø-ÿŒœÆæ]+)*",
+);
+
 SentenceHuntPackageFixture syntheticSentencePackage({
   bool reviewed = true,
   List<Map<String, dynamic>> historicalSections =
@@ -99,48 +121,29 @@ SentenceHuntPackageFixture syntheticSentencePackage({
       final String annotationHash = _sha('c');
       final String originalSha = _sha(_hexDigit(ordinal + 1));
       final String clipSha = _sha(_hexDigit(ordinal + 17));
-      const String text = 'Tu vois tout, tu souris.';
-      final String firstTokenId = '$itemId-token-01';
-      final String secondTokenId = '$itemId-token-02';
-      final String distractorTokenId = '$itemId-token-03';
-      final String repeatedTokenId = '$itemId-token-04';
-      final String finalTokenId = '$itemId-token-05';
+      final String text = _fixtureSentenceTexts[ordinal];
+      final List<String> tokenTexts = _fixtureWordPattern
+          .allMatches(text)
+          .map((RegExpMatch match) => match.group(0)!)
+          .toList(growable: false);
+      if (tokenTexts.length != 5) {
+        throw StateError('Synthetic fixture sentences must contain five words');
+      }
+      final List<String> tokenIds = <String>[
+        for (int index = 0; index < tokenTexts.length; index++)
+          '$itemId-token-${(index + 1).toString().padLeft(2, '0')}',
+      ];
       final List<Map<String, dynamic>> tokens = <Map<String, dynamic>>[
-        <String, dynamic>{
-          'id': firstTokenId,
-          'text': 'Tu',
-          'phonemes': <String>['t', sound],
-        },
-        <String, dynamic>{
-          'id': secondTokenId,
-          'text': 'vois',
-          'phonemes': <String>[
-            for (final String phoneme in <String>['v', 'w', 'a'])
-              if (phoneme != sound) phoneme,
-          ],
-        },
-        <String, dynamic>{
-          'id': distractorTokenId,
-          'text': 'tout',
-          'phonemes': <String>['t', 'i'],
-        },
-        <String, dynamic>{
-          'id': repeatedTokenId,
-          'text': 'tu',
-          'phonemes': <String>['t', sound],
-        },
-        <String, dynamic>{
-          'id': finalTokenId,
-          'text': 'souris',
-          'phonemes': <String>[
-            for (final String phoneme in <String>['s', 'u', 'ʁ', 'i'])
-              if (phoneme != sound) phoneme,
-          ],
-        },
+        for (int index = 0; index < tokenTexts.length; index++)
+          <String, dynamic>{
+            'id': tokenIds[index],
+            'text': tokenTexts[index],
+            'phonemes': _fixturePhonemes(sound, index),
+          },
       ];
       final List<String> expectedTokenIds = <String>[
-        firstTokenId,
-        repeatedTokenId,
+        tokenIds[0],
+        tokenIds[3],
       ];
       final Map<String, dynamic> frenchReview = _review(
         reviewed: reviewed,
@@ -354,6 +357,21 @@ String _targetRole(int sectionIndex, int itemIndex) {
   if (sectionIndex == 0 || (sectionIndex == 2 && itemIndex < 2)) return 'vowel';
   return 'consonant';
 }
+
+List<String> _fixturePhonemes(String targetSound, int tokenIndex) =>
+    switch (tokenIndex) {
+      0 || 3 => <String>['t', targetSound],
+      1 => <String>[
+          for (final String phoneme in <String>['v', 'w', 'a'])
+            if (phoneme != targetSound) phoneme,
+        ],
+      2 => <String>['t', 'i'],
+      4 => <String>[
+          for (final String phoneme in <String>['s', 'u', 'ʁ', 'i'])
+            if (phoneme != targetSound) phoneme,
+        ],
+      _ => throw RangeError.index(tokenIndex, const <int>[0, 1, 2, 3, 4]),
+    };
 
 String _hexDigit(int index) {
   const String digits = '0123456789abcdef';

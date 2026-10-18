@@ -35,7 +35,7 @@ final class FrenchSentencePackageLoader {
     final Future<SentenceHuntCatalogue> pending = _readAndDecode();
     _inFlight = pending;
     return pending.then((SentenceHuntCatalogue catalogue) {
-      _cached = catalogue;
+      if (catalogue.hasValidRoot) _cached = catalogue;
       return catalogue;
     }).whenComplete(() {
       _inFlight = null;

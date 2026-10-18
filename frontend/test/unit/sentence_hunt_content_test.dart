@@ -72,6 +72,23 @@ void main() {
         catalogue.sections.expand((section) => section.items).length,
         15,
       );
+      expect(catalogue.hasValidRoot, isTrue);
+      for (int mixedIndex = 0; mixedIndex < 5; mixedIndex++) {
+        final SentenceHuntItem mixed =
+            catalogue.section(fixtureSectionIds[2]).items[mixedIndex];
+        final SentenceHuntSection primary = catalogue.section(
+          fixtureSectionIds[mixedIndex < 2 ? 0 : 1],
+        );
+        expect(
+          primary.items
+              .where((SentenceHuntItem item) =>
+                  item.exercise.targetSound == mixed.exercise.targetSound)
+              .every((SentenceHuntItem item) =>
+                  item.sentence.text != mixed.sentence.text),
+          isTrue,
+          reason: '${mixed.identity.itemId} must use a new literal context',
+        );
+      }
     });
 
     test('keeps repeated written words as separate selectable occurrences', () {
@@ -141,6 +158,7 @@ void main() {
       final SentenceHuntCatalogue catalogue = _decode(fixture);
 
       expect(catalogue.sections, isEmpty);
+      expect(catalogue.hasValidRoot, isFalse);
       expect(
           fixtureSectionIds.every((id) => !catalogue.isAvailable(id)), isTrue);
       expect(catalogue.diagnostics, isNotEmpty);
@@ -157,6 +175,7 @@ void main() {
       final SentenceHuntCatalogue catalogue = _decode(fixture);
 
       expect(catalogue.isAvailable(fixtureSectionIds[0]), isFalse);
+      expect(catalogue.hasValidRoot, isTrue);
       expect(catalogue.isAvailable(fixtureSectionIds[1]), isTrue);
       expect(catalogue.isAvailable(fixtureSectionIds[2]), isTrue);
       expect(catalogue.diagnosticsFor(fixtureSectionIds[0]), isNotEmpty);
@@ -311,6 +330,478 @@ void main() {
       expect(catalogue.isAvailable(fixtureSectionIds[0]), isFalse);
       expect(catalogue.isAvailable(fixtureSectionIds[1]), isTrue);
       expect(catalogue.isAvailable(fixtureSectionIds[2]), isTrue);
+    });
+
+    test('mixed items repeat neither primary text nor reviewed availability',
+        () {
+      final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+      final Map<String, dynamic> primary =
+          _manifestItem(fixture, fixtureItemIds[0][0]);
+      final Map<String, dynamic> mixed =
+          _manifestItem(fixture, fixtureItemIds[2][0]);
+      mixed['text'] = primary['text'];
+      final List<Map<String, dynamic>> mixedTokens =
+          (mixed['tokens'] as List).cast<Map<String, dynamic>>();
+      final List<Map<String, dynamic>> primaryTokens =
+          (primary['tokens'] as List).cast<Map<String, dynamic>>();
+      for (int index = 0; index < mixedTokens.length; index++) {
+        mixedTokens[index]['text'] = primaryTokens[index]['text'];
+      }
+      _syncAnnotationTokens(fixture, mixed);
+      _syncSourceText(fixture, mixed);
+
+      final SentenceHuntCatalogue catalogue = _decode(fixture);
+
+      expect(catalogue.isAvailable(fixtureSectionIds[0]), isTrue);
+      expect(catalogue.isAvailable(fixtureSectionIds[1]), isTrue);
+      expect(catalogue.isAvailable(fixtureSectionIds[2]), isFalse);
+      expect(
+        _codes(catalogue, fixtureSectionIds[2]),
+        contains('mixed_target_context'),
+      );
+      expect(
+        fixtureItemIds[2].every((String itemId) =>
+            catalogue.recordingMetadataFor('$itemId-audio') == null),
+        isTrue,
+      );
+    });
+
+    test('validates every unreferenced source-evidence record fail-closed', () {
+      final List<void Function(SentenceHuntPackageFixture)> mutations =
+          <void Function(SentenceHuntPackageFixture)>[
+        (SentenceHuntPackageFixture fixture) {
+          _evidence(fixture, 'fixture-orphan')['unexpected'] = true;
+        },
+        (SentenceHuntPackageFixture fixture) {
+          _evidence(fixture, 'fixture-orphan').remove('url');
+        },
+        (SentenceHuntPackageFixture fixture) {
+          _evidence(fixture, 'fixture-orphan')['url'] = 'http://example.test/';
+        },
+        (SentenceHuntPackageFixture fixture) {
+          _evidence(fixture, 'fixture-orphan')['retrievedAt'] = 'not-utc';
+        },
+        (SentenceHuntPackageFixture fixture) {
+          _evidence(fixture, 'fixture-orphan')['sha256'] = 'bad';
+        },
+        (SentenceHuntPackageFixture fixture) {
+          _evidence(fixture, 'fixture-orphan')['scope'] = 'unknown';
+        },
+        (SentenceHuntPackageFixture fixture) {
+          final Map<String, dynamic> evidence =
+              _evidence(fixture, 'fixture-orphan');
+          evidence['scope'] = 'item';
+          evidence['itemIds'] = <String>['not-an-authored-item'];
+        },
+      ];
+
+      for (final void Function(SentenceHuntPackageFixture) mutate
+          in mutations) {
+        final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+        (fixture.sourceEvidence['entries'] as List).add(<String, dynamic>{
+          'id': 'fixture-orphan',
+          'url': 'https://example.test/orphan',
+          'retrievedAt': '2026-01-01T00:00:00Z',
+          'sha256': List<String>.filled(64, 'a').join(),
+          'text': 'Complete but unreferenced synthetic evidence.',
+          'scope': 'dataset',
+          'itemIds': <String>[],
+        });
+        mutate(fixture);
+
+        final SentenceHuntCatalogue catalogue = _decode(fixture);
+
+        expect(catalogue.sections, isEmpty);
+        expect(catalogue.hasValidRoot, isFalse);
+        expect(
+          fixtureSectionIds.every((String id) => !catalogue.isAvailable(id)),
+          isTrue,
+        );
+        expect(
+          catalogue.diagnostics.any((SentenceHuntDiagnostic diagnostic) =>
+              diagnostic.recordId == 'fixture-orphan'),
+          isTrue,
+        );
+      }
+    });
+
+    test('keeps malformed referenced evidence local to its item section', () {
+      final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+      _evidence(fixture, 'fixture-item-${fixtureItemIds[0][0]}')['url'] =
+          'http://example.test/item';
+
+      final SentenceHuntCatalogue catalogue = _decode(fixture);
+
+      expect(catalogue.isAvailable(fixtureSectionIds[0]), isFalse);
+      expect(catalogue.hasValidRoot, isTrue);
+      expect(catalogue.isAvailable(fixtureSectionIds[1]), isTrue);
+      expect(catalogue.isAvailable(fixtureSectionIds[2]), isTrue);
+      expect(
+        catalogue.diagnosticsFor(fixtureSectionIds[0]).any(
+            (SentenceHuntDiagnostic diagnostic) =>
+                diagnostic.recordId == 'fixture-item-${fixtureItemIds[0][0]}'),
+        isTrue,
+      );
+    });
+
+    test('initial policy revision requires the declared eighty-percent target',
+        () {
+      for (final int threshold in <int>[79, 100]) {
+        final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+        _manifestSection(
+                fixture, fixtureSectionIds[0])['completionThresholdPercent'] =
+            threshold;
+
+        final SentenceHuntCatalogue catalogue = _decode(fixture);
+
+        expect(catalogue.isAvailable(fixtureSectionIds[0]), isFalse);
+        expect(catalogue.section(fixtureSectionIds[0]).items, hasLength(5));
+        expect(catalogue.isAvailable(fixtureSectionIds[1]), isTrue);
+        expect(catalogue.isAvailable(fixtureSectionIds[2]), isTrue);
+        expect(
+          _codes(catalogue, fixtureSectionIds[0]),
+          contains('policy_threshold'),
+        );
+      }
+    });
+
+    test('revision one history also retains eighty-percent threshold', () {
+      final SentenceHuntPackageFixture fixture = syntheticSentencePackage(
+        historicalSections: <Map<String, dynamic>>[
+          <String, dynamic>{
+            'sectionId': fixtureSectionIds[0],
+            'kind': 'vowels',
+            'contentRevision': 1,
+            'policyRevision': 1,
+            'completionThresholdPercent': 79,
+            'sectionFingerprint': '{"historical":true}',
+          },
+        ],
+      );
+      _manifestSection(fixture, fixtureSectionIds[0])['policyRevision'] = 2;
+
+      final SentenceHuntCatalogue catalogue = _decode(fixture);
+
+      expect(catalogue.sections, isEmpty);
+      expect(
+        fixtureSectionIds.every((String id) => !catalogue.isAvailable(id)),
+        isTrue,
+      );
+      expect(
+        catalogue.diagnostics.map((SentenceHuntDiagnostic value) => value.code),
+        contains('historical_policy_threshold'),
+      );
+    });
+
+    test('versioned threshold changes and their retained history stay bound',
+        () {
+      final SentenceHuntPackageFixture baseline = syntheticSentencePackage();
+      final String baselineFingerprint =
+          _decode(baseline).section(fixtureSectionIds[0]).sectionFingerprint;
+      final SentenceHuntPackageFixture fixture = syntheticSentencePackage(
+        historicalSections: <Map<String, dynamic>>[
+          <String, dynamic>{
+            'sectionId': fixtureSectionIds[0],
+            'kind': 'vowels',
+            'contentRevision': 1,
+            'policyRevision': 2,
+            'completionThresholdPercent': 75,
+            'sectionFingerprint': '{"historical":true}',
+          },
+        ],
+      );
+      final Map<String, dynamic> section =
+          _manifestSection(fixture, fixtureSectionIds[0]);
+      section['policyRevision'] = 3;
+      section['completionThresholdPercent'] = 85;
+
+      final SentenceHuntCatalogue catalogue = _decode(fixture);
+
+      expect(catalogue.isAvailable(fixtureSectionIds[0]), isTrue);
+      expect(
+        catalogue
+            .section(fixtureSectionIds[0])
+            .policy
+            .completionThresholdPercent,
+        85,
+      );
+      expect(
+        catalogue.section(fixtureSectionIds[0]).sectionFingerprint,
+        isNot(baselineFingerprint),
+      );
+      expect(catalogue.historicalSections.single.policyRevision, 2);
+      expect(
+          catalogue.historicalSections.single.completionThresholdPercent, 75);
+    });
+
+    test('rejects impossible UTC calendar and clock values without rollover',
+        () {
+      const List<String> invalidTimestamps = <String>[
+        '2026-02-31T00:00:00Z',
+        '2026-13-01T00:00:00Z',
+        '2025-02-29T00:00:00Z',
+        '2026-01-01T24:00:00Z',
+        '2026-01-01T12:60:00Z',
+        '2026-01-01T12:00:60Z',
+        '2026-01-01T12:00:00+01:00',
+        '0000-01-01T00:00:00Z',
+      ];
+
+      for (final String timestamp in invalidTimestamps) {
+        final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+        (_annotation(fixture, fixtureItemIds[0][0])['frenchAudioReview']
+            as Map<String, dynamic>)['reviewedAt'] = timestamp;
+
+        final SentenceHuntCatalogue catalogue = _decode(fixture);
+
+        expect(catalogue.isAvailable(fixtureSectionIds[0]), isFalse,
+            reason: timestamp);
+        expect(catalogue.isAvailable(fixtureSectionIds[1]), isTrue,
+            reason: timestamp);
+        expect(catalogue.isAvailable(fixtureSectionIds[2]), isTrue,
+            reason: timestamp);
+        expect(
+          fixtureItemIds[0].every((String itemId) =>
+              catalogue.recordingMetadataFor('$itemId-audio') == null),
+          isTrue,
+          reason: timestamp,
+        );
+      }
+    });
+
+    test('strict UTC calendar validation covers review, source, and evidence',
+        () {
+      final List<void Function(SentenceHuntPackageFixture)> mutations =
+          <void Function(SentenceHuntPackageFixture)>[
+        (SentenceHuntPackageFixture fixture) {
+          (_annotation(fixture, fixtureItemIds[0][0])['frenchAudioReview']
+              as Map<String, dynamic>)['reviewedAt'] = '2026-02-31T00:00:00Z';
+        },
+        (SentenceHuntPackageFixture fixture) {
+          (_provenance(fixture, fixtureItemIds[0][0])['rightsReview']
+              as Map<String, dynamic>)['reviewedAt'] = '2026-02-31T00:00:00Z';
+        },
+        (SentenceHuntPackageFixture fixture) {
+          (_provenance(fixture, fixtureItemIds[0][0])['source']
+              as Map<String, dynamic>)['retrievedAt'] = '2026-02-31T00:00:00Z';
+        },
+        (SentenceHuntPackageFixture fixture) {
+          _evidence(fixture, 'fixture-item-${fixtureItemIds[0][0]}')[
+              'retrievedAt'] = '2026-02-31T00:00:00Z';
+        },
+      ];
+
+      for (final void Function(SentenceHuntPackageFixture) mutate
+          in mutations) {
+        final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+        mutate(fixture);
+
+        final SentenceHuntCatalogue catalogue = _decode(fixture);
+
+        expect(catalogue.isAvailable(fixtureSectionIds[0]), isFalse);
+        expect(catalogue.isAvailable(fixtureSectionIds[1]), isTrue);
+        expect(catalogue.isAvailable(fixtureSectionIds[2]), isTrue);
+      }
+    });
+
+    test('accepts valid UTC leap day, precision, and zero-offset forms', () {
+      final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+      (_annotation(fixture, fixtureItemIds[0][0])['frenchAudioReview']
+              as Map<String, dynamic>)['reviewedAt'] =
+          '2024-02-29T23:59:59.1234567Z';
+      (_provenance(fixture, fixtureItemIds[0][0])['rightsReview']
+          as Map<String, dynamic>)['reviewedAt'] = '2024-02-29T23:59:59+00:00';
+      (_provenance(fixture, fixtureItemIds[0][0])['source']
+              as Map<String, dynamic>)['retrievedAt'] =
+          '2024-02-29T23:59:59.1+00:00';
+      _evidence(
+              fixture, 'fixture-item-${fixtureItemIds[0][0]}')['retrievedAt'] =
+          '2024-02-29T23:59:59Z';
+
+      final SentenceHuntCatalogue catalogue = _decode(fixture);
+
+      expect(catalogue.isAvailable(fixtureSectionIds[0]), isTrue);
+      expect(catalogue.isAvailable(fixtureSectionIds[1]), isTrue);
+      expect(catalogue.isAvailable(fixtureSectionIds[2]), isTrue);
+    });
+
+    test(
+        'malformed annotation drafts and corrections gate the whole reviewed section',
+        () {
+      final List<SentenceHuntPackageFixture Function()> mutations =
+          <SentenceHuntPackageFixture Function()>[
+        () {
+          final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+          final Map<String, dynamic> annotation =
+              _annotation(fixture, fixtureItemIds[0][0]);
+          final List<Map<String, dynamic>> drafts =
+              (annotation['draftTokenPhonemes'] as List)
+                  .cast<Map<String, dynamic>>();
+          drafts.first['unexpected'] = true;
+          return fixture;
+        },
+        () {
+          final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+          final Map<String, dynamic> annotation =
+              _annotation(fixture, fixtureItemIds[0][0]);
+          final List<Map<String, dynamic>> drafts =
+              (annotation['draftTokenPhonemes'] as List)
+                  .cast<Map<String, dynamic>>();
+          drafts.first['tokenId'] = 'not-a-manifest-token';
+          return fixture;
+        },
+        () {
+          final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+          final Map<String, dynamic> annotation =
+              _annotation(fixture, fixtureItemIds[0][0]);
+          final List<Map<String, dynamic>> drafts =
+              (annotation['draftTokenPhonemes'] as List)
+                  .cast<Map<String, dynamic>>();
+          drafts[1]['tokenId'] = drafts[0]['tokenId'];
+          return fixture;
+        },
+        () {
+          final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+          final Map<String, dynamic> annotation =
+              _annotation(fixture, fixtureItemIds[0][0]);
+          final List<Map<String, dynamic>> drafts =
+              (annotation['draftTokenPhonemes'] as List)
+                  .cast<Map<String, dynamic>>();
+          final Map<String, dynamic> first = drafts.first;
+          (first['phonemes'] as List<String>)[0] = 'not-ipa';
+          annotation['corrections'] = <Map<String, dynamic>>[
+            <String, dynamic>{
+              'tokenId': first['tokenId'],
+              'before': <String>['not-ipa', 'ɑ̃'],
+              'after': <String>['t', 'ɑ̃'],
+              'rationale': 'Synthetic repair for the regression fixture.',
+            },
+          ];
+          return fixture;
+        },
+        () {
+          final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+          _annotation(fixture, fixtureItemIds[0][0])['corrections'] =
+              <Map<String, dynamic>>[
+            <String, dynamic>{
+              'tokenId': '${fixtureItemIds[0][0]}-token-01',
+              'before': <String>['t', '', 'ɑ̃'],
+              'after': <String>['t', 'ɑ̃'],
+              'rationale': 'Malformed before list with matching parsed values.',
+            },
+          ];
+          return fixture;
+        },
+        () {
+          final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+          _annotation(fixture, fixtureItemIds[0][0])['corrections'] =
+              <Map<String, dynamic>>[
+            <String, dynamic>{
+              'tokenId': '${fixtureItemIds[0][0]}-token-01',
+              'before': <String>['t', 'ɑ̃'],
+              'after': <String>['t', '', 'ɑ̃'],
+              'rationale': 'Malformed after list with matching parsed values.',
+            },
+          ];
+          return fixture;
+        },
+        () {
+          final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+          _annotation(fixture, fixtureItemIds[0][0])['corrections'] =
+              <Map<String, dynamic>>[
+            <String, dynamic>{
+              'tokenId': 'not-a-manifest-token',
+              'before': <String>['t', 'ɑ̃'],
+              'after': <String>['t', 'ɑ̃'],
+              'rationale': 'Synthetic unknown correction ID.',
+            },
+          ];
+          return fixture;
+        },
+        () {
+          final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+          final Map<String, dynamic> annotation =
+              _annotation(fixture, fixtureItemIds[0][0]);
+          final Map<String, dynamic> firstCorrection = <String, dynamic>{
+            'tokenId': '${fixtureItemIds[0][0]}-token-01',
+            'before': <String>['d', 'ɑ̃'],
+            'after': <String>['t', 'ɑ̃'],
+            'rationale': 'The declared before value is intentionally wrong.',
+          };
+          annotation['corrections'] = <Map<String, dynamic>>[firstCorrection];
+          return fixture;
+        },
+        () {
+          final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+          final Map<String, dynamic> annotation =
+              _annotation(fixture, fixtureItemIds[0][0]);
+          annotation['corrections'] = <Map<String, dynamic>>[
+            <String, dynamic>{
+              'tokenId': '${fixtureItemIds[0][0]}-token-01',
+              'before': <String>['t', 'ɑ̃'],
+              'after': <String>['t', 'ɑ̃'],
+              'rationale': '',
+            },
+          ];
+          return fixture;
+        },
+        () {
+          final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+          final Map<String, dynamic> annotation =
+              _annotation(fixture, fixtureItemIds[0][0]);
+          annotation['corrections'] = <Map<String, dynamic>>[
+            <String, dynamic>{
+              'tokenId': '${fixtureItemIds[0][0]}-token-01',
+              'before': <String>['t', 'ɑ̃'],
+              'after': <String>['t', 'ɑ̃'],
+              'rationale': 'Synthetic correction with an unknown field.',
+              'unexpected': true,
+            },
+          ];
+          return fixture;
+        },
+      ];
+
+      for (final SentenceHuntPackageFixture Function() mutate in mutations) {
+        final SentenceHuntCatalogue catalogue = _decode(mutate());
+
+        expect(catalogue.isAvailable(fixtureSectionIds[0]), isFalse);
+        expect(
+          fixtureItemIds[0].every((String itemId) =>
+              catalogue.recordingMetadataFor('$itemId-audio') == null),
+          isTrue,
+        );
+        expect(catalogue.isAvailable(fixtureSectionIds[1]), isTrue);
+        expect(catalogue.isAvailable(fixtureSectionIds[2]), isTrue);
+      }
+    });
+
+    test('accepts a valid correction whose final mapping matches the manifest',
+        () {
+      final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+      final String itemId = fixtureItemIds[0][0];
+      final Map<String, dynamic> item = _manifestItem(fixture, itemId);
+      final List<Map<String, dynamic>> tokens =
+          (item['tokens'] as List).cast<Map<String, dynamic>>();
+      (tokens.first['phonemes'] as List<String>)[0] = 'd';
+      _annotation(fixture, itemId)['corrections'] = <Map<String, dynamic>>[
+        <String, dynamic>{
+          'tokenId': tokens.first['id'],
+          'before': <String>['t', 'ɑ̃'],
+          'after': <String>['d', 'ɑ̃'],
+          'rationale': 'Synthetic retained correction for the fixture.',
+        },
+      ];
+
+      final SentenceHuntCatalogue catalogue = _decode(fixture);
+
+      expect(catalogue.isAvailable(fixtureSectionIds[0]), isTrue);
+      expect(catalogue.isAvailable(fixtureSectionIds[1]), isTrue);
+      expect(catalogue.isAvailable(fixtureSectionIds[2]), isTrue);
+      expect(
+        catalogue.recordingMetadataFor('$itemId-audio'),
+        isNotNull,
+      );
     });
 
     test('requires hash binding, accepted reviewer/date, and covering evidence',
@@ -620,8 +1111,30 @@ void main() {
           catalogue.sections
               .every((section) => !catalogue.isAvailable(section.id)),
           isTrue);
+      expect(catalogue.hasValidRoot, isTrue);
       expect(
           catalogue.sections.expand((section) => section.items), hasLength(15));
+      for (int mixedIndex = 0; mixedIndex < 5; mixedIndex++) {
+        final SentenceHuntItem mixed =
+            catalogue.section(fixtureSectionIds[2]).items[mixedIndex];
+        final SentenceHuntSection primary = catalogue.section(
+          fixtureSectionIds[mixedIndex < 2 ? 0 : 1],
+        );
+        expect(
+          primary.items
+              .where((SentenceHuntItem item) =>
+                  item.exercise.targetSound == mixed.exercise.targetSound)
+              .every((SentenceHuntItem item) =>
+                  item.sentence.text != mixed.sentence.text),
+          isTrue,
+          reason:
+              'Pending packet ${mixed.identity.itemId} must retain a new context',
+        );
+      }
+      expect(
+        _codes(catalogue, fixtureSectionIds[2]),
+        isNot(contains('mixed_target_context')),
+      );
     });
   });
 }
@@ -666,6 +1179,14 @@ Map<String, dynamic> _provenance(
     (fixture.provenance['entries'] as List)
         .cast<Map<String, dynamic>>()
         .singleWhere((entry) => entry['itemId'] == itemId);
+
+Map<String, dynamic> _evidence(
+  SentenceHuntPackageFixture fixture,
+  String evidenceId,
+) =>
+    (fixture.sourceEvidence['entries'] as List)
+        .cast<Map<String, dynamic>>()
+        .singleWhere((entry) => entry['id'] == evidenceId);
 
 void _syncAnnotationTokens(
   SentenceHuntPackageFixture fixture,
@@ -783,11 +1304,24 @@ Map<String, Object?> _referenceVowelItem(
   String targetSound,
   int index,
 ) {
-  final String firstTokenId = '$itemId-token-01';
-  final String secondTokenId = '$itemId-token-02';
-  final String distractorTokenId = '$itemId-token-03';
-  final String repeatedTokenId = '$itemId-token-04';
-  final String finalTokenId = '$itemId-token-05';
+  const List<String> texts = <String>[
+    'Tu vois tout, tu souris.',
+    'Elle chante avec un ami.',
+    'Nous avons deux chats noirs.',
+    'Il mange une pomme verte.',
+    'Vous aimez ce grand jardin.',
+  ];
+  const List<List<String>> tokenTexts = <List<String>>[
+    <String>['Tu', 'vois', 'tout', 'tu', 'souris'],
+    <String>['Elle', 'chante', 'avec', 'un', 'ami'],
+    <String>['Nous', 'avons', 'deux', 'chats', 'noirs'],
+    <String>['Il', 'mange', 'une', 'pomme', 'verte'],
+    <String>['Vous', 'aimez', 'ce', 'grand', 'jardin'],
+  ];
+  final List<String> ids = <String>[
+    for (int tokenIndex = 0; tokenIndex < 5; tokenIndex++)
+      '$itemId-token-${(tokenIndex + 1).toString().padLeft(2, '0')}',
+  ];
   final String hashDigit = '12345'[index];
   final String clipHashDigit = '12345'[index];
   final List<String> finalTokenPhonemes = <String>['s', 'u', 'ʁ', 'i']
@@ -799,38 +1333,25 @@ Map<String, Object?> _referenceVowelItem(
     'purpose': 'practice',
     'targetSound': targetSound,
     'targetLabel': 'French vowel /$targetSound/',
-    'text': 'Tu vois tout, tu souris.',
+    'text': texts[index],
     'debriefNote': 'Synthetic test note for $itemId.',
     'annotationRevision': 1,
     'annotationHash': List<String>.filled(64, 'c').join(),
     'tokens': <Map<String, Object?>>[
-      <String, Object?>{
-        'id': firstTokenId,
-        'text': 'Tu',
-        'phonemes': <String>['t', targetSound],
-      },
-      <String, Object?>{
-        'id': secondTokenId,
-        'text': 'vois',
-        'phonemes': <String>['v', 'w', 'a'],
-      },
-      <String, Object?>{
-        'id': distractorTokenId,
-        'text': 'tout',
-        'phonemes': <String>['t', 'i'],
-      },
-      <String, Object?>{
-        'id': repeatedTokenId,
-        'text': 'tu',
-        'phonemes': <String>['t', targetSound],
-      },
-      <String, Object?>{
-        'id': finalTokenId,
-        'text': 'souris',
-        'phonemes': finalTokenPhonemes,
-      },
+      for (int tokenIndex = 0; tokenIndex < 5; tokenIndex++)
+        <String, Object?>{
+          'id': ids[tokenIndex],
+          'text': tokenTexts[index][tokenIndex],
+          'phonemes': switch (tokenIndex) {
+            0 || 3 => <String>['t', targetSound],
+            1 => <String>['v', 'w', 'a'],
+            2 => <String>['t', 'i'],
+            4 => finalTokenPhonemes,
+            _ => throw RangeError.index(tokenIndex, const <int>[0, 1, 2, 3, 4]),
+          },
+        },
     ],
-    'expectedTokenIds': <String>[firstTokenId, repeatedTokenId],
+    'expectedTokenIds': <String>[ids[0], ids[3]],
     'originalSha256': List<String>.filled(64, hashDigit).join(),
     'clipSha256': List<String>.filled(64, clipHashDigit).join(),
   };

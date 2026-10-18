@@ -184,6 +184,7 @@ final class SentenceHuntCatalogue {
     required List<SentenceHuntSection> sections,
     required List<SentenceHuntDiagnostic> diagnostics,
     required List<SentenceHuntHistoricalDescriptor> historicalSections,
+    required this.hasValidRoot,
     required Map<String, bool> availability,
     required Map<String, List<SentenceHuntDiagnostic>> diagnosticsBySection,
     required Map<String, SentenceHuntRecordingMetadata> recordingsByReference,
@@ -211,6 +212,11 @@ final class SentenceHuntCatalogue {
   final List<SentenceHuntSection> sections;
   final List<SentenceHuntDiagnostic> diagnostics;
   final List<SentenceHuntHistoricalDescriptor> historicalSections;
+
+  /// Whether all package-level roots and global evidence are structurally valid.
+  /// Local section/item faults do not change this value.
+  final bool hasValidRoot;
+
   final Map<String, bool> _availability;
   final Map<String, List<SentenceHuntDiagnostic>> _diagnosticsBySection;
   final Map<String, SentenceHuntRecordingMetadata> _recordingsByReference;
@@ -459,6 +465,21 @@ SentenceHuntCatalogue decodeFrenchSentencePackage({
     idField: 'id',
     diagnostics: rootDiagnostics,
   );
+  final Set<String> referencedEvidenceIds = _referencedEvidenceIds(
+    annotationIndex,
+    provenanceIndex,
+  );
+  for (final MapEntry<String, Map<String, dynamic>> entry
+      in evidenceIndex.byId.entries) {
+    if (referencedEvidenceIds.contains(entry.key)) continue;
+    if (!_validateEvidenceRecord(
+      entry.value,
+      expectedId: entry.key,
+      diagnostics: rootDiagnostics,
+    )) {
+      rootValid = false;
+    }
+  }
   if (!provenanceIndex.rootValid ||
       !annotationIndex.rootValid ||
       !evidenceIndex.rootValid) {
@@ -534,6 +555,7 @@ SentenceHuntCatalogue decodeFrenchSentencePackage({
     sections: sections,
     diagnostics: allDiagnostics,
     historicalSections: historical,
+    hasValidRoot: rootValid && sectionOrderValid,
     availability: availability,
     diagnosticsBySection: diagnosticsBySection,
     recordingsByReference: recordings,
@@ -550,6 +572,7 @@ SentenceHuntCatalogue _emptyCatalogue(
       sections: const <SentenceHuntSection>[],
       diagnostics: diagnostics,
       historicalSections: historical,
+      hasValidRoot: false,
       availability: <String, bool>{
         for (final String id in knownSectionIds) id: false,
       },
@@ -839,6 +862,15 @@ List<SentenceHuntHistoricalDescriptor>? _parseHistoricalSections(
       diagnostics: diagnostics,
       code: 'historical_schema',
     );
+    if (policyRevision == 1 && threshold != null && threshold != 80) {
+      _addDiagnostic(
+        diagnostics,
+        'historical_policy_threshold',
+        'manifest',
+        '$recordId policy revision 1 must retain the 80-percent threshold',
+      );
+      descriptorValid = false;
+    }
     final String? fingerprint = _readString(
       value,
       'sectionFingerprint',
@@ -939,6 +971,29 @@ final class _RecordIndex {
   final Map<String, Map<String, dynamic>> byId;
   final Set<String> duplicateIds;
   final bool rootValid;
+}
+
+Set<String> _referencedEvidenceIds(
+  _RecordIndex annotations,
+  _RecordIndex provenance,
+) {
+  final Set<String> ids = <String>{};
+  void collect(Object? value) {
+    if (value is! Map<String, dynamic>) return;
+    final Object? rawIds = value['evidenceIds'];
+    if (rawIds is List) {
+      ids.addAll(rawIds.whereType<String>());
+    }
+  }
+
+  for (final Map<String, dynamic> annotation in annotations.byId.values) {
+    collect(annotation['frenchAudioReview']);
+  }
+  for (final Map<String, dynamic> record in provenance.byId.values) {
+    collect(record['rightsReview']);
+    collect(record['credit']);
+  }
+  return ids;
 }
 
 _RecordIndex _indexRecords(
@@ -1142,6 +1197,15 @@ _SectionParseResult _parseSection(
     recordId: spec.id,
     diagnostics: diagnostics,
   );
+  if (policyRevision == 1 && threshold != null && threshold != 80) {
+    _addDiagnostic(
+      diagnostics,
+      'policy_threshold',
+      spec.id,
+      'policy revision 1 must use the initial 80-percent threshold',
+    );
+    sectionValid = false;
+  }
   final SentenceHuntSectionKind expectedKind = _sectionKind(spec.kind)!;
   if (id != spec.id) {
     _addDiagnostic(diagnostics, 'section_identity', spec.id,
@@ -1842,13 +1906,54 @@ int? _readIntRange(
 
 bool _isSha256(String value) => RegExp(r'^[0-9a-f]{64}$').hasMatch(value);
 
+final RegExp _utcTimestampPattern = RegExp(
+  r'^([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt ]'
+  r'([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:[.,]([0-9]+))?)?'
+  r'(Z|\+00:00)$',
+);
+
 bool _isUtcTimestamp(String value) {
-  if (!RegExp(r'(?:Z|\+00:00)$').hasMatch(value)) return false;
-  try {
-    return DateTime.parse(value).isUtc;
-  } on FormatException {
+  final RegExpMatch? match = _utcTimestampPattern.firstMatch(value);
+  if (match == null) return false;
+
+  final int year = int.parse(match[1]!);
+  final int month = int.parse(match[2]!);
+  final int day = int.parse(match[3]!);
+  final int hour = int.parse(match[4]!);
+  final int minute = int.parse(match[5]!);
+  final int second = int.tryParse(match[6] ?? '') ?? 0;
+  final String fraction = match[7] ?? '';
+  final String microsecondDigits = fraction.length >= 6
+      ? fraction.substring(0, 6)
+      : fraction.padRight(6, '0');
+  final int microseconds = fraction.isEmpty ? 0 : int.parse(microsecondDigits);
+  if (year == 0 ||
+      month < 1 ||
+      month > 12 ||
+      day < 1 ||
+      day > 31 ||
+      hour > 23 ||
+      minute > 59 ||
+      second > 59) {
     return false;
   }
+
+  final DateTime calendar = DateTime.utc(
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    second,
+    microseconds ~/ Duration.microsecondsPerMillisecond,
+    microseconds % Duration.microsecondsPerMillisecond,
+  );
+  return calendar.year == year &&
+      calendar.month == month &&
+      calendar.day == day &&
+      calendar.hour == hour &&
+      calendar.minute == minute &&
+      calendar.second == second;
 }
 
 bool _sameList<T>(List<T> left, List<T> right) {
@@ -1961,12 +2066,17 @@ _AnnotationResult _parseAnnotation(
         valid;
   }
 
+  final Set<String>? tokenIds =
+      tokens?.map((SentenceToken token) => token.id).toSet();
   final Object? rawDrafts = row['draftTokenPhonemes'];
-  final Map<String, List<String>>? draftMap = _parseDrafts(
+  final _TokenPhonemeMapResult draftResult = _parseDrafts(
     rawDrafts,
     itemId: itemId,
+    tokenIds: tokenIds,
     diagnostics: diagnostics,
   );
+  final Map<String, List<String>>? draftMap = draftResult.values;
+  valid = draftResult.valid && valid;
   if (draftMap == null) {
     valid = false;
   } else if (tokens == null || draftMap.length != tokens.length) {
@@ -1976,12 +2086,15 @@ _AnnotationResult _parseAnnotation(
   }
 
   final Object? rawCorrections = row['corrections'];
-  final Map<String, List<String>>? corrected = _applyCorrections(
+  final _CorrectedPhonemeMapResult correctionResult = _applyCorrections(
     rawCorrections,
     draftMap,
     itemId: itemId,
+    tokenIds: tokenIds,
     diagnostics: diagnostics,
   );
+  final Map<String, List<String>>? corrected = correctionResult.values;
+  valid = correctionResult.valid && valid;
   if (corrected == null) {
     valid = false;
   } else if (tokens != null) {
@@ -2071,15 +2184,23 @@ bool _validateAnnotationTool(
   return valid;
 }
 
-Map<String, List<String>>? _parseDrafts(
+final class _TokenPhonemeMapResult {
+  const _TokenPhonemeMapResult({required this.values, required this.valid});
+
+  final Map<String, List<String>>? values;
+  final bool valid;
+}
+
+_TokenPhonemeMapResult _parseDrafts(
   Object? raw, {
   required String itemId,
+  required Set<String>? tokenIds,
   required List<SentenceHuntDiagnostic> diagnostics,
 }) {
   if (raw is! List) {
     _addDiagnostic(diagnostics, 'annotation_tokens', itemId,
         'draftTokenPhonemes must be a JSON list');
-    return null;
+    return const _TokenPhonemeMapResult(values: null, valid: false);
   }
   bool valid = true;
   final Map<String, List<String>> byId = <String, List<String>>{};
@@ -2118,6 +2239,11 @@ Map<String, List<String>>? _parseDrafts(
       valid = false;
       continue;
     }
+    if (tokenIds != null && !tokenIds.contains(tokenId)) {
+      _addDiagnostic(diagnostics, 'annotation_tokens', itemId,
+          'draftTokenPhonemes tokenId "$tokenId" is not a manifest token');
+      valid = false;
+    }
     for (final String phoneme in phonemes.values!) {
       if (!_allPhonemes.contains(phoneme)) {
         _addDiagnostic(diagnostics, 'unknown_phoneme', itemId,
@@ -2133,21 +2259,37 @@ Map<String, List<String>>? _parseDrafts(
       byId[tokenId] = phonemes.values!;
     }
   }
-  return valid ? byId : byId;
+  return _TokenPhonemeMapResult(
+    values: Map<String, List<String>>.unmodifiable(byId),
+    valid: valid,
+  );
 }
 
-Map<String, List<String>>? _applyCorrections(
+final class _CorrectedPhonemeMapResult {
+  const _CorrectedPhonemeMapResult({
+    required this.values,
+    required this.valid,
+  });
+
+  final Map<String, List<String>>? values;
+  final bool valid;
+}
+
+_CorrectedPhonemeMapResult _applyCorrections(
   Object? raw,
   Map<String, List<String>>? drafts, {
   required String itemId,
+  required Set<String>? tokenIds,
   required List<SentenceHuntDiagnostic> diagnostics,
 }) {
   if (raw is! List) {
     _addDiagnostic(diagnostics, 'annotation_corrections', itemId,
         'corrections must be a JSON list');
-    return null;
+    return const _CorrectedPhonemeMapResult(values: null, valid: false);
   }
-  if (drafts == null) return null;
+  if (drafts == null) {
+    return const _CorrectedPhonemeMapResult(values: null, valid: false);
+  }
   final Map<String, List<String>> corrected = <String, List<String>>{
     for (final MapEntry<String, List<String>> entry in drafts.entries)
       entry.key: List<String>.of(entry.value),
@@ -2207,22 +2349,34 @@ Map<String, List<String>>? _applyCorrections(
       valid = false;
       continue;
     }
+    valid = before.valid && after.valid && valid;
+    if (tokenIds != null && !tokenIds.contains(tokenId)) {
+      _addDiagnostic(diagnostics, 'annotation_corrections', itemId,
+          'correction[$index].tokenId is not a manifest token');
+      valid = false;
+    }
     final List<String>? current = corrected[tokenId];
     if (current == null || !_sameList(current, before.values!)) {
       _addDiagnostic(diagnostics, 'annotation_corrections', itemId,
           'correction[$index].before does not match token "$tokenId"');
       valid = false;
     }
-    for (final String phoneme in after.values!) {
+    for (final String phoneme in <String>[
+      ...before.values!,
+      ...after.values!
+    ]) {
       if (!_allPhonemes.contains(phoneme)) {
         _addDiagnostic(diagnostics, 'unknown_phoneme', itemId,
-            'corrected phoneme "$phoneme" is not in the sentence-local IPA table');
+            'correction phoneme "$phoneme" is not in the sentence-local IPA table');
         valid = false;
       }
     }
     if (current != null) corrected[tokenId] = after.values!;
   }
-  return valid ? corrected : corrected;
+  return _CorrectedPhonemeMapResult(
+    values: Map<String, List<String>>.unmodifiable(corrected),
+    valid: valid,
+  );
 }
 
 _ValidatedReview _validateReview(
@@ -2343,23 +2497,21 @@ _ValidatedReview _validateReview(
         '$reviewName.$status requires nonempty evidenceIds');
     valid = false;
   }
-  if (status == 'accepted' || status == 'rejected') {
-    for (final String evidenceId in evidenceIds.values ?? const <String>[]) {
-      final Map<String, dynamic>? evidenceRow = _recordFor(
-        evidence,
-        evidenceId,
-        rootId: 'source-evidence',
-        diagnostics: diagnostics,
-      );
-      if (evidenceRow == null ||
-          !_validateEvidenceRecord(
-            evidenceRow,
-            expectedId: evidenceId,
-            itemId: itemId,
-            diagnostics: diagnostics,
-          )) {
-        valid = false;
-      }
+  for (final String evidenceId in evidenceIds.values ?? const <String>[]) {
+    final Map<String, dynamic>? evidenceRow = _recordFor(
+      evidence,
+      evidenceId,
+      rootId: 'source-evidence',
+      diagnostics: diagnostics,
+    );
+    if (evidenceRow == null ||
+        !_validateEvidenceRecord(
+          evidenceRow,
+          expectedId: evidenceId,
+          itemId: itemId,
+          diagnostics: diagnostics,
+        )) {
+      valid = false;
     }
   }
   if (notes == null) valid = false;
@@ -2437,9 +2589,9 @@ bool _validateEvidenceRecord(
         'source-evidence id does not match its index');
     valid = false;
   }
-  if (url == null || !url.startsWith('https://')) {
+  if (url == null || !_isAbsoluteHttpsUrl(url)) {
     _addDiagnostic(diagnostics, 'evidence_record', expectedId,
-        'source-evidence.url must be an https URL');
+        'source-evidence.url must be an absolute https URL without credentials');
     valid = false;
   }
   if (retrievedAt == null || !_isUtcTimestamp(retrievedAt)) {
@@ -2462,6 +2614,13 @@ bool _validateEvidenceRecord(
     code: 'evidence_record',
   );
   valid = itemIds.valid && valid;
+  for (final String assignedItemId in itemIds.values ?? const <String>[]) {
+    if (!_allItemIds.contains(assignedItemId)) {
+      _addDiagnostic(diagnostics, 'evidence_record', expectedId,
+          'source-evidence.itemIds contains unknown item "$assignedItemId"');
+      valid = false;
+    }
+  }
   if (scope != 'dataset' && scope != 'tool' && scope != 'item') {
     _addDiagnostic(diagnostics, 'evidence_record', expectedId,
         'source-evidence.scope must be dataset, tool, or item');
@@ -3270,6 +3429,14 @@ bool _isSafeRelativePath(String path) =>
     !path.split('/').any((String segment) =>
         segment.isEmpty || segment == '.' || segment == '..');
 
+bool _isAbsoluteHttpsUrl(String value) {
+  final Uri? uri = Uri.tryParse(value);
+  return uri != null &&
+      uri.scheme == 'https' &&
+      uri.host.isNotEmpty &&
+      uri.userInfo.isEmpty;
+}
+
 void _validateMixedRevisits(
   List<_SectionParseResult> sections,
   Map<String, List<SentenceHuntDiagnostic>> diagnosticsBySection,
@@ -3287,6 +3454,10 @@ void _validateMixedRevisits(
   };
   bool valid = true;
   for (final _ItemParseResult item in sections[2].items) {
+    final _SectionParseResult primarySection =
+        item.spec.targetRole == SentenceHuntTargetRole.vowel
+            ? sections[0]
+            : sections[1];
     final Set<String> priorTargets =
         item.spec.targetRole == SentenceHuntTargetRole.vowel
             ? vowelTargets
@@ -3296,6 +3467,18 @@ void _validateMixedRevisits(
         code: 'mixed_target_revisit',
         recordId: item.spec.id,
         message: 'mixed target must revisit a prior vowel or consonant target',
+      ));
+      valid = false;
+    }
+    final String? mixedText = item.item?.sentence.text;
+    if (mixedText != null &&
+        primarySection.items.any((_ItemParseResult primary) =>
+            primary.targetSound == item.targetSound &&
+            primary.item?.sentence.text == mixedText)) {
+      diagnosticsBySection[sections[2].spec.id]!.add(SentenceHuntDiagnostic(
+        code: 'mixed_target_context',
+        recordId: item.spec.id,
+        message: 'mixed target must use text distinct from its primary context',
       ));
       valid = false;
     }

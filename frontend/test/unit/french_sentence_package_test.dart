@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -56,6 +57,109 @@ void main() {
       expect(retried.sections, hasLength(3));
       expect(bundle.loads.length, failedReadCount + 4);
       expect(bundle.loads.every((load) => !load.cache), isTrue);
+    });
+
+    test('a malformed or wrong-schema root is retryable after bundle repair',
+        () async {
+      final List<({String asset, String invalidJson})> brokenRoots =
+          <({String asset, String invalidJson})>[
+        (
+          asset: 'assets/audio/fr-sentences/manifest.json',
+          invalidJson: '{',
+        ),
+        (
+          asset: 'assets/audio/fr-sentences/manifest.json',
+          invalidJson: _withSchemaVersion(
+            syntheticSentencePackage().manifestJson,
+            2,
+          ),
+        ),
+        (
+          asset: 'assets/audio/fr-sentences/provenance.json',
+          invalidJson: _withSchemaVersion(
+            syntheticSentencePackage().provenanceJson,
+            2,
+          ),
+        ),
+      ];
+
+      for (final ({String asset, String invalidJson}) broken in brokenRoots) {
+        final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+        final _FixtureBundle bundle = _FixtureBundle(fixture);
+        bundle.contents[broken.asset] = broken.invalidJson;
+        final FrenchSentencePackageLoader loader =
+            FrenchSentencePackageLoader(bundle: bundle);
+
+        final SentenceHuntCatalogue invalid = await loader.load();
+        expect(invalid.sections, isEmpty);
+        expect(invalid.hasValidRoot, isFalse);
+
+        bundle.contents[broken.asset] =
+            _fixtureContents(fixture)[broken.asset]!;
+        final SentenceHuntCatalogue repaired = await loader.load();
+
+        expect(repaired.sections, hasLength(3));
+        expect(repaired.hasValidRoot, isTrue);
+        expect(bundle.loads, hasLength(8));
+        expect(bundle.loads.every((load) => !load.cache), isTrue);
+      }
+    });
+
+    test('a valid pending catalogue is cached after one coalesced read',
+        () async {
+      final _FixtureBundle bundle = _FixtureBundle(
+        syntheticSentencePackage(reviewed: false),
+      );
+      final FrenchSentencePackageLoader loader =
+          FrenchSentencePackageLoader(bundle: bundle);
+
+      final List<SentenceHuntCatalogue> catalogues = await Future.wait(
+        <Future<SentenceHuntCatalogue>>[loader.load(), loader.load()],
+      );
+      final SentenceHuntCatalogue cached = await loader.load();
+
+      expect(catalogues.first, same(catalogues.last));
+      expect(cached, same(catalogues.first));
+      expect(cached.sections, hasLength(3));
+      expect(cached.hasValidRoot, isTrue);
+      expect(
+        cached.sections.every(
+            (SentenceHuntSection section) => !cached.isAvailable(section.id)),
+        isTrue,
+      );
+      expect(bundle.loads, hasLength(4));
+    });
+
+    test('caches a valid root with one local fault and preserves sibling audio',
+        () async {
+      final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+      _manifestItem(fixture, fixtureItemIds[0][0])['targetLabel'] =
+          'incorrect synthetic label';
+      final _FixtureBundle bundle = _FixtureBundle(fixture);
+      final FrenchSentencePackageLoader loader =
+          FrenchSentencePackageLoader(bundle: bundle);
+
+      final SentenceHuntCatalogue first = await loader.load();
+      final SentenceHuntCatalogue cached = await loader.load();
+      final CourseAudioCatalog malformedSection =
+          await loader.loadAudioForReference(
+        sentenceHuntSectionSpecifications[0].items[0].audioRefId,
+      );
+      final CourseAudioCatalog validSibling =
+          await loader.loadAudioForReference(
+        sentenceHuntSectionSpecifications[1].items[0].audioRefId,
+      );
+
+      expect(first, same(cached));
+      expect(first.hasValidRoot, isTrue);
+      expect(first.isAvailable(fixtureSectionIds[0]), isFalse);
+      expect(first.isAvailable(fixtureSectionIds[1]), isTrue);
+      expect(first.isAvailable(fixtureSectionIds[2]), isTrue);
+      expect(malformedSection.references, hasLength(5));
+      expect(malformedSection.entries, isEmpty);
+      expect(validSibling.references, hasLength(5));
+      expect(validSibling.entries, hasLength(5));
+      expect(bundle.loads, hasLength(4));
     });
 
     test(
@@ -199,15 +303,9 @@ final class _FixtureBundle extends AssetBundle {
     SentenceHuntPackageFixture fixture, {
     this.gate,
     this.failFirstRead = false,
-  }) : _contents = <String, String>{
-          'assets/audio/fr-sentences/manifest.json': fixture.manifestJson,
-          'assets/audio/fr-sentences/provenance.json': fixture.provenanceJson,
-          'assets/audio/fr-sentences/annotations.json': fixture.annotationsJson,
-          'assets/audio/fr-sentences/source-evidence.json':
-              fixture.sourceEvidenceJson,
-        };
+  }) : contents = _fixtureContents(fixture);
 
-  final Map<String, String> _contents;
+  final Map<String, String> contents;
   final Completer<void>? gate;
   final bool failFirstRead;
   final List<({String key, bool cache})> loads = <({String key, bool cache})>[];
@@ -225,10 +323,26 @@ final class _FixtureBundle extends AssetBundle {
       throw StateError('synthetic first read failure');
     }
     await gate?.future;
-    final String? value = _contents[key];
+    final String? value = contents[key];
     if (value == null) throw StateError('unknown test asset $key');
     return value;
   }
+}
+
+Map<String, String> _fixtureContents(SentenceHuntPackageFixture fixture) =>
+    <String, String>{
+      'assets/audio/fr-sentences/manifest.json': fixture.manifestJson,
+      'assets/audio/fr-sentences/provenance.json': fixture.provenanceJson,
+      'assets/audio/fr-sentences/annotations.json': fixture.annotationsJson,
+      'assets/audio/fr-sentences/source-evidence.json':
+          fixture.sourceEvidenceJson,
+    };
+
+String _withSchemaVersion(String json, int version) {
+  final Map<String, dynamic> value =
+      (jsonDecode(json) as Map).cast<String, dynamic>();
+  value['schemaVersion'] = version;
+  return jsonEncode(value);
 }
 
 final class _FileAssetBundle extends AssetBundle {
@@ -256,6 +370,15 @@ void _setOneItemPending(SentenceHuntPackageFixture fixture, String itemId) {
           .singleWhere((entry) => entry['itemId'] == itemId);
   _pending(provenance['rightsReview'] as Map<String, dynamic>);
 }
+
+Map<String, dynamic> _manifestItem(
+  SentenceHuntPackageFixture fixture,
+  String itemId,
+) =>
+    ((fixture.manifest['sections'] as List).cast<Map<String, dynamic>>().expand(
+            (section) =>
+                (section['items'] as List).cast<Map<String, dynamic>>()))
+        .singleWhere((item) => item['id'] == itemId);
 
 void _pending(Map<String, dynamic> review) {
   review['status'] = 'pending';
