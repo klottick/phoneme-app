@@ -5,8 +5,11 @@ import 'package:go_router/go_router.dart';
 import '../../core/course/course_learning_providers.dart';
 import '../../core/course/comparison_content.dart';
 import '../../core/course/french_course.dart';
+import '../../core/course/french_sentence_package.dart';
+import '../../core/course/sentence_hunt_learning_providers.dart';
 import '../course/course_completion_summary.dart';
 import '../course/comparison_progress_summary.dart';
+import '../course/sentence_hunt_progress_summary.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -187,7 +190,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 );
               },
             ),
-            const SizedBox(height: 12),
             Wrap(spacing: 12, runSpacing: 8, children: [
               OutlinedButton.icon(
                   onPressed: () => context.push('/course-review'),
@@ -217,6 +219,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       context.push('/course-lesson/${legacyLessons[i].id}'),
                 ),
               ),
+            const SizedBox(height: 12),
+            const _SentenceHuntHomeEntry(),
             const SizedBox(height: 12),
             ExpansionTile(title: const Text('Practice tools'), children: [
               for (final tool in const {
@@ -253,4 +257,38 @@ class _ComparisonUnavailableCard extends StatelessWidget {
                     context.push('/course-comparison/en-fr-phoneme-comparison'),
             child: const Text('Open comparison recovery')),
       ]);
+}
+
+class _SentenceHuntHomeEntry extends ConsumerWidget {
+  const _SentenceHuntHomeEntry();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final progress = ref.watch(sentenceHuntLearningStateProvider);
+    final catalogue = ref.watch(sentenceHuntCatalogueProvider);
+    final state = progress.asData?.value;
+    final content = catalogue.asData?.value;
+    String progressLabel;
+    if (state == null || content == null) {
+      progressLabel = progress.hasError || catalogue.hasError
+          ? 'Sentence progress unavailable'
+          : 'Sentence progress loading';
+    } else {
+      try {
+        progressLabel = SentenceHuntProgressSummary.fromState(
+                state: state, catalogue: content)
+            .completionLabel;
+      } on Object {
+        progressLabel = 'Sentence progress unavailable';
+      }
+    }
+    return Card(
+      child: ListTile(
+        title: const Text('Sentence sound hunt'),
+        subtitle: Text(progressLabel),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => context.push('/course-sentence-hunt'),
+      ),
+    );
+  }
 }

@@ -4,11 +4,16 @@ import 'package:go_router/go_router.dart';
 
 import '../core/providers/app_providers.dart';
 import '../core/course/lesson_section.dart';
+import '../core/course/french_sentence_exercises.dart';
+import '../core/course/french_sentence_package.dart';
+import '../core/course/sentence_hunt_content.dart';
 import '../features/arcade/arcade_screen.dart';
 import '../features/course/course_lesson_screen.dart';
 import '../features/course/course_progress_screen.dart';
 import '../features/course/discovery_lesson_screen.dart';
 import '../features/course/comparison_lesson_screen.dart';
+import '../features/course/exercises/sentence_hunt_lesson_screen.dart';
+import '../features/course/sentence_hunt_sections_screen.dart';
 import '../core/course/comparison_content.dart';
 import '../core/course/course_learning_providers.dart';
 import '../features/auth/login_screen.dart';
@@ -113,6 +118,77 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               }
             });
           }),
+      GoRoute(
+        path: '/course-sentence-hunt',
+        builder: (context, state) {
+          if (state.uri.queryParametersAll.isNotEmpty) {
+            return const _SentenceHuntRouteUnavailable();
+          }
+          return const SentenceHuntSectionsScreen();
+        },
+      ),
+      GoRoute(
+        path: '/course-sentence-hunt/:sectionId',
+        builder: (context, state) {
+          final String? sectionId = state.pathParameters['sectionId'];
+          final SentenceHuntSectionSpecification? specification =
+              _sentenceHuntSpecification(sectionId);
+          final Map<String, List<String>> all = state.uri.queryParametersAll;
+          if (specification == null ||
+              all.keys
+                  .any((String key) => key != 'review' && key != 'itemId') ||
+              all.values.any((List<String> values) => values.length != 1) ||
+              (all['review'] != null &&
+                  !<String>{'true', 'false'}.contains(all['review']!.single))) {
+            return const _SentenceHuntRouteUnavailable();
+          }
+          final String? itemId = all['itemId']?.single;
+          if (itemId != null &&
+              (itemId.trim().isEmpty ||
+                  !specification.items.any(
+                      (SentenceHuntItemSpecification item) =>
+                          item.id == itemId))) {
+            return const _SentenceHuntRouteUnavailable();
+          }
+          return Consumer(
+            builder: (BuildContext context, WidgetRef ref, Widget? child) {
+              final AsyncValue<SentenceHuntCatalogue> catalogue =
+                  ref.watch(sentenceHuntCatalogueProvider);
+              return catalogue.when(
+                skipLoadingOnRefresh: false,
+                loading: () => Scaffold(
+                  appBar: AppBar(title: const Text('Sentence hunt')),
+                  body: const Center(child: CircularProgressIndicator()),
+                ),
+                error: (_, __) => _SentenceHuntContentUnavailable(
+                  message: 'Sentence-hunt content could not be checked.',
+                  onRetry: () => ref.invalidate(sentenceHuntCatalogueProvider),
+                ),
+                data: (SentenceHuntCatalogue value) {
+                  try {
+                    value.section(specification.id);
+                  } on Object {
+                    return const _SentenceHuntContentUnavailable(
+                      message: 'This sentence-hunt section is unavailable.',
+                    );
+                  }
+                  if (!value.isAvailable(specification.id)) {
+                    return const _SentenceHuntContentUnavailable(
+                      message: 'This complete sentence section is unavailable '
+                          'until its content and audio are reviewed.',
+                    );
+                  }
+                  return SentenceHuntLessonScreen(
+                    sectionId: specification.id,
+                    review: all['review']?.single == 'true',
+                    itemId: itemId,
+                  );
+                },
+              );
+            },
+          );
+        },
+      ),
       GoRoute(
           path: '/course-review',
           builder: (_, __) => const CourseProgressScreen(review: true)),
@@ -234,3 +310,71 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
+
+SentenceHuntSectionSpecification? _sentenceHuntSpecification(String? id) {
+  if (id == null) return null;
+  for (final SentenceHuntSectionSpecification specification
+      in sentenceHuntSectionSpecifications) {
+    if (specification.id == id) return specification;
+  }
+  return null;
+}
+
+class _SentenceHuntRouteUnavailable extends StatelessWidget {
+  const _SentenceHuntRouteUnavailable();
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Sentence sound hunt')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const Text('This sentence-hunt route is unavailable.'),
+                TextButton(
+                  onPressed: () => context.go('/course-sentence-hunt'),
+                  child: const Text('Back to sentence sections'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+}
+
+class _SentenceHuntContentUnavailable extends StatelessWidget {
+  const _SentenceHuntContentUnavailable({
+    required this.message,
+    this.onRetry,
+  });
+
+  final String message;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Sentence hunt')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(message),
+                if (onRetry != null)
+                  TextButton(
+                    onPressed: onRetry,
+                    child: const Text('Retry validation'),
+                  ),
+                TextButton(
+                  onPressed: () => context.go('/course-sentence-hunt'),
+                  child: const Text('Back to sentence sections'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+}
