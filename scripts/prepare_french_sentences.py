@@ -65,12 +65,19 @@ def _publish_staging(staging, target):
         raise SentencePackageError(f"output already exists: {target}") from exc
 
 
+def _safe_member_name(name):
+    parts = name.split("/")
+    return (bool(name) and not name.startswith("/") and "\\" not in name
+            and "\x00" not in name and all(part not in ("", ".", "..") for part in parts)
+            and not (len(parts[0]) >= 2 and parts[0][1] == ":"))
+
+
 def select_originals(archive, filenames, output):
     archive, output = Path(archive), _fresh_target(output)
     _verify(archive, ARCHIVE_SIZE, ARCHIVE_SHA256, "archive")
     if not isinstance(filenames, list) or not filenames:
         raise SentencePackageError("selection must be a nonempty list of member names")
-    if any(not isinstance(n, str) or not n or "\x00" in n or "\\" in n or n.startswith("/") or ".." in n.split("/") for n in filenames):
+    if any(not isinstance(n, str) or not _safe_member_name(n) for n in filenames):
         raise SentencePackageError("selection contains an unsafe archive member name")
     if len(set(filenames)) != len(filenames):
         raise SentencePackageError("selection contains duplicate member names")
@@ -81,7 +88,7 @@ def select_originals(archive, filenames, output):
         with tarfile.open(archive, "r:gz") as tar:
             for member in tar:
                 name = member.name
-                if name.startswith("/") or "\x00" in name or "\\" in name or ".." in name.split("/"):
+                if not _safe_member_name(name):
                     raise SentencePackageError(f"unsafe archive member name: {name!r}")
                 if not (member.isfile() or member.isdir()):
                     raise SentencePackageError(f"unsupported archive member type: {name!r}")
@@ -216,7 +223,7 @@ def draft_phonemes(text, executable, data_parent):
         result = subprocess.run(base, input=text, text=True, capture_output=True, timeout=TIMEOUT, check=False)
     except (OSError, subprocess.SubprocessError) as exc:
         raise SentencePackageError(f"phonemizer execution failed: {exc}") from exc
-    if version.returncode or result.returncode or not result.stdout.strip():
+    if version.returncode or not (version.stdout or version.stderr).strip() or result.returncode or not result.stdout.strip():
         raise SentencePackageError("phonemizer failed or returned empty IPA; check local French voice data")
     return {"status": "draft", "reviewStatus": "pending", "text": text,
             "inputSha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
@@ -249,6 +256,10 @@ def main(argv=None):
             result = fetch_source(args.cache)
         elif args.command == "select":
             selection = json.loads(args.selection.read_text(encoding="utf-8"))
+            if (not isinstance(selection, list) or not selection
+                    or any(not isinstance(name, str) or not name for name in selection)
+                    or len(set(selection)) != len(selection)):
+                raise SentencePackageError("selection JSON must be a nonempty list of unique archive member-name strings")
             result = select_originals(args.cache / "train.tar.gz", selection, args.output)
         elif args.command == "crop":
             result = crop_pcm(args.source, args.destination, args.start_frame, args.end_frame)
