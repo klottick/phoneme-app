@@ -610,8 +610,10 @@ class SentenceHuntController {
       stillOwnsStoreAuthRoute: () =>
           identical(_fence, fence) && _ownsStoreAuthRoute(),
       onAcknowledged: (SentenceHuntCommit commit) async {
+        // FrozenExerciseSave validates the epoch of the acknowledging attempt;
+        // use the live epoch here so an explicit post-resume retry can publish.
         if (!identical(_save, save) ||
-            !_ownsOperation(fence, epoch) ||
+            !_ownsOperation(fence, fence.lifecycleEpoch) ||
             commit.state.scope != _scope ||
             commit.slot.sectionId != sectionId) {
           return;

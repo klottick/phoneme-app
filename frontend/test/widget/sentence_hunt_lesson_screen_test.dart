@@ -1,10 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show SemanticsAction;
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
+import 'package:linguist/src/core/course/french_sentence_package.dart';
+import 'package:linguist/src/core/course/sentence_hunt_content.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_command.dart';
+import 'package:linguist/src/core/course/sentence_hunt_learning_providers.dart';
+import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
+import 'package:linguist/src/core/course/sentence_hunt_learning_store.dart';
+import 'package:linguist/src/features/course/exercises/sentence_hunt_controller.dart';
 import 'package:linguist/src/features/course/exercises/sentence_hunt_lesson_screen.dart';
 import '../support/sentence_hunt_harness.dart';
 
@@ -121,10 +130,54 @@ void main() {
     expect(find.text('Resume exercise'), findsOneWidget,
         reason: 'revealing a suspended route requires explicit safe recovery');
     expect(rig.audio.requests, hasLength(1));
+    final Finder prerecoveryPlay =
+        find.widgetWithText(OutlinedButton, 'Play sentence');
+    final Finder prerecoveryWord = find
+        .byKey(const ValueKey<String>('sentence-word-fr08-vowel-01-token-01'));
+    expect(tester.widget<OutlinedButton>(prerecoveryPlay).onPressed, isNull,
+        reason: 'playback is unavailable until explicit recovery');
+    expect(
+      tester
+          .getSemantics(prerecoveryWord)
+          .getSemanticsData()
+          .hasAction(SemanticsAction.tap),
+      isFalse,
+      reason: 'word selection semantics use the same recovery gate',
+    );
+    expect(
+      tester
+          .getSemantics(prerecoveryWord)
+          .getSemanticsData()
+          .flagsCollection
+          .isSelected
+          .name,
+      'isFalse',
+    );
+    final Finder prerecoverySubmit =
+        find.widgetWithText(FilledButton, 'Submit answer');
+    expect(tester.widget<FilledButton>(prerecoverySubmit).onPressed, isNull);
+    await tester.tap(prerecoveryPlay);
+    await tester.tap(prerecoveryWord);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(rig.audio.requests, hasLength(1),
+        reason:
+            'pointer and keyboard activation cannot restart stale playback');
+    expect(
+      tester
+          .getSemantics(prerecoveryWord)
+          .getSemanticsData()
+          .flagsCollection
+          .isSelected
+          .name,
+      'isFalse',
+      reason: 'prerecovery input cannot alter local selection state',
+    );
     expect(
         rig.store.submitted.where((SentenceHuntCommand command) =>
             command.action is AnswerSentenceHuntItem),
         isEmpty);
+    await tester.ensureVisible(find.text('Resume exercise'));
     await tester.tap(find.text('Resume exercise'));
     await tester.pumpAndSettle();
     expect(find.text('Resume exercise'), findsNothing);
@@ -242,6 +295,17 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Retry saving'), findsOneWidget,
           reason: 'save retry remains visible at text scale $scale');
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(find.text('Resume exercise'), findsOneWidget);
+      expect(find.text('Retry saving'), findsNothing,
+          reason: 'a pending answer cannot retry before explicit recovery');
+      await tester.ensureVisible(find.text('Resume exercise'));
+      await tester.tap(find.text('Resume exercise'));
+      await tester.pump();
+      expect(find.text('Retry saving'), findsOneWidget);
       await tester.ensureVisible(find.text('Retry saving'));
       await tester.tap(find.text('Retry saving'));
       await tester.pumpAndSettle();
@@ -303,5 +367,311 @@ void main() {
       isNotNull,
     );
     expect(rig.audio.speakCalls, 0);
+
+    await _interruptedCatalogueAcquisition(tester);
+    await _interruptedStoreAcquisition(tester);
+    await _failedInitialStartIsRecoverableAtScale(tester, 2);
+    await _failedInitialStartIsRecoverableAtScale(tester, 3);
+    await _savedDebriefActionsWaitForResume(tester);
   });
+}
+
+Future<void> _clearMountedScreen(WidgetTester tester) async {
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pump();
+}
+
+Future<void> _interruptedCatalogueAcquisition(WidgetTester tester) async {
+  await _clearMountedScreen(tester);
+  final SentenceHuntTestRig rig = SentenceHuntTestRig();
+  final LearningAuthTracker authTracker = LearningAuthTracker(
+    owner: LearningOwner.guest(),
+    ready: true,
+  );
+  final Completer<SentenceHuntCatalogue> staleCatalogue =
+      Completer<SentenceHuntCatalogue>();
+  final Completer<SentenceHuntCatalogue> currentCatalogue =
+      Completer<SentenceHuntCatalogue>();
+  var acquisitions = 0;
+  final ProviderContainer container = rig.providerContainer(
+    authTracker: authTracker,
+    acquireCatalogue: () {
+      acquisitions++;
+      return acquisitions == 1
+          ? staleCatalogue.future
+          : currentCatalogue.future;
+    },
+  );
+  addTearDown(container.dispose);
+  await tester.pumpWidget(UncontrolledProviderScope(
+    container: container,
+    child: MaterialApp(
+      home: SentenceHuntLessonScreen(sectionId: rig.sectionId),
+    ),
+  ));
+  await tester.pump();
+  expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+  await tester.pump();
+  authTracker.observe(owner: LearningOwner.guest(), ready: false);
+  await tester.pump();
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  await tester.pump();
+  authTracker.observe(owner: LearningOwner.guest(), ready: true);
+  await tester.pump();
+
+  expect(find.text('Resume exercise'), findsOneWidget,
+      reason: 'a stale provider await must not strand the screen on a spinner');
+  expect(find.byType(CircularProgressIndicator), findsNothing);
+
+  container.invalidate(sentenceHuntCatalogueProvider);
+  await tester.ensureVisible(find.text('Resume exercise'));
+  await tester.tap(find.text('Resume exercise'));
+  await tester.pump();
+  expect(acquisitions, 2);
+  expect(find.byType(CircularProgressIndicator), findsOneWidget);
+  staleCatalogue.completeError(StateError('stale catalogue failure'));
+  await tester.pump();
+  await tester.pump();
+  expect(find.byType(CircularProgressIndicator), findsOneWidget,
+      reason: 'the old failure cannot clear the current acquisition spinner');
+  expect(find.textContaining('stale catalogue failure'), findsNothing);
+
+  currentCatalogue.complete(rig.catalogue);
+  await tester.pumpAndSettle();
+  expect(find.bySemanticsLabel('Word 1 of 5: Tu'), findsOneWidget);
+  expect(find.text('Resume exercise'), findsNothing);
+  expect(rig.persistence.writes, 1,
+      reason: 'only the recovered owner may start the learner run');
+  await _clearMountedScreen(tester);
+}
+
+Future<void> _interruptedStoreAcquisition(WidgetTester tester) async {
+  await _clearMountedScreen(tester);
+  final SentenceHuntTestRig rig = SentenceHuntTestRig();
+  final Completer<SentenceHuntLearningStore> staleStore =
+      Completer<SentenceHuntLearningStore>();
+  final Completer<SentenceHuntLearningStore> currentStore =
+      Completer<SentenceHuntLearningStore>();
+  var acquisitions = 0;
+  final ProviderContainer container = rig.providerContainer(
+    acquireStore: () {
+      acquisitions++;
+      return acquisitions == 1 ? staleStore.future : currentStore.future;
+    },
+  );
+  addTearDown(container.dispose);
+  final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+  await tester.pumpWidget(UncontrolledProviderScope(
+    container: container,
+    child: MaterialApp(
+      navigatorKey: navigatorKey,
+      home: SentenceHuntLessonScreen(sectionId: rig.sectionId),
+    ),
+  ));
+  await tester.pump();
+  await tester.pump();
+  expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+  navigatorKey.currentState!.push<void>(MaterialPageRoute<void>(
+    builder: (BuildContext context) => const Scaffold(body: Text('Cover')),
+  ));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 300));
+  navigatorKey.currentState!.pop();
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 500));
+
+  expect(find.text('Resume exercise'), findsOneWidget,
+      reason: 'route reveal must expose recovery after store acquisition');
+  expect(find.byType(CircularProgressIndicator), findsNothing);
+  container.invalidate(sentenceHuntLearningStoreProvider);
+  await tester.ensureVisible(find.text('Resume exercise'));
+  await tester.tap(find.text('Resume exercise'));
+  await tester.pump();
+  expect(acquisitions, 2);
+  expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+  staleStore.complete(rig.store);
+  await tester.pump();
+  await tester.pump();
+  expect(find.byType(CircularProgressIndicator), findsOneWidget,
+      reason: 'the old store cannot clear the newer acquisition spinner');
+  currentStore.complete(rig.store);
+  await tester.pumpAndSettle();
+  expect(find.bySemanticsLabel('Word 1 of 5: Tu'), findsOneWidget);
+  expect(rig.persistence.writes, 1,
+      reason: 'a stale store completion must not start a run');
+  await _clearMountedScreen(tester);
+}
+
+Future<void> _failedInitialStartIsRecoverableAtScale(
+  WidgetTester tester,
+  double scale,
+) async {
+  await _clearMountedScreen(tester);
+  final SentenceHuntTestRig rig = SentenceHuntTestRig();
+  final ProviderContainer container = rig.providerContainer();
+  addTearDown(container.dispose);
+  tester.view.physicalSize = const Size(360, 640);
+  tester.view.devicePixelRatio = 1;
+  tester.platformDispatcher.textScaleFactorTestValue = scale;
+  addTearDown(() {
+    tester.view.resetPhysicalSize();
+    tester.view.resetDevicePixelRatio();
+    tester.platformDispatcher.clearTextScaleFactorTestValue();
+  });
+
+  rig.persistence.holdNextWrite(failure: StateError('quota rejected'));
+  await tester.pumpWidget(UncontrolledProviderScope(
+    container: container,
+    child: MaterialApp(
+      home: SentenceHuntLessonScreen(sectionId: rig.sectionId),
+    ),
+  ));
+  await tester.pump();
+  await rig.persistence.writeEntered;
+  rig.persistence.releaseWrite();
+  await tester.pumpAndSettle();
+
+  expect(find.textContaining('This change could not be saved.'), findsOneWidget,
+      reason: 'the pre-prompt frozen Start failure is explained at $scale×');
+  expect(find.text('Retry saving'), findsOneWidget,
+      reason: 'the initial Start command remains retryable at $scale×');
+  expect(find.textContaining('Words with target:'), findsNothing,
+      reason: 'a failed Start does not reveal key or teaching metadata');
+
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+  await tester.pump();
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  await tester.pump();
+  expect(find.text('Resume exercise'), findsOneWidget);
+  expect(find.text('Retry saving'), findsNothing,
+      reason: 'a frozen save cannot retry before explicit lifecycle recovery');
+  await tester.ensureVisible(find.text('Resume exercise'));
+  await tester.tap(find.text('Resume exercise'));
+  await tester.pump();
+  expect(find.text('Retry saving'), findsOneWidget);
+
+  rig.persistence.holdNextWrite(failure: StateError('quota rejected again'));
+  await tester.ensureVisible(find.text('Retry saving'));
+  await tester.tap(find.text('Retry saving'));
+  await tester.pump();
+  await rig.persistence.writeEntered;
+  rig.persistence.releaseWrite();
+  await tester.pumpAndSettle();
+  expect(find.text('Retry saving'), findsOneWidget,
+      reason: 'a repeated quota failure preserves the same recovery action');
+
+  await tester.ensureVisible(find.text('Retry saving'));
+  await tester.tap(find.text('Retry saving'));
+  await tester.pumpAndSettle();
+  expect(find.bySemanticsLabel('Word 1 of 5: Tu'), findsOneWidget,
+      reason: 'the acknowledged exact Start retry publishes its first prompt');
+  final List<SentenceHuntCommand> starts = rig.store.submitted
+      .where((SentenceHuntCommand command) =>
+          command.action is StartSentenceHuntRun)
+      .toList();
+  expect(starts, hasLength(3));
+  expect(identical(starts[0], starts[1]), isTrue);
+  expect(identical(starts[1], starts[2]), isTrue);
+  expect(rig.persistence.writes, 3);
+  final SentenceHuntState saved = await rig.store.load();
+  expect(saved.slots, hasLength(1),
+      reason: 'only one initial run slot is durably started');
+  expect(saved.completions, isEmpty,
+      reason: 'a Start retry cannot fabricate a completion receipt');
+  expect(tester.takeException(), isNull,
+      reason: 'save recovery remains reachable at $scale× in 360×640');
+  tester.view.resetPhysicalSize();
+  tester.view.resetDevicePixelRatio();
+  tester.platformDispatcher.clearTextScaleFactorTestValue();
+  await _clearMountedScreen(tester);
+}
+
+Future<void> _savedDebriefActionsWaitForResume(WidgetTester tester) async {
+  await _clearMountedScreen(tester);
+  final SentenceHuntTestRig rig = SentenceHuntTestRig();
+  final SentenceHuntController seeded = rig.controller();
+  await seeded.load();
+  for (var index = 0; index < 5; index++) {
+    final SentenceHuntItem item = rig.catalogue.item(
+      rig.sectionId,
+      'fr08-vowel-0${index + 1}',
+    );
+    final Future<void> playback = seeded.play();
+    rig.audio.requests.last.complete();
+    await playback;
+    final List<String> selection = index == 0
+        ? <String>[item.selectableTokenIds[1]]
+        : item.expectedTokenIds;
+    for (final String id in selection) {
+      seeded.toggleToken(id);
+    }
+    await seeded.submit();
+    await seeded.advance();
+  }
+  expect(seeded.state.phase, SentenceHuntPhase.debrief);
+  seeded.dispose();
+
+  final ProviderContainer container = rig.providerContainer();
+  addTearDown(container.dispose);
+  await tester.pumpWidget(UncontrolledProviderScope(
+    container: container,
+    child: MaterialApp(
+      home: SentenceHuntLessonScreen(sectionId: rig.sectionId),
+    ),
+  ));
+  await tester.pumpAndSettle();
+  expect(find.text('Sentence hunt debrief'), findsOneWidget);
+
+  rig.persistence.holdNextWrite(failure: StateError('quota rejected'));
+  await tester.ensureVisible(find.text('Finish'));
+  await tester.tap(find.text('Finish'));
+  await tester.pump();
+  await rig.persistence.writeEntered;
+  rig.persistence.releaseWrite();
+  await tester.pumpAndSettle();
+  expect(find.text('Retry saving'), findsOneWidget);
+
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+  await tester.pump();
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  await tester.pump();
+  expect(find.text('Resume exercise'), findsOneWidget);
+  final Finder retry = find.widgetWithText(TextButton, 'Retry saving');
+  expect(tester.widget<TextButton>(retry).onPressed, isNull,
+      reason: 'debrief save retry waits for safe lifecycle recovery');
+  expect(
+    tester.getSemantics(retry).getSemanticsData().hasAction(
+          SemanticsAction.tap,
+        ),
+    isFalse,
+  );
+  final Finder finish = find.widgetWithText(FilledButton, 'Finish');
+  expect(tester.widget<FilledButton>(finish).onPressed, isNull);
+  expect(find.text('Review mistakes'), findsNothing);
+  final int commandsBeforeKey = rig.store.submitted.length;
+  await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+  await tester.pump();
+  expect(rig.store.submitted, hasLength(commandsBeforeKey),
+      reason: 'keyboard activation cannot submit another debrief action');
+
+  await tester.ensureVisible(find.text('Resume exercise'));
+  await tester.tap(find.text('Resume exercise'));
+  await tester.pump();
+  expect(tester.widget<TextButton>(retry).onPressed, isNotNull);
+  await tester.ensureVisible(retry);
+  await tester.tap(retry);
+  await tester.pumpAndSettle();
+  expect(find.text('Retry saving'), findsNothing);
+  final SentenceHuntState saved = await rig.store.load();
+  expect(saved.completions, hasLength(1));
+  expect(
+    rig.store.submitted.where((SentenceHuntCommand command) =>
+        command.action is FinishSentenceHuntRun),
+    hasLength(2),
+  );
+  await _clearMountedScreen(tester);
 }

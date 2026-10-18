@@ -229,6 +229,235 @@ void main() {
     controller.dispose();
   });
 
+  test('post-suspension exact Start retry publishes the initial prompt once',
+      () async {
+    final SentenceHuntTestRig rig = SentenceHuntTestRig();
+    final SentenceHuntController controller = rig.controller();
+    rig.persistence.holdNextWrite();
+    final Future<void> loading = controller.load();
+    await rig.persistence.writeEntered;
+
+    expect(controller.state.prompt, isNull);
+    expect(controller.state.savePending, isTrue);
+    final SentenceHuntCommand startCommand = rig.store.submitted.single;
+    expect(startCommand.action, isA<StartSentenceHuntRun>());
+    final String sessionId =
+        (startCommand.action as StartSentenceHuntRun).sessionId;
+    controller.suspend();
+    rig.persistence.releaseWrite();
+    await loading;
+
+    expect(controller.state.prompt, isNull,
+        reason: 'an acknowledgement owned by the suspended epoch is not UI');
+    expect(controller.state.savePending, isTrue);
+    controller.resume();
+    await controller.retrySave();
+
+    final List<SentenceHuntCommand> starts = rig.store.submitted
+        .where((SentenceHuntCommand command) =>
+            command.action is StartSentenceHuntRun)
+        .toList();
+    expect(starts, hasLength(2));
+    expect(identical(starts[0], starts[1]), isTrue,
+        reason: 'recovery retries the frozen Start token, not a new run');
+    expect(controller.state.prompt?.itemId, 'fr08-vowel-01');
+    expect(controller.state.session?.sessionId, sessionId);
+    expect(controller.state.savePending, isFalse);
+    expect(rig.audio.requests, isEmpty);
+    controller.dispose();
+  });
+
+  test('disposed owner cannot publish a held Start acknowledgement', () async {
+    final SentenceHuntTestRig rig = SentenceHuntTestRig();
+    var ownerNotifications = 0;
+    final SentenceHuntController retired = rig.controller(
+      onStateChanged: () => ownerNotifications++,
+    );
+    rig.persistence.holdNextWrite();
+    final Future<void> loading = retired.load();
+    await rig.persistence.writeEntered;
+    retired.dispose();
+    final int notificationsAtRetirement = ownerNotifications;
+    rig.persistence.releaseWrite();
+    await loading;
+
+    expect(ownerNotifications, notificationsAtRetirement,
+        reason: 'a retired owner cannot publish an old asynchronous ACK');
+    final SentenceHuntController current = rig.controller();
+    await current.load();
+    expect(current.state.prompt?.itemId, 'fr08-vowel-01');
+    expect(
+      rig.store.submitted.where((SentenceHuntCommand command) =>
+          command.action is StartSentenceHuntRun),
+      hasLength(1),
+      reason:
+          'the successor restores the saved run rather than starting A again',
+    );
+    current.dispose();
+  });
+
+  test('post-suspension failed answer retries its frozen observation exactly',
+      () async {
+    final SentenceHuntTestRig rig = SentenceHuntTestRig();
+    final SentenceHuntController controller = rig.controller();
+    await controller.load();
+    final SentenceHuntItem item =
+        rig.catalogue.item(rig.sectionId, 'fr08-vowel-01');
+    final Future<void> playback = controller.play();
+    rig.audio.requests.single.complete();
+    await playback;
+    for (final String id in item.expectedTokenIds.reversed) {
+      controller.toggleToken(id);
+    }
+
+    rig.persistence.holdNextWrite(failure: StateError('quota rejected'));
+    final Future<void> submit = controller.submit();
+    await rig.persistence.writeEntered;
+    final SentenceHuntCommand frozen = rig.store.submitted.last;
+    final SentenceHuntAnswer frozenAnswer =
+        (frozen.action as AnswerSentenceHuntItem).answer;
+    controller.suspend();
+    rig.persistence.releaseWrite();
+    await submit;
+
+    expect(controller.state.session?.attemptCount, 0,
+        reason: 'the failed suspended attempt is not published');
+    expect(controller.state.savePending, isTrue);
+    expect(rig.audio.requests, hasLength(1));
+    controller.resume();
+    await controller.retrySave();
+
+    final List<SentenceHuntCommand> answers = rig.store.submitted
+        .where((SentenceHuntCommand command) =>
+            command.action is AnswerSentenceHuntItem)
+        .toList();
+    expect(answers, hasLength(2));
+    expect(identical(answers[0], answers[1]), isTrue);
+    final SentenceHuntAnswer retriedAnswer =
+        (answers[1].action as AnswerSentenceHuntItem).answer;
+    expect(retriedAnswer.selectedTokenIds, frozenAnswer.selectedTokenIds);
+    expect(retriedAnswer.playback, frozenAnswer.playback);
+    expect(controller.state.session?.attemptCount, 1);
+    expect(controller.state.feedback, ListeningFeedback.correct);
+    expect(controller.state.canAdvance, isTrue);
+    expect(rig.audio.requests, hasLength(1),
+        reason: 'saving a frozen answer never needs another hearing');
+    controller.dispose();
+  });
+
+  test('suspended advance review and finish publish only their exact retries',
+      () async {
+    final SentenceHuntTestRig rig = SentenceHuntTestRig();
+    final SentenceHuntController controller = rig.controller();
+    await controller.load();
+
+    for (var index = 0; index < 5; index++) {
+      final SentenceHuntItem item = rig.catalogue.item(
+        rig.sectionId,
+        'fr08-vowel-0${index + 1}',
+      );
+      final Future<void> playback = controller.play();
+      rig.audio.requests.last.complete();
+      await playback;
+      final List<String> selection = index == 0
+          ? <String>[item.selectableTokenIds[1]]
+          : item.expectedTokenIds;
+      for (final String id in selection) {
+        controller.toggleToken(id);
+      }
+      await controller.submit();
+
+      if (index < 4) {
+        await controller.advance();
+        continue;
+      }
+
+      rig.persistence.holdNextWrite();
+      final Future<void> advance = controller.advance();
+      await rig.persistence.writeEntered;
+      final SentenceHuntCommand advanceCommand = rig.store.submitted.last;
+      expect(advanceCommand.action, isA<AdvanceSentenceHuntItem>());
+      controller.suspend();
+      rig.persistence.releaseWrite();
+      await advance;
+      expect(controller.state.phase, SentenceHuntPhase.exercise,
+          reason: 'debrief waits for an acknowledged current-owner retry');
+      expect(controller.state.savePending, isTrue);
+      controller.resume();
+      await controller.retrySave();
+      expect(controller.state.phase, SentenceHuntPhase.debrief);
+      final List<SentenceHuntCommand> advances = rig.store.submitted
+          .where((SentenceHuntCommand command) =>
+              command.action is AdvanceSentenceHuntItem)
+          .toList();
+      expect(identical(advances.last, advanceCommand), isTrue);
+      expect(controller.state.debriefAttempts, hasLength(5));
+    }
+
+    final int attemptsBeforeReview = controller.state.session!.attemptCount;
+    rig.persistence.holdNextWrite(failure: StateError('quota rejected'));
+    final Future<void> review = controller.reviewMistakes();
+    await rig.persistence.writeEntered;
+    final SentenceHuntCommand reviewCommand = rig.store.submitted.last;
+    expect(reviewCommand.action, isA<ReviewSentenceHuntMistakes>());
+    controller.suspend();
+    rig.persistence.releaseWrite();
+    await review;
+    expect(controller.state.phase, SentenceHuntPhase.debrief,
+        reason: 'a failed suspended Review cannot publish the mistake round');
+    expect(controller.state.savePending, isTrue);
+    controller.resume();
+    await controller.retrySave();
+    expect(controller.state.prompt?.itemId, 'fr08-vowel-01');
+    expect(controller.state.session?.round, 2);
+    expect(controller.state.session?.attemptCount, attemptsBeforeReview);
+    final List<SentenceHuntCommand> reviews = rig.store.submitted
+        .where((SentenceHuntCommand command) =>
+            command.action is ReviewSentenceHuntMistakes)
+        .toList();
+    expect(reviews, hasLength(2));
+    expect(identical(reviews[0], reviews[1]), isTrue);
+
+    final SentenceHuntItem reviewItem =
+        rig.catalogue.item(rig.sectionId, 'fr08-vowel-01');
+    final Future<void> reviewPlayback = controller.play();
+    rig.audio.requests.last.complete();
+    await reviewPlayback;
+    for (final String id in reviewItem.expectedTokenIds) {
+      controller.toggleToken(id);
+    }
+    await controller.submit();
+    await controller.advance();
+    expect(controller.state.canFinish, isTrue);
+
+    rig.persistence.holdNextWrite();
+    final Future<void> finish = controller.finish();
+    await rig.persistence.writeEntered;
+    final SentenceHuntCommand finishCommand = rig.store.submitted.last;
+    expect(finishCommand.action, isA<FinishSentenceHuntRun>());
+    controller.suspend();
+    rig.persistence.releaseWrite();
+    await finish;
+    expect(controller.state.finished, isFalse,
+        reason: 'Finish is not shown before current-owner acknowledgement');
+    expect(controller.state.savePending, isTrue);
+    controller.resume();
+    await controller.retrySave();
+    expect(controller.state.finished, isTrue);
+    final List<SentenceHuntCommand> finishes = rig.store.submitted
+        .where((SentenceHuntCommand command) =>
+            command.action is FinishSentenceHuntRun)
+        .toList();
+    expect(finishes, hasLength(2));
+    expect(identical(finishes[0], finishes[1]), isTrue);
+    final SentenceHuntState durable = await rig.store.load();
+    expect(durable.completions, hasLength(1),
+        reason: 'a Finish retry creates one completion receipt');
+    expect(rig.audio.requests, hasLength(6),
+        reason: 'only the five initial and one review recording are heard');
+    controller.dispose();
+  });
+
   test('answered restore shows saved feedback without guessed choices or audio',
       () async {
     final SentenceHuntTestRig rig = SentenceHuntTestRig();

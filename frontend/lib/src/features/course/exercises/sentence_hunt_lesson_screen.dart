@@ -153,7 +153,7 @@ class _SentenceHuntLessonScreenState
             widget.policy?.completionThresholdPercent) {
       return;
     }
-    _acquisitionOperation++;
+    _invalidateAcquisition();
     _retireController();
     _catalogue = null;
     _section = null;
@@ -386,7 +386,7 @@ class _SentenceHuntLessonScreenState
     final bool ownerChanged = old != null &&
         (old.owner != next.owner || old.generation != next.generation);
     if (ownerChanged) {
-      _acquisitionOperation++;
+      _invalidateAcquisition();
       _retireController();
       _catalogue = null;
       _section = null;
@@ -396,7 +396,7 @@ class _SentenceHuntLessonScreenState
       _acquisitionFailure = _AcquisitionFailure.none;
       _recoveryRequired = true;
     } else if (!next.ready) {
-      _acquisitionOperation++;
+      _invalidateAcquisition();
       _controller?.suspend();
       _recoveryRequired = true;
     }
@@ -445,7 +445,7 @@ class _SentenceHuntLessonScreenState
   }
 
   void _requireDependencyRecovery() {
-    _acquisitionOperation++;
+    _invalidateAcquisition();
     _retireController();
     _catalogue = null;
     _section = null;
@@ -483,7 +483,7 @@ class _SentenceHuntLessonScreenState
     if (blocked == _blocked) return;
     _blocked = blocked;
     if (blocked) {
-      _acquisitionOperation++;
+      _invalidateAcquisition();
       _controller?.suspend();
       _recoveryRequired = true;
     } else {
@@ -510,6 +510,11 @@ class _SentenceHuntLessonScreenState
     final SentenceHuntController? controller = _controller;
     _controller = null;
     controller?.dispose();
+  }
+
+  void _invalidateAcquisition() {
+    _acquisitionOperation++;
+    _acquiring = false;
   }
 
   Future<void> _resumeExplicitly() async {
@@ -563,7 +568,7 @@ class _SentenceHuntLessonScreenState
   @override
   void dispose() {
     _disposed = true;
-    _acquisitionOperation++;
+    _invalidateAcquisition();
     _retireController();
     _authSubscription?.close();
     _catalogueSubscription?.close();
@@ -579,6 +584,7 @@ class _SentenceHuntLessonScreenState
   Widget build(BuildContext context) {
     final SentenceHuntController? controller = _controller;
     final SentenceHuntViewState? state = controller?.state;
+    final bool controlsBlocked = _blocked || _recoveryRequired;
     final bool showDebrief =
         state?.session?.phase == LessonSectionPhase.debrief;
     final bool showExercise =
@@ -597,11 +603,14 @@ class _SentenceHuntLessonScreenState
               if (_blocked)
                 const Text(
                     'Sentence hunt is paused while this screen is covered or unavailable.'),
-              if (_acquiring || (controller == null && !showUnavailable))
+              if (_acquiring ||
+                  (controller == null &&
+                      !showUnavailable &&
+                      !_recoveryRequired))
                 const Center(child: CircularProgressIndicator()),
               if (_acquisitionError != null) ...<Widget>[
                 Text(_acquisitionError!),
-                if (!_blocked && !_acquiring)
+                if (!controlsBlocked && !_acquiring)
                   TextButton(
                     onPressed:
                         _acquisitionFailure == _AcquisitionFailure.content
@@ -616,9 +625,20 @@ class _SentenceHuntLessonScreenState
               ],
               if (state?.error != null && !showDebrief && !state!.savePending)
                 Text(state.error!),
+              if (state?.savePending == true &&
+                  state?.error != null &&
+                  !showExercise &&
+                  !showDebrief) ...<Widget>[
+                Text(state!.error!),
+                if (!controlsBlocked)
+                  TextButton(
+                    onPressed: controller!.retrySave,
+                    child: const Text('Retry saving'),
+                  ),
+              ],
               if (state?.conflict != null && !showDebrief) ...<Widget>[
                 Text(state!.conflict!),
-                if (!_blocked)
+                if (!controlsBlocked)
                   TextButton(
                     onPressed: () => controller!.load(retry: true),
                     child: const Text('Reload saved progress'),
@@ -627,7 +647,7 @@ class _SentenceHuntLessonScreenState
               if (state?.loadFailed == true &&
                   !showDebrief &&
                   !state!.savePending &&
-                  !_blocked)
+                  !controlsBlocked)
                 TextButton(
                   onPressed: () => controller!.load(retry: true),
                   child: const Text('Retry loading'),
@@ -647,30 +667,32 @@ class _SentenceHuntLessonScreenState
                   state: ListeningExerciseState(
                     busy: state.busy,
                     playing: state.playing,
-                    blocked: _blocked,
+                    blocked: controlsBlocked,
                     answered: state.feedback != null,
                     feedback: state.feedback,
                   ),
                   selectedTokenIds: state.selectedTokenIds,
-                  canSubmit: state.canSubmit && !_blocked,
+                  canSubmit: state.canSubmit && !controlsBlocked,
                   onPlay: controller!.play,
                   onToggleToken: controller.toggleToken,
                   onSubmit: controller.submit,
                 ),
                 if (state.audioError != null) ...<Widget>[
                   Text(state.audioError!),
-                  if (!_blocked && !state.busy && state.feedback == null)
+                  if (!controlsBlocked && !state.busy && state.feedback == null)
                     TextButton(
                       onPressed: controller.play,
                       child: const Text('Retry audio'),
                     ),
                 ],
-                if (state.canAdvance && !_blocked)
+                if (state.canAdvance && !controlsBlocked)
                   FilledButton(
                     onPressed: controller.advance,
                     child: const Text('Continue'),
                   ),
-                if (state.savePending && state.error != null && !_blocked)
+                if (state.savePending &&
+                    state.error != null &&
+                    !controlsBlocked)
                   TextButton(
                     onPressed: controller.retrySave,
                     child: const Text('Retry saving'),
@@ -682,9 +704,9 @@ class _SentenceHuntLessonScreenState
                   session: state!.session!,
                   latestAttempts:
                       state.debriefAttempts ?? const <SentenceHuntAttempt>[],
-                  busy: state.busy,
-                  canReview: state.canReview && !_blocked,
-                  canFinish: state.canFinish && !_blocked,
+                  busy: state.busy || controlsBlocked,
+                  canReview: state.canReview && !controlsBlocked,
+                  canFinish: state.canFinish && !controlsBlocked,
                   completionEligible: state.completionEligible,
                   reviewOnly: state.reviewOnly,
                   finished: state.finished,
