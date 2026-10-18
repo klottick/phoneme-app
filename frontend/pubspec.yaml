@@ -37,3 +37,9 @@ flutter:
     - assets/audio/fr/provenance.json
     - assets/audio/fr/words/
     - assets/audio/fr/licenses/
+    - assets/audio/fr-sentences/manifest.json
+    - assets/audio/fr-sentences/provenance.json
+    - assets/audio/fr-sentences/annotations.json
+    - assets/audio/fr-sentences/source-evidence.json
+    - assets/audio/fr-sentences/clips/
+    - assets/audio/fr-sentences/licenses/

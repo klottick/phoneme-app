@@ -145,6 +145,85 @@ void main() {
       expect(h.speechCreations, 0);
     });
 
+    test('optional resolver plays exact sentence while speak stays word-only',
+        () async {
+      const String sentenceId = 'fr08-test-sentence-audio';
+      const String sentenceText = 'Tu vois tout, tu souris.';
+      final CourseAudioReference sentenceReference =
+          _ref(sentenceId, sentenceText, AudioReferenceKind.sentence);
+      final CourseAudioCatalog sentenceCatalogue = CourseAudioCatalog(
+        references: <CourseAudioReference>[sentenceReference],
+        entries: <CourseAudioEntry>[
+          CourseAudioEntry(
+            reference: sentenceReference,
+            recordings: <CourseAudioVariant, CourseAudioRecording>{
+              CourseAudioVariant.normal: CourseAudioRecording(
+                assetKey: 'assets/audio/fr-sentences/clips/$sentenceId.wav',
+                byteLength: 64,
+                duration: const Duration(milliseconds: 2),
+                source: CourseAudioSource.reviewedRecording,
+              ),
+            },
+            credit: _credit(sentenceId, sentenceText),
+          ),
+        ],
+      );
+      final sentenceSession = recording();
+      final wordSession = recording();
+      final List<FakeCourseRecordingSession> sessions = <FakeCourseRecordingSession>[
+        sentenceSession,
+        wordSession,
+      ];
+      var wordLoads = 0;
+      var resolverCalls = 0;
+      final facade = FrenchReferenceAudio(
+        loadCatalog: () async {
+          wordLoads++;
+          return fixtureCatalogue();
+        },
+        loadReferenceCatalog: (String referenceId) async {
+          resolverCalls++;
+          expect(referenceId, sentenceId);
+          return sentenceCatalogue;
+        },
+        recordingFactory: () => sessions.removeAt(0),
+        speechFactory: FakeCourseSpeechSession.new,
+        deadlines: const CourseAudioDeadlines(
+          setup: Duration(milliseconds: 150),
+          cleanup: Duration(milliseconds: 200),
+          completionFloor: Duration(milliseconds: 50),
+          completionSlack: Duration(milliseconds: 80),
+          ttsUtterance: Duration(milliseconds: 150),
+        ),
+      );
+      addTearDown(facade.dispose);
+
+      final sentence = facade.playReference(
+        sentenceId,
+        use: CourseAudioUse.reviewedOnly,
+        variant: CourseAudioVariant.normal,
+        allowPracticeTts: false,
+      );
+      await sentenceSession.waitForStart();
+      sentenceSession.emitCompleted();
+      final CourseAudioResult sentenceResult = await sentence;
+      expect(sentenceResult.outcome, CourseAudioOutcome.completed);
+      expect(sentenceResult.source, CourseAudioSource.reviewedRecording);
+      expect(sentenceResult.referenceId, sentenceId);
+      expect(sentenceSession.preparedRecording!.assetKey,
+          'assets/audio/fr-sentences/clips/$sentenceId.wav');
+      expect(resolverCalls, 1);
+      expect(wordLoads, 0);
+
+      final Future<void> legacy = facade.speak('tout');
+      await wordSession.waitForStart();
+      wordSession.emitCompleted();
+      await legacy;
+      expect(wordLoads, 1);
+      expect(resolverCalls, 1,
+          reason: 'legacy speak must continue using only the word loader');
+    });
+
     test('rejects nonpositive injected deadlines before use', () {
       expect(
         () => FrenchReferenceAudio(
