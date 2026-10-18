@@ -278,9 +278,10 @@ content, assessment, or audio qualification.
 
 The checked `course_learning_sync.dart` currently projects only supported
 course-learning answer/lesson/score events for authenticated users. Its existing
-per-attempt answer event contains only `sound`, `skill`, `correct`, and `activity`;
-the current sender passes those fields unchanged through `record_course_events`,
-in batches of at most 100, and acknowledges delivered IDs.
+per-attempt answer event has answer-specific fields `sound`, `skill`, `correct`,
+and `activity`, alongside the unchanged `id`/`user_id`/`course_id`/`kind: "answer"`
+event envelope. The current sender passes the event unchanged through
+`record_course_events`, in batches of at most 100, and acknowledges delivered IDs.
 The comparison and sentence-hunt repositories currently have no corresponding
 cloud event outbox. Preserve that distinction: keep the existing supported
 course sync behavior and wire payload allowlist, persist/ack its outbox rows
