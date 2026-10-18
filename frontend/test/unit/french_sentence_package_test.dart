@@ -1,0 +1,434 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:linguist/src/core/course/course_audio_catalog.dart';
+import 'package:linguist/src/core/course/course_audio_contract.dart';
+import 'package:linguist/src/core/course/french_sentence_exercises.dart';
+import 'package:linguist/src/core/course/french_sentence_package.dart';
+import 'package:linguist/src/core/course/sentence_hunt_content.dart';
+
+import '../support/sentence_hunt_fixtures.dart';
+
+void main() {
+  group('French sentence package loader', () {
+    test('coalesces concurrent reads and caches only a successful catalogue',
+        () async {
+      final _FixtureBundle bundle = _FixtureBundle(
+        syntheticSentencePackage(),
+        gate: Completer<void>(),
+      );
+      final FrenchSentencePackageLoader loader =
+          FrenchSentencePackageLoader(bundle: bundle);
+
+      final Future<SentenceHuntCatalogue> first = loader.load();
+      final Future<SentenceHuntCatalogue> second = loader.load();
+      await Future<void>.delayed(Duration.zero);
+      expect(bundle.loads, hasLength(4));
+      expect(bundle.loads.every((load) => !load.cache), isTrue);
+
+      bundle.gate!.complete();
+      final List<SentenceHuntCatalogue> loaded = await Future.wait(
+        <Future<SentenceHuntCatalogue>>[first, second],
+      );
+      expect(identical(loaded[0], loaded[1]), isTrue);
+
+      final SentenceHuntCatalogue cached = await loader.load();
+      expect(identical(cached, loaded[0]), isTrue);
+      expect(bundle.loads, hasLength(4));
+    });
+
+    test('a failed asset read is cleared and an explicit retry succeeds',
+        () async {
+      final _FixtureBundle bundle = _FixtureBundle(
+        syntheticSentencePackage(),
+        failFirstRead: true,
+      );
+      final FrenchSentencePackageLoader loader =
+          FrenchSentencePackageLoader(bundle: bundle);
+
+      await expectLater(loader.load(), throwsA(isA<Object>()));
+      final int failedReadCount = bundle.loads.length;
+      final SentenceHuntCatalogue retried = await loader.load();
+
+      expect(retried.sections, hasLength(3));
+      expect(bundle.loads.length, failedReadCount + 4);
+      expect(bundle.loads.every((load) => !load.cache), isTrue);
+    });
+
+    test('a malformed or wrong-schema root is retryable after bundle repair',
+        () async {
+      final List<({String asset, String invalidJson})> brokenRoots =
+          <({String asset, String invalidJson})>[
+        (
+          asset: 'assets/audio/fr-sentences/manifest.json',
+          invalidJson: '{',
+        ),
+        (
+          asset: 'assets/audio/fr-sentences/manifest.json',
+          invalidJson: _withSchemaVersion(
+            syntheticSentencePackage().manifestJson,
+            2,
+          ),
+        ),
+        (
+          asset: 'assets/audio/fr-sentences/provenance.json',
+          invalidJson: _withSchemaVersion(
+            syntheticSentencePackage().provenanceJson,
+            2,
+          ),
+        ),
+      ];
+
+      for (final ({String asset, String invalidJson}) broken in brokenRoots) {
+        final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+        final _FixtureBundle bundle = _FixtureBundle(fixture);
+        bundle.contents[broken.asset] = broken.invalidJson;
+        final FrenchSentencePackageLoader loader =
+            FrenchSentencePackageLoader(bundle: bundle);
+
+        final SentenceHuntCatalogue invalid = await loader.load();
+        expect(invalid.sections, isEmpty);
+        expect(invalid.hasValidRoot, isFalse);
+
+        bundle.contents[broken.asset] =
+            _fixtureContents(fixture)[broken.asset]!;
+        final SentenceHuntCatalogue repaired = await loader.load();
+
+        expect(repaired.sections, hasLength(3));
+        expect(repaired.hasValidRoot, isTrue);
+        expect(bundle.loads, hasLength(8));
+        expect(bundle.loads.every((load) => !load.cache), isTrue);
+      }
+    });
+
+    test('an unreferenced duplicate evidence root retries on the same loader',
+        () async {
+      final SentenceHuntPackageFixture repairedFixture =
+          syntheticSentencePackage();
+      final SentenceHuntPackageFixture invalidFixture = repairedFixture.copy();
+      final Map<String, dynamic> duplicate = <String, dynamic>{
+        'id': 'fixture-root-duplicate',
+        'url': 'https://example.test/root-duplicate',
+        'retrievedAt': '2026-01-01T00:00:00Z',
+        'sha256': List<String>.filled(64, 'a').join(),
+        'text': 'Synthetic duplicate root record.',
+        'scope': 'dataset',
+        'itemIds': <String>[],
+      };
+      (invalidFixture.sourceEvidence['entries'] as List)
+        ..add(<String, dynamic>{...duplicate})
+        ..add(
+            <String, dynamic>{...duplicate, 'text': 'Conflicting duplicate.'});
+      final _FixtureBundle bundle = _FixtureBundle(invalidFixture);
+      final FrenchSentencePackageLoader loader =
+          FrenchSentencePackageLoader(bundle: bundle);
+
+      final SentenceHuntCatalogue invalid = await loader.load();
+
+      expect(invalid.hasValidRoot, isFalse);
+      expect(invalid.sections, isEmpty);
+      expect(bundle.loads, hasLength(4));
+      expect(
+        invalid.diagnostics.any((SentenceHuntDiagnostic diagnostic) =>
+            diagnostic.code == 'duplicate_record' &&
+            diagnostic.recordId == 'source-evidence'),
+        isTrue,
+      );
+
+      bundle.contents['assets/audio/fr-sentences/source-evidence.json'] =
+          repairedFixture.sourceEvidenceJson;
+      final SentenceHuntCatalogue repaired = await loader.load();
+
+      expect(repaired.hasValidRoot, isTrue);
+      expect(repaired.sections, hasLength(3));
+      expect(bundle.loads, hasLength(8));
+      expect(bundle.loads.every((load) => !load.cache), isTrue);
+    });
+
+    test('a valid pending catalogue is cached after one coalesced read',
+        () async {
+      final _FixtureBundle bundle = _FixtureBundle(
+        syntheticSentencePackage(reviewed: false),
+      );
+      final FrenchSentencePackageLoader loader =
+          FrenchSentencePackageLoader(bundle: bundle);
+
+      final List<SentenceHuntCatalogue> catalogues = await Future.wait(
+        <Future<SentenceHuntCatalogue>>[loader.load(), loader.load()],
+      );
+      final SentenceHuntCatalogue cached = await loader.load();
+
+      expect(catalogues.first, same(catalogues.last));
+      expect(cached, same(catalogues.first));
+      expect(cached.sections, hasLength(3));
+      expect(cached.hasValidRoot, isTrue);
+      expect(
+        cached.sections.every(
+            (SentenceHuntSection section) => !cached.isAvailable(section.id)),
+        isTrue,
+      );
+      expect(bundle.loads, hasLength(4));
+    });
+
+    test('caches a valid root with one local fault and preserves sibling audio',
+        () async {
+      final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+      _manifestItem(fixture, fixtureItemIds[0][0])['targetLabel'] =
+          'incorrect synthetic label';
+      final _FixtureBundle bundle = _FixtureBundle(fixture);
+      final FrenchSentencePackageLoader loader =
+          FrenchSentencePackageLoader(bundle: bundle);
+
+      final SentenceHuntCatalogue first = await loader.load();
+      final SentenceHuntCatalogue cached = await loader.load();
+      final CourseAudioCatalog malformedSection =
+          await loader.loadAudioForReference(
+        sentenceHuntSectionSpecifications[0].items[0].audioRefId,
+      );
+      final CourseAudioCatalog validSibling =
+          await loader.loadAudioForReference(
+        sentenceHuntSectionSpecifications[1].items[0].audioRefId,
+      );
+
+      expect(first, same(cached));
+      expect(first.hasValidRoot, isTrue);
+      expect(first.isAvailable(fixtureSectionIds[0]), isFalse);
+      expect(first.isAvailable(fixtureSectionIds[1]), isTrue);
+      expect(first.isAvailable(fixtureSectionIds[2]), isTrue);
+      expect(malformedSection.references, hasLength(5));
+      expect(malformedSection.entries, isEmpty);
+      expect(validSibling.references, hasLength(5));
+      expect(validSibling.entries, hasLength(5));
+      expect(bundle.loads, hasLength(4));
+    });
+
+    test(
+        'returns five references and five reviewed entries for a valid section',
+        () async {
+      final _FixtureBundle bundle = _FixtureBundle(
+        syntheticSentencePackage(),
+      );
+      final FrenchSentencePackageLoader loader =
+          FrenchSentencePackageLoader(bundle: bundle);
+
+      final CourseAudioCatalog catalog = await loader.loadAudioForReference(
+        sentenceHuntSectionSpecifications[0].items[0].audioRefId,
+      );
+
+      expect(catalog.references, hasLength(5));
+      expect(catalog.entries, hasLength(5));
+      expect(
+        catalog.references.map((reference) => reference.id),
+        sentenceHuntSectionSpecifications[0]
+            .items
+            .map((item) => item.audioRefId),
+      );
+      for (final CourseAudioEntry entry in catalog.entries) {
+        expect(entry.recordings, contains(CourseAudioVariant.normal));
+        expect(entry.recordings, isNot(contains(CourseAudioVariant.slow)));
+        expect(entry.recordings[CourseAudioVariant.normal]!.source,
+            CourseAudioSource.reviewedRecording);
+        expect(entry.credit.unchanged, isFalse);
+        expect(entry.credit.creator, contains('Synthetic fixture source'));
+        expect(
+            entry.credit.notices, contains('synthetic conversion for tests'));
+      }
+    });
+
+    test('one pending member atomically removes all section recording entries',
+        () async {
+      final SentenceHuntPackageFixture fixture = syntheticSentencePackage();
+      _setOneItemPending(fixture, fixtureItemIds[0][2]);
+      final FrenchSentencePackageLoader loader = FrenchSentencePackageLoader(
+        bundle: _FixtureBundle(fixture),
+      );
+
+      final CourseAudioCatalog vowels = await loader.loadAudioForReference(
+        sentenceHuntSectionSpecifications[0].items[0].audioRefId,
+      );
+      final CourseAudioCatalog consonants = await loader.loadAudioForReference(
+        sentenceHuntSectionSpecifications[1].items[0].audioRefId,
+      );
+
+      expect(vowels.references, hasLength(5));
+      expect(vowels.entries, isEmpty);
+      expect(
+          vowels.references.map((reference) => reference.id),
+          sentenceHuntSectionSpecifications[0]
+              .items
+              .map((item) => item.audioRefId));
+      expect(consonants.references, hasLength(5));
+      expect(consonants.entries, hasLength(5));
+    });
+
+    test('pending reviews expose no reviewed audio and never shrink references',
+        () async {
+      final SentenceHuntPackageFixture fixture =
+          syntheticSentencePackage(reviewed: false);
+      final FrenchSentencePackageLoader loader = FrenchSentencePackageLoader(
+        bundle: _FixtureBundle(fixture),
+      );
+
+      for (final SentenceHuntSectionSpecification section
+          in sentenceHuntSectionSpecifications) {
+        final CourseAudioCatalog catalog = await loader.loadAudioForReference(
+          section.items.first.audioRefId,
+        );
+        expect(catalog.references, hasLength(5));
+        expect(catalog.entries, isEmpty);
+        expect(
+          catalog.entries.any((entry) => entry.recordings.values.any(
+              (recording) =>
+                  recording.source == CourseAudioSource.reviewedRecording)),
+          isFalse,
+        );
+      }
+    });
+
+    test('rejects an unknown reference locally', () async {
+      final FrenchSentencePackageLoader loader = FrenchSentencePackageLoader(
+        bundle: _FixtureBundle(syntheticSentencePackage()),
+      );
+
+      await expectLater(
+        loader.loadAudioForReference('not-a-sentence-reference'),
+        throwsA(
+          isA<CourseAudioException>().having(
+            (error) => error.failure.reason,
+            'reason',
+            CourseAudioFailureReason.unknownReference,
+          ),
+        ),
+      );
+    });
+
+    test('provider exposes the coalesced catalogue loader and catalogue',
+        () async {
+      final FrenchSentencePackageLoader loader = FrenchSentencePackageLoader(
+        bundle: _FixtureBundle(syntheticSentencePackage()),
+      );
+      final ProviderContainer container = ProviderContainer(
+        overrides: <Override>[
+          sentencePackageLoaderProvider.overrideWithValue(loader),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      expect(container.read(sentencePackageLoaderProvider), same(loader));
+      final SentenceHuntCatalogue catalogue =
+          await container.read(sentenceHuntCatalogueProvider.future);
+      expect(catalogue.sections, hasLength(3));
+    });
+
+    test('the actual pending packet creates five refs but no recording entries',
+        () async {
+      final FrenchSentencePackageLoader loader = FrenchSentencePackageLoader(
+        bundle: _FileAssetBundle(),
+      );
+
+      for (final SentenceHuntSectionSpecification section
+          in sentenceHuntSectionSpecifications) {
+        final CourseAudioCatalog catalog = await loader.loadAudioForReference(
+          section.items.first.audioRefId,
+        );
+        expect(catalog.references, hasLength(5));
+        expect(catalog.entries, isEmpty);
+      }
+    });
+  });
+}
+
+final class _FixtureBundle extends AssetBundle {
+  _FixtureBundle(
+    SentenceHuntPackageFixture fixture, {
+    this.gate,
+    this.failFirstRead = false,
+  }) : contents = _fixtureContents(fixture);
+
+  final Map<String, String> contents;
+  final Completer<void>? gate;
+  final bool failFirstRead;
+  final List<({String key, bool cache})> loads = <({String key, bool cache})>[];
+  bool _hasFailed = false;
+
+  @override
+  Future<ByteData> load(String key) =>
+      Future<ByteData>.error(UnsupportedError('loadString-only test bundle'));
+
+  @override
+  Future<String> loadString(String key, {bool cache = true}) async {
+    loads.add((key: key, cache: cache));
+    if (failFirstRead && !_hasFailed) {
+      _hasFailed = true;
+      throw StateError('synthetic first read failure');
+    }
+    await gate?.future;
+    final String? value = contents[key];
+    if (value == null) throw StateError('unknown test asset $key');
+    return value;
+  }
+}
+
+Map<String, String> _fixtureContents(SentenceHuntPackageFixture fixture) =>
+    <String, String>{
+      'assets/audio/fr-sentences/manifest.json': fixture.manifestJson,
+      'assets/audio/fr-sentences/provenance.json': fixture.provenanceJson,
+      'assets/audio/fr-sentences/annotations.json': fixture.annotationsJson,
+      'assets/audio/fr-sentences/source-evidence.json':
+          fixture.sourceEvidenceJson,
+    };
+
+String _withSchemaVersion(String json, int version) {
+  final Map<String, dynamic> value =
+      (jsonDecode(json) as Map).cast<String, dynamic>();
+  value['schemaVersion'] = version;
+  return jsonEncode(value);
+}
+
+final class _FileAssetBundle extends AssetBundle {
+  @override
+  Future<ByteData> load(String key) =>
+      Future<ByteData>.error(UnsupportedError('loadString-only test bundle'));
+
+  @override
+  Future<String> loadString(String key, {bool cache = true}) async =>
+      File(key).readAsStringSync();
+}
+
+void _setOneItemPending(SentenceHuntPackageFixture fixture, String itemId) {
+  final Map<String, dynamic> item =
+      (fixture.manifest['sections'] as List<Map<String, dynamic>>)
+          .expand((section) => section['items'] as List<Map<String, dynamic>>)
+          .singleWhere((candidate) => candidate['id'] == itemId);
+  item['reviewState'] = 'pending';
+  final Map<String, dynamic> annotation =
+      (fixture.annotations['entries'] as List<Map<String, dynamic>>)
+          .singleWhere((entry) => entry['itemId'] == itemId);
+  _pending(annotation['frenchAudioReview'] as Map<String, dynamic>);
+  final Map<String, dynamic> provenance =
+      (fixture.provenance['entries'] as List<Map<String, dynamic>>)
+          .singleWhere((entry) => entry['itemId'] == itemId);
+  _pending(provenance['rightsReview'] as Map<String, dynamic>);
+}
+
+Map<String, dynamic> _manifestItem(
+  SentenceHuntPackageFixture fixture,
+  String itemId,
+) =>
+    ((fixture.manifest['sections'] as List).cast<Map<String, dynamic>>().expand(
+            (section) =>
+                (section['items'] as List).cast<Map<String, dynamic>>()))
+        .singleWhere((item) => item['id'] == itemId);
+
+void _pending(Map<String, dynamic> review) {
+  review['status'] = 'pending';
+  review['reviewer'] = null;
+  review['qualification'] = null;
+  review['reviewedAt'] = null;
+  review['evidenceIds'] = <String>[];
+  review['notes'] = 'Synthetic pending test decision.';
+}
