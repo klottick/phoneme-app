@@ -1,0 +1,197 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "id": "dataset-fleurs-card",
+      "url": "https://huggingface.co/datasets/google/fleurs/raw/d7c758a6dceecd54a98cac43404d3d576e721f07/README.md",
+      "retrievedAt": "2026-10-18T01:43:46.987305+00:00",
+      "sha256": "3020739f1af796ab17fa87bce8d3f214deb2dd4110a2391bd320b54f3775a541",
+      "text": "---\nannotations_creators:\n- expert-generated\n- crowdsourced\n- machine-generated\nlanguage_creators:\n- crowdsourced\n- expert-generated\n\nlicense:\n- cc-by-4.0\n\n# FLEURS\n\n## Dataset Description\n\n- **Fine-Tuning script:** [pytorch/speech-recognition](https://github.com/huggingface/transformers/tree/main/examples/pytorch/speech-recognition)\n- **Paper:** [FLEURS: Few-shot Learning Evaluation of\nUniversal Representations of Speech](https://arxiv.org/abs/2205.12446)\n- **Total amount of disk used:** ca. 350 GB\n\nFleurs is the speech version of the [FLoRes machine translation benchmark](https://arxiv.org/abs/2106.03193). \nWe use 2009 n-way parallel sentences from the FLoRes dev and devtest publicly available sets, in 102 languages. \n\nTraining sets have around 10 hours of supervision. Speakers of the train sets are different than speakers from the dev/test sets. Multilingual fine-tuning is\nused and ”unit error rate” (characters, signs) of all languages is averaged. Languages and results are also grouped into seven geographical areas: \n\n- **Western Europe**: *Asturian, Bosnian, Catalan, Croatian, Danish, Dutch, English, Finnish, French, Galician, German, Greek, Hungarian, Icelandic, Irish, Italian, Kabuverdianu, Luxembourgish, Maltese, Norwegian, Occitan, Portuguese, Spanish, Swedish, Welsh* \n",
+      "scope": "dataset",
+      "itemIds": []
+    },
+    {
+      "id": "dataset-cc-by-4.0",
+      "url": "https://creativecommons.org/licenses/by/4.0/legalcode.txt",
+      "retrievedAt": "2026-10-18T01:43:47.098335+00:00",
+      "sha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411",
+      "text": "Attribution 4.0 International\n\n=======================================================================\n\nCreative Commons Corporation (\"Creative Commons\") is not a law firm and\ndoes not provide legal services or legal advice. Distribution of\nCreative Commons public licenses does not create a lawyer-client or\nother relationship. Creative Commons makes its licenses and related\ninformation available on an \"as-is\" basis. Creative Commons gives no\nwarranties regarding its licenses, any material licensed under their\nterms and conditions, or any related information. Creative Commons\ndisclaims all liability for damages resulting from their use to the\nfullest extent possible.\n\nUsing Creative Commons Public Licenses\n\nCreative Commons public licenses provide a standard set of terms and\nconditions that creators and other rights holders may use to share\noriginal works of authorship and other material subject to copyright\nand certain other rights specified in the public license below. The\nfollowing considerations are for informational purposes only, are not\nexhaustive, and do not form part of our licenses.\n\n     Considerations for licensors: Our public licenses are\n     intended for use by those authorized to give the public\n     permission to use material in ways otherwise restricted by\n     copyright and certain other rights. Our licenses are\n     irrevocable. Licensors should read and understand the terms\n     and conditions of the license they choose before applying it.\n     Licensors should also secure all rights necessary before\n     applying our licenses so that the public can reuse the\n     material as expected. Licensors should clearly mark any\n     material not subject to the license. This includes other CC-\n     licensed material, or material used under an exception or\n     limitation to copyright. More considerations for licensors:\n    wiki.creativecommons.org/Considerations_for_licensors\n\n     Considerations for the public: By using one of our public\n     licenses, a licensor grants the public permission to use the\n     licensed material under specified terms and conditions. If\n     the licensor's permission is not necessary for any reason--for\n     example, because of any applicable exception or limitation to\n     copyright--then that use is not regulated by the license. Our\n     licenses grant only permissions under copyright and certain\n     other rights that a licensor has authority to grant. Use of\n     the licensed material may still be restricted for other\n     reasons, including because others have copyright or other\n     rights in the material. A licensor may make special requests,\n     such as asking that all changes be marked or described.\n     Although not required by our licenses, you are encouraged to\n     respect those requests where reasonable. More considerations\n     for the public:\n    wiki.creativecommons.org/Considerations_for_licensees\n\n=======================================================================\n\nCreative Commons Attribution 4.0 International Public License\n\nBy exercising the Licensed Rights (defined below), You accept and agree\nto be bound by the terms and conditions of this Creative Commons\nAttribution 4.0 International Public License (\"Public License\"). To the\nextent this Public License may be interpreted as a contract, You are\ngranted the Licensed Rights in consideration of Your acceptance of\nthese terms and conditions, and the Licensor grants You such rights in\nconsideration of benefits the Licensor receives from making the\nLicensed Material available under these terms and conditions.\n\n\nSection 1 -- Definitions.\n\n  a. Adapted Material means material subject to Copyright and Similar\n     Rights that is derived from or based upon the Licensed Material\n     and in which the Licensed Material is translated, altered,\n     arranged, transformed, or otherwise modified in a manner requiring\n     permission under the Copyright and Similar Rights held by the\n     Licensor. For purposes of this Public License, where the Licensed\n     Material is a musical work, performance, or sound recording,\n     Adapted Material is always produced where the Licensed Material is\n     synched in timed relation with a moving image.\n\n  b. Adapter's License means the license You apply to Your Copyright\n     and Similar Rights in Your contributions to Adapted Material in\n     accordance with the terms and conditions of this Public License.\n\n  c. Copyright and Similar Rights means copyright and/or similar rights\n     closely related to copyright including, without limitation,\n     performance, broadcast, sound recording, and Sui Generis Database\n     Rights, without regard to how the rights are labeled or\n     categorized. For purposes of this Public License, the rights\n     specified in Section 2(b)(1)-(2) are not Copyright and Similar\n     Rights.\n\n  d. Effective Technological Measures means those measures that, in the\n     absence of proper authority, may not be circumvented under laws\n     fulfilling obligations under Article 11 of the WIPO Copyright\n     Treaty adopted on December 20, 1996, and/or similar international\n     agreements.\n\n  e. Exceptions and Limitations means fair use, fair dealing, and/or\n     any other exception or limitation to Copyright and Similar Rights\n     that applies to Your use of the Licensed Material.\n\n  f. Licensed Material means the artistic or literary work, database,\n     or other material to which the Licensor applied this Public\n     License.\n\n  g. Licensed Rights means the rights granted to You subject to the\n     terms and conditions of this Public License, which are limited to\n     all Copyright and Similar Rights that apply to Your use of the\n     Licensed Material and that the Licensor has authority to license.\n\n  h. Licensor means the individual(s) or entity(ies) granting rights\n     under this Public License.\n\n  i. Share means to provide material to the public by any means or\n     process that requires permission under the Licensed Rights, such\n     as reproduction, public display, public performance, distribution,\n     dissemination, communication, or importation, and to make material\n     available to the public including in ways that members of the\n     public may access the material from a place and at a time\n     individually chosen by them.\n\n  j. Sui Generis Database Rights means rights other than copyright\n     resulting from Directive 96/9/EC of the European Parliament and of\n     the Council of 11 March 1996 on the legal protection of databases,\n     as amended and/or succeeded, as well as other essentially\n     equivalent rights anywhere in the world.\n\n  k. You means the individual or entity exercising the Licensed Rights\n     under this Public License. Your has a corresponding meaning.\n\n\nSection 2 -- Scope.\n\n  a. License grant.\n\n       1. Subject to the terms and conditions of this Public License,\n          the Licensor hereby grants You a worldwide, royalty-free,\n          non-sublicensable, non-exclusive, irrevocable license to\n          exercise the Licensed Rights in the Licensed Material to:\n\n            a. reproduce and Share the Licensed Material, in whole or\n               in part; and\n\n            b. produce, reproduce, and Share Adapted Material.\n\n       2. Exceptions and Limitations. For the avoidance of doubt, where\n          Exceptions and Limitations apply to Your use, this Public\n          License does not apply, and You do not need to comply with\n          its terms and conditions.\n\n       3. Term. The term of this Public License is specified in Section\n          6(a).\n\n       4. Media and formats; technical modifications allowed. The\n          Licensor authorizes You to exercise the Licensed Rights in\n          all media and formats whether now known or hereafter created,\n          and to make technical modifications necessary to do so. The\n          Licensor waives and/or agrees not to assert any right or\n          authority to forbid You from making technical modifications\n          necessary to exercise the Licensed Rights, including\n          technical modifications necessary to circumvent Effective\n          Technological Measures. For purposes of this Public License,\n          simply making modifications authorized by this Section 2(a)\n          (4) never produces Adapted Material.\n\n       5. Downstream recipients.\n\n            a. Offer from the Licensor -- Licensed Material. Every\n               recipient of the Licensed Material automatically\n               receives an offer from the Licensor to exercise the\n               Licensed Rights under the terms and conditions of this\n               Public License.\n\n            b. No downstream restrictions. You may not offer or impose\n               any additional or different terms or conditions on, or\n               apply any Effective Technological Measures to, the\n               Licensed Material if doing so restricts exercise of the\n               Licensed Rights by any recipient of the Licensed\n               Material.\n\n       6. No endorsement. Nothing in this Public License constitutes or\n          may be construed as permission to assert or imply that You\n          are, or that Your use of the Licensed Material is, connected\n          with, or sponsored, endorsed, or granted official status by,\n          the Licensor or others designated to receive attribution as\n          provided in Section 3(a)(1)(A)(i).\n\n  b. Other rights.\n\n       1. Moral rights, such as the right of integrity, are not\n          licensed under this Public License, nor are publicity,\n          privacy, and/or other similar personality rights; however, to\n          the extent possible, the Licensor waives and/or agrees not to\n          assert any such rights held by the Licensor to the limited\n          extent necessary to allow You to exercise the Licensed\n          Rights, but not otherwise.\n\n       2. Patent and trademark rights are not licensed under this\n          Public License.\n\n       3. To the extent possible, the Licensor waives any right to\n          collect royalties from You for the exercise of the Licensed\n          Rights, whether directly or through a collecting society\n          under any voluntary or waivable statutory or compulsory\n          licensing scheme. In all other cases the Licensor expressly\n          reserves any right to collect such royalties.\n\n\nSection 3 -- License Conditions.\n\nYour exercise of the Licensed Rights is expressly made subject to the\nfollowing conditions.\n\n  a. Attribution.\n\n       1. If You Share the Licensed Material (including in modified\n          form), You must:\n\n            a. retain the following if it is supplied by the Licensor\n               with the Licensed Material:\n\n                 i. identification of the creator(s) of the Licensed\n                    Material and any others designated to receive\n                    attribution, in any reasonable manner requested by\n                    the Licensor (including by pseudonym if\n                    designated);\n\n                ii. a copyright notice;\n\n               iii. a notice that refers to this Public License;\n\n                iv. a notice that refers to the disclaimer of\n                    warranties;\n\n                 v. a URI or hyperlink to the Licensed Material to the\n                    extent reasonably practicable;\n\n            b. indicate if You modified the Licensed Material and\n               retain an indication of any previous modifications; and\n\n            c. indicate the Licensed Material is licensed under this\n               Public License, and include the text of, or the URI or\n               hyperlink to, this Public License.\n\n       2. You may satisfy the conditions in Section 3(a)(1) in any\n          reasonable manner based on the medium, means, and context in\n          which You Share the Licensed Material. For example, it may be\n          reasonable to satisfy the conditions by providing a URI or\n          hyperlink to a resource that includes the required\n          information.\n\n       3. If requested by the Licensor, You must remove any of the\n          information required by Section 3(a)(1)(A) to the extent\n          reasonably practicable.\n\n       4. If You Share Adapted Material You produce, the Adapter's\n          License You apply must not prevent recipients of the Adapted\n          Material from complying with this Public License.\n\n\nSection 4 -- Sui Generis Database Rights.\n\nWhere the Licensed Rights include Sui Generis Database Rights that\napply to Your use of the Licensed Material:\n\n  a. for the avoidance of doubt, Section 2(a)(1) grants You the right\n     to extract, reuse, reproduce, and Share all or a substantial\n     portion of the contents of the database;\n\n  b. if You include all or a substantial portion of the database\n     contents in a database in which You have Sui Generis Database\n     Rights, then the database in which You have Sui Generis Database\n     Rights (but not its individual contents) is Adapted Material; and\n\n  c. You must comply with the conditions in Section 3(a) if You Share\n     all or a substantial portion of the contents of the database.\n\nFor the avoidance of doubt, this Section 4 supplements and does not\nreplace Your obligations under this Public License where the Licensed\nRights include other Copyright and Similar Rights.\n\n\nSection 5 -- Disclaimer of Warranties and Limitation of Liability.\n\n  a. UNLESS OTHERWISE SEPARATELY UNDERTAKEN BY THE LICENSOR, TO THE\n     EXTENT POSSIBLE, THE LICENSOR OFFERS THE LICENSED MATERIAL AS-IS\n     AND AS-AVAILABLE, AND MAKES NO REPRESENTATIONS OR WARRANTIES OF\n     ANY KIND CONCERNING THE LICENSED MATERIAL, WHETHER EXPRESS,\n     IMPLIED, STATUTORY, OR OTHER. THIS INCLUDES, WITHOUT LIMITATION,\n     WARRANTIES OF TITLE, MERCHANTABILITY, FITNESS FOR A PARTICULAR\n     PURPOSE, NON-INFRINGEMENT, ABSENCE OF LATENT OR OTHER DEFECTS,\n     ACCURACY, OR THE PRESENCE OR ABSENCE OF ERRORS, WHETHER OR NOT\n     KNOWN OR DISCOVERABLE. WHERE DISCLAIMERS OF WARRANTIES ARE NOT\n     ALLOWED IN FULL OR IN PART, THIS DISCLAIMER MAY NOT APPLY TO YOU.\n\n  b. TO THE EXTENT POSSIBLE, IN NO EVENT WILL THE LICENSOR BE LIABLE\n     TO YOU ON ANY LEGAL THEORY (INCLUDING, WITHOUT LIMITATION,\n     NEGLIGENCE) OR OTHERWISE FOR ANY DIRECT, SPECIAL, INDIRECT,\n     INCIDENTAL, CONSEQUENTIAL, PUNITIVE, EXEMPLARY, OR OTHER LOSSES,\n     COSTS, EXPENSES, OR DAMAGES ARISING OUT OF THIS PUBLIC LICENSE OR\n     USE OF THE LICENSED MATERIAL, EVEN IF THE LICENSOR HAS BEEN\n     ADVISED OF THE POSSIBILITY OF SUCH LOSSES, COSTS, EXPENSES, OR\n     DAMAGES. WHERE A LIMITATION OF LIABILITY IS NOT ALLOWED IN FULL OR\n     IN PART, THIS LIMITATION MAY NOT APPLY TO YOU.\n\n  c. The disclaimer of warranties and limitation of liability provided\n     above shall be interpreted in a manner that, to the extent\n     possible, most closely approximates an absolute disclaimer and\n     waiver of all liability.\n\n\nSection 6 -- Term and Termination.\n\n  a. This Public License applies for the term of the Copyright and\n     Similar Rights licensed here. However, if You fail to comply with\n     this Public License, then Your rights under this Public License\n     terminate automatically.\n\n  b. Where Your right to use the Licensed Material has terminated under\n     Section 6(a), it reinstates:\n\n       1. automatically as of the date the violation is cured, provided\n          it is cured within 30 days of Your discovery of the\n          violation; or\n\n       2. upon express reinstatement by the Licensor.\n\n     For the avoidance of doubt, this Section 6(b) does not affect any\n     right the Licensor may have to seek remedies for Your violations\n     of this Public License.\n\n  c. For the avoidance of doubt, the Licensor may also offer the\n     Licensed Material under separate terms or conditions or stop\n     distributing the Licensed Material at any time; however, doing so\n     will not terminate this Public License.\n\n  d. Sections 1, 5, 6, 7, and 8 survive termination of this Public\n     License.\n\n\nSection 7 -- Other Terms and Conditions.\n\n  a. The Licensor shall not be bound by any additional or different\n     terms or conditions communicated by You unless expressly agreed.\n\n  b. Any arrangements, understandings, or agreements regarding the\n     Licensed Material not stated herein are separate from and\n     independent of the terms and conditions of this Public License.\n\n\nSection 8 -- Interpretation.\n\n  a. For the avoidance of doubt, this Public License does not, and\n     shall not be interpreted to, reduce, limit, restrict, or impose\n     conditions on any use of the Licensed Material that could lawfully\n     be made without permission under this Public License.\n\n  b. To the extent possible, if any provision of this Public License is\n     deemed unenforceable, it shall be automatically reformed to the\n     minimum extent necessary to make it enforceable. If the provision\n     cannot be reformed, it shall be severed from this Public License\n     without affecting the enforceability of the remaining terms and\n     conditions.\n\n  c. No term or condition of this Public License will be waived and no\n     failure to comply consented to unless expressly agreed to by the\n     Licensor.\n\n  d. Nothing in this Public License constitutes or may be interpreted\n     as a limitation upon, or waiver of, any privileges and immunities\n     that apply to the Licensor or You, including from the legal\n     processes of any jurisdiction or authority.\n\n\n=======================================================================\n\nCreative Commons is not a party to its public\nlicenses. Notwithstanding, Creative Commons may elect to apply one of\nits public licenses to material it publishes and in those instances\nwill be considered the “Licensor.” The text of the Creative Commons\npublic licenses is dedicated to the public domain under the CC0 Public\nDomain Dedication. Except for the limited purpose of indicating that\nmaterial is shared under a Creative Commons public license or as\notherwise permitted by the Creative Commons policies published at\ncreativecommons.org/policies, Creative Commons does not authorize the\nuse of the trademark \"Creative Commons\" or any other trademark or logo\nof Creative Commons without its prior written consent including,\nwithout limitation, in connection with any unauthorized modifications\nto any of its public licenses or any other arrangements,\nunderstandings, or agreements concerning use of licensed material. For\nthe avoidance of doubt, this paragraph does not form part of the\npublic licenses.\n\nCreative Commons may be contacted at creativecommons.org.\n\n",
+      "scope": "dataset",
+      "itemIds": []
+    },
+    {
+      "id": "tool-espeak-ng-1.52.0-manual",
+      "url": "https://raw.githubusercontent.com/espeak-ng/espeak-ng/1.52.0/src/espeak-ng.1.ronn",
+      "retrievedAt": "2026-10-18T01:43:47.154216+00:00",
+      "sha256": "578807dd8aaa2c420a09e5d2d5d3f921271328a0400a396d75a94b11e7045945",
+      "text": "# espeak-ng - A multi-lingual software speech synthesizer.\n\n## SYNOPSIS\n\n__espeak-ng__ [<options>] [<words>]\n\n## DESCRIPTION\n\n__espeak-ng__ is a software speech synthesizer for English, and some other\nlanguages.\n\n## OPTIONS\n\n  * `-h`, `--help`:\n    Show summary of options.\n\n  * `--version`:\n    Prints the espeak library version and the location of the espeak voice\n    data.\n\n  * `-f <text file>`:\n    Text file to speak.\n\n  * `--stdin`:\n    Read text input from stdin till to the end of a stream at once.\n\nIf neither -f nor --stdin are provided, then &lt;words&gt; from parameter are spoken,\nor text is spoken from stdin, read separately one line by line at a time.\n\n  * `-d <device>`:\n    Use the specified device to speak the audio on. If not specified, the\n    default audio device is used.\n\n  * `-q`:\n    Quiet, don't produce any speech (may be useful with -x).\n\n  * `-a <integer>`:\n    Amplitude, 0 to 200, default is 100.\n\n  * `-g <integer>`:\n    Word gap. Pause between words, units of 10ms at the default speed.\n\n  * `-k <integer>`:\n    Indicate capital letters with: 1=sound, 2=the word \"capitals\", higher\n    values = a pitch increase (try -k20).\n\n  * `-l <integer>`:\n    Line length. If not zero (which is the default), consider lines less than\n    this length as end-of-clause.\n\n  * `-p <integer>`:\n    Pitch adjustment, 0 to 99, default is 50.\n\n  * `-s <integer>`:\n    Speed in words per minute, default is 175.\n\n  * `-v <voice name>`:\n    Use voice file of this name from espeak-ng-data/voices. A variant can be\n    specified using <voice>+<variant>, such as af+m3.\n\n  * `-w <wave file name>`:\n    Write output to this WAV file, rather than speaking it directly.\n\n  * `--split=<minutes>`:\n    Used with `-w` to split the audio output into &lt;minutes&gt; recorded\n    chunks.\n\n  * `-b`:\n    Input text encoding, 1=UTF8, 2=8 bit, 4=16 bit.\n\n  * `-m`:\n    Indicates that the text contains SSML (Speech Synthesis Markup Language)\n    tags or other XML tags. Those SSML tags which are supported are\n    interpreted. Other tags, including HTML, are ignored, except that some HTML\n    tags such as &lt;hr&gt; &lt;h2&gt; and &lt;li&gt; ensure a break in the\n    speech.\n\n  * `-x`:\n    Write phoneme mnemonics to stdout.\n\n  * `-X`:\n    Write phonemes mnemonics and translation trace to stdout. If rules files\n    have been built with --compile=debug, line numbers will also be displayed.\n\n  * `-z`:\n    No final sentence pause at the end of the text.\n\n  * `--stdout`:\n    Write speech output to stdout.\n\n  * `--compile=voicename`:\n    Compile the pronunciation rules and dictionary in the current directory.\n    =&lt;voicename&lt; is optional and specifies which language is compiled.\n\n  * `--compile-debug=voicename`:\n    Compile the pronunciation rules and dictionary in the current directory as\n    above, but include line numbers, that get shown when -X is used.\n\n  * `--ipa`:\n    Write phonemes to stdout using International Phonetic Alphabet. --ipa=1 Use\n    ties, --ipa=2 Use ZWJ, --ipa=3 Separate with _.\n\n  * `--tie=<character>`:\n    The character to use to join multi-letter phonemes in -x and --ipa output.\n\n  * `--path=<path>`:\n    Specifies the directory containing the espeak-ng-data directory.\n\n  * `--pho`:\n    Write mbrola phoneme data (.pho) to stdout or to the file in --phonout.\n\n  * `--phonout=<filename>`:\n    Write output from -x -X commands and mbrola phoneme data to this file.\n\n  * `--punct=\"<characters>\"`:\n    Speak the names of punctuation characters during speaking. If\n    =&lt;characters&gt; is omitted, all punctuation is spoken.\n\n  * `--sep=<character>`:\n    The character to separate phonemes from the -x and --ipa output.\n\n  * `--voices[=<language code>]`:\n    Lists the available voices. If =&lt;language code&gt; is present then only\n    those voices which are suitable for that language are listed.\n    If `xx-yy` language code is passed, then voices with `yy` of `xx` language variants\n    are shown with higher priority than just `xx`.\n    If `variant` is passed, then all voice variants are shown.\n    If `mb` or `mbrola` is passed, then all voices using the MBROLA voice synthesizer\n    are shown.\n    If `all` is passed, then all eSpeak NG voices, voice variants and MBROLA\n    voices are shown.\n\n  * `--voices=<directory>`:\n    Lists the voices in the specified subdirectory.\n\n## EXAMPLES\n\n  * `espeak-ng \"This is a test\"`:\n    Speak the sentence \"This is a test\" using the default English voice.\n\n  * `espeak-ng -f hello.txt`:\n    Speak the contents of hello.txt using the default English voice.\n\n  * `cat hello.txt | espeak-ng`:\n    Speak the contents of hello.txt using the default English voice.\n\n  * `espeak-ng -x hello`:\n    Speak the word \"hello\" using the default English voice, and print the\n    phonemes that were spoken.\n\n  * `espeak-ng -ven-us \"[[h@'loU]]\"`:\n    Speak the phonemes \"h@'loU\" using the American English voice.\n\n  * `espeak-ng --voices`:\n    List all voices supported by eSpeak.\n\n  * `espeak-ng --voices=en`:\n    List all voices that speak English (`en`).\n\n  * `espeak-ng --voices=mb`:\n    List all voices using the MBROLA voice synthesizer.\n\n## AUTHOR\n\neSpeak NG is maintained by Reece H. Dunn <msclrhd@gmail.com>. It is based on\neSpeak by Jonathan Duddington <jonsd@jsd.clara.co.uk>.\n\nThis manual page is based on the eSpeak page written by Luke Yelavich\n<themuso@ubuntu.com> for the Ubuntu project.\n",
+      "scope": "tool",
+      "itemIds": []
+    },
+    {
+      "id": "item-source-fr08-vowel-01",
+      "url": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+      "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+      "sha256": "97fb812281bd3dfb8aab1f42f7b50b5dbf155bb7682afc1f2ce6786087f36a42",
+      "text": "96\t11012893987259795216.wav\tUne enquête a été ouverte.\tune enquête a été ouverte\tu n e | e n q u ê t e | a | é t é | o u v e r t e |\t67200\tMALE",
+      "scope": "item",
+      "itemIds": [
+        "fr08-vowel-01"
+      ]
+    },
+    {
+      "id": "item-source-fr08-vowel-02",
+      "url": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+      "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+      "sha256": "f22df557d22d2cbd4eed6ec3ee411cda73882dfea264fe13f4c1d7a311b11ca1",
+      "text": "1146\t1091429117067792685.wav\tCependant, le conducteur a été grièvement blessé à la tête.\tcependant le conducteur a été grièvement blessé à la tête\tc e p e n d a n t | l e | c o n d u c t e u r | a | é t é | g r i è v e m e n t | b l e s s é | à | l a | t ê t e |\t84480\tMALE",
+      "scope": "item",
+      "itemIds": [
+        "fr08-vowel-02"
+      ]
+    },
+    {
+      "id": "item-source-fr08-vowel-03",
+      "url": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+      "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+      "sha256": "d94e435a108d6e150f214c73836e1bf54878383cf68190314bdfea405462ea53",
+      "text": "109\t12599857077174421203.wav\tLa capsule ressemblera beaucoup à une étoile filante qui traverse le ciel.\tla capsule ressemblera beaucoup à une étoile filante qui traverse le ciel\tl a | c a p s u l e | r e s s e m b l e r a | b e a u c o u p | à | u n e | é t o i l e | f i l a n t e | q u i | t r a v e r s e | l e | c i e l |\t99840\tMALE",
+      "scope": "item",
+      "itemIds": [
+        "fr08-vowel-03"
+      ]
+    },
+    {
+      "id": "item-source-fr08-vowel-04",
+      "url": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+      "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+      "sha256": "334816aeeec89a6bb794f0ae09184e3d3f731abf54a9cf3233d088946fbd5d7f",
+      "text": "213\t17946052666067177960.wav\tPersonne n'était à l'intérieur de l'appartement.\tpersonne n'était à l'intérieur de l'appartement\tp e r s o n n e | n ' é t a i t | à | l ' i n t é r i e u r | d e | l ' a p p a r t e m e n t |\t61440\tFEMALE",
+      "scope": "item",
+      "itemIds": [
+        "fr08-vowel-04"
+      ]
+    },
+    {
+      "id": "item-source-fr08-vowel-05",
+      "url": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+      "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+      "sha256": "3b60e2be454ff0ff71ed6de7477aba80d9c6c56f4f61e483933689e9b86dc3be",
+      "text": "1188\t5977517119241020454.wav\tLe sommet de la tour était un sanctuaire spécial pour le dieu.\tle sommet de la tour était un sanctuaire spécial pour le dieu\tl e | s o m m e t | d e | l a | t o u r | é t a i t | u n | s a n c t u a i r e | s p é c i a l | p o u r | l e | d i e u |\t73920\tFEMALE",
+      "scope": "item",
+      "itemIds": [
+        "fr08-vowel-05"
+      ]
+    },
+    {
+      "id": "item-source-fr08-consonant-01",
+      "url": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+      "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+      "sha256": "1ba57a29e36b2715c006336ab1329852b44d42deae40b5b33602c23c226b594d",
+      "text": "211\t4850321046044587421.wav\tUne fois l'agent arrivé sur place, l'appartement a explosé.\tune fois l'agent arrivé sur place l'appartement a explosé\tu n e | f o i s | l ' a g e n t | a r r i v é | s u r | p l a c e | l ' a p p a r t e m e n t | a | e x p l o s é |\t78720\tFEMALE",
+      "scope": "item",
+      "itemIds": [
+        "fr08-consonant-01"
+      ]
+    },
+    {
+      "id": "item-source-fr08-consonant-02",
+      "url": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+      "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+      "sha256": "d9aa188311c372169021054878fa53149e870d52ed1e15e6364b898fac963560",
+      "text": "1167\t3700262936882086048.wav\tLeurs prédécesseurs, les australopithèques, ne marchaient pas debout comme d’habitude.\tleurs prédécesseurs les australopithèques ne marchaient pas debout comme d'habitude\tl e u r s | p r é d é c e s s e u r s | l e s | a u s t r a l o p i t h è q u e s | n e | m a r c h a i e n t | p a s | d e b o u t | c o m m e | d ' h a b i t u d e |\t114240\tFEMALE",
+      "scope": "item",
+      "itemIds": [
+        "fr08-consonant-02"
+      ]
+    },
+    {
+      "id": "item-source-fr08-consonant-03",
+      "url": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+      "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+      "sha256": "87888d256b56e7a40b145111d0b50cd5c431ff5693fb50a53eda22e529eb7c71",
+      "text": "147\t17129134957828745308.wav\tAvec cet arrangement en place, cette liberté pourrait prendre fin.\tavec cet arrangement en place cette liberté pourrait prendre fin\ta v e c | c e t | a r r a n g e m e n t | e n | p l a c e | c e t t e | l i b e r t é | p o u r r a i t | p r e n d r e | f i n |\t102720\tFEMALE",
+      "scope": "item",
+      "itemIds": [
+        "fr08-consonant-03"
+      ]
+    },
+    {
+      "id": "item-source-fr08-consonant-04",
+      "url": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+      "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+      "sha256": "0e9505ba7d35422520bae105299d29c94af5d69c524b45b00d51c76ff2290979",
+      "text": "597\t1116466640828320580.wav\tCellule vient du mot latin cella signifiant petite pièce.\tcellule vient du mot latin cella signifiant petite pièce\tc e l l u l e | v i e n t | d u | m o t | l a t i n | c e l l a | s i g n i f i a n t | p e t i t e | p i è c e |\t117120\tFEMALE",
+      "scope": "item",
+      "itemIds": [
+        "fr08-consonant-04"
+      ]
+    },
+    {
+      "id": "item-source-fr08-consonant-05",
+      "url": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+      "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+      "sha256": "a0045343e4ccad58a8cc3683282e6a4d636ea1d9a75acd82fb954e6bf59fe08c",
+      "text": "359\t16581524268666712309.wav\tIls le font en émettant une minuscule particule de lumière appelée « photon ».\tils le font en émettant une minuscule particule de lumière appelée « photon »\ti l s | l e | f o n t | e n | é m e t t a n t | u n e | m i n u s c u l e | p a r t i c u l e | d e | l u m i è r e | a p p e l é e | « | p h o t o n | » |\t103680\tMALE",
+      "scope": "item",
+      "itemIds": [
+        "fr08-consonant-05"
+      ]
+    },
+    {
+      "id": "item-source-fr08-mixed-01",
+      "url": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+      "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+      "sha256": "e6dc62cd6855cbd3c66fcf0adb37a7ea9c7d0c8f8b900e803f65f9da9c2aedff",
+      "text": "729\t2109137236063134867.wav\tPour quelques pièces de monnaie, des enfants vous raconteront l’histoire.\tpour quelques pièces de monnaie des enfants vous raconteront l'histoire\tp o u r | q u e l q u e s | p i è c e s | d e | m o n n a i e | d e s | e n f a n t s | v o u s | r a c o n t e r o n t | l ' h i s t o i r e |\t111360\tFEMALE",
+      "scope": "item",
+      "itemIds": [
+        "fr08-mixed-01"
+      ]
+    },
+    {
+      "id": "item-source-fr08-mixed-02",
+      "url": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+      "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+      "sha256": "7d33421e6541d7483df9ef7a0bce666dbb2e55abc2f07ff39159139b4f7f89db",
+      "text": "362\t2616057997901349706.wav\tLes photons sont même plus petits que les particules formant les atomes !\tles photons sont même plus petits que les particules formant les atomes !\tl e s | p h o t o n s | s o n t | m ê m e | p l u s | p e t i t s | q u e | l e s | p a r t i c u l e s | f o r m a n t | l e s | a t o m e s | ! |\t109440\tFEMALE",
+      "scope": "item",
+      "itemIds": [
+        "fr08-mixed-02"
+      ]
+    },
+    {
+      "id": "item-source-fr08-mixed-03",
+      "url": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+      "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+      "sha256": "367cd84748c27c8b850d49d2dd161f7a198bf148e43341130d7ce221f4ef1d26",
+      "text": "377\t4400146449789560658.wav\tLe gaz se raréfie à mesure que l'on s'éloigne du centre du Soleil.\tle gaz se raréfie à mesure que l'on s'éloigne du centre du soleil\tl e | g a z | s e | r a r é f i e | à | m e s u r e | q u e | l ' o n | s ' é l o i g n e | d u | c e n t r e | d u | s o l e i l |\t101760\tMALE",
+      "scope": "item",
+      "itemIds": [
+        "fr08-mixed-03"
+      ]
+    },
+    {
+      "id": "item-source-fr08-mixed-04",
+      "url": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+      "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+      "sha256": "cc5702ac091fea76fd7941da0479414b7341d7c06f937f92f363b62f1b68642f",
+      "text": "235\t15764957559967488519.wav\t« Nous étions tous simplement sous le choc », a déclaré la mère.\t« nous étions tous simplement sous le choc » a déclaré la mère\t« | n o u s | é t i o n s | t o u s | s i m p l e m e n t | s o u s | l e | c h o c | » | a | d é c l a r é | l a | m è r e |\t72960\tFEMALE",
+      "scope": "item",
+      "itemIds": [
+        "fr08-mixed-04"
+      ]
+    },
+    {
+      "id": "item-source-fr08-mixed-05",
+      "url": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+      "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+      "sha256": "c3f1a70bc0b01d6268e8a7380f7daf97717d77f05401e02dcdd2c642ff1652f5",
+      "text": "1044\t13793329202664532971.wav\tLa région abrite également une très grande variété d'espèces animales et d'oiseaux.\tla région abrite également une très grande variété d'espèces animales et d'oiseaux\tl a | r é g i o n | a b r i t e | é g a l e m e n t | u n e | t r è s | g r a n d e | v a r i é t é | d ' e s p è c e s | a n i m a l e s | e t | d ' o i s e a u x |\t126720\tFEMALE",
+      "scope": "item",
+      "itemIds": [
+        "fr08-mixed-05"
+      ]
+    }
+  ]
+}

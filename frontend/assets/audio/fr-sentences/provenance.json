@@ -1,0 +1,1310 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "itemId": "fr08-vowel-01",
+      "source": {
+        "repository": "google/fleurs",
+        "revision": "d7c758a6dceecd54a98cac43404d3d576e721f07",
+        "config": "fr_fr",
+        "split": "train",
+        "rowId": "96",
+        "audioPath": "11012893987259795216.wav",
+        "retrievalUrl": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+        "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+        "rawTranscription": "Une enquête a été ouverte.",
+        "transcription": "une enquête a été ouverte",
+        "rawTsvRecord": "96\t11012893987259795216.wav\tUne enquête a été ouverte.\tune enquête a été ouverte\tu n e | e n q u ê t e | a | é t é | o u v e r t e |\t67200\tMALE"
+      },
+      "original": {
+        "path": "originals/fr08-vowel-01.wav",
+        "sha256": "8ccda5e60d39824b6fb28ca77b8dbe8dd2e240cb6270c94f5ad85fcf60a928aa",
+        "byteLength": 268858,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 4,
+        "sampleEncoding": "ieee-float32le",
+        "frameCount": 67200,
+        "durationSeconds": 4.2
+      },
+      "clip": {
+        "path": "clips/fr08-vowel-01.wav",
+        "sha256": "14bb70d0041c868bb919968d296ed68a8f6984fa98e2e58d04c0192f71e4dda4",
+        "byteLength": 134444,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 2,
+        "sampleEncoding": "pcm-s16le",
+        "frameCount": 67200,
+        "durationSeconds": 4.2
+      },
+      "derivation": {
+        "startFrame": 0,
+        "endFrame": 67200,
+        "conversionPolicy": "pcm16-v1",
+        "tool": "FR08 offline preparation CLI: scripts/prepare_french_sentences.py crop using scripts/french_sentence_wav.py",
+        "version": "Git source revision cecbaf456097bd62c5b0e8577f8a4f24151890b5; Python 3.14.4",
+        "settings": [
+          "startFrame=0",
+          "endFrame=full source frameCount (half-open)",
+          "outputEncoding=pcm-s16le",
+          "conversionPolicy=pcm16-v1",
+          "sourceEncoding=ieee-float32le",
+          "no resampling, channel mixing, gain change, dither, or randomness"
+        ],
+        "changes": [
+          "The original source WAV is retained byte-for-byte; no source rewriting or relabeling.",
+          "Full source range [0,67200) is delivered as mono 16 kHz signed little-endian PCM16.",
+          "IEEE-float32le samples are quantized using pcm16-v1: round-to-nearest ties-to-even after scaling by 32768, clamped to [-32768,32767]; no normalization, resampling, channel mixing, gain change, dither, or randomness."
+        ],
+        "transcriptCorrectionRationale": "Display text uses the pinned raw_transcription field verbatim (including its capitalization and punctuation) rather than the separate normalized transcription field; no transcript correction is claimed, and match to recorded speech remains unreviewed."
+      },
+      "credit": {
+        "creator": "FLEURS dataset (google/fleurs; the item source row does not identify an individual speaker or recording creator)",
+        "attribution": "FLEURS, google/fleurs, French fr_fr train split, source row 96 (11012893987259795216.wav), pinned revision d7c758a6dceecd54a98cac43404d3d576e721f07; dataset card: https://huggingface.co/datasets/google/fleurs/raw/d7c758a6dceecd54a98cac43404d3d576e721f07/README.md; source card declares CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/legalcode.txt). Changes: original source bytes retained; delivered full-range clip deterministically quantized from IEEE-float32le to signed PCM16 under pcm16-v1. No individual speaker identity is supplied or inferred.",
+        "licenseId": "CC-BY-4.0",
+        "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+        "licenseTextPath": "licenses/CC-BY-4.0.txt",
+        "notices": [
+          "The pinned FLEURS dataset card declares CC BY 4.0; this metadata claim is not an independent rights decision.",
+          "No individual speaker/recording creator is identified by this source row; the supplied gender value is not treated as identity.",
+          "Original audio bytes are preserved; the full-length delivery clip is a lossy, deterministic PCM16 conversion under pcm16-v1."
+        ],
+        "evidenceIds": [
+          "dataset-fleurs-card",
+          "dataset-cc-by-4.0",
+          "item-source-fr08-vowel-01"
+        ]
+      },
+      "rightsReview": {
+        "status": "pending",
+        "reviewer": null,
+        "qualification": null,
+        "reviewedAt": null,
+        "originalSha256": "8ccda5e60d39824b6fb28ca77b8dbe8dd2e240cb6270c94f5ad85fcf60a928aa",
+        "clipSha256": "14bb70d0041c868bb919968d296ed68a8f6984fa98e2e58d04c0192f71e4dda4",
+        "annotationHash": "1552c0de4a098385241bf4705e88dd0d44264dc2785d9de118c8be807220429d",
+        "evidenceIds": [],
+        "notes": "PENDING: verify CC BY 4.0 applicability to this specific recording, appropriate source/creator attribution and redistribution rights, and any speaker/recording conditions. The source row/card is not item-level clearance; do not infer an individual from the supplied gender field."
+      }
+    },
+    {
+      "itemId": "fr08-vowel-02",
+      "source": {
+        "repository": "google/fleurs",
+        "revision": "d7c758a6dceecd54a98cac43404d3d576e721f07",
+        "config": "fr_fr",
+        "split": "train",
+        "rowId": "1146",
+        "audioPath": "1091429117067792685.wav",
+        "retrievalUrl": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+        "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+        "rawTranscription": "Cependant, le conducteur a été grièvement blessé à la tête.",
+        "transcription": "cependant le conducteur a été grièvement blessé à la tête",
+        "rawTsvRecord": "1146\t1091429117067792685.wav\tCependant, le conducteur a été grièvement blessé à la tête.\tcependant le conducteur a été grièvement blessé à la tête\tc e p e n d a n t | l e | c o n d u c t e u r | a | é t é | g r i è v e m e n t | b l e s s é | à | l a | t ê t e |\t84480\tMALE"
+      },
+      "original": {
+        "path": "originals/fr08-vowel-02.wav",
+        "sha256": "acce10ca9257ed7b2ae84439d387354aaf8b66418add1a5c4878a9c7085cac5e",
+        "byteLength": 337978,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 4,
+        "sampleEncoding": "ieee-float32le",
+        "frameCount": 84480,
+        "durationSeconds": 5.28
+      },
+      "clip": {
+        "path": "clips/fr08-vowel-02.wav",
+        "sha256": "b20bb2568126c563d9126e7e9c5b3ac8cfc6a450f3ed40dd6ee870c3a9acf091",
+        "byteLength": 169004,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 2,
+        "sampleEncoding": "pcm-s16le",
+        "frameCount": 84480,
+        "durationSeconds": 5.28
+      },
+      "derivation": {
+        "startFrame": 0,
+        "endFrame": 84480,
+        "conversionPolicy": "pcm16-v1",
+        "tool": "FR08 offline preparation CLI: scripts/prepare_french_sentences.py crop using scripts/french_sentence_wav.py",
+        "version": "Git source revision cecbaf456097bd62c5b0e8577f8a4f24151890b5; Python 3.14.4",
+        "settings": [
+          "startFrame=0",
+          "endFrame=full source frameCount (half-open)",
+          "outputEncoding=pcm-s16le",
+          "conversionPolicy=pcm16-v1",
+          "sourceEncoding=ieee-float32le",
+          "no resampling, channel mixing, gain change, dither, or randomness"
+        ],
+        "changes": [
+          "The original source WAV is retained byte-for-byte; no source rewriting or relabeling.",
+          "Full source range [0,84480) is delivered as mono 16 kHz signed little-endian PCM16.",
+          "IEEE-float32le samples are quantized using pcm16-v1: round-to-nearest ties-to-even after scaling by 32768, clamped to [-32768,32767]; no normalization, resampling, channel mixing, gain change, dither, or randomness."
+        ],
+        "transcriptCorrectionRationale": "Display text uses the pinned raw_transcription field verbatim (including its capitalization and punctuation) rather than the separate normalized transcription field; no transcript correction is claimed, and match to recorded speech remains unreviewed."
+      },
+      "credit": {
+        "creator": "FLEURS dataset (google/fleurs; the item source row does not identify an individual speaker or recording creator)",
+        "attribution": "FLEURS, google/fleurs, French fr_fr train split, source row 1146 (1091429117067792685.wav), pinned revision d7c758a6dceecd54a98cac43404d3d576e721f07; dataset card: https://huggingface.co/datasets/google/fleurs/raw/d7c758a6dceecd54a98cac43404d3d576e721f07/README.md; source card declares CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/legalcode.txt). Changes: original source bytes retained; delivered full-range clip deterministically quantized from IEEE-float32le to signed PCM16 under pcm16-v1. No individual speaker identity is supplied or inferred.",
+        "licenseId": "CC-BY-4.0",
+        "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+        "licenseTextPath": "licenses/CC-BY-4.0.txt",
+        "notices": [
+          "The pinned FLEURS dataset card declares CC BY 4.0; this metadata claim is not an independent rights decision.",
+          "No individual speaker/recording creator is identified by this source row; the supplied gender value is not treated as identity.",
+          "Original audio bytes are preserved; the full-length delivery clip is a lossy, deterministic PCM16 conversion under pcm16-v1."
+        ],
+        "evidenceIds": [
+          "dataset-fleurs-card",
+          "dataset-cc-by-4.0",
+          "item-source-fr08-vowel-02"
+        ]
+      },
+      "rightsReview": {
+        "status": "pending",
+        "reviewer": null,
+        "qualification": null,
+        "reviewedAt": null,
+        "originalSha256": "acce10ca9257ed7b2ae84439d387354aaf8b66418add1a5c4878a9c7085cac5e",
+        "clipSha256": "b20bb2568126c563d9126e7e9c5b3ac8cfc6a450f3ed40dd6ee870c3a9acf091",
+        "annotationHash": "67f1326f7f39f93df10f0383bcf27383f13943f365afac026c04015fed6d0f7a",
+        "evidenceIds": [],
+        "notes": "PENDING: verify CC BY 4.0 applicability to this specific recording, appropriate source/creator attribution and redistribution rights, and any speaker/recording conditions. The source row/card is not item-level clearance; do not infer an individual from the supplied gender field."
+      }
+    },
+    {
+      "itemId": "fr08-vowel-03",
+      "source": {
+        "repository": "google/fleurs",
+        "revision": "d7c758a6dceecd54a98cac43404d3d576e721f07",
+        "config": "fr_fr",
+        "split": "train",
+        "rowId": "109",
+        "audioPath": "12599857077174421203.wav",
+        "retrievalUrl": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+        "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+        "rawTranscription": "La capsule ressemblera beaucoup à une étoile filante qui traverse le ciel.",
+        "transcription": "la capsule ressemblera beaucoup à une étoile filante qui traverse le ciel",
+        "rawTsvRecord": "109\t12599857077174421203.wav\tLa capsule ressemblera beaucoup à une étoile filante qui traverse le ciel.\tla capsule ressemblera beaucoup à une étoile filante qui traverse le ciel\tl a | c a p s u l e | r e s s e m b l e r a | b e a u c o u p | à | u n e | é t o i l e | f i l a n t e | q u i | t r a v e r s e | l e | c i e l |\t99840\tMALE"
+      },
+      "original": {
+        "path": "originals/fr08-vowel-03.wav",
+        "sha256": "516e608745ab12bac3534346526e2a6823aefcd5a57d68db94300a492e1deed9",
+        "byteLength": 399418,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 4,
+        "sampleEncoding": "ieee-float32le",
+        "frameCount": 99840,
+        "durationSeconds": 6.24
+      },
+      "clip": {
+        "path": "clips/fr08-vowel-03.wav",
+        "sha256": "a444f9377544c7fa49653e3537cc2b663dce11955b978c3171b999511236ee75",
+        "byteLength": 199724,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 2,
+        "sampleEncoding": "pcm-s16le",
+        "frameCount": 99840,
+        "durationSeconds": 6.24
+      },
+      "derivation": {
+        "startFrame": 0,
+        "endFrame": 99840,
+        "conversionPolicy": "pcm16-v1",
+        "tool": "FR08 offline preparation CLI: scripts/prepare_french_sentences.py crop using scripts/french_sentence_wav.py",
+        "version": "Git source revision cecbaf456097bd62c5b0e8577f8a4f24151890b5; Python 3.14.4",
+        "settings": [
+          "startFrame=0",
+          "endFrame=full source frameCount (half-open)",
+          "outputEncoding=pcm-s16le",
+          "conversionPolicy=pcm16-v1",
+          "sourceEncoding=ieee-float32le",
+          "no resampling, channel mixing, gain change, dither, or randomness"
+        ],
+        "changes": [
+          "The original source WAV is retained byte-for-byte; no source rewriting or relabeling.",
+          "Full source range [0,99840) is delivered as mono 16 kHz signed little-endian PCM16.",
+          "IEEE-float32le samples are quantized using pcm16-v1: round-to-nearest ties-to-even after scaling by 32768, clamped to [-32768,32767]; no normalization, resampling, channel mixing, gain change, dither, or randomness."
+        ],
+        "transcriptCorrectionRationale": "Display text uses the pinned raw_transcription field verbatim (including its capitalization and punctuation) rather than the separate normalized transcription field; no transcript correction is claimed, and match to recorded speech remains unreviewed."
+      },
+      "credit": {
+        "creator": "FLEURS dataset (google/fleurs; the item source row does not identify an individual speaker or recording creator)",
+        "attribution": "FLEURS, google/fleurs, French fr_fr train split, source row 109 (12599857077174421203.wav), pinned revision d7c758a6dceecd54a98cac43404d3d576e721f07; dataset card: https://huggingface.co/datasets/google/fleurs/raw/d7c758a6dceecd54a98cac43404d3d576e721f07/README.md; source card declares CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/legalcode.txt). Changes: original source bytes retained; delivered full-range clip deterministically quantized from IEEE-float32le to signed PCM16 under pcm16-v1. No individual speaker identity is supplied or inferred.",
+        "licenseId": "CC-BY-4.0",
+        "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+        "licenseTextPath": "licenses/CC-BY-4.0.txt",
+        "notices": [
+          "The pinned FLEURS dataset card declares CC BY 4.0; this metadata claim is not an independent rights decision.",
+          "No individual speaker/recording creator is identified by this source row; the supplied gender value is not treated as identity.",
+          "Original audio bytes are preserved; the full-length delivery clip is a lossy, deterministic PCM16 conversion under pcm16-v1."
+        ],
+        "evidenceIds": [
+          "dataset-fleurs-card",
+          "dataset-cc-by-4.0",
+          "item-source-fr08-vowel-03"
+        ]
+      },
+      "rightsReview": {
+        "status": "pending",
+        "reviewer": null,
+        "qualification": null,
+        "reviewedAt": null,
+        "originalSha256": "516e608745ab12bac3534346526e2a6823aefcd5a57d68db94300a492e1deed9",
+        "clipSha256": "a444f9377544c7fa49653e3537cc2b663dce11955b978c3171b999511236ee75",
+        "annotationHash": "b6fd6128e9e2a2634650437e719e6597a83f72012c3789b4ee573728578fc168",
+        "evidenceIds": [],
+        "notes": "PENDING: verify CC BY 4.0 applicability to this specific recording, appropriate source/creator attribution and redistribution rights, and any speaker/recording conditions. The source row/card is not item-level clearance; do not infer an individual from the supplied gender field."
+      }
+    },
+    {
+      "itemId": "fr08-vowel-04",
+      "source": {
+        "repository": "google/fleurs",
+        "revision": "d7c758a6dceecd54a98cac43404d3d576e721f07",
+        "config": "fr_fr",
+        "split": "train",
+        "rowId": "213",
+        "audioPath": "17946052666067177960.wav",
+        "retrievalUrl": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+        "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+        "rawTranscription": "Personne n'était à l'intérieur de l'appartement.",
+        "transcription": "personne n'était à l'intérieur de l'appartement",
+        "rawTsvRecord": "213\t17946052666067177960.wav\tPersonne n'était à l'intérieur de l'appartement.\tpersonne n'était à l'intérieur de l'appartement\tp e r s o n n e | n ' é t a i t | à | l ' i n t é r i e u r | d e | l ' a p p a r t e m e n t |\t61440\tFEMALE"
+      },
+      "original": {
+        "path": "originals/fr08-vowel-04.wav",
+        "sha256": "09904a3ffa535887f1fa8864dbcae0d8e1a6222ca0c3d9b9ed3272ddfe128fc1",
+        "byteLength": 245818,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 4,
+        "sampleEncoding": "ieee-float32le",
+        "frameCount": 61440,
+        "durationSeconds": 3.84
+      },
+      "clip": {
+        "path": "clips/fr08-vowel-04.wav",
+        "sha256": "92a9888fd358bf0f5c90c4978635068d4d30f4440e6745418f34204b541f3a0e",
+        "byteLength": 122924,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 2,
+        "sampleEncoding": "pcm-s16le",
+        "frameCount": 61440,
+        "durationSeconds": 3.84
+      },
+      "derivation": {
+        "startFrame": 0,
+        "endFrame": 61440,
+        "conversionPolicy": "pcm16-v1",
+        "tool": "FR08 offline preparation CLI: scripts/prepare_french_sentences.py crop using scripts/french_sentence_wav.py",
+        "version": "Git source revision cecbaf456097bd62c5b0e8577f8a4f24151890b5; Python 3.14.4",
+        "settings": [
+          "startFrame=0",
+          "endFrame=full source frameCount (half-open)",
+          "outputEncoding=pcm-s16le",
+          "conversionPolicy=pcm16-v1",
+          "sourceEncoding=ieee-float32le",
+          "no resampling, channel mixing, gain change, dither, or randomness"
+        ],
+        "changes": [
+          "The original source WAV is retained byte-for-byte; no source rewriting or relabeling.",
+          "Full source range [0,61440) is delivered as mono 16 kHz signed little-endian PCM16.",
+          "IEEE-float32le samples are quantized using pcm16-v1: round-to-nearest ties-to-even after scaling by 32768, clamped to [-32768,32767]; no normalization, resampling, channel mixing, gain change, dither, or randomness."
+        ],
+        "transcriptCorrectionRationale": "Display text uses the pinned raw_transcription field verbatim (including its capitalization and punctuation) rather than the separate normalized transcription field; no transcript correction is claimed, and match to recorded speech remains unreviewed."
+      },
+      "credit": {
+        "creator": "FLEURS dataset (google/fleurs; the item source row does not identify an individual speaker or recording creator)",
+        "attribution": "FLEURS, google/fleurs, French fr_fr train split, source row 213 (17946052666067177960.wav), pinned revision d7c758a6dceecd54a98cac43404d3d576e721f07; dataset card: https://huggingface.co/datasets/google/fleurs/raw/d7c758a6dceecd54a98cac43404d3d576e721f07/README.md; source card declares CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/legalcode.txt). Changes: original source bytes retained; delivered full-range clip deterministically quantized from IEEE-float32le to signed PCM16 under pcm16-v1. No individual speaker identity is supplied or inferred.",
+        "licenseId": "CC-BY-4.0",
+        "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+        "licenseTextPath": "licenses/CC-BY-4.0.txt",
+        "notices": [
+          "The pinned FLEURS dataset card declares CC BY 4.0; this metadata claim is not an independent rights decision.",
+          "No individual speaker/recording creator is identified by this source row; the supplied gender value is not treated as identity.",
+          "Original audio bytes are preserved; the full-length delivery clip is a lossy, deterministic PCM16 conversion under pcm16-v1."
+        ],
+        "evidenceIds": [
+          "dataset-fleurs-card",
+          "dataset-cc-by-4.0",
+          "item-source-fr08-vowel-04"
+        ]
+      },
+      "rightsReview": {
+        "status": "pending",
+        "reviewer": null,
+        "qualification": null,
+        "reviewedAt": null,
+        "originalSha256": "09904a3ffa535887f1fa8864dbcae0d8e1a6222ca0c3d9b9ed3272ddfe128fc1",
+        "clipSha256": "92a9888fd358bf0f5c90c4978635068d4d30f4440e6745418f34204b541f3a0e",
+        "annotationHash": "be1af6c7b76eabb4537c304719b59c26738182d47f2543593e8fd493aa01f9df",
+        "evidenceIds": [],
+        "notes": "PENDING: verify CC BY 4.0 applicability to this specific recording, appropriate source/creator attribution and redistribution rights, and any speaker/recording conditions. The source row/card is not item-level clearance; do not infer an individual from the supplied gender field."
+      }
+    },
+    {
+      "itemId": "fr08-vowel-05",
+      "source": {
+        "repository": "google/fleurs",
+        "revision": "d7c758a6dceecd54a98cac43404d3d576e721f07",
+        "config": "fr_fr",
+        "split": "train",
+        "rowId": "1188",
+        "audioPath": "5977517119241020454.wav",
+        "retrievalUrl": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+        "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+        "rawTranscription": "Le sommet de la tour était un sanctuaire spécial pour le dieu.",
+        "transcription": "le sommet de la tour était un sanctuaire spécial pour le dieu",
+        "rawTsvRecord": "1188\t5977517119241020454.wav\tLe sommet de la tour était un sanctuaire spécial pour le dieu.\tle sommet de la tour était un sanctuaire spécial pour le dieu\tl e | s o m m e t | d e | l a | t o u r | é t a i t | u n | s a n c t u a i r e | s p é c i a l | p o u r | l e | d i e u |\t73920\tFEMALE"
+      },
+      "original": {
+        "path": "originals/fr08-vowel-05.wav",
+        "sha256": "b7f5e9b879c2efb0a2d0cf19e417c2fa3a3911c08563a46a5764eef68813362f",
+        "byteLength": 295738,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 4,
+        "sampleEncoding": "ieee-float32le",
+        "frameCount": 73920,
+        "durationSeconds": 4.62
+      },
+      "clip": {
+        "path": "clips/fr08-vowel-05.wav",
+        "sha256": "e763b5f5b785fcea10dfb177e2dc5b7cda6f6d44ae67b1c723a474ec96971cc9",
+        "byteLength": 147884,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 2,
+        "sampleEncoding": "pcm-s16le",
+        "frameCount": 73920,
+        "durationSeconds": 4.62
+      },
+      "derivation": {
+        "startFrame": 0,
+        "endFrame": 73920,
+        "conversionPolicy": "pcm16-v1",
+        "tool": "FR08 offline preparation CLI: scripts/prepare_french_sentences.py crop using scripts/french_sentence_wav.py",
+        "version": "Git source revision cecbaf456097bd62c5b0e8577f8a4f24151890b5; Python 3.14.4",
+        "settings": [
+          "startFrame=0",
+          "endFrame=full source frameCount (half-open)",
+          "outputEncoding=pcm-s16le",
+          "conversionPolicy=pcm16-v1",
+          "sourceEncoding=ieee-float32le",
+          "no resampling, channel mixing, gain change, dither, or randomness"
+        ],
+        "changes": [
+          "The original source WAV is retained byte-for-byte; no source rewriting or relabeling.",
+          "Full source range [0,73920) is delivered as mono 16 kHz signed little-endian PCM16.",
+          "IEEE-float32le samples are quantized using pcm16-v1: round-to-nearest ties-to-even after scaling by 32768, clamped to [-32768,32767]; no normalization, resampling, channel mixing, gain change, dither, or randomness."
+        ],
+        "transcriptCorrectionRationale": "Display text uses the pinned raw_transcription field verbatim (including its capitalization and punctuation) rather than the separate normalized transcription field; no transcript correction is claimed, and match to recorded speech remains unreviewed."
+      },
+      "credit": {
+        "creator": "FLEURS dataset (google/fleurs; the item source row does not identify an individual speaker or recording creator)",
+        "attribution": "FLEURS, google/fleurs, French fr_fr train split, source row 1188 (5977517119241020454.wav), pinned revision d7c758a6dceecd54a98cac43404d3d576e721f07; dataset card: https://huggingface.co/datasets/google/fleurs/raw/d7c758a6dceecd54a98cac43404d3d576e721f07/README.md; source card declares CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/legalcode.txt). Changes: original source bytes retained; delivered full-range clip deterministically quantized from IEEE-float32le to signed PCM16 under pcm16-v1. No individual speaker identity is supplied or inferred.",
+        "licenseId": "CC-BY-4.0",
+        "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+        "licenseTextPath": "licenses/CC-BY-4.0.txt",
+        "notices": [
+          "The pinned FLEURS dataset card declares CC BY 4.0; this metadata claim is not an independent rights decision.",
+          "No individual speaker/recording creator is identified by this source row; the supplied gender value is not treated as identity.",
+          "Original audio bytes are preserved; the full-length delivery clip is a lossy, deterministic PCM16 conversion under pcm16-v1."
+        ],
+        "evidenceIds": [
+          "dataset-fleurs-card",
+          "dataset-cc-by-4.0",
+          "item-source-fr08-vowel-05"
+        ]
+      },
+      "rightsReview": {
+        "status": "pending",
+        "reviewer": null,
+        "qualification": null,
+        "reviewedAt": null,
+        "originalSha256": "b7f5e9b879c2efb0a2d0cf19e417c2fa3a3911c08563a46a5764eef68813362f",
+        "clipSha256": "e763b5f5b785fcea10dfb177e2dc5b7cda6f6d44ae67b1c723a474ec96971cc9",
+        "annotationHash": "e0f849aa828eae85f992dc59cb477df9b5145a5dc4e163d89f178d8df99c2190",
+        "evidenceIds": [],
+        "notes": "PENDING: verify CC BY 4.0 applicability to this specific recording, appropriate source/creator attribution and redistribution rights, and any speaker/recording conditions. The source row/card is not item-level clearance; do not infer an individual from the supplied gender field."
+      }
+    },
+    {
+      "itemId": "fr08-consonant-01",
+      "source": {
+        "repository": "google/fleurs",
+        "revision": "d7c758a6dceecd54a98cac43404d3d576e721f07",
+        "config": "fr_fr",
+        "split": "train",
+        "rowId": "211",
+        "audioPath": "4850321046044587421.wav",
+        "retrievalUrl": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+        "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+        "rawTranscription": "Une fois l'agent arrivé sur place, l'appartement a explosé.",
+        "transcription": "une fois l'agent arrivé sur place l'appartement a explosé",
+        "rawTsvRecord": "211\t4850321046044587421.wav\tUne fois l'agent arrivé sur place, l'appartement a explosé.\tune fois l'agent arrivé sur place l'appartement a explosé\tu n e | f o i s | l ' a g e n t | a r r i v é | s u r | p l a c e | l ' a p p a r t e m e n t | a | e x p l o s é |\t78720\tFEMALE"
+      },
+      "original": {
+        "path": "originals/fr08-consonant-01.wav",
+        "sha256": "d910a3fa5077e686c943cb6c2d686fac9cc1f45d874ad24d04fbbe6eac39c47d",
+        "byteLength": 314938,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 4,
+        "sampleEncoding": "ieee-float32le",
+        "frameCount": 78720,
+        "durationSeconds": 4.92
+      },
+      "clip": {
+        "path": "clips/fr08-consonant-01.wav",
+        "sha256": "b4bd1437ab098b94a6192c01f7ffc838d24716db772c45f7573a14b01ae1a0dd",
+        "byteLength": 157484,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 2,
+        "sampleEncoding": "pcm-s16le",
+        "frameCount": 78720,
+        "durationSeconds": 4.92
+      },
+      "derivation": {
+        "startFrame": 0,
+        "endFrame": 78720,
+        "conversionPolicy": "pcm16-v1",
+        "tool": "FR08 offline preparation CLI: scripts/prepare_french_sentences.py crop using scripts/french_sentence_wav.py",
+        "version": "Git source revision cecbaf456097bd62c5b0e8577f8a4f24151890b5; Python 3.14.4",
+        "settings": [
+          "startFrame=0",
+          "endFrame=full source frameCount (half-open)",
+          "outputEncoding=pcm-s16le",
+          "conversionPolicy=pcm16-v1",
+          "sourceEncoding=ieee-float32le",
+          "no resampling, channel mixing, gain change, dither, or randomness"
+        ],
+        "changes": [
+          "The original source WAV is retained byte-for-byte; no source rewriting or relabeling.",
+          "Full source range [0,78720) is delivered as mono 16 kHz signed little-endian PCM16.",
+          "IEEE-float32le samples are quantized using pcm16-v1: round-to-nearest ties-to-even after scaling by 32768, clamped to [-32768,32767]; no normalization, resampling, channel mixing, gain change, dither, or randomness."
+        ],
+        "transcriptCorrectionRationale": "Display text uses the pinned raw_transcription field verbatim (including its capitalization and punctuation) rather than the separate normalized transcription field; no transcript correction is claimed, and match to recorded speech remains unreviewed."
+      },
+      "credit": {
+        "creator": "FLEURS dataset (google/fleurs; the item source row does not identify an individual speaker or recording creator)",
+        "attribution": "FLEURS, google/fleurs, French fr_fr train split, source row 211 (4850321046044587421.wav), pinned revision d7c758a6dceecd54a98cac43404d3d576e721f07; dataset card: https://huggingface.co/datasets/google/fleurs/raw/d7c758a6dceecd54a98cac43404d3d576e721f07/README.md; source card declares CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/legalcode.txt). Changes: original source bytes retained; delivered full-range clip deterministically quantized from IEEE-float32le to signed PCM16 under pcm16-v1. No individual speaker identity is supplied or inferred.",
+        "licenseId": "CC-BY-4.0",
+        "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+        "licenseTextPath": "licenses/CC-BY-4.0.txt",
+        "notices": [
+          "The pinned FLEURS dataset card declares CC BY 4.0; this metadata claim is not an independent rights decision.",
+          "No individual speaker/recording creator is identified by this source row; the supplied gender value is not treated as identity.",
+          "Original audio bytes are preserved; the full-length delivery clip is a lossy, deterministic PCM16 conversion under pcm16-v1."
+        ],
+        "evidenceIds": [
+          "dataset-fleurs-card",
+          "dataset-cc-by-4.0",
+          "item-source-fr08-consonant-01"
+        ]
+      },
+      "rightsReview": {
+        "status": "pending",
+        "reviewer": null,
+        "qualification": null,
+        "reviewedAt": null,
+        "originalSha256": "d910a3fa5077e686c943cb6c2d686fac9cc1f45d874ad24d04fbbe6eac39c47d",
+        "clipSha256": "b4bd1437ab098b94a6192c01f7ffc838d24716db772c45f7573a14b01ae1a0dd",
+        "annotationHash": "9bae88775c3eb0740fddc21ac224efecf773511f649225710f8c0c6a20f024af",
+        "evidenceIds": [],
+        "notes": "PENDING: verify CC BY 4.0 applicability to this specific recording, appropriate source/creator attribution and redistribution rights, and any speaker/recording conditions. The source row/card is not item-level clearance; do not infer an individual from the supplied gender field."
+      }
+    },
+    {
+      "itemId": "fr08-consonant-02",
+      "source": {
+        "repository": "google/fleurs",
+        "revision": "d7c758a6dceecd54a98cac43404d3d576e721f07",
+        "config": "fr_fr",
+        "split": "train",
+        "rowId": "1167",
+        "audioPath": "3700262936882086048.wav",
+        "retrievalUrl": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+        "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+        "rawTranscription": "Leurs prédécesseurs, les australopithèques, ne marchaient pas debout comme d’habitude.",
+        "transcription": "leurs prédécesseurs les australopithèques ne marchaient pas debout comme d'habitude",
+        "rawTsvRecord": "1167\t3700262936882086048.wav\tLeurs prédécesseurs, les australopithèques, ne marchaient pas debout comme d’habitude.\tleurs prédécesseurs les australopithèques ne marchaient pas debout comme d'habitude\tl e u r s | p r é d é c e s s e u r s | l e s | a u s t r a l o p i t h è q u e s | n e | m a r c h a i e n t | p a s | d e b o u t | c o m m e | d ' h a b i t u d e |\t114240\tFEMALE"
+      },
+      "original": {
+        "path": "originals/fr08-consonant-02.wav",
+        "sha256": "0ea4fc540910148ba69c30956b0b4478a0efa3744083e44bd960ba05f5138045",
+        "byteLength": 457018,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 4,
+        "sampleEncoding": "ieee-float32le",
+        "frameCount": 114240,
+        "durationSeconds": 7.14
+      },
+      "clip": {
+        "path": "clips/fr08-consonant-02.wav",
+        "sha256": "6d5ca87315963eb8bcf071ea353ca56ead0f031e18958f80a00bd7a0c35aa366",
+        "byteLength": 228524,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 2,
+        "sampleEncoding": "pcm-s16le",
+        "frameCount": 114240,
+        "durationSeconds": 7.14
+      },
+      "derivation": {
+        "startFrame": 0,
+        "endFrame": 114240,
+        "conversionPolicy": "pcm16-v1",
+        "tool": "FR08 offline preparation CLI: scripts/prepare_french_sentences.py crop using scripts/french_sentence_wav.py",
+        "version": "Git source revision cecbaf456097bd62c5b0e8577f8a4f24151890b5; Python 3.14.4",
+        "settings": [
+          "startFrame=0",
+          "endFrame=full source frameCount (half-open)",
+          "outputEncoding=pcm-s16le",
+          "conversionPolicy=pcm16-v1",
+          "sourceEncoding=ieee-float32le",
+          "no resampling, channel mixing, gain change, dither, or randomness"
+        ],
+        "changes": [
+          "The original source WAV is retained byte-for-byte; no source rewriting or relabeling.",
+          "Full source range [0,114240) is delivered as mono 16 kHz signed little-endian PCM16.",
+          "IEEE-float32le samples are quantized using pcm16-v1: round-to-nearest ties-to-even after scaling by 32768, clamped to [-32768,32767]; no normalization, resampling, channel mixing, gain change, dither, or randomness."
+        ],
+        "transcriptCorrectionRationale": "Display text uses the pinned raw_transcription field verbatim (including its capitalization and punctuation) rather than the separate normalized transcription field; no transcript correction is claimed, and match to recorded speech remains unreviewed."
+      },
+      "credit": {
+        "creator": "FLEURS dataset (google/fleurs; the item source row does not identify an individual speaker or recording creator)",
+        "attribution": "FLEURS, google/fleurs, French fr_fr train split, source row 1167 (3700262936882086048.wav), pinned revision d7c758a6dceecd54a98cac43404d3d576e721f07; dataset card: https://huggingface.co/datasets/google/fleurs/raw/d7c758a6dceecd54a98cac43404d3d576e721f07/README.md; source card declares CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/legalcode.txt). Changes: original source bytes retained; delivered full-range clip deterministically quantized from IEEE-float32le to signed PCM16 under pcm16-v1. No individual speaker identity is supplied or inferred.",
+        "licenseId": "CC-BY-4.0",
+        "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+        "licenseTextPath": "licenses/CC-BY-4.0.txt",
+        "notices": [
+          "The pinned FLEURS dataset card declares CC BY 4.0; this metadata claim is not an independent rights decision.",
+          "No individual speaker/recording creator is identified by this source row; the supplied gender value is not treated as identity.",
+          "Original audio bytes are preserved; the full-length delivery clip is a lossy, deterministic PCM16 conversion under pcm16-v1."
+        ],
+        "evidenceIds": [
+          "dataset-fleurs-card",
+          "dataset-cc-by-4.0",
+          "item-source-fr08-consonant-02"
+        ]
+      },
+      "rightsReview": {
+        "status": "pending",
+        "reviewer": null,
+        "qualification": null,
+        "reviewedAt": null,
+        "originalSha256": "0ea4fc540910148ba69c30956b0b4478a0efa3744083e44bd960ba05f5138045",
+        "clipSha256": "6d5ca87315963eb8bcf071ea353ca56ead0f031e18958f80a00bd7a0c35aa366",
+        "annotationHash": "514aa4ea17060aa537e5b78a6e2b535747e5b6eb0005f70f492faf30708be0f1",
+        "evidenceIds": [],
+        "notes": "PENDING: verify CC BY 4.0 applicability to this specific recording, appropriate source/creator attribution and redistribution rights, and any speaker/recording conditions. The source row/card is not item-level clearance; do not infer an individual from the supplied gender field."
+      }
+    },
+    {
+      "itemId": "fr08-consonant-03",
+      "source": {
+        "repository": "google/fleurs",
+        "revision": "d7c758a6dceecd54a98cac43404d3d576e721f07",
+        "config": "fr_fr",
+        "split": "train",
+        "rowId": "147",
+        "audioPath": "17129134957828745308.wav",
+        "retrievalUrl": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+        "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+        "rawTranscription": "Avec cet arrangement en place, cette liberté pourrait prendre fin.",
+        "transcription": "avec cet arrangement en place cette liberté pourrait prendre fin",
+        "rawTsvRecord": "147\t17129134957828745308.wav\tAvec cet arrangement en place, cette liberté pourrait prendre fin.\tavec cet arrangement en place cette liberté pourrait prendre fin\ta v e c | c e t | a r r a n g e m e n t | e n | p l a c e | c e t t e | l i b e r t é | p o u r r a i t | p r e n d r e | f i n |\t102720\tFEMALE"
+      },
+      "original": {
+        "path": "originals/fr08-consonant-03.wav",
+        "sha256": "cf9b0ef77660439c2efa70387220655be82442e9d4330936c7832b326c2d932f",
+        "byteLength": 410938,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 4,
+        "sampleEncoding": "ieee-float32le",
+        "frameCount": 102720,
+        "durationSeconds": 6.42
+      },
+      "clip": {
+        "path": "clips/fr08-consonant-03.wav",
+        "sha256": "530aa75881bee8e409be9e8bb279d2685524dd486efa6295cbd7289c4b573098",
+        "byteLength": 205484,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 2,
+        "sampleEncoding": "pcm-s16le",
+        "frameCount": 102720,
+        "durationSeconds": 6.42
+      },
+      "derivation": {
+        "startFrame": 0,
+        "endFrame": 102720,
+        "conversionPolicy": "pcm16-v1",
+        "tool": "FR08 offline preparation CLI: scripts/prepare_french_sentences.py crop using scripts/french_sentence_wav.py",
+        "version": "Git source revision cecbaf456097bd62c5b0e8577f8a4f24151890b5; Python 3.14.4",
+        "settings": [
+          "startFrame=0",
+          "endFrame=full source frameCount (half-open)",
+          "outputEncoding=pcm-s16le",
+          "conversionPolicy=pcm16-v1",
+          "sourceEncoding=ieee-float32le",
+          "no resampling, channel mixing, gain change, dither, or randomness"
+        ],
+        "changes": [
+          "The original source WAV is retained byte-for-byte; no source rewriting or relabeling.",
+          "Full source range [0,102720) is delivered as mono 16 kHz signed little-endian PCM16.",
+          "IEEE-float32le samples are quantized using pcm16-v1: round-to-nearest ties-to-even after scaling by 32768, clamped to [-32768,32767]; no normalization, resampling, channel mixing, gain change, dither, or randomness."
+        ],
+        "transcriptCorrectionRationale": "Display text uses the pinned raw_transcription field verbatim (including its capitalization and punctuation) rather than the separate normalized transcription field; no transcript correction is claimed, and match to recorded speech remains unreviewed."
+      },
+      "credit": {
+        "creator": "FLEURS dataset (google/fleurs; the item source row does not identify an individual speaker or recording creator)",
+        "attribution": "FLEURS, google/fleurs, French fr_fr train split, source row 147 (17129134957828745308.wav), pinned revision d7c758a6dceecd54a98cac43404d3d576e721f07; dataset card: https://huggingface.co/datasets/google/fleurs/raw/d7c758a6dceecd54a98cac43404d3d576e721f07/README.md; source card declares CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/legalcode.txt). Changes: original source bytes retained; delivered full-range clip deterministically quantized from IEEE-float32le to signed PCM16 under pcm16-v1. No individual speaker identity is supplied or inferred.",
+        "licenseId": "CC-BY-4.0",
+        "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+        "licenseTextPath": "licenses/CC-BY-4.0.txt",
+        "notices": [
+          "The pinned FLEURS dataset card declares CC BY 4.0; this metadata claim is not an independent rights decision.",
+          "No individual speaker/recording creator is identified by this source row; the supplied gender value is not treated as identity.",
+          "Original audio bytes are preserved; the full-length delivery clip is a lossy, deterministic PCM16 conversion under pcm16-v1."
+        ],
+        "evidenceIds": [
+          "dataset-fleurs-card",
+          "dataset-cc-by-4.0",
+          "item-source-fr08-consonant-03"
+        ]
+      },
+      "rightsReview": {
+        "status": "pending",
+        "reviewer": null,
+        "qualification": null,
+        "reviewedAt": null,
+        "originalSha256": "cf9b0ef77660439c2efa70387220655be82442e9d4330936c7832b326c2d932f",
+        "clipSha256": "530aa75881bee8e409be9e8bb279d2685524dd486efa6295cbd7289c4b573098",
+        "annotationHash": "8354fb6abc5f0b5ffcff0713be3abb4acc13d8b296fe07d14910a9e7fcf31561",
+        "evidenceIds": [],
+        "notes": "PENDING: verify CC BY 4.0 applicability to this specific recording, appropriate source/creator attribution and redistribution rights, and any speaker/recording conditions. The source row/card is not item-level clearance; do not infer an individual from the supplied gender field."
+      }
+    },
+    {
+      "itemId": "fr08-consonant-04",
+      "source": {
+        "repository": "google/fleurs",
+        "revision": "d7c758a6dceecd54a98cac43404d3d576e721f07",
+        "config": "fr_fr",
+        "split": "train",
+        "rowId": "597",
+        "audioPath": "1116466640828320580.wav",
+        "retrievalUrl": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+        "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+        "rawTranscription": "Cellule vient du mot latin cella signifiant petite pièce.",
+        "transcription": "cellule vient du mot latin cella signifiant petite pièce",
+        "rawTsvRecord": "597\t1116466640828320580.wav\tCellule vient du mot latin cella signifiant petite pièce.\tcellule vient du mot latin cella signifiant petite pièce\tc e l l u l e | v i e n t | d u | m o t | l a t i n | c e l l a | s i g n i f i a n t | p e t i t e | p i è c e |\t117120\tFEMALE"
+      },
+      "original": {
+        "path": "originals/fr08-consonant-04.wav",
+        "sha256": "45e0cb1df951917352d031a220440c6df34e802c0c539521a55995aaddc5b61d",
+        "byteLength": 468538,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 4,
+        "sampleEncoding": "ieee-float32le",
+        "frameCount": 117120,
+        "durationSeconds": 7.32
+      },
+      "clip": {
+        "path": "clips/fr08-consonant-04.wav",
+        "sha256": "124658e5b3335da1a8f02669ae7132819e8bc8a0fd3cdfef4b13b75a8a463253",
+        "byteLength": 234284,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 2,
+        "sampleEncoding": "pcm-s16le",
+        "frameCount": 117120,
+        "durationSeconds": 7.32
+      },
+      "derivation": {
+        "startFrame": 0,
+        "endFrame": 117120,
+        "conversionPolicy": "pcm16-v1",
+        "tool": "FR08 offline preparation CLI: scripts/prepare_french_sentences.py crop using scripts/french_sentence_wav.py",
+        "version": "Git source revision cecbaf456097bd62c5b0e8577f8a4f24151890b5; Python 3.14.4",
+        "settings": [
+          "startFrame=0",
+          "endFrame=full source frameCount (half-open)",
+          "outputEncoding=pcm-s16le",
+          "conversionPolicy=pcm16-v1",
+          "sourceEncoding=ieee-float32le",
+          "no resampling, channel mixing, gain change, dither, or randomness"
+        ],
+        "changes": [
+          "The original source WAV is retained byte-for-byte; no source rewriting or relabeling.",
+          "Full source range [0,117120) is delivered as mono 16 kHz signed little-endian PCM16.",
+          "IEEE-float32le samples are quantized using pcm16-v1: round-to-nearest ties-to-even after scaling by 32768, clamped to [-32768,32767]; no normalization, resampling, channel mixing, gain change, dither, or randomness."
+        ],
+        "transcriptCorrectionRationale": "Display text uses the pinned raw_transcription field verbatim (including its capitalization and punctuation) rather than the separate normalized transcription field; no transcript correction is claimed, and match to recorded speech remains unreviewed."
+      },
+      "credit": {
+        "creator": "FLEURS dataset (google/fleurs; the item source row does not identify an individual speaker or recording creator)",
+        "attribution": "FLEURS, google/fleurs, French fr_fr train split, source row 597 (1116466640828320580.wav), pinned revision d7c758a6dceecd54a98cac43404d3d576e721f07; dataset card: https://huggingface.co/datasets/google/fleurs/raw/d7c758a6dceecd54a98cac43404d3d576e721f07/README.md; source card declares CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/legalcode.txt). Changes: original source bytes retained; delivered full-range clip deterministically quantized from IEEE-float32le to signed PCM16 under pcm16-v1. No individual speaker identity is supplied or inferred.",
+        "licenseId": "CC-BY-4.0",
+        "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+        "licenseTextPath": "licenses/CC-BY-4.0.txt",
+        "notices": [
+          "The pinned FLEURS dataset card declares CC BY 4.0; this metadata claim is not an independent rights decision.",
+          "No individual speaker/recording creator is identified by this source row; the supplied gender value is not treated as identity.",
+          "Original audio bytes are preserved; the full-length delivery clip is a lossy, deterministic PCM16 conversion under pcm16-v1."
+        ],
+        "evidenceIds": [
+          "dataset-fleurs-card",
+          "dataset-cc-by-4.0",
+          "item-source-fr08-consonant-04"
+        ]
+      },
+      "rightsReview": {
+        "status": "pending",
+        "reviewer": null,
+        "qualification": null,
+        "reviewedAt": null,
+        "originalSha256": "45e0cb1df951917352d031a220440c6df34e802c0c539521a55995aaddc5b61d",
+        "clipSha256": "124658e5b3335da1a8f02669ae7132819e8bc8a0fd3cdfef4b13b75a8a463253",
+        "annotationHash": "3d71332c04124dcc1a97fa4fab029342f6041520f40d56ab300416a8588fabfb",
+        "evidenceIds": [],
+        "notes": "PENDING: verify CC BY 4.0 applicability to this specific recording, appropriate source/creator attribution and redistribution rights, and any speaker/recording conditions. The source row/card is not item-level clearance; do not infer an individual from the supplied gender field."
+      }
+    },
+    {
+      "itemId": "fr08-consonant-05",
+      "source": {
+        "repository": "google/fleurs",
+        "revision": "d7c758a6dceecd54a98cac43404d3d576e721f07",
+        "config": "fr_fr",
+        "split": "train",
+        "rowId": "359",
+        "audioPath": "16581524268666712309.wav",
+        "retrievalUrl": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+        "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+        "rawTranscription": "Ils le font en émettant une minuscule particule de lumière appelée « photon ».",
+        "transcription": "ils le font en émettant une minuscule particule de lumière appelée « photon »",
+        "rawTsvRecord": "359\t16581524268666712309.wav\tIls le font en émettant une minuscule particule de lumière appelée « photon ».\tils le font en émettant une minuscule particule de lumière appelée « photon »\ti l s | l e | f o n t | e n | é m e t t a n t | u n e | m i n u s c u l e | p a r t i c u l e | d e | l u m i è r e | a p p e l é e | « | p h o t o n | » |\t103680\tMALE"
+      },
+      "original": {
+        "path": "originals/fr08-consonant-05.wav",
+        "sha256": "5d2d74bbb71a6b5fe6e38a5770a7f1acf48e00093d6cfccf8cafdb7ade036c69",
+        "byteLength": 414778,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 4,
+        "sampleEncoding": "ieee-float32le",
+        "frameCount": 103680,
+        "durationSeconds": 6.48
+      },
+      "clip": {
+        "path": "clips/fr08-consonant-05.wav",
+        "sha256": "3b1d0fbd2ba93df594703eb2a79549c38ee1fabe7b2a950614693e67483e363a",
+        "byteLength": 207404,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 2,
+        "sampleEncoding": "pcm-s16le",
+        "frameCount": 103680,
+        "durationSeconds": 6.48
+      },
+      "derivation": {
+        "startFrame": 0,
+        "endFrame": 103680,
+        "conversionPolicy": "pcm16-v1",
+        "tool": "FR08 offline preparation CLI: scripts/prepare_french_sentences.py crop using scripts/french_sentence_wav.py",
+        "version": "Git source revision cecbaf456097bd62c5b0e8577f8a4f24151890b5; Python 3.14.4",
+        "settings": [
+          "startFrame=0",
+          "endFrame=full source frameCount (half-open)",
+          "outputEncoding=pcm-s16le",
+          "conversionPolicy=pcm16-v1",
+          "sourceEncoding=ieee-float32le",
+          "no resampling, channel mixing, gain change, dither, or randomness"
+        ],
+        "changes": [
+          "The original source WAV is retained byte-for-byte; no source rewriting or relabeling.",
+          "Full source range [0,103680) is delivered as mono 16 kHz signed little-endian PCM16.",
+          "IEEE-float32le samples are quantized using pcm16-v1: round-to-nearest ties-to-even after scaling by 32768, clamped to [-32768,32767]; no normalization, resampling, channel mixing, gain change, dither, or randomness."
+        ],
+        "transcriptCorrectionRationale": "Display text uses the pinned raw_transcription field verbatim (including its capitalization and punctuation) rather than the separate normalized transcription field; no transcript correction is claimed, and match to recorded speech remains unreviewed."
+      },
+      "credit": {
+        "creator": "FLEURS dataset (google/fleurs; the item source row does not identify an individual speaker or recording creator)",
+        "attribution": "FLEURS, google/fleurs, French fr_fr train split, source row 359 (16581524268666712309.wav), pinned revision d7c758a6dceecd54a98cac43404d3d576e721f07; dataset card: https://huggingface.co/datasets/google/fleurs/raw/d7c758a6dceecd54a98cac43404d3d576e721f07/README.md; source card declares CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/legalcode.txt). Changes: original source bytes retained; delivered full-range clip deterministically quantized from IEEE-float32le to signed PCM16 under pcm16-v1. No individual speaker identity is supplied or inferred.",
+        "licenseId": "CC-BY-4.0",
+        "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+        "licenseTextPath": "licenses/CC-BY-4.0.txt",
+        "notices": [
+          "The pinned FLEURS dataset card declares CC BY 4.0; this metadata claim is not an independent rights decision.",
+          "No individual speaker/recording creator is identified by this source row; the supplied gender value is not treated as identity.",
+          "Original audio bytes are preserved; the full-length delivery clip is a lossy, deterministic PCM16 conversion under pcm16-v1."
+        ],
+        "evidenceIds": [
+          "dataset-fleurs-card",
+          "dataset-cc-by-4.0",
+          "item-source-fr08-consonant-05"
+        ]
+      },
+      "rightsReview": {
+        "status": "pending",
+        "reviewer": null,
+        "qualification": null,
+        "reviewedAt": null,
+        "originalSha256": "5d2d74bbb71a6b5fe6e38a5770a7f1acf48e00093d6cfccf8cafdb7ade036c69",
+        "clipSha256": "3b1d0fbd2ba93df594703eb2a79549c38ee1fabe7b2a950614693e67483e363a",
+        "annotationHash": "ccf60242002470eb10dc415f7ba1f7bad9270a58db15e04a7a27cedee27fa032",
+        "evidenceIds": [],
+        "notes": "PENDING: verify CC BY 4.0 applicability to this specific recording, appropriate source/creator attribution and redistribution rights, and any speaker/recording conditions. The source row/card is not item-level clearance; do not infer an individual from the supplied gender field."
+      }
+    },
+    {
+      "itemId": "fr08-mixed-01",
+      "source": {
+        "repository": "google/fleurs",
+        "revision": "d7c758a6dceecd54a98cac43404d3d576e721f07",
+        "config": "fr_fr",
+        "split": "train",
+        "rowId": "729",
+        "audioPath": "2109137236063134867.wav",
+        "retrievalUrl": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+        "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+        "rawTranscription": "Pour quelques pièces de monnaie, des enfants vous raconteront l’histoire.",
+        "transcription": "pour quelques pièces de monnaie des enfants vous raconteront l'histoire",
+        "rawTsvRecord": "729\t2109137236063134867.wav\tPour quelques pièces de monnaie, des enfants vous raconteront l’histoire.\tpour quelques pièces de monnaie des enfants vous raconteront l'histoire\tp o u r | q u e l q u e s | p i è c e s | d e | m o n n a i e | d e s | e n f a n t s | v o u s | r a c o n t e r o n t | l ' h i s t o i r e |\t111360\tFEMALE"
+      },
+      "original": {
+        "path": "originals/fr08-mixed-01.wav",
+        "sha256": "433dd48ae8d256d6219112574c25bb3555ae2205457d366a6fae58f8e2e3ebf5",
+        "byteLength": 445498,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 4,
+        "sampleEncoding": "ieee-float32le",
+        "frameCount": 111360,
+        "durationSeconds": 6.96
+      },
+      "clip": {
+        "path": "clips/fr08-mixed-01.wav",
+        "sha256": "580d95d76f2bd0601ff2d4b872431aff876675f2fae6e724fdab613b3f114f97",
+        "byteLength": 222764,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 2,
+        "sampleEncoding": "pcm-s16le",
+        "frameCount": 111360,
+        "durationSeconds": 6.96
+      },
+      "derivation": {
+        "startFrame": 0,
+        "endFrame": 111360,
+        "conversionPolicy": "pcm16-v1",
+        "tool": "FR08 offline preparation CLI: scripts/prepare_french_sentences.py crop using scripts/french_sentence_wav.py",
+        "version": "Git source revision cecbaf456097bd62c5b0e8577f8a4f24151890b5; Python 3.14.4",
+        "settings": [
+          "startFrame=0",
+          "endFrame=full source frameCount (half-open)",
+          "outputEncoding=pcm-s16le",
+          "conversionPolicy=pcm16-v1",
+          "sourceEncoding=ieee-float32le",
+          "no resampling, channel mixing, gain change, dither, or randomness"
+        ],
+        "changes": [
+          "The original source WAV is retained byte-for-byte; no source rewriting or relabeling.",
+          "Full source range [0,111360) is delivered as mono 16 kHz signed little-endian PCM16.",
+          "IEEE-float32le samples are quantized using pcm16-v1: round-to-nearest ties-to-even after scaling by 32768, clamped to [-32768,32767]; no normalization, resampling, channel mixing, gain change, dither, or randomness."
+        ],
+        "transcriptCorrectionRationale": "Display text uses the pinned raw_transcription field verbatim (including its capitalization and punctuation) rather than the separate normalized transcription field; no transcript correction is claimed, and match to recorded speech remains unreviewed."
+      },
+      "credit": {
+        "creator": "FLEURS dataset (google/fleurs; the item source row does not identify an individual speaker or recording creator)",
+        "attribution": "FLEURS, google/fleurs, French fr_fr train split, source row 729 (2109137236063134867.wav), pinned revision d7c758a6dceecd54a98cac43404d3d576e721f07; dataset card: https://huggingface.co/datasets/google/fleurs/raw/d7c758a6dceecd54a98cac43404d3d576e721f07/README.md; source card declares CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/legalcode.txt). Changes: original source bytes retained; delivered full-range clip deterministically quantized from IEEE-float32le to signed PCM16 under pcm16-v1. No individual speaker identity is supplied or inferred.",
+        "licenseId": "CC-BY-4.0",
+        "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+        "licenseTextPath": "licenses/CC-BY-4.0.txt",
+        "notices": [
+          "The pinned FLEURS dataset card declares CC BY 4.0; this metadata claim is not an independent rights decision.",
+          "No individual speaker/recording creator is identified by this source row; the supplied gender value is not treated as identity.",
+          "Original audio bytes are preserved; the full-length delivery clip is a lossy, deterministic PCM16 conversion under pcm16-v1."
+        ],
+        "evidenceIds": [
+          "dataset-fleurs-card",
+          "dataset-cc-by-4.0",
+          "item-source-fr08-mixed-01"
+        ]
+      },
+      "rightsReview": {
+        "status": "pending",
+        "reviewer": null,
+        "qualification": null,
+        "reviewedAt": null,
+        "originalSha256": "433dd48ae8d256d6219112574c25bb3555ae2205457d366a6fae58f8e2e3ebf5",
+        "clipSha256": "580d95d76f2bd0601ff2d4b872431aff876675f2fae6e724fdab613b3f114f97",
+        "annotationHash": "f6a42318ca531c75ccd411f574296b4075dbbfd5a2d50af33de7cb18cd5fabb8",
+        "evidenceIds": [],
+        "notes": "PENDING: verify CC BY 4.0 applicability to this specific recording, appropriate source/creator attribution and redistribution rights, and any speaker/recording conditions. The source row/card is not item-level clearance; do not infer an individual from the supplied gender field."
+      }
+    },
+    {
+      "itemId": "fr08-mixed-02",
+      "source": {
+        "repository": "google/fleurs",
+        "revision": "d7c758a6dceecd54a98cac43404d3d576e721f07",
+        "config": "fr_fr",
+        "split": "train",
+        "rowId": "362",
+        "audioPath": "2616057997901349706.wav",
+        "retrievalUrl": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+        "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+        "rawTranscription": "Les photons sont même plus petits que les particules formant les atomes !",
+        "transcription": "les photons sont même plus petits que les particules formant les atomes !",
+        "rawTsvRecord": "362\t2616057997901349706.wav\tLes photons sont même plus petits que les particules formant les atomes !\tles photons sont même plus petits que les particules formant les atomes !\tl e s | p h o t o n s | s o n t | m ê m e | p l u s | p e t i t s | q u e | l e s | p a r t i c u l e s | f o r m a n t | l e s | a t o m e s | ! |\t109440\tFEMALE"
+      },
+      "original": {
+        "path": "originals/fr08-mixed-02.wav",
+        "sha256": "43533351b9a277e18c47b9378b8cfbe43a7120da51b451f032f892bed7985f01",
+        "byteLength": 437818,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 4,
+        "sampleEncoding": "ieee-float32le",
+        "frameCount": 109440,
+        "durationSeconds": 6.84
+      },
+      "clip": {
+        "path": "clips/fr08-mixed-02.wav",
+        "sha256": "0a147189cf0481d4ee3c1614bf63d02125ff8f840cfa1d0cd1e4abd4cb8017f6",
+        "byteLength": 218924,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 2,
+        "sampleEncoding": "pcm-s16le",
+        "frameCount": 109440,
+        "durationSeconds": 6.84
+      },
+      "derivation": {
+        "startFrame": 0,
+        "endFrame": 109440,
+        "conversionPolicy": "pcm16-v1",
+        "tool": "FR08 offline preparation CLI: scripts/prepare_french_sentences.py crop using scripts/french_sentence_wav.py",
+        "version": "Git source revision cecbaf456097bd62c5b0e8577f8a4f24151890b5; Python 3.14.4",
+        "settings": [
+          "startFrame=0",
+          "endFrame=full source frameCount (half-open)",
+          "outputEncoding=pcm-s16le",
+          "conversionPolicy=pcm16-v1",
+          "sourceEncoding=ieee-float32le",
+          "no resampling, channel mixing, gain change, dither, or randomness"
+        ],
+        "changes": [
+          "The original source WAV is retained byte-for-byte; no source rewriting or relabeling.",
+          "Full source range [0,109440) is delivered as mono 16 kHz signed little-endian PCM16.",
+          "IEEE-float32le samples are quantized using pcm16-v1: round-to-nearest ties-to-even after scaling by 32768, clamped to [-32768,32767]; no normalization, resampling, channel mixing, gain change, dither, or randomness."
+        ],
+        "transcriptCorrectionRationale": "Display text uses the pinned raw_transcription field verbatim (including its capitalization and punctuation) rather than the separate normalized transcription field; no transcript correction is claimed, and match to recorded speech remains unreviewed."
+      },
+      "credit": {
+        "creator": "FLEURS dataset (google/fleurs; the item source row does not identify an individual speaker or recording creator)",
+        "attribution": "FLEURS, google/fleurs, French fr_fr train split, source row 362 (2616057997901349706.wav), pinned revision d7c758a6dceecd54a98cac43404d3d576e721f07; dataset card: https://huggingface.co/datasets/google/fleurs/raw/d7c758a6dceecd54a98cac43404d3d576e721f07/README.md; source card declares CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/legalcode.txt). Changes: original source bytes retained; delivered full-range clip deterministically quantized from IEEE-float32le to signed PCM16 under pcm16-v1. No individual speaker identity is supplied or inferred.",
+        "licenseId": "CC-BY-4.0",
+        "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+        "licenseTextPath": "licenses/CC-BY-4.0.txt",
+        "notices": [
+          "The pinned FLEURS dataset card declares CC BY 4.0; this metadata claim is not an independent rights decision.",
+          "No individual speaker/recording creator is identified by this source row; the supplied gender value is not treated as identity.",
+          "Original audio bytes are preserved; the full-length delivery clip is a lossy, deterministic PCM16 conversion under pcm16-v1."
+        ],
+        "evidenceIds": [
+          "dataset-fleurs-card",
+          "dataset-cc-by-4.0",
+          "item-source-fr08-mixed-02"
+        ]
+      },
+      "rightsReview": {
+        "status": "pending",
+        "reviewer": null,
+        "qualification": null,
+        "reviewedAt": null,
+        "originalSha256": "43533351b9a277e18c47b9378b8cfbe43a7120da51b451f032f892bed7985f01",
+        "clipSha256": "0a147189cf0481d4ee3c1614bf63d02125ff8f840cfa1d0cd1e4abd4cb8017f6",
+        "annotationHash": "97a478f166b2a663a5ecc029f7c55393a0259582b48039b8b21525356d6e6b85",
+        "evidenceIds": [],
+        "notes": "PENDING: verify CC BY 4.0 applicability to this specific recording, appropriate source/creator attribution and redistribution rights, and any speaker/recording conditions. The source row/card is not item-level clearance; do not infer an individual from the supplied gender field."
+      }
+    },
+    {
+      "itemId": "fr08-mixed-03",
+      "source": {
+        "repository": "google/fleurs",
+        "revision": "d7c758a6dceecd54a98cac43404d3d576e721f07",
+        "config": "fr_fr",
+        "split": "train",
+        "rowId": "377",
+        "audioPath": "4400146449789560658.wav",
+        "retrievalUrl": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+        "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+        "rawTranscription": "Le gaz se raréfie à mesure que l'on s'éloigne du centre du Soleil.",
+        "transcription": "le gaz se raréfie à mesure que l'on s'éloigne du centre du soleil",
+        "rawTsvRecord": "377\t4400146449789560658.wav\tLe gaz se raréfie à mesure que l'on s'éloigne du centre du Soleil.\tle gaz se raréfie à mesure que l'on s'éloigne du centre du soleil\tl e | g a z | s e | r a r é f i e | à | m e s u r e | q u e | l ' o n | s ' é l o i g n e | d u | c e n t r e | d u | s o l e i l |\t101760\tMALE"
+      },
+      "original": {
+        "path": "originals/fr08-mixed-03.wav",
+        "sha256": "ef3d41b18deb49d94a7f9d1423e2fb1c4bcb0b891e97a6b5f77edb3de1d60504",
+        "byteLength": 407098,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 4,
+        "sampleEncoding": "ieee-float32le",
+        "frameCount": 101760,
+        "durationSeconds": 6.36
+      },
+      "clip": {
+        "path": "clips/fr08-mixed-03.wav",
+        "sha256": "030ed9c2d3ae775adf2bce19b98d05c0075142525814d0436943092bafb0a0be",
+        "byteLength": 203564,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 2,
+        "sampleEncoding": "pcm-s16le",
+        "frameCount": 101760,
+        "durationSeconds": 6.36
+      },
+      "derivation": {
+        "startFrame": 0,
+        "endFrame": 101760,
+        "conversionPolicy": "pcm16-v1",
+        "tool": "FR08 offline preparation CLI: scripts/prepare_french_sentences.py crop using scripts/french_sentence_wav.py",
+        "version": "Git source revision cecbaf456097bd62c5b0e8577f8a4f24151890b5; Python 3.14.4",
+        "settings": [
+          "startFrame=0",
+          "endFrame=full source frameCount (half-open)",
+          "outputEncoding=pcm-s16le",
+          "conversionPolicy=pcm16-v1",
+          "sourceEncoding=ieee-float32le",
+          "no resampling, channel mixing, gain change, dither, or randomness"
+        ],
+        "changes": [
+          "The original source WAV is retained byte-for-byte; no source rewriting or relabeling.",
+          "Full source range [0,101760) is delivered as mono 16 kHz signed little-endian PCM16.",
+          "IEEE-float32le samples are quantized using pcm16-v1: round-to-nearest ties-to-even after scaling by 32768, clamped to [-32768,32767]; no normalization, resampling, channel mixing, gain change, dither, or randomness."
+        ],
+        "transcriptCorrectionRationale": "Display text uses the pinned raw_transcription field verbatim (including its capitalization and punctuation) rather than the separate normalized transcription field; no transcript correction is claimed, and match to recorded speech remains unreviewed."
+      },
+      "credit": {
+        "creator": "FLEURS dataset (google/fleurs; the item source row does not identify an individual speaker or recording creator)",
+        "attribution": "FLEURS, google/fleurs, French fr_fr train split, source row 377 (4400146449789560658.wav), pinned revision d7c758a6dceecd54a98cac43404d3d576e721f07; dataset card: https://huggingface.co/datasets/google/fleurs/raw/d7c758a6dceecd54a98cac43404d3d576e721f07/README.md; source card declares CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/legalcode.txt). Changes: original source bytes retained; delivered full-range clip deterministically quantized from IEEE-float32le to signed PCM16 under pcm16-v1. No individual speaker identity is supplied or inferred.",
+        "licenseId": "CC-BY-4.0",
+        "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+        "licenseTextPath": "licenses/CC-BY-4.0.txt",
+        "notices": [
+          "The pinned FLEURS dataset card declares CC BY 4.0; this metadata claim is not an independent rights decision.",
+          "No individual speaker/recording creator is identified by this source row; the supplied gender value is not treated as identity.",
+          "Original audio bytes are preserved; the full-length delivery clip is a lossy, deterministic PCM16 conversion under pcm16-v1."
+        ],
+        "evidenceIds": [
+          "dataset-fleurs-card",
+          "dataset-cc-by-4.0",
+          "item-source-fr08-mixed-03"
+        ]
+      },
+      "rightsReview": {
+        "status": "pending",
+        "reviewer": null,
+        "qualification": null,
+        "reviewedAt": null,
+        "originalSha256": "ef3d41b18deb49d94a7f9d1423e2fb1c4bcb0b891e97a6b5f77edb3de1d60504",
+        "clipSha256": "030ed9c2d3ae775adf2bce19b98d05c0075142525814d0436943092bafb0a0be",
+        "annotationHash": "02edc50155bf6021e4e17aa47bf280a05791034ecc69a047471a7f1164f510d5",
+        "evidenceIds": [],
+        "notes": "PENDING: verify CC BY 4.0 applicability to this specific recording, appropriate source/creator attribution and redistribution rights, and any speaker/recording conditions. The source row/card is not item-level clearance; do not infer an individual from the supplied gender field."
+      }
+    },
+    {
+      "itemId": "fr08-mixed-04",
+      "source": {
+        "repository": "google/fleurs",
+        "revision": "d7c758a6dceecd54a98cac43404d3d576e721f07",
+        "config": "fr_fr",
+        "split": "train",
+        "rowId": "235",
+        "audioPath": "15764957559967488519.wav",
+        "retrievalUrl": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+        "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+        "rawTranscription": "« Nous étions tous simplement sous le choc », a déclaré la mère.",
+        "transcription": "« nous étions tous simplement sous le choc » a déclaré la mère",
+        "rawTsvRecord": "235\t15764957559967488519.wav\t« Nous étions tous simplement sous le choc », a déclaré la mère.\t« nous étions tous simplement sous le choc » a déclaré la mère\t« | n o u s | é t i o n s | t o u s | s i m p l e m e n t | s o u s | l e | c h o c | » | a | d é c l a r é | l a | m è r e |\t72960\tFEMALE"
+      },
+      "original": {
+        "path": "originals/fr08-mixed-04.wav",
+        "sha256": "52cd915b679e54f9655f0e331ddb1f4e56c5edc62951cd237e488fa145f668d6",
+        "byteLength": 291898,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 4,
+        "sampleEncoding": "ieee-float32le",
+        "frameCount": 72960,
+        "durationSeconds": 4.56
+      },
+      "clip": {
+        "path": "clips/fr08-mixed-04.wav",
+        "sha256": "7a2ef2f9be083f2695a943c38bf9b4b0620914df44a526097bd59479bc1d2c27",
+        "byteLength": 145964,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 2,
+        "sampleEncoding": "pcm-s16le",
+        "frameCount": 72960,
+        "durationSeconds": 4.56
+      },
+      "derivation": {
+        "startFrame": 0,
+        "endFrame": 72960,
+        "conversionPolicy": "pcm16-v1",
+        "tool": "FR08 offline preparation CLI: scripts/prepare_french_sentences.py crop using scripts/french_sentence_wav.py",
+        "version": "Git source revision cecbaf456097bd62c5b0e8577f8a4f24151890b5; Python 3.14.4",
+        "settings": [
+          "startFrame=0",
+          "endFrame=full source frameCount (half-open)",
+          "outputEncoding=pcm-s16le",
+          "conversionPolicy=pcm16-v1",
+          "sourceEncoding=ieee-float32le",
+          "no resampling, channel mixing, gain change, dither, or randomness"
+        ],
+        "changes": [
+          "The original source WAV is retained byte-for-byte; no source rewriting or relabeling.",
+          "Full source range [0,72960) is delivered as mono 16 kHz signed little-endian PCM16.",
+          "IEEE-float32le samples are quantized using pcm16-v1: round-to-nearest ties-to-even after scaling by 32768, clamped to [-32768,32767]; no normalization, resampling, channel mixing, gain change, dither, or randomness."
+        ],
+        "transcriptCorrectionRationale": "Display text uses the pinned raw_transcription field verbatim (including its capitalization and punctuation) rather than the separate normalized transcription field; no transcript correction is claimed, and match to recorded speech remains unreviewed."
+      },
+      "credit": {
+        "creator": "FLEURS dataset (google/fleurs; the item source row does not identify an individual speaker or recording creator)",
+        "attribution": "FLEURS, google/fleurs, French fr_fr train split, source row 235 (15764957559967488519.wav), pinned revision d7c758a6dceecd54a98cac43404d3d576e721f07; dataset card: https://huggingface.co/datasets/google/fleurs/raw/d7c758a6dceecd54a98cac43404d3d576e721f07/README.md; source card declares CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/legalcode.txt). Changes: original source bytes retained; delivered full-range clip deterministically quantized from IEEE-float32le to signed PCM16 under pcm16-v1. No individual speaker identity is supplied or inferred.",
+        "licenseId": "CC-BY-4.0",
+        "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+        "licenseTextPath": "licenses/CC-BY-4.0.txt",
+        "notices": [
+          "The pinned FLEURS dataset card declares CC BY 4.0; this metadata claim is not an independent rights decision.",
+          "No individual speaker/recording creator is identified by this source row; the supplied gender value is not treated as identity.",
+          "Original audio bytes are preserved; the full-length delivery clip is a lossy, deterministic PCM16 conversion under pcm16-v1."
+        ],
+        "evidenceIds": [
+          "dataset-fleurs-card",
+          "dataset-cc-by-4.0",
+          "item-source-fr08-mixed-04"
+        ]
+      },
+      "rightsReview": {
+        "status": "pending",
+        "reviewer": null,
+        "qualification": null,
+        "reviewedAt": null,
+        "originalSha256": "52cd915b679e54f9655f0e331ddb1f4e56c5edc62951cd237e488fa145f668d6",
+        "clipSha256": "7a2ef2f9be083f2695a943c38bf9b4b0620914df44a526097bd59479bc1d2c27",
+        "annotationHash": "65d75a17fbd0d16f5921d84584b7138331b593916be6c9a24b3c84635a9625c0",
+        "evidenceIds": [],
+        "notes": "PENDING: verify CC BY 4.0 applicability to this specific recording, appropriate source/creator attribution and redistribution rights, and any speaker/recording conditions. The source row/card is not item-level clearance; do not infer an individual from the supplied gender field."
+      }
+    },
+    {
+      "itemId": "fr08-mixed-05",
+      "source": {
+        "repository": "google/fleurs",
+        "revision": "d7c758a6dceecd54a98cac43404d3d576e721f07",
+        "config": "fr_fr",
+        "split": "train",
+        "rowId": "1044",
+        "audioPath": "13793329202664532971.wav",
+        "retrievalUrl": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/fr_fr/train.tsv",
+        "retrievedAt": "2026-10-18T01:42:54.384692+00:00",
+        "rawTranscription": "La région abrite également une très grande variété d'espèces animales et d'oiseaux.",
+        "transcription": "la région abrite également une très grande variété d'espèces animales et d'oiseaux",
+        "rawTsvRecord": "1044\t13793329202664532971.wav\tLa région abrite également une très grande variété d'espèces animales et d'oiseaux.\tla région abrite également une très grande variété d'espèces animales et d'oiseaux\tl a | r é g i o n | a b r i t e | é g a l e m e n t | u n e | t r è s | g r a n d e | v a r i é t é | d ' e s p è c e s | a n i m a l e s | e t | d ' o i s e a u x |\t126720\tFEMALE"
+      },
+      "original": {
+        "path": "originals/fr08-mixed-05.wav",
+        "sha256": "5bcaabefa6e10fbca0016fcf7d351fd20dcb955678c2ef79c2be17a5b5e2b491",
+        "byteLength": 506938,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 4,
+        "sampleEncoding": "ieee-float32le",
+        "frameCount": 126720,
+        "durationSeconds": 7.92
+      },
+      "clip": {
+        "path": "clips/fr08-mixed-05.wav",
+        "sha256": "cb7429308511da2a52c3af487f4aef41f287e50fd30a7e0d8a19b381480bb00d",
+        "byteLength": 253484,
+        "sampleRate": 16000,
+        "channels": 1,
+        "sampleWidth": 2,
+        "sampleEncoding": "pcm-s16le",
+        "frameCount": 126720,
+        "durationSeconds": 7.92
+      },
+      "derivation": {
+        "startFrame": 0,
+        "endFrame": 126720,
+        "conversionPolicy": "pcm16-v1",
+        "tool": "FR08 offline preparation CLI: scripts/prepare_french_sentences.py crop using scripts/french_sentence_wav.py",
+        "version": "Git source revision cecbaf456097bd62c5b0e8577f8a4f24151890b5; Python 3.14.4",
+        "settings": [
+          "startFrame=0",
+          "endFrame=full source frameCount (half-open)",
+          "outputEncoding=pcm-s16le",
+          "conversionPolicy=pcm16-v1",
+          "sourceEncoding=ieee-float32le",
+          "no resampling, channel mixing, gain change, dither, or randomness"
+        ],
+        "changes": [
+          "The original source WAV is retained byte-for-byte; no source rewriting or relabeling.",
+          "Full source range [0,126720) is delivered as mono 16 kHz signed little-endian PCM16.",
+          "IEEE-float32le samples are quantized using pcm16-v1: round-to-nearest ties-to-even after scaling by 32768, clamped to [-32768,32767]; no normalization, resampling, channel mixing, gain change, dither, or randomness."
+        ],
+        "transcriptCorrectionRationale": "Display text uses the pinned raw_transcription field verbatim (including its capitalization and punctuation) rather than the separate normalized transcription field; no transcript correction is claimed, and match to recorded speech remains unreviewed."
+      },
+      "credit": {
+        "creator": "FLEURS dataset (google/fleurs; the item source row does not identify an individual speaker or recording creator)",
+        "attribution": "FLEURS, google/fleurs, French fr_fr train split, source row 1044 (13793329202664532971.wav), pinned revision d7c758a6dceecd54a98cac43404d3d576e721f07; dataset card: https://huggingface.co/datasets/google/fleurs/raw/d7c758a6dceecd54a98cac43404d3d576e721f07/README.md; source card declares CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/legalcode.txt). Changes: original source bytes retained; delivered full-range clip deterministically quantized from IEEE-float32le to signed PCM16 under pcm16-v1. No individual speaker identity is supplied or inferred.",
+        "licenseId": "CC-BY-4.0",
+        "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+        "licenseTextPath": "licenses/CC-BY-4.0.txt",
+        "notices": [
+          "The pinned FLEURS dataset card declares CC BY 4.0; this metadata claim is not an independent rights decision.",
+          "No individual speaker/recording creator is identified by this source row; the supplied gender value is not treated as identity.",
+          "Original audio bytes are preserved; the full-length delivery clip is a lossy, deterministic PCM16 conversion under pcm16-v1."
+        ],
+        "evidenceIds": [
+          "dataset-fleurs-card",
+          "dataset-cc-by-4.0",
+          "item-source-fr08-mixed-05"
+        ]
+      },
+      "rightsReview": {
+        "status": "pending",
+        "reviewer": null,
+        "qualification": null,
+        "reviewedAt": null,
+        "originalSha256": "5bcaabefa6e10fbca0016fcf7d351fd20dcb955678c2ef79c2be17a5b5e2b491",
+        "clipSha256": "cb7429308511da2a52c3af487f4aef41f287e50fd30a7e0d8a19b381480bb00d",
+        "annotationHash": "2cdbc48fc76e982583fda6fb7d9002814d5bf0f7a1a19bfbf559632cc0cd9eb9",
+        "evidenceIds": [],
+        "notes": "PENDING: verify CC BY 4.0 applicability to this specific recording, appropriate source/creator attribution and redistribution rights, and any speaker/recording conditions. The source row/card is not item-level clearance; do not infer an individual from the supplied gender field."
+      }
+    }
+  ]
+}
