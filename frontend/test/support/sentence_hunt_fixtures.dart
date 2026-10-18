@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:linguist/src/core/course/sentence_hunt_content.dart';
+
 /// Synthetic records used only by FR08 unit tests. They intentionally do not
 /// reproduce the pending production sentence packet or assert any real review.
 final class SentenceHuntPackageFixture {
@@ -33,6 +35,25 @@ const List<String> fixtureSectionIds = <String>[
   'en-fr-sentence-hunt-consonants',
   'en-fr-sentence-hunt-mixed',
 ];
+
+SentenceHuntCatalogue syntheticSentenceCatalogue({
+  bool reviewed = true,
+  int wordsPerSentence = 5,
+  List<Map<String, dynamic>> historicalSections =
+      const <Map<String, dynamic>>[],
+}) {
+  final SentenceHuntPackageFixture fixture = syntheticSentencePackage(
+    reviewed: reviewed,
+    wordsPerSentence: wordsPerSentence,
+    historicalSections: historicalSections,
+  );
+  return decodeFrenchSentencePackage(
+    manifestJson: fixture.manifestJson,
+    provenanceJson: fixture.provenanceJson,
+    annotationsJson: fixture.annotationsJson,
+    sourceEvidenceJson: fixture.sourceEvidenceJson,
+  );
+}
 
 const List<List<String>> fixtureItemIds = <List<String>>[
   <String>[
@@ -88,9 +109,13 @@ final RegExp _fixtureWordPattern = RegExp(
 
 SentenceHuntPackageFixture syntheticSentencePackage({
   bool reviewed = true,
+  int wordsPerSentence = 5,
   List<Map<String, dynamic>> historicalSections =
       const <Map<String, dynamic>>[],
 }) {
+  if (wordsPerSentence < 5) {
+    throw ArgumentError.value(wordsPerSentence, 'wordsPerSentence');
+  }
   final List<Map<String, dynamic>> sections = <Map<String, dynamic>>[];
   final List<Map<String, dynamic>> provenanceEntries = <Map<String, dynamic>>[];
   final List<Map<String, dynamic>> annotationEntries = <Map<String, dynamic>>[];
@@ -121,13 +146,23 @@ SentenceHuntPackageFixture syntheticSentencePackage({
       final String annotationHash = _sha('c');
       final String originalSha = _sha(_hexDigit(ordinal + 1));
       final String clipSha = _sha(_hexDigit(ordinal + 17));
-      final String text = _fixtureSentenceTexts[ordinal];
-      final List<String> tokenTexts = _fixtureWordPattern
-          .allMatches(text)
+      final List<String> baseTokenTexts = _fixtureWordPattern
+          .allMatches(_fixtureSentenceTexts[ordinal])
           .map((RegExpMatch match) => match.group(0)!)
           .toList(growable: false);
-      if (tokenTexts.length != 5) {
-        throw StateError('Synthetic fixture sentences must contain five words');
+      final List<String> tokenTexts = <String>[
+        ...baseTokenTexts,
+        for (int index = baseTokenTexts.length;
+            index < wordsPerSentence;
+            index++)
+          'anticonstitutionnellement',
+      ];
+      final String text = wordsPerSentence == 5
+          ? _fixtureSentenceTexts[ordinal]
+          : '${tokenTexts.join(' ')}.';
+      if (tokenTexts.length != wordsPerSentence) {
+        throw StateError(
+            'Synthetic fixture sentences must contain $wordsPerSentence words.');
       }
       final List<String> tokenIds = <String>[
         for (int index = 0; index < tokenTexts.length; index++)
@@ -358,20 +393,27 @@ String _targetRole(int sectionIndex, int itemIndex) {
   return 'consonant';
 }
 
-List<String> _fixturePhonemes(String targetSound, int tokenIndex) =>
-    switch (tokenIndex) {
-      0 || 3 => <String>['t', targetSound],
-      1 => <String>[
-          for (final String phoneme in <String>['v', 'w', 'a'])
-            if (phoneme != targetSound) phoneme,
-        ],
-      2 => <String>['t', 'i'],
-      4 => <String>[
-          for (final String phoneme in <String>['s', 'u', 'ʁ', 'i'])
-            if (phoneme != targetSound) phoneme,
-        ],
-      _ => throw RangeError.index(tokenIndex, const <int>[0, 1, 2, 3, 4]),
-    };
+List<String> _fixturePhonemes(String targetSound, int tokenIndex) {
+  if (tokenIndex >= 5) {
+    return <String>[
+      for (final String phoneme in <String>['v', 'w', 'a'])
+        if (phoneme != targetSound) phoneme,
+    ];
+  }
+  return switch (tokenIndex) {
+    0 || 3 => <String>['t', targetSound],
+    1 => <String>[
+        for (final String phoneme in <String>['v', 'w', 'a'])
+          if (phoneme != targetSound) phoneme,
+      ],
+    2 => <String>['t', 'i'],
+    4 => <String>[
+        for (final String phoneme in <String>['s', 'u', 'ʁ', 'i'])
+          if (phoneme != targetSound) phoneme,
+      ],
+    _ => throw RangeError.index(tokenIndex, const <int>[0, 1, 2, 3, 4]),
+  };
+}
 
 String _hexDigit(int index) {
   const String digits = '0123456789abcdef';
