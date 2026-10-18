@@ -34,6 +34,15 @@ def make_float_wav(path, samples, channels=1, rate=8000):
     path.write_bytes(data)
 
 
+def make_u8_wav(path, channels, frame_count=1):
+    frames = bytes((128,)) * channels * frame_count
+    fmt = struct.pack("<HHIIHH", 1, channels, 16000,
+                      16000 * channels, channels, 8)
+    body = (b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt
+            + b"data" + struct.pack("<I", len(frames)) + frames)
+    path.write_bytes(b"RIFF" + struct.pack("<I", len(body)) + body)
+
+
 def archive_bytes(entries):
     output = io.BytesIO()
     with tarfile.open(fileobj=output, mode="w:gz") as archive:
@@ -454,6 +463,87 @@ class PreparationTests(unittest.TestCase):
             self.assertEqual(stdout.getvalue(), "")
             self.assertEqual(source.read_bytes(), before)
             self.assertEqual(list(root.iterdir()), [source])
+
+    def test_crop_rejects_unrepresentable_pcm16_header_without_output_or_source_change(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source, destination = root / "many-channel-u8.wav", root / "delivery.wav"
+            make_u8_wav(source, 32768)
+            parsed = prep.read_wav(source)
+            self.assertEqual((parsed.sample_encoding, parsed.channels,
+                              parsed.frame_count), ("pcm-u8", 32768, 1))
+            before = source.read_bytes()
+            with self.assertRaisesRegex(SentencePackageError,
+                                        "blockAlign|channels|PCM16"):
+                prep.crop_pcm(source, destination, 0, 1,
+                              output_encoding="pcm-s16le")
+            self.assertFalse(destination.exists())
+            self.assertEqual(source.read_bytes(), before)
+
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with mock.patch("sys.stdout", stdout), mock.patch("sys.stderr", stderr):
+                status = prep.main([
+                    "crop", "--source", str(source), "--destination", str(destination),
+                    "--start-frame", "0", "--end-frame", "1",
+                    "--output-encoding", "pcm-s16le",
+                ])
+            self.assertEqual(status, 1)
+            self.assertIn("blockAlign", stderr.getvalue())
+            self.assertNotIn("Traceback", stderr.getvalue())
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertFalse(destination.exists())
+            self.assertEqual(source.read_bytes(), before)
+
+    def test_preflight_rejects_unrepresentable_pcm16_header_in_api_and_cli(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "many-channel-u8.wav"
+            make_u8_wav(source, 32768)
+            parsed = prep.read_wav(source)
+            self.assertEqual((parsed.sample_encoding, parsed.channels,
+                              parsed.frame_count), ("pcm-u8", 32768, 1))
+            before = source.read_bytes()
+            with self.assertRaisesRegex(SentencePackageError,
+                                        "blockAlign|channels|PCM16"):
+                prep.preflight_source(source)
+
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with mock.patch("sys.stdout", stdout), mock.patch("sys.stderr", stderr):
+                status = prep.main(["preflight", "--source", str(source)])
+            self.assertEqual(status, 1)
+            self.assertIn("blockAlign", stderr.getvalue())
+            self.assertNotIn("Traceback", stderr.getvalue())
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertEqual(source.read_bytes(), before)
+            self.assertEqual(list(root.iterdir()), [source])
+
+    def test_preflight_checks_header_not_full_range_size_and_shorter_crop_can_fit(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "two-frame-u8.wav"
+            full_range = root / "full-range.wav"
+            shorter_crop = root / "shorter-crop.wav"
+            make_u8_wav(source, channels=1, frame_count=2)
+            before = source.read_bytes()
+            self.assertEqual(len(before), 46)
+
+            with mock.patch.object(prep, "MAX_WAV_BYTES", 46), \
+                 mock.patch("french_sentence_wav.MAX_WAV_BYTES", 46):
+                preflight = prep.preflight_source(source)
+                self.assertEqual(preflight["supportedDeliveryPolicy"], "pcm16-v1")
+                with self.assertRaisesRegex(SentencePackageError, "size|limit"):
+                    prep.crop_pcm(source, full_range, 0, 2,
+                                  output_encoding="pcm-s16le")
+                self.assertFalse(full_range.exists())
+
+                metadata = prep.crop_pcm(source, shorter_crop, 0, 1,
+                                         output_encoding="pcm-s16le")
+                self.assertEqual(metadata["frameCount"], 1)
+                self.assertEqual(metadata["sampleEncoding"], "pcm-s16le")
+                self.assertEqual(len(shorter_crop.read_bytes()), 46)
+                self.assertEqual(prep.read_wav(shorter_crop).frame_count, 1)
+
+            self.assertEqual(source.read_bytes(), before)
 
     def test_crop_cli_accepts_explicit_output_encoding(self):
         with tempfile.TemporaryDirectory() as temp:

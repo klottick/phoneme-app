@@ -5,7 +5,9 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
+from unittest import mock
 
+import french_sentence_wav as sentence_wav
 from french_sentence_package import SentencePackageError
 from french_sentence_wav import (
     convert_to_pcm16,
@@ -52,6 +54,12 @@ def _wav(tag, bits, samples, channels=1, rate=8000, *, ancillary=False):
     return _riff(chunks)
 
 
+def _pcm_u8_one_frame(channels):
+    fmt = _chunk(b"fmt ", _fmt(1, channels, 16000, 8))
+    data = _chunk(b"data", bytes((128,)) * channels)
+    return _riff([fmt, data])
+
+
 class FrenchSentenceWavTests(unittest.TestCase):
     def test_reader_identifies_supported_integer_and_float_encodings(self):
         cases = (
@@ -81,6 +89,56 @@ class FrenchSentenceWavTests(unittest.TestCase):
         parsed = parse_wav_bytes(raw)
         self.assertEqual((parsed.sample_encoding, parsed.frame_count,
                           parsed.frame_data), ("pcm-u8", 1, b"\x80"))
+
+    def test_pcm16_conversion_rejects_unrepresentable_output_block_align(self):
+        source = parse_wav_bytes(_pcm_u8_one_frame(32768))
+        self.assertEqual((source.sample_encoding, source.channels,
+                          source.frame_count), ("pcm-u8", 32768, 1))
+        with self.assertRaisesRegex(SentencePackageError, "blockAlign|channels|PCM16"):
+            convert_to_pcm16(source, 0, 1)
+
+    def test_pcm16_conversion_checks_expanded_serialized_size_before_allocation(self):
+        source = parse_wav_bytes(_wav(1, 8, [0, 255]))
+        with mock.patch.object(sentence_wav, "MAX_WAV_BYTES", 48):
+            converted = convert_to_pcm16(source, 0, 2)
+        self.assertEqual(converted, struct.pack("<hh", -32768, 32512))
+        with mock.patch.object(sentence_wav, "MAX_WAV_BYTES", 47):
+            with self.assertRaisesRegex(SentencePackageError, "size|limit|100 MiB"):
+                convert_to_pcm16(source, 0, 2)
+
+    def test_write_wav_enforces_exact_serialized_size_including_odd_padding(self):
+        with mock.patch.object(sentence_wav, "MAX_WAV_BYTES", 48):
+            raw = write_wav(b"\x80\x81\x82", sample_rate=8000, channels=1,
+                            sample_encoding="pcm-u8")
+        self.assertEqual(len(raw), 48)
+        self.assertEqual(struct.unpack_from("<I", raw, 4)[0], 40)
+        self.assertEqual(struct.unpack_from("<I", raw, 40)[0], 3)
+        self.assertEqual(raw[-1:], b"\0")
+        self.assertEqual(parse_wav_bytes(raw, max_bytes=48).frame_data,
+                         b"\x80\x81\x82")
+        with mock.patch.object(sentence_wav, "MAX_WAV_BYTES", 47):
+            with self.assertRaisesRegex(SentencePackageError, "size|limit|100 MiB"):
+                write_wav(b"\x80\x81\x82", sample_rate=8000, channels=1,
+                          sample_encoding="pcm-u8")
+
+    def test_serialized_layout_rejects_uint32_data_and_riff_overflow_without_allocation(self):
+        with self.assertRaisesRegex(SentencePackageError, "data chunk.*uint32"):
+            sentence_wav._serialized_output_layout(0x1_0000_0000)
+        with self.assertRaisesRegex(SentencePackageError, "RIFF size.*uint32"):
+            sentence_wav._serialized_output_layout(0xFFFFFFFF)
+
+    def test_writer_rejects_output_header_fields_outside_wav_ranges(self):
+        cases = (
+            (b"\0\0", 0x1_0000_0000, 1, "pcm-s16le"),
+            (b"\0\0\0\0", 0x4000_0000, 2, "pcm-s16le"),
+            (bytes(65536), 16000, 32768, "pcm-s16le"),
+        )
+        for data, rate, channels, encoding in cases:
+            with self.subTest(rate=rate, channels=channels):
+                with self.assertRaisesRegex(SentencePackageError,
+                                            "sample rate|byteRate|blockAlign|WAV output"):
+                    write_wav(data, sample_rate=rate, channels=channels,
+                              sample_encoding=encoding)
 
     def test_reader_accepts_zero_length_format_extension_but_rejects_extended_fields(self):
         fmt18 = _fmt(3, bits=32) + struct.pack("<H", 0)

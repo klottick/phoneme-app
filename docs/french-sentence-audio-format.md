@@ -88,9 +88,14 @@ preflight JSON has exactly `sampleEncoding`, `sampleRate`, `channels`,
 `preflight --source <wav>` is a read-only format check. It reports exactly
 `sampleEncoding`, `sampleRate`, `channels`, `frameCount`, and
 `supportedDeliveryPolicy` (`pcm16-v1`); it writes no audio. Preflight confirms
-only that the header/samples fit this supported format and conversion policy.
-It is not listening approval, a claim that a selected utterance is suitable,
-or linguistic, legal, platform, accessibility, or release clearance.
+the source fits the supported subset and the fixed PCM16 output header fields
+(including `blockAlign` and `byteRate`) are representable. It deliberately does
+not assert that converting the entire source fits the 100 MiB serialized-WAV
+limit: a shorter crop may still fit. Each requested conversion checks its own
+frame range and complete serialized output size, including header and RIFF pad,
+before allocating or publishing output. Preflight writes no audio and is not
+listening approval, a claim that a selected utterance is suitable, or linguistic,
+legal, platform, accessibility, or release clearance.
 
 ## Schema 1 measurements and provenance
 

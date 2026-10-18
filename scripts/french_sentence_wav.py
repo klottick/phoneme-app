@@ -165,6 +165,61 @@ def read_wav(path, max_bytes=MAX_WAV_BYTES):
     return parse_wav_bytes(raw, max_bytes=max_bytes)
 
 
+def _output_format(sample_rate, channels, sample_encoding):
+    if (isinstance(sample_rate, bool) or not isinstance(sample_rate, int)
+            or sample_rate <= 0):
+        raise SentencePackageError("WAV output sample rate must be a positive integer")
+    if sample_rate > 0xFFFFFFFF:
+        raise SentencePackageError("WAV output sample rate exceeds its uint32 field")
+    if isinstance(channels, bool) or not isinstance(channels, int) or channels <= 0:
+        raise SentencePackageError("WAV output channels must be a positive integer")
+    if channels > 0xFFFF:
+        raise SentencePackageError("WAV output channels exceed their uint16 field")
+
+    encodings = {
+        "pcm-u8": (1, 8, 1),
+        "pcm-s16le": (1, 16, 2),
+        "pcm-s24le": (1, 24, 3),
+        "pcm-s32le": (1, 32, 4),
+        "ieee-float32le": (3, 32, 4),
+    }
+    try:
+        format_tag, bits_per_sample, sample_width = encodings[sample_encoding]
+    except (KeyError, TypeError) as exc:
+        raise SentencePackageError(f"unsupported WAV output encoding: {sample_encoding!r}") from exc
+
+    block_align = channels * sample_width
+    if block_align > 0xFFFF:
+        raise SentencePackageError(
+            f"WAV output blockAlign for {sample_encoding} exceeds its uint16 field")
+    byte_rate = sample_rate * block_align
+    if byte_rate > 0xFFFFFFFF:
+        raise SentencePackageError("WAV output byteRate exceeds its uint32 field")
+    return format_tag, bits_per_sample, sample_width, block_align, byte_rate
+
+
+def validate_pcm16_output_header(sample_rate, channels):
+    """Reject PCM16 output headers whose fixed RIFF fields are unrepresentable."""
+    _output_format(sample_rate, channels, PCM16_ENCODING)
+
+
+def _serialized_output_layout(data_byte_count):
+    if isinstance(data_byte_count, bool) or not isinstance(data_byte_count, int) or data_byte_count <= 0:
+        raise SentencePackageError("WAV output must contain nonempty frame data")
+    if data_byte_count > 0xFFFFFFFF:
+        raise SentencePackageError("WAV output data chunk exceeds its uint32 size field")
+    padding = data_byte_count & 1
+    riff_size = 36 + data_byte_count + padding
+    if riff_size > 0xFFFFFFFF:
+        raise SentencePackageError("WAV output RIFF size exceeds its uint32 size field")
+    serialized_size = riff_size + 8
+    if serialized_size > MAX_WAV_BYTES:
+        raise SentencePackageError(
+            f"WAV output serialized size {serialized_size} exceeds verifier limit "
+            f"of {MAX_WAV_BYTES} bytes")
+    return padding, riff_size
+
+
 def convert_to_pcm16(wav, start_frame, end_frame):
     """Convert a validated source half-open frame range under deterministic pcm16-v1."""
     if not isinstance(wav, WavData):
@@ -175,9 +230,14 @@ def convert_to_pcm16(wav, start_frame, end_frame):
     if start_frame < 0 or end_frame <= start_frame or end_frame > wav.frame_count:
         raise SentencePackageError("crop range must be a valid nonempty half-open frame range")
 
+    _, _, _, output_block_align, _ = _output_format(
+        wav.sample_rate, wav.channels, PCM16_ENCODING)
+    output_data_length = (end_frame - start_frame) * output_block_align
+    _serialized_output_layout(output_data_length)
+
     first_sample = start_frame * wav.channels
     final_sample = end_frame * wav.channels
-    output = bytearray((final_sample - first_sample) * 2)
+    output = bytearray(output_data_length)
     output_offset = 0
     for sample_index in range(first_sample, final_sample):
         byte_offset = sample_index * wav.sample_width
@@ -200,33 +260,17 @@ def write_wav(frame_data, sample_rate, channels, sample_encoding):
     """Return a canonical 44-byte-header WAV for a supported interleaved encoding."""
     if not isinstance(frame_data, (bytes, bytearray, memoryview)):
         raise SentencePackageError("WAV output frame data must be bytes")
-    if any(isinstance(value, bool) or not isinstance(value, int) or value <= 0
-           for value in (sample_rate, channels)):
-        raise SentencePackageError("WAV output sample rate and channels must be positive integers")
-    encodings = {
-        "pcm-u8": (1, 8, 1),
-        "pcm-s16le": (1, 16, 2),
-        "pcm-s24le": (1, 24, 3),
-        "pcm-s32le": (1, 32, 4),
-        "ieee-float32le": (3, 32, 4),
-    }
-    try:
-        format_tag, bits_per_sample, sample_width = encodings[sample_encoding]
-    except (KeyError, TypeError) as exc:
-        raise SentencePackageError(f"unsupported WAV output encoding: {sample_encoding!r}") from exc
-    frame_data = bytes(frame_data)
-    block_align = channels * sample_width
-    if not frame_data or len(frame_data) % block_align:
+    format_tag, bits_per_sample, sample_width, block_align, byte_rate = _output_format(
+        sample_rate, channels, sample_encoding)
+    data_byte_count = frame_data.nbytes if isinstance(frame_data, memoryview) else len(frame_data)
+    if data_byte_count == 0 or data_byte_count % block_align:
         raise SentencePackageError("WAV output must contain complete nonempty interleaved frames")
-    byte_rate = sample_rate * block_align
-    padding = len(frame_data) & 1
-    riff_size = 36 + len(frame_data) + padding
-    if byte_rate > 0xFFFFFFFF or riff_size > 0xFFFFFFFF:
-        raise SentencePackageError("WAV output exceeds RIFF/WAVE size limits")
+    padding, riff_size = _serialized_output_layout(data_byte_count)
+    frame_data = bytes(frame_data)
     header = struct.pack(
         "<4sI4s4sIHHIIHH4sI",
         b"RIFF", riff_size, b"WAVE", b"fmt ", 16, format_tag, channels,
-        sample_rate, byte_rate, block_align, bits_per_sample, b"data", len(frame_data),
+        sample_rate, byte_rate, block_align, bits_per_sample, b"data", data_byte_count,
     )
     return header + frame_data + (b"\0" if padding else b"")
 

@@ -24,6 +24,7 @@ from french_sentence_wav import (
     PCM16_POLICY,
     convert_to_pcm16,
     read_wav,
+    validate_pcm16_output_header,
     write_wav,
 )
 
@@ -306,8 +307,9 @@ def crop_pcm(source, destination, start_frame, end_frame, *, output_encoding=Non
 
 
 def preflight_source(source):
-    """Report the supported WAV shape without generating or changing audio."""
+    """Report source shape after checking fixed PCM16 header representability."""
     wav = read_wav(source, max_bytes=MAX_WAV_BYTES)
+    validate_pcm16_output_header(wav.sample_rate, wav.channels)
     return {
         "sampleEncoding": wav.sample_encoding,
         "sampleRate": wav.sample_rate,
