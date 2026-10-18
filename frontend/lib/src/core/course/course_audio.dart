@@ -7,6 +7,8 @@ import 'course_audio_catalog.dart';
 import 'course_audio_contract.dart';
 import 'course_recording_backend.dart';
 import 'course_reference_audio.dart';
+import 'french_sentence_exercises.dart';
+import 'french_sentence_package.dart';
 
 export 'course_audio_contract.dart';
 
@@ -150,10 +152,8 @@ class FrenchWordAudio implements CourseAudio {
       await _runSetup(mine).timeout(
         _deadlines.setup,
         onTimeout: () {
-          throw PhaseTimeoutException(
-              CourseAudioFailureReason.startupTimeout,
-              'The setup phase deadline was exceeded.',
-              _deadlines.setup);
+          throw PhaseTimeoutException(CourseAudioFailureReason.startupTimeout,
+              'The setup phase deadline was exceeded.', _deadlines.setup);
         },
       );
       if (mine != _current) return;
@@ -169,16 +169,15 @@ class FrenchWordAudio implements CourseAudio {
       // A source error — including a source TimeoutException that settles
       // before the allowance — passes through to the caller unchanged; the
       // phase error exists only on this adapter's own timer expiry.
-      final dynamic result = await utterance
-          .timeout(
-            _deadlines.ttsUtterance,
-            onTimeout: () {
-              throw PhaseTimeoutException(
-                  CourseAudioFailureReason.completionTimeout,
-                  'The utterance phase deadline was exceeded.',
-                  _deadlines.ttsUtterance);
-            },
-          );
+      final dynamic result = await utterance.timeout(
+        _deadlines.ttsUtterance,
+        onTimeout: () {
+          throw PhaseTimeoutException(
+              CourseAudioFailureReason.completionTimeout,
+              'The utterance phase deadline was exceeded.',
+              _deadlines.ttsUtterance);
+        },
+      );
       // The outer catch owns staleness: an abandoned request drains any
       // failure quietly; an active failure invalidates its token and
       // rethrows the same error with its original stack trace.
@@ -248,8 +247,16 @@ final courseSpeechSessionFactoryProvider =
 final courseReferenceAudioProvider = Provider<CourseReferenceAudio>((ref) {
   final CourseAudioCatalogLoader loader =
       ref.watch(courseAudioCatalogLoaderProvider);
+  final FrenchSentencePackageLoader sentenceLoader =
+      ref.watch(sentencePackageLoaderProvider);
   final FrenchReferenceAudio audio = FrenchReferenceAudio(
     loadCatalog: loader.load,
+    loadReferenceCatalog: (String referenceId) {
+      if (_isSentenceAudioReference(referenceId)) {
+        return sentenceLoader.loadAudioForReference(referenceId);
+      }
+      return loader.load();
+    },
     // The factory FUNCTIONS are stored, never invoked here: the engines are
     // built only when the facade actually selects a recording or speech.
     recordingFactory: ref.watch(courseRecordingSessionFactoryProvider),
@@ -261,6 +268,13 @@ final courseReferenceAudioProvider = Provider<CourseReferenceAudio>((ref) {
   });
   return audio;
 });
+
+bool _isSentenceAudioReference(String referenceId) =>
+    sentenceHuntSectionSpecifications.any(
+      (SentenceHuntSectionSpecification section) => section.items.any(
+        (SentenceHuntItemSpecification item) => item.audioRefId == referenceId,
+      ),
+    );
 
 /// The existing legacy provider now serves the shared alpha player instead
 /// of a raw TTS adapter: `speak(word)` plays the bundled recording for

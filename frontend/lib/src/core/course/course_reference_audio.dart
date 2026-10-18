@@ -48,10 +48,13 @@ import 'course_recording_backend.dart';
 final class FrenchReferenceAudio implements CourseReferenceAudio {
   FrenchReferenceAudio({
     required Future<CourseAudioCatalog> Function() loadCatalog,
+    Future<CourseAudioCatalog> Function(String referenceId)?
+        loadReferenceCatalog,
     required CourseRecordingSession Function() recordingFactory,
     required CoursePracticeSpeechSession Function() speechFactory,
     CourseAudioDeadlines deadlines = const CourseAudioDeadlines(),
   })  : _loadCatalog = loadCatalog,
+        _loadReferenceCatalog = loadReferenceCatalog,
         _recordingFactory = recordingFactory,
         _speechFactory = speechFactory,
         _deadlines = deadlines {
@@ -59,6 +62,8 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
   }
 
   final Future<CourseAudioCatalog> Function() _loadCatalog;
+  final Future<CourseAudioCatalog> Function(String referenceId)?
+      _loadReferenceCatalog;
   final CourseRecordingSession Function() _recordingFactory;
   final CoursePracticeSpeechSession Function() _speechFactory;
   final CourseAudioDeadlines _deadlines;
@@ -78,6 +83,7 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
 
   /// Retirements in flight (success or failure still to be learned).
   final List<Future<void>> _pendingRetirements = <Future<void>>[];
+
   /// Retirements that failed: durable, and a permanent block on admitting
   /// another audible owner. Kept with their stack traces so the blocking
   /// failure preserves its original throw site.
@@ -128,8 +134,7 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
       },
       onError: (Object error, StackTrace stackTrace) {
         if (_pendingRetirements.remove(retirement)) {
-          _retirementFailures
-              .add(_RetirementFailure(error, stackTrace));
+          _retirementFailures.add(_RetirementFailure(error, stackTrace));
         }
       },
     ));
@@ -155,16 +160,14 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
         List<Future<void>>.of(_pendingRetirements);
     try {
       await Future.wait<void>(snapshot, eagerError: false).timeout(
-            _deadlines.cleanup,
-            onTimeout: () {
-              // The facade owns this deadline: its expiry is the typed owned
-              // cleanup failure (created on onTimeout).
-              throw PhaseTimeoutException(
-                  CourseAudioFailureReason.cleanupFailed,
-                  'The cleanup deadline was exceeded.',
-                  _deadlines.cleanup);
-            },
-          );
+        _deadlines.cleanup,
+        onTimeout: () {
+          // The facade owns this deadline: its expiry is the typed owned
+          // cleanup failure (created on onTimeout).
+          throw PhaseTimeoutException(CourseAudioFailureReason.cleanupFailed,
+              'The cleanup deadline was exceeded.', _deadlines.cleanup);
+        },
+      );
     } on Object catch (error, stackTrace) {
       // Any retirement failure (the owned deadline above, or a source
       // failure of the session's cleanup) blocks the next owner as a
@@ -284,8 +287,8 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
         _register(token, word, _coreSpeak(token, word));
     // Legacy bridge: resolve only for Completed; everything else must be
     // visible to the caller's error handling — never a quiet completion.
-    final Future<void> delivery = terminal.then<void>(
-        (CourseAudioResult result) {
+    final Future<void> delivery =
+        terminal.then<void>((CourseAudioResult result) {
       if (result.outcome == CourseAudioOutcome.completed) {
         return;
       }
@@ -299,8 +302,8 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
     // across an event boundary (zone unhandled-error reporting); every
     // caller listener still receives the exact exception itself — verified
     // A/B against an unobserved bridge.
-    unawaited(delivery.then<void>(
-        (Object? value) {}, onError: (Object error) {}));
+    unawaited(
+        delivery.then<void>((Object? value) {}, onError: (Object error) {}));
     return delivery;
   }
 
@@ -347,7 +350,40 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
 
     CourseAudioCatalog catalog;
     try {
-      catalog = await _loadedCatalogue();
+      final Future<CourseAudioCatalog> Function(String referenceId)? resolver =
+          _loadReferenceCatalog;
+      if (resolver == null) {
+        catalog = await _loadedCatalogue();
+      } else {
+        try {
+          catalog = await _loadedReferenceCatalogue(id, resolver);
+        } on _ReferenceCatalogueSetupDeadline catch (error, stackTrace) {
+          if (!_owns(token)) {
+            return CourseAudioResult.cancelled(referenceId: id);
+          }
+          return CourseAudioResult.failed(
+            referenceId: id,
+            source: null,
+            failure: CourseAudioFailure(
+              reason: CourseAudioFailureReason.startupTimeout,
+              cause: error.phaseTimeout,
+              stackTrace: stackTrace,
+            ),
+          );
+        } on PhaseTimeoutException catch (error, stackTrace) {
+          // A resolver may report its own typed phase. Preserve that source
+          // classification; only the private marker above identifies this
+          // facade's setup allowance.
+          if (!_owns(token)) {
+            return CourseAudioResult.cancelled(referenceId: id);
+          }
+          return CourseAudioResult.failed(
+            referenceId: id,
+            source: null,
+            failure: _classify(error, stackTrace, null),
+          );
+        }
+      }
     } on PhaseTimeoutException catch (error, stackTrace) {
       // The facade's OWN setup deadline for the load expired: _loadedCatalogue
       // created the typed phase on onTimeout, so the owned expiry is an
@@ -420,11 +456,10 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
         // Explicit practice fallback: speak the exact authored text.
         return _runSpeech(token, id, reference.spokenText);
       }
-      final CourseAudioFailureReason reason = (variant ==
-              CourseAudioVariant.slow &&
-          entry != null)
-          ? CourseAudioFailureReason.unavailableVariant
-          : CourseAudioFailureReason.missingAsset;
+      final CourseAudioFailureReason reason =
+          (variant == CourseAudioVariant.slow && entry != null)
+              ? CourseAudioFailureReason.unavailableVariant
+              : CourseAudioFailureReason.missingAsset;
       return CourseAudioResult.failed(
         referenceId: id,
         source: null,
@@ -554,8 +589,8 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
     }
     // The facade can lose this request after dispatch (stop, replacement,
     // dispose): an abandonment settlement must drain quietly.
-    unawaited(speakFuture.then<void>((Object? value) {},
-        onError: (Object error) {}));
+    unawaited(
+        speakFuture.then<void>((Object? value) {}, onError: (Object error) {}));
 
     // The total facade speech allowance (setup + utterance). A well-behaved
     // session reports its own phase timeout first; the facade's bound is
@@ -563,14 +598,14 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
     // phase on onTimeout instead of surfacing a raw untyped timeout.
     try {
       await speakFuture.timeout(
-            _deadlines.setup + _deadlines.ttsUtterance,
-            onTimeout: () {
-              throw PhaseTimeoutException(
-                  CourseAudioFailureReason.completionTimeout,
-                  'The practice-speech deadline was exceeded.',
-                  _deadlines.setup + _deadlines.ttsUtterance);
-            },
-          );
+        _deadlines.setup + _deadlines.ttsUtterance,
+        onTimeout: () {
+          throw PhaseTimeoutException(
+              CourseAudioFailureReason.completionTimeout,
+              'The practice-speech deadline was exceeded.',
+              _deadlines.setup + _deadlines.ttsUtterance);
+        },
+      );
     } on PhaseTimeoutException catch (error, stackTrace) {
       // The session typed the expired phase (setup or utterance) or the
       // facade backstop created its own typed expiry; either way it is
@@ -648,8 +683,7 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
           terminal.complete(CourseAudioResult.failed(
             referenceId: id,
             source: recording.source,
-            failure:
-                _classify(error, stackTrace, recording.source),
+            failure: _classify(error, stackTrace, recording.source),
           ));
         }
       },
@@ -657,16 +691,14 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
 
     try {
       await session.prepare(recording).timeout(
-            _deadlines.setup,
-            onTimeout: () {
-              // The facade owns this setup deadline: its expiry is the typed
-              // owned startup phase (created on onTimeout).
-              throw PhaseTimeoutException(
-                  CourseAudioFailureReason.startupTimeout,
-                  'The prepare setup deadline was exceeded.',
-                  _deadlines.setup);
-            },
-          );
+        _deadlines.setup,
+        onTimeout: () {
+          // The facade owns this setup deadline: its expiry is the typed
+          // owned startup phase (created on onTimeout).
+          throw PhaseTimeoutException(CourseAudioFailureReason.startupTimeout,
+              'The prepare setup deadline was exceeded.', _deadlines.setup);
+        },
+      );
     } on PhaseTimeoutException catch (error, stackTrace) {
       // The facade's own setup allowance expired (typed owned deadline).
       events.cancel();
@@ -696,8 +728,8 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
     // The raw acknowledgment must be observed and fenced, whatever its
     // settlement: a quiet observer keeps a late release from becoming an
     // unhandled error, and the session fences it at retirement.
-    unawaited(startAck.then<void>((Object? value) {},
-        onError: (Object error) {}));
+    unawaited(
+        startAck.then<void>((Object? value) {}, onError: (Object error) {}));
     if (!_owns(token)) {
       events.cancel();
       return CourseAudioResult.cancelled(referenceId: id);
@@ -712,8 +744,7 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
     // start-ack settlement — publishes exactly one terminal; whatever
     // arrives later (a late ack success or failure) is fenced, never an
     // override.
-    final Completer<CourseAudioResult> public =
-        Completer<CourseAudioResult>();
+    final Completer<CourseAudioResult> public = Completer<CourseAudioResult>();
     void settleOnce(CourseAudioResult result) {
       if (public.isCompleted) {
         return;
@@ -726,51 +757,51 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
     }
 
     unawaited(terminal.future.timeout(
-          _deadlines.recordingCompletion(recording.duration),
-          onTimeout: () {
-            // The facade owns this completion floor: its expiry is the typed
-            // owned completion phase (created on onTimeout).
-            throw PhaseTimeoutException(
-                CourseAudioFailureReason.completionTimeout,
-                'The recording completion deadline was exceeded.',
-                _deadlines.recordingCompletion(recording.duration));
-          },
-        ).then<void>(
-          (CourseAudioResult result) => settleOnce(result),
-          onError: (Object error, StackTrace stackTrace) {
-            // The owned floor's typed expiry classifies as completionTimeout
-            // from its phase; a raw source timeout (settled before the
-            // floor) classifies conservatively; no inference either way.
-            final CourseAudioFailure failure =
-                _classify(error, stackTrace, recording.source);
-            settleOnce(CourseAudioResult.failed(
-                referenceId: id, source: recording.source, failure: failure));
-          },
-        ));
+      _deadlines.recordingCompletion(recording.duration),
+      onTimeout: () {
+        // The facade owns this completion floor: its expiry is the typed
+        // owned completion phase (created on onTimeout).
+        throw PhaseTimeoutException(
+            CourseAudioFailureReason.completionTimeout,
+            'The recording completion deadline was exceeded.',
+            _deadlines.recordingCompletion(recording.duration));
+      },
+    ).then<void>(
+      (CourseAudioResult result) => settleOnce(result),
+      onError: (Object error, StackTrace stackTrace) {
+        // The owned floor's typed expiry classifies as completionTimeout
+        // from its phase; a raw source timeout (settled before the
+        // floor) classifies conservatively; no inference either way.
+        final CourseAudioFailure failure =
+            _classify(error, stackTrace, recording.source);
+        settleOnce(CourseAudioResult.failed(
+            referenceId: id, source: recording.source, failure: failure));
+      },
+    ));
     unawaited(startAck.timeout(
-          _deadlines.setup,
-          onTimeout: () {
-            // The facade owns this acknowledgement bound: its expiry is the
-            // typed owned startup phase (created on onTimeout).
-            throw PhaseTimeoutException(
-                CourseAudioFailureReason.startupTimeout,
-                'The start-acknowledgement setup deadline was exceeded.',
-                _deadlines.setup);
-          },
-        ).then<void>(
-          (Object? value) {
-            // Acknowledgment success is not completion: the bound or an
-            // actual event decides.
-          },
-          onError: (Object error, StackTrace stackTrace) {
-            // The owned bound's typed expiry classifies as startupTimeout
-            // from its phase; a raw source timeout sets conservatively.
-            final CourseAudioFailure failure =
-                _classify(error, stackTrace, recording.source);
-            settleOnce(CourseAudioResult.failed(
-                referenceId: id, source: recording.source, failure: failure));
-          },
-        ));
+      _deadlines.setup,
+      onTimeout: () {
+        // The facade owns this acknowledgement bound: its expiry is the
+        // typed owned startup phase (created on onTimeout).
+        throw PhaseTimeoutException(
+            CourseAudioFailureReason.startupTimeout,
+            'The start-acknowledgement setup deadline was exceeded.',
+            _deadlines.setup);
+      },
+    ).then<void>(
+      (Object? value) {
+        // Acknowledgment success is not completion: the bound or an
+        // actual event decides.
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        // The owned bound's typed expiry classifies as startupTimeout
+        // from its phase; a raw source timeout sets conservatively.
+        final CourseAudioFailure failure =
+            _classify(error, stackTrace, recording.source);
+        settleOnce(CourseAudioResult.failed(
+            referenceId: id, source: recording.source, failure: failure));
+      },
+    ));
 
     await public.future;
     events.cancel();
@@ -810,15 +841,36 @@ final class FrenchReferenceAudio implements CourseReferenceAudio {
   /// first — passes through unchanged for the caller's classification.
   Future<CourseAudioCatalog> _loadedCatalogue() {
     final Future<CourseAudioCatalog> load = _loadCatalog();
-    unawaited(
-        load.then<void>((Object? value) {}, onError: (Object error) {}));
+    unawaited(load.then<void>((Object? value) {}, onError: (Object error) {}));
     return load.timeout(
       _deadlines.setup,
       onTimeout: () {
-        throw PhaseTimeoutException(
+        throw PhaseTimeoutException(CourseAudioFailureReason.startupTimeout,
+            'The catalogue load deadline was exceeded.', _deadlines.setup);
+      },
+    );
+  }
+
+  /// Resolves one reference through the optional per-reference catalogue
+  /// seam. It has the same setup deadline and quiet stale-settlement observer
+  /// as the original word-loader path, while keeping cache ownership in the
+  /// independent loaders rather than this facade.
+  Future<CourseAudioCatalog> _loadedReferenceCatalogue(
+    String referenceId,
+    Future<CourseAudioCatalog> Function(String referenceId) resolver,
+  ) {
+    final Future<CourseAudioCatalog> load = resolver(referenceId);
+    unawaited(load.then<void>((Object? value) {}, onError: (Object error) {}));
+    return load.timeout(
+      _deadlines.setup,
+      onTimeout: () {
+        throw _ReferenceCatalogueSetupDeadline(
+          PhaseTimeoutException(
             CourseAudioFailureReason.startupTimeout,
             'The catalogue load deadline was exceeded.',
-            _deadlines.setup);
+            _deadlines.setup,
+          ),
+        );
       },
     );
   }
@@ -924,4 +976,12 @@ final class _RetirementFailure {
 
   final Object error;
   final StackTrace? stackTrace;
+}
+
+/// Distinguishes the facade's optional-resolver setup timeout from a typed
+/// phase timeout reported by the source itself.
+final class _ReferenceCatalogueSetupDeadline implements Exception {
+  const _ReferenceCatalogueSetupDeadline(this.phaseTimeout);
+
+  final PhaseTimeoutException phaseTimeout;
 }
