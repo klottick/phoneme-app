@@ -1,6 +1,8 @@
 """Safe offline preparation tools for the FR08 sentence package."""
 
 import argparse
+import ctypes
+import errno
 import hashlib
 import json
 import os
@@ -60,9 +62,31 @@ def _fresh_target(path):
 
 def _publish_staging(staging, target):
     try:
-        os.rename(staging, target)
-    except FileExistsError as exc:
-        raise SentencePackageError(f"output already exists: {target}") from exc
+        _renameat2(staging, target)
+    except OSError as exc:
+        if exc.errno == errno.EEXIST:
+            raise SentencePackageError(f"output already exists: {target}") from exc
+        if exc.errno in (errno.ENOSYS, errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP):
+            raise SentencePackageError("atomic no-overwrite publication is unsupported on this platform") from exc
+        raise SentencePackageError(f"cannot publish output without overwrite: {target} ({exc.strerror or exc})") from exc
+
+
+def _renameat2(staging, target):
+    """Atomically rename a path without replacing any existing target."""
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        renameat2 = libc.renameat2
+    except (AttributeError, OSError) as exc:
+        raise OSError(errno.ENOSYS, "libc renameat2 is unavailable") from exc
+    renameat2.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                          ctypes.c_char_p, ctypes.c_uint)
+    renameat2.restype = ctypes.c_int
+    at_fdcwd, rename_noreplace = -100, 1
+    result = renameat2(at_fdcwd, os.fsencode(staging), at_fdcwd,
+                       os.fsencode(target), rename_noreplace)
+    if result != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code), os.fspath(target))
 
 
 def _safe_member_name(name):
@@ -195,14 +219,23 @@ def crop_pcm(source, destination, start_frame, end_frame):
                 raise SentencePackageError("WAV data is truncated")
     except (wave.Error, EOFError, OSError) as exc:
         raise SentencePackageError(f"invalid or unsupported WAV: {exc}") from exc
-    staging = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
     try:
-        with wave.open(str(staging), "wb") as out:
-            out.setparams(params)
-            out.writeframes(data)
+        staging_fd, staging_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent)
+    except OSError as exc:
+        raise SentencePackageError(f"cannot create private crop staging file: {exc}") from exc
+    staging = Path(staging_name)
+    published = False
+    try:
+        with os.fdopen(staging_fd, "wb") as raw:
+            with wave.open(raw, "wb") as out:
+                out.setparams(params)
+                out.writeframes(data)
         _publish_staging(staging, destination)
+        published = True
     finally:
-        staging.unlink(missing_ok=True)
+        if not published:
+            staging.unlink(missing_ok=True)
     size, digest = _identity(destination)
     count = end_frame - start_frame
     return {"path": str(destination), "sha256": digest, "byteLength": size,
@@ -278,12 +311,21 @@ def main(argv=None):
 
 def _write_json(path, value):
     path = _fresh_target(path)
-    staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
-        staging.write_text(canonical_json(value) + "\n", encoding="utf-8", errors="strict")
+        staging_fd, staging_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    except OSError as exc:
+        raise SentencePackageError(f"cannot create private JSON staging file: {exc}") from exc
+    staging = Path(staging_name)
+    published = False
+    try:
+        with os.fdopen(staging_fd, "w", encoding="utf-8", errors="strict") as out:
+            out.write(canonical_json(value) + "\n")
         _publish_staging(staging, path)
+        published = True
     finally:
-        staging.unlink(missing_ok=True)
+        if not published:
+            staging.unlink(missing_ok=True)
     return value
 
 

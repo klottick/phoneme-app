@@ -1,12 +1,15 @@
-import hashlib
+import errno
 import gzip
+import hashlib
 import io
 import json
+import os
 import tarfile
 import tempfile
 import unittest
 import urllib.error
 import wave
+from contextlib import ExitStack
 from pathlib import Path
 from unittest import mock
 
@@ -33,6 +36,115 @@ def archive_bytes(entries):
 
 
 class PreparationTests(unittest.TestCase):
+    def _run_publication_race(self, operation_name, target_kind):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            destination = root / 'destination'
+            sentinel = root / 'sentinel'
+            if target_kind == 'symlink':
+                sentinel.write_bytes(b'symlink-target')
+
+            if operation_name == 'select':
+                archive_bytes_value = archive_bytes([('one.wav', b'original')])
+                archive = root / 'source.tar.gz'; archive.write_bytes(archive_bytes_value)
+                operation = lambda: prep.select_originals(archive, ['one.wav'], destination)
+                pins = (mock.patch.object(prep, 'ARCHIVE_SIZE', len(archive_bytes_value)),
+                        mock.patch.object(prep, 'ARCHIVE_SHA256', hashlib.sha256(archive_bytes_value).hexdigest()))
+            elif operation_name == 'fetch':
+                tsv = b'1\tone.wav\tbonjour\tbonjour\tx\t2\tfemale\n'
+                tar = archive_bytes([('one.wav', b'RIFF')])
+                payloads = {prep.TSV_URL: tsv, prep.ARCHIVE_URL: tar}
+                operation = lambda: prep.fetch_source(destination)
+                pins = (mock.patch.object(prep, 'TSV_SIZE', len(tsv)),
+                        mock.patch.object(prep, 'TSV_SHA256', hashlib.sha256(tsv).hexdigest()),
+                        mock.patch.object(prep, 'ARCHIVE_SIZE', len(tar)),
+                        mock.patch.object(prep, 'ARCHIVE_SHA256', hashlib.sha256(tar).hexdigest()),
+                        mock.patch.object(prep, '_fetch_to', side_effect=lambda url, path, *_: Path(path).write_bytes(payloads[url])))
+            elif operation_name == 'crop':
+                source = root / 'source.wav'; make_wav(source, b'\x00\x00', channels=1, width=2)
+                operation = lambda: prep.crop_pcm(source, destination, 0, 1)
+                pins = ()
+            else:
+                operation = lambda: prep._write_json(destination, {'draft': True})
+                pins = ()
+
+            actual_publish = prep._publish_staging
+            def create_competing_target(staging, target):
+                if target_kind == 'file':
+                    target.write_bytes(b'concurrent-file')
+                elif target_kind == 'directory':
+                    target.mkdir()
+                else:
+                    sentinel.write_bytes(b'symlink-target')
+                    target.symlink_to(sentinel)
+                return actual_publish(staging, target)
+
+            with mock.patch.object(prep, '_publish_staging', side_effect=create_competing_target):
+                with ExitStack() as stack:
+                    for patcher in pins: stack.enter_context(patcher)
+                    with self.assertRaises(SentencePackageError):
+                        operation()
+
+            if target_kind == 'file':
+                self.assertFalse(destination.is_dir())
+                self.assertEqual(destination.read_bytes(), b'concurrent-file')
+            elif target_kind == 'directory':
+                self.assertTrue(destination.is_dir())
+                self.assertEqual(list(destination.iterdir()), [])
+            else:
+                self.assertTrue(destination.is_symlink())
+                self.assertEqual(destination.resolve(), sentinel)
+                self.assertEqual(sentinel.read_bytes(), b'symlink-target')
+            self.assertFalse(any(p.name.startswith('.destination.') for p in root.iterdir()))
+
+    def test_atomic_publication_refuses_racing_files_directories_and_symlinks(self):
+        for operation in ('select', 'fetch', 'crop', 'json'):
+            for target_type in ('file', 'directory', 'symlink'):
+                with self.subTest(operation=operation, target_type=target_type):
+                    self._run_publication_race(operation, target_type)
+
+    def test_unsupported_atomic_publication_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            staging, destination = root / 'staging', root / 'destination'
+            staging.write_bytes(b'staged')
+            with mock.patch.object(prep, '_renameat2', side_effect=OSError(errno.ENOSYS, 'unsupported')):
+                with self.assertRaises(SentencePackageError): prep._publish_staging(staging, destination)
+            self.assertFalse(destination.exists())
+            self.assertEqual(staging.read_bytes(), b'staged')
+
+    def _assert_predictable_staging_ignored(self, operation_name):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / 'source.wav'; make_wav(source, b'\x01\x02', channels=1, width=2)
+            extension = 'wav' if operation_name == 'crop' else 'json'
+            output = root / f'output.{extension}'
+            linked_output = root / f'linked.{extension}'
+            predictable = root / f'.{output.name}.{os.getpid()}.tmp'
+            predictable_link = root / f'.{linked_output.name}.{os.getpid()}.tmp'
+            predictable.write_bytes(b'keep-staging')
+            link_target = root / 'link-target'; link_target.write_bytes(b'keep-link')
+            predictable_link.symlink_to(link_target)
+
+            def write_output(path):
+                if operation_name == 'crop': prep.crop_pcm(source, path, 0, 1)
+                else: prep._write_json(path, {'draft': True})
+
+            write_output(output)
+            write_output(linked_output)
+
+            self.assertTrue(output.is_file())
+            self.assertTrue(linked_output.is_file())
+            self.assertEqual(predictable.read_bytes(), b'keep-staging')
+            self.assertTrue(predictable_link.is_symlink())
+            self.assertEqual(link_target.read_bytes(), b'keep-link')
+
+    def test_crop_ignores_predictable_staging_file_and_symlink(self):
+        self._assert_predictable_staging_ignored('crop')
+
+    def test_json_ignores_predictable_staging_file_and_symlink(self):
+        self._assert_predictable_staging_ignored('json')
+
     def test_archive_rejects_traversal_links_and_duplicate_members(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -146,8 +258,9 @@ class PreparationTests(unittest.TestCase):
                 self.assertEqual(prep.main(['annotate', '--text-file', str(text), '--executable', '/fake',
                                             '--data-parent', str(root), '--output', str(output)]), 1)
             self.assertEqual(output.read_bytes(), original_output)
-            with self.assertRaises(SystemExit) as exit_status:
-                prep.main(['not-a-command'])
+            with mock.patch('sys.stderr', io.StringIO()):
+                with self.assertRaises(SystemExit) as exit_status:
+                    prep.main(['not-a-command'])
             self.assertEqual(exit_status.exception.code, 2)
 
     def test_archive_rejects_links_devices_oversize_bad_identity_and_unsafe_requests(self):
@@ -403,7 +516,8 @@ class PreparationTests(unittest.TestCase):
             tsv = root / 'selection.json'; tsv.write_text('["one.wav"]')
             cache = root / 'cache'; cache.mkdir(); (cache / 'train.tar.gz').write_bytes(b'tar')
             output = root / 'selected'
-            with mock.patch.object(prep, 'fetch_source', return_value={'ok': 1}), mock.patch.object(prep, 'select_originals', return_value={'ok': 1}) as select, mock.patch.object(prep, 'crop_pcm', return_value={'ok': 1}), mock.patch.object(prep, 'draft_phonemes', return_value={'status': 'draft', 'text': 'été'}), mock.patch.object(prep.urllib.request, 'build_opener', side_effect=AssertionError('unexpected network')):
+            stdout = io.StringIO()
+            with mock.patch('sys.stdout', stdout), mock.patch.object(prep, 'fetch_source', return_value={'ok': 1}), mock.patch.object(prep, 'select_originals', return_value={'ok': 1}) as select, mock.patch.object(prep, 'crop_pcm', return_value={'ok': 1}), mock.patch.object(prep, 'draft_phonemes', return_value={'status': 'draft', 'text': 'été'}), mock.patch.object(prep.urllib.request, 'build_opener', side_effect=AssertionError('unexpected network')):
                 self.assertEqual(prep.main(['fetch-source', '--cache', str(root / 'cache2')]), 0)
                 self.assertEqual(prep.main(['select', '--selection', str(tsv), '--cache', str(cache), '--output', str(output)]), 0)
                 wav = root / 'source.wav'; make_wav(wav, b'\0\0')
@@ -413,6 +527,7 @@ class PreparationTests(unittest.TestCase):
                 self.assertEqual(prep.main(['annotate', '--text-file', str(text), '--executable', str(root / 'fake'), '--data-parent', str(root), '--output', str(annotation)]), 0)
                 self.assertIn('été', annotation.read_text(encoding='utf-8'))
                 self.assertEqual(select.call_count, 1)
+            self.assertEqual(stdout.getvalue(), '{"ok":1}\n{"ok":1}\n{"ok":1}\n')
             for content in ('{', 'null', '["one.wav", "one.wav"]'):
                 selection = root / 'bad-selection.json'; selection.write_text(content)
                 stderr = io.StringIO()
