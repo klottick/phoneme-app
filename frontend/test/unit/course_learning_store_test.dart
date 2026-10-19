@@ -208,6 +208,21 @@ void main() {
 
     final legacy = CourseLearningCommandCodec.legacyCanonicalCommand(command);
     expect(
+      legacy,
+      '{"action":{"audioSource":"pendingRecording","kind":"chooseSound",'
+      '"selectedSound":"u"},"activityId":"lesson:en-fr-u-y","authGeneration":0,'
+      '"candidate":{"kind":"discovery","session":{"answered":true,"attemptCount":1,'
+      '"contentRevision":1,"itemIds":["tout","tu","rouge","rue","vous","lune",'
+      '"doux","jus","loup","mur"],"lastCorrect":true,"latestAnswers":{"tout":true},'
+      '"phase":"exercise","policy":{"completionThresholdPercent":80},"position":0,'
+      '"queue":["tout","tu","rouge","rue","vous","lune","doux","jus","loup","mur"],'
+      '"round":1,"sessionId":"AAAAAAAAAAAAAAAAAAAA01","submittedThisRound":["tout"],'
+      '"version":1}},"draws":[],"expected":{"generation":1,"revision":0,"sequence":1},'
+      '"feedback":{"bonus":0,"cascades":0,"correct":true,"message":"Correct","points":0},'
+      '"scope":"course.learning.v2.ZW4tZnI.g","submittedAt":"2026-10-15T12:00:00.000Z",'
+      '"token":"AAAAAAAAAAAAAAAAAAAA02"}',
+    );
+    expect(
       CourseLearningCommandCodec.legacyCanonicalCommand(
         withScopeRevision(state.revision + 1)
       ),
