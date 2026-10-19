@@ -1,11 +1,11 @@
 import 'dart:convert';
 
-import '../../features/arcade/word_match_engine.dart';
-import 'course_attempt.dart';
+import '../../../features/arcade/word_match_engine.dart';
+import '../course_attempt.dart';
 import 'course_learning_checkpoint_codec.dart';
-import 'course_learning_registry.dart';
-import 'course_learning_state.dart';
-import 'course_skill_summary.dart';
+import '../course_learning_registry.dart';
+import '../course_learning_state.dart';
+import '../course_skill_summary.dart';
 
 /// Validates the typed course state assembled from normalized SQL rows.
 ///

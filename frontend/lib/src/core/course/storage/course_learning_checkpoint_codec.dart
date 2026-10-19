@@ -1,14 +1,14 @@
 import 'dart:convert';
 import 'dart:math';
 
-import '../../features/arcade/sound_match_engine.dart';
-import '../../features/arcade/word_match_engine.dart';
-import 'course_attempt.dart';
-import 'course_learning_checkpoint.dart';
-import 'course_learning_registry.dart';
-import 'course_learning_state.dart';
-import 'lesson_section_session.dart';
-import 'storage/learning_tables.dart';
+import '../../../features/arcade/sound_match_engine.dart';
+import '../../../features/arcade/word_match_engine.dart';
+import '../course_attempt.dart';
+import '../course_learning_checkpoint.dart';
+import '../course_learning_registry.dart';
+import '../course_learning_state.dart';
+import '../lesson_section_session.dart';
+import 'learning_tables.dart';
 
 /// Strict, bounded codec for one resumable course activity checkpoint.
 ///

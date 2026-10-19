@@ -1,16 +1,16 @@
 import 'dart:math';
 
-import 'course_attempt.dart';
-import 'course_learning_command.dart';
-import 'course_learning_error.dart';
-import 'course_learning_state.dart';
+import '../course_attempt.dart';
+import '../course_learning_command.dart';
+import '../course_learning_error.dart';
+import '../course_learning_state.dart';
 import 'course_learning_state_validator.dart';
-import 'course_learning_store.dart';
-import 'course_learning_sync.dart';
+import '../course_learning_store.dart';
+import '../course_learning_sync.dart';
 import 'course_learning_sql_adapter.dart';
-import 'course_learning_transition.dart';
-import 'storage/learning_database.dart' show LearningDatabaseHandle;
-import 'storage/learning_sql_transaction.dart';
+import '../course_learning_transition.dart';
+import 'learning_database.dart' show LearningDatabaseHandle;
+import 'learning_sql_transaction.dart';
 
 /// Course repository over normalized SQLite records.
 ///

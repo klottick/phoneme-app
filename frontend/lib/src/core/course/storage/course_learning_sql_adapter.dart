@@ -2,25 +2,25 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart';
 
-import 'course_attempt.dart';
-import 'course_learning_checkpoint.dart';
+import '../course_attempt.dart';
+import '../course_learning_checkpoint.dart';
 import 'course_learning_checkpoint_codec.dart';
-import 'course_learning_command.dart';
-import 'course_learning_command_codec.dart';
-import 'course_learning_error.dart';
-import 'course_learning_registry.dart';
-import 'course_learning_state.dart';
+import '../course_learning_command.dart';
+import '../course_learning_command_codec.dart';
+import '../course_learning_error.dart';
+import '../course_learning_registry.dart';
+import '../course_learning_state.dart';
 import 'course_learning_state_validator.dart';
-import 'course_learning_store.dart' show LearningCommit;
-import 'course_learning_sync.dart';
-import 'course_learning_transition.dart';
-import 'course_skill_summary.dart';
-import 'learning_storage_types.dart';
-import 'lesson_policy.dart';
-import 'storage/learning_database.dart' show LearningDatabase;
-import 'storage/learning_sql_transaction.dart';
-import 'storage/learning_storage_scope.dart';
-import 'storage/learning_tables.dart';
+import '../course_learning_store.dart' show LearningCommit;
+import '../course_learning_sync.dart';
+import '../course_learning_transition.dart';
+import '../course_skill_summary.dart';
+import '../learning_storage_types.dart';
+import '../lesson_policy.dart';
+import 'learning_database.dart' show LearningDatabase;
+import 'learning_sql_transaction.dart';
+import 'learning_storage_scope.dart';
+import 'learning_tables.dart';
 
 /// Maps course learning commands and state to the shared normalized SQL
 /// transaction protocol. This adapter is independent of the active

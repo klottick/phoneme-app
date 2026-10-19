@@ -16,10 +16,10 @@ import 'package:linguist/src/core/course/course_learning_store.dart';
 import 'package:linguist/src/core/course/course_learning_sync.dart';
 import 'package:linguist/src/core/course/course_learning_transition.dart';
 import 'package:linguist/src/core/course/course_learning_registry.dart';
-import 'package:linguist/src/core/course/course_learning_sql_adapter.dart';
-import 'package:linguist/src/core/course/course_learning_sql_repository.dart';
-import 'package:linguist/src/core/course/course_learning_state_validator.dart';
-import 'package:linguist/src/core/course/course_learning_checkpoint_codec.dart';
+import 'package:linguist/src/core/course/storage/course_learning_sql_adapter.dart';
+import 'package:linguist/src/core/course/storage/course_learning_sql_repository.dart';
+import 'package:linguist/src/core/course/storage/course_learning_state_validator.dart';
+import 'package:linguist/src/core/course/storage/course_learning_checkpoint_codec.dart';
 import 'package:linguist/src/core/course/storage/learning_database.dart'
     show LearningDatabase, LearningDatabaseHandle;
 import 'package:linguist/src/core/course/storage/learning_sql_transaction.dart';
