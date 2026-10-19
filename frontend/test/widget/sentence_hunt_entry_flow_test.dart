@@ -11,6 +11,7 @@ import 'package:linguist/src/app.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
 import 'package:linguist/src/core/course/backend.dart';
 import 'package:linguist/src/core/course/french_sentence_package.dart';
+import 'package:linguist/src/core/course/learning_storage_types.dart';
 import 'package:linguist/src/core/course/sentence_hunt_content.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/comparison_learning_state.dart';
@@ -22,6 +23,7 @@ import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_transition.dart';
 import 'package:linguist/src/core/course/storage/learning_database.dart'
     show LearningDatabase, LearningDatabaseHandle;
+import 'package:linguist/src/core/course/storage/sentence_hunt_learning_command_codec.dart';
 import 'package:linguist/src/core/course/storage/sentence_hunt_learning_sql_repository.dart';
 import 'package:linguist/src/features/course/sentence_hunt_progress_section.dart';
 import 'package:linguist/src/features/course/sentence_hunt_progress_summary.dart';
@@ -806,6 +808,8 @@ void main() {
       observerDb,
       scope,
     );
+    final Map<String, List<Map<String, Object?>>> sqlRowsBeforeFinish =
+        await _sentenceScopedRowSnapshots(observerDb, scope);
     final int revisionBeforeFinish = await _sentenceScopeRevision(
       observerDb,
       scope,
@@ -855,6 +859,11 @@ void main() {
     await tester.runAsync(() => failedFinishGate.entered.future);
     await tester.pump();
     expect(find.byType(SentenceHuntLessonScreen), findsOneWidget);
+    _expectSentenceSqlSnapshotsEqual(
+      sqlRowsBeforeFinish,
+      await _sentenceScopedRowSnapshots(observerDb, scope),
+      reason: 'a held failed Finish leaves saved SQL row values unchanged',
+    );
     expect(await _sentenceTableCounts(observerDb, scope), countsBeforeFinish);
     expect(
       await _sentenceScopeRevision(observerDb, scope),
@@ -872,6 +881,11 @@ void main() {
     await tester.runAsync(() => failedFinishGate.completed.future);
     await tester.pumpAndSettle();
     expect(find.text('Retry saving'), findsOneWidget);
+    _expectSentenceSqlSnapshotsEqual(
+      sqlRowsBeforeFinish,
+      await _sentenceScopedRowSnapshots(observerDb, scope),
+      reason: 'failed Finish preserves every previously saved SQL row value',
+    );
     expect(
       await _sentenceTableCounts(observerDb, scope),
       countsBeforeFinish,
@@ -906,6 +920,16 @@ void main() {
       scope: scope,
       sectionId: sectionId,
     );
+    final SentenceHuntState finishCandidate =
+        SentenceHuntTransitionEngine(catalogue: catalogue)
+            .evaluate(
+              state: beforeFinish,
+              command: retryCommand,
+              committedAt: retryCommand.submittedAt,
+            )
+            .nextState;
+    expect(finishCandidate.revision, beforeFinish.revision + 1);
+    expect(finishCandidate.completions, hasLength(1));
     expect(finishPublicationCount, 0);
     expect(
       container.read(sentenceHuntLearningStateProvider).asData?.value.revision,
@@ -916,6 +940,21 @@ void main() {
       await _sentenceScopeRevision(observerDb, scope),
       revisionBeforeFinish + 1,
       reason: 'the commit is durable before its provider ACK callback',
+    );
+    final Map<String, List<Map<String, Object?>>> sqlRowsAfterDurableCommit =
+        await _sentenceScopedRowSnapshots(observerDb, scope);
+    _expectPriorSentenceSqlRowsPreserved(
+      sqlRowsBeforeFinish,
+      sqlRowsAfterDurableCommit,
+      reason: 'Finish preserves values in every pre-existing SQL row',
+    );
+    await _expectNewFinishSqlValues(
+      db: observerDb,
+      scope: scope,
+      rows: sqlRowsAfterDurableCommit,
+      expectedReceipt: finishCandidate.slots[sectionId]!.latestReceipt,
+      expectedCompletion: finishCandidate.completions.single,
+      expectedCommand: retryCommand,
     );
     expect(await _sentenceCompletionCount(observerDb, scope), 1);
     final Map<String, int> countsAfterDurableCommit =
@@ -953,25 +992,28 @@ void main() {
       reason: 'the real repository publishes its ACKed Finish once',
     );
     final SentenceHuntState afterFinish = publishedState;
-    final SentenceHuntState finishCandidate =
-        SentenceHuntTransitionEngine(catalogue: catalogue)
-            .evaluate(
-              state: beforeFinish,
-              command: retryCommand,
-              committedAt: retryCommand.submittedAt,
-            )
-            .nextState;
-    expect(finishCandidate.revision, beforeFinish.revision + 1);
-    expect(finishCandidate.completions, hasLength(1));
-    expect(afterFinish.revision, finishCandidate.revision);
-    expect(afterFinish.completions, hasLength(1));
-    expect(afterFinish.attempts.length, beforeFinish.attempts.length);
-    expect(afterFinish.mistakes.length, beforeFinish.mistakes.length);
-    expect(afterFinish.summaries.length, beforeFinish.summaries.length);
     expect(
-      afterFinish.teachingExposure.length,
-      beforeFinish.teachingExposure.length,
+      _sentenceHuntStateValues(afterFinish),
+      _sentenceHuntStateValues(finishCandidate),
+      reason: 'reloaded Finish state matches every typed transition value',
     );
+    _expectPriorSentenceHuntValuesPreserved(beforeFinish, afterFinish);
+    final SentenceHuntCompletion expectedCompletion =
+        finishCandidate.completions.single;
+    final SentenceHuntCompletion actualCompletion =
+        afterFinish.completions.single;
+    expect(actualCompletion.scope, expectedCompletion.scope);
+    expect(actualCompletion.sectionId, expectedCompletion.sectionId);
+    expect(
+      actualCompletion.contentRevision,
+      expectedCompletion.contentRevision,
+    );
+    expect(actualCompletion.policyRevision, expectedCompletion.policyRevision);
+    expect(
+      actualCompletion.thresholdPercent,
+      expectedCompletion.thresholdPercent,
+    );
+    expect(actualCompletion.committedAt, expectedCompletion.committedAt);
     expect(
         SentenceHuntProgressSummary.fromState(
         state: afterFinish,
@@ -1020,6 +1062,58 @@ void main() {
       reason: 'an acknowledged duplicate Finish publishes no refresh',
     );
     expect(finishPublicationCount, 1);
+    final Map<String, List<Map<String, Object?>>> sqlRowsBeforeDuplicateCheck =
+        await _sentenceScopedRowSnapshots(observerDb, scope);
+    _expectSentenceSqlSnapshotsEqual(
+      sqlRowsAfterDurableCommit,
+      sqlRowsBeforeDuplicateCheck,
+      reason: 'duplicate Finish has not altered any scoped SQL row values',
+    );
+
+    // A count-preserving timestamp mutation must fail the same complete value
+    // comparison used above; restore the durable row immediately afterward.
+    final int scopeId = await _sentenceScopeId(observerDb, scope);
+    final int expectedCommittedAtUs =
+        expectedCompletion.committedAt.microsecondsSinceEpoch;
+    await observerDb.customStatement(
+      'UPDATE learning_completions SET committed_at_us = committed_at_us + 1 '
+      'WHERE scope_id = ? AND activity_id = ? AND content_revision = ?',
+      <Object?>[
+        scopeId,
+        expectedCompletion.sectionId,
+        expectedCompletion.contentRevision,
+      ],
+    );
+    expect(await _sentenceCompletionCount(observerDb, scope), 1);
+    try {
+      final SentenceHuntState mutatedState = await store.load();
+      expect(
+        _sentenceHuntStateValues(mutatedState),
+        isNot(equals(_sentenceHuntStateValues(finishCandidate))),
+        reason: 'a count-preserving completion timestamp mutation is detected',
+      );
+    } finally {
+      await observerDb.customStatement(
+        'UPDATE learning_completions SET committed_at_us = ? '
+        'WHERE scope_id = ? AND activity_id = ? AND content_revision = ?',
+        <Object?>[
+          expectedCommittedAtUs,
+          scopeId,
+          expectedCompletion.sectionId,
+          expectedCompletion.contentRevision,
+        ],
+      );
+    }
+    expect(
+      _sentenceHuntStateValues(await store.load()),
+      _sentenceHuntStateValues(finishCandidate),
+      reason: 'the timestamp mutation control restores the original SQL row',
+    );
+    _expectSentenceSqlSnapshotsEqual(
+      sqlRowsBeforeDuplicateCheck,
+      await _sentenceScopedRowSnapshots(observerDb, scope),
+      reason: 'the timestamp mutation control leaves no persisted change',
+    );
 
     router.go('/home');
     await tester.pumpAndSettle();
@@ -1536,6 +1630,369 @@ Future<void> _exerciseCorruptSentenceRecovery(
 
   await tester.pumpWidget(const SizedBox());
   await tester.pumpAndSettle();
+}
+
+const List<String> _sentenceFinishUnchangedSqlTables = <String>[
+  'learning_content_bindings',
+  'learning_attempts',
+  'learning_attempt_values',
+  'learning_attempt_evidence',
+  'learning_mistakes',
+  'learning_summaries',
+  'learning_exposure',
+  'learning_best_scores',
+  'supported_sync_outbox',
+];
+
+const List<String> _sentenceFinishAppendOnlySqlTables = <String>[
+  'learning_command_receipts',
+  'learning_completions',
+];
+
+Future<Map<String, List<Map<String, Object?>>>> _sentenceScopedRowSnapshots(
+  LearningDatabase db,
+  SentenceHuntProfileScope scope,
+) async {
+  final int scopeId = await _sentenceScopeId(db, scope);
+  final Map<String, List<Map<String, Object?>>> snapshots =
+      <String, List<Map<String, Object?>>>{};
+  for (final String table in <String>[
+    ..._sentenceFinishUnchangedSqlTables,
+    ..._sentenceFinishAppendOnlySqlTables,
+  ]) {
+    final List<drift.QueryRow> rows = await db
+        .customSelect(
+          'SELECT rowid AS __rowid, * FROM $table '
+          'WHERE scope_id = ? ORDER BY rowid',
+          variables: <drift.Variable<Object>>[drift.Variable<int>(scopeId)],
+        )
+        .get();
+    snapshots[table] = rows
+        .map((drift.QueryRow row) => Map<String, Object?>.from(row.data))
+        .toList();
+  }
+  return snapshots;
+}
+
+void _expectSentenceSqlSnapshotsEqual(
+  Map<String, List<Map<String, Object?>>> expected,
+  Map<String, List<Map<String, Object?>>> actual, {
+  required String reason,
+}) {
+  expect(actual, expected, reason: reason);
+}
+
+void _expectPriorSentenceSqlRowsPreserved(
+  Map<String, List<Map<String, Object?>>> before,
+  Map<String, List<Map<String, Object?>>> after, {
+  required String reason,
+}) {
+  for (final String table in _sentenceFinishUnchangedSqlTables) {
+    expect(after[table], before[table], reason: '$reason: $table');
+  }
+  for (final String table in _sentenceFinishAppendOnlySqlTables) {
+    final List<Map<String, Object?>> priorRows = before[table]!;
+    final Set<Object?> priorRowIds = priorRows
+        .map((Map<String, Object?> row) => row['__rowid'])
+        .toSet();
+    final List<Map<String, Object?>> retainedRows = after[table]!
+        .where(
+          (Map<String, Object?> row) => priorRowIds.contains(row['__rowid']),
+        )
+        .toList();
+    expect(retainedRows, priorRows, reason: '$reason: existing $table values');
+    expect(
+      after[table],
+      hasLength(priorRows.length + 1),
+      reason: 'Finish adds exactly one $table row',
+    );
+  }
+}
+
+Future<void> _expectNewFinishSqlValues({
+  required LearningDatabase db,
+  required SentenceHuntProfileScope scope,
+  required Map<String, List<Map<String, Object?>>> rows,
+  required SentenceHuntReceipt expectedReceipt,
+  required SentenceHuntCompletion expectedCompletion,
+  required SentenceHuntCommand expectedCommand,
+}) async {
+  final int scopeId = await _sentenceScopeId(db, scope);
+  final List<Map<String, Object?>> receiptRows =
+      rows['learning_command_receipts']!
+          .where(
+            (Map<String, Object?> row) => row['token'] == expectedReceipt.token,
+          )
+          .toList();
+  expect(receiptRows, hasLength(1));
+  final Map<String, Object?> actualReceiptValues = Map<String, Object?>.from(
+    receiptRows.single,
+  )..remove('__rowid');
+  expect(actualReceiptValues, <String, Object?>{
+    'scope_id': scopeId,
+    'activity_id': expectedReceipt.sectionId,
+    'token': expectedReceipt.token,
+    'canonical_payload': SentenceHuntCommandCodec.canonicalCommand(
+      expectedCommand,
+    ),
+    'before_generation': expectedReceipt.before.generation,
+    'before_sequence': expectedReceipt.before.sequence,
+    'before_cursor_revision': expectedReceipt.before.revision,
+    'after_generation': expectedReceipt.after.generation,
+    'after_sequence': expectedReceipt.after.sequence,
+    'after_cursor_revision': expectedReceipt.after.revision,
+    'commit_ordinal': expectedReceipt.commitOrdinal,
+    'result_activity_id': expectedReceipt.sectionId,
+    'result_generation': expectedReceipt.after.generation,
+    'result_sequence': expectedReceipt.after.sequence,
+    'result_cursor_revision': expectedReceipt.after.revision,
+  }, reason: 'the durable retry receipt retains every expected SQL value');
+
+  final List<Map<String, Object?>> completionRows =
+      rows['learning_completions']!
+          .where(
+            (Map<String, Object?> row) =>
+                row['activity_id'] == expectedCompletion.sectionId &&
+                row['content_revision'] == expectedCompletion.contentRevision,
+          )
+          .toList();
+  expect(completionRows, hasLength(1));
+  final Map<String, Object?> actualCompletionValues = Map<String, Object?>.from(
+    completionRows.single,
+  )..remove('__rowid');
+  expect(actualCompletionValues, <String, Object?>{
+    'scope_id': scopeId,
+    'activity_id': expectedCompletion.sectionId,
+    'content_revision': expectedCompletion.contentRevision,
+    'policy_kind': 'discoveryThreshold',
+    'policy_revision': expectedCompletion.policyRevision,
+    'threshold_percent': expectedCompletion.thresholdPercent,
+    'committed_at_us': expectedCompletion.committedAt.microsecondsSinceEpoch,
+  }, reason: 'the durable completion retains its exact typed metadata');
+}
+
+void _expectPriorSentenceHuntValuesPreserved(
+  SentenceHuntState before,
+  SentenceHuntState after,
+) {
+  expect(
+    after.attempts.map(_sentenceHuntAttemptValues).toList(),
+    before.attempts.map(_sentenceHuntAttemptValues).toList(),
+    reason: 'Finish preserves every prior attempt value',
+  );
+  expect(
+    _sentenceHuntMistakeValues(after),
+    _sentenceHuntMistakeValues(before),
+    reason: 'Finish preserves every prior mistake value',
+  );
+  expect(
+    _sentenceHuntSummaryValues(after),
+    _sentenceHuntSummaryValues(before),
+    reason: 'Finish preserves every prior summary value',
+  );
+  expect(
+    _sentenceHuntExposureValues(after),
+    _sentenceHuntExposureValues(before),
+    reason: 'Finish preserves every prior teaching-exposure value',
+  );
+  expect(after.receipts, hasLength(before.receipts.length + 1));
+  expect(
+    after.receipts
+        .take(before.receipts.length)
+        .map(_sentenceHuntReceiptValues)
+        .toList(),
+    before.receipts.map(_sentenceHuntReceiptValues).toList(),
+    reason: 'Finish preserves every prior receipt value',
+  );
+  expect(after.completions, hasLength(before.completions.length + 1));
+  expect(
+    after.completions
+        .take(before.completions.length)
+        .map(_sentenceHuntCompletionValues)
+        .toList(),
+    before.completions.map(_sentenceHuntCompletionValues).toList(),
+    reason: 'Finish preserves every prior completion value',
+  );
+}
+
+List<Object?> _sentenceHuntStateValues(SentenceHuntState state) {
+  final List<MapEntry<String, SentenceHuntSlot>> slots =
+      state.slots.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+  return <Object?>[
+    state.schemaVersion,
+    _sentenceHuntScopeValues(state.scope),
+    state.revision,
+    state.commitOrdinal,
+    slots
+        .map(
+          (MapEntry<String, SentenceHuntSlot> entry) => <Object?>[
+            entry.key,
+            _sentenceHuntCheckpointValues(entry.value.checkpoint),
+            _sentenceHuntCursorValues(entry.value.cursor),
+            _sentenceHuntReceiptValues(entry.value.latestReceipt),
+          ],
+        )
+        .toList(),
+    state.attempts.map(_sentenceHuntAttemptValues).toList(),
+    state.receipts.map(_sentenceHuntReceiptValues).toList(),
+    _sentenceHuntMistakeValues(state),
+    _sentenceHuntSummaryValues(state),
+    state.completions.map(_sentenceHuntCompletionValues).toList(),
+    _sentenceHuntExposureValues(state),
+  ];
+}
+
+List<Object?> _sentenceHuntScopeValues(SentenceHuntProfileScope scope) =>
+    <Object?>[
+      scope.courseId,
+      scope.owner.isGuest ? 'guest' : 'account',
+      scope.owner.userId,
+    ];
+
+List<Object?> _sentenceHuntContentValues(SentenceHuntContentIdentity content) =>
+    <Object?>[
+      content.sectionId,
+      content.itemId,
+      content.sentenceId,
+      content.audioRefId,
+      content.annotationHash,
+      content.contentRevision,
+      content.annotationRevision,
+    ];
+
+String _sentenceHuntContentSortKey(SentenceHuntContentIdentity content) =>
+    '${content.sectionId}\u0000${content.itemId}\u0000${content.sentenceId}'
+    '\u0000${content.contentRevision}\u0000${content.annotationRevision}';
+
+List<Object?> _sentenceHuntCursorValues(LearningCursorPosition cursor) =>
+    <Object?>[cursor.generation, cursor.sequence, cursor.revision];
+
+List<Object?> _sentenceHuntCheckpointValues(
+  SentenceHuntCheckpoint checkpoint,
+) => <Object?>[
+  _sentenceHuntScopeValues(checkpoint.scope),
+  checkpoint.sessionId,
+  checkpoint.sectionFingerprint,
+  checkpoint.contentRevision,
+  checkpoint.mode,
+  checkpoint.finished,
+  checkpoint.policy.completionThresholdPercent,
+  checkpoint.sessionJson,
+  checkpoint.runStartRound,
+];
+
+List<Object?> _sentenceHuntReceiptValues(SentenceHuntReceipt receipt) =>
+    <Object?>[
+      _sentenceHuntScopeValues(receipt.scope),
+      receipt.sectionId,
+      receipt.token,
+      receipt.canonicalCommand,
+      _sentenceHuntCursorValues(receipt.before),
+      _sentenceHuntCursorValues(receipt.after),
+      receipt.commitOrdinal,
+    ];
+
+List<Object?> _sentenceHuntAttemptValues(SentenceHuntAttempt attempt) =>
+    <Object?>[
+      _sentenceHuntScopeValues(attempt.scope),
+      _sentenceHuntContentValues(attempt.content),
+      attempt.runGeneration,
+      attempt.round,
+      attempt.sequence,
+      attempt.selectedTokenIds,
+      attempt.expectedTokenIds,
+      attempt.correct,
+      attempt.presentation,
+      attempt.teachingExposed,
+      <Object?>[
+        _sentenceHuntScopeValues(attempt.playback.scope),
+        _sentenceHuntContentValues(attempt.playback.content),
+        attempt.playback.runGeneration,
+        attempt.playback.round,
+        attempt.playback.uiGeneration,
+        attempt.playback.referenceId,
+        attempt.playback.outcome,
+        attempt.playback.source,
+      ],
+      attempt.answeredAt,
+      attempt.committedAt,
+    ];
+
+List<Object?> _sentenceHuntMistakeValues(SentenceHuntState state) {
+  final List<SentenceHuntMistake> mistakes = state.mistakes.values.toList()
+    ..sort(
+      (a, b) => _sentenceHuntContentSortKey(
+        a.content,
+      ).compareTo(_sentenceHuntContentSortKey(b.content)),
+    );
+  return mistakes
+      .map(
+        (SentenceHuntMistake mistake) => <Object?>[
+          _sentenceHuntScopeValues(mistake.scope),
+          _sentenceHuntContentValues(mistake.content),
+          mistake.firstWrongAt,
+          mistake.latestWrongAt,
+          mistake.failureCount,
+        ],
+      )
+      .toList();
+}
+
+List<Object?> _sentenceHuntSummaryValues(SentenceHuntState state) {
+  final List<SentenceHuntSummary> summaries = state.summaries.values.toList()
+    ..sort(
+      (a, b) => _sentenceHuntContentSortKey(
+        a.content,
+      ).compareTo(_sentenceHuntContentSortKey(b.content)),
+    );
+  return summaries
+      .map(
+        (SentenceHuntSummary summary) => <Object?>[
+          _sentenceHuntScopeValues(summary.scope),
+          _sentenceHuntContentValues(summary.content),
+          <int>[summary.firstInRun.correct, summary.firstInRun.total],
+          <int>[summary.repeatInRun.correct, summary.repeatInRun.total],
+          <int>[
+            summary.firstTeachingExposed.correct,
+            summary.firstTeachingExposed.total,
+          ],
+          <int>[
+            summary.repeatTeachingExposed.correct,
+            summary.repeatTeachingExposed.total,
+          ],
+        ],
+      )
+      .toList();
+}
+
+List<Object?> _sentenceHuntCompletionValues(
+  SentenceHuntCompletion completion,
+) => <Object?>[
+  _sentenceHuntScopeValues(completion.scope),
+  completion.sectionId,
+  completion.contentRevision,
+  completion.policyRevision,
+  completion.thresholdPercent,
+  completion.committedAt,
+];
+
+List<Object?> _sentenceHuntExposureValues(SentenceHuntState state) {
+  final List<SentenceHuntExposureKey> exposure = state.teachingExposure.toList()
+    ..sort((a, b) {
+      final int sectionOrder = a.sectionId.compareTo(b.sectionId);
+      return sectionOrder != 0
+          ? sectionOrder
+          : a.contentRevision.compareTo(b.contentRevision);
+    });
+  return exposure
+      .map(
+        (SentenceHuntExposureKey key) => <Object?>[
+          _sentenceHuntScopeValues(key.scope),
+          key.sectionId,
+          key.contentRevision,
+        ],
+      )
+      .toList();
 }
 
 void _expectFinishRetryCommandsMatch({
