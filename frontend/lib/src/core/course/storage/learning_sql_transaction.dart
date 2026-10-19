@@ -267,7 +267,10 @@ final class SqliteLearningCommandCoordinator<S, C, R> {
         );
       });
 
-      if (outcome.committed) _notifyCommitted();
+      if (outcome.committed) {
+        _checkAuth(commandGeneration: commandGeneration);
+        _notifyCommitted();
+      }
       _checkAuth(commandGeneration: commandGeneration);
       return outcome.result;
     } on Object catch (error, stackTrace) {

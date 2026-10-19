@@ -650,6 +650,91 @@ void main() {
     );
 
     test(
+      'auth_change_after_sql_commit_before_transaction_returns_does_not_notify',
+      () async {
+        final commitBarrier = _SqlCommitBarrier();
+        final handle = LearningDatabaseHandle(
+          open: () async => LearningDatabase(
+            DatabaseConnection(
+              NativeDatabase(file).interceptWith(commitBarrier),
+            ),
+          ),
+        );
+        harness.handles.add(handle);
+        final coordinator = harness.coordinator(handle: handle);
+        await coordinator.load();
+
+        final persistGate = _PersistGate();
+        harness.adapter.persistGate = persistGate;
+        final submitting = coordinator.submit(_command());
+        await persistGate.entered.future;
+        commitBarrier.arm();
+        persistGate.release.complete();
+
+        // QueryInterceptor releases the real SQLite COMMIT before pausing the
+        // transaction future, so this auth change is strictly post-commit.
+        await commitBarrier.committed.future;
+        harness.changeAuth(LearningOwner.account('new-account'), generation: 8);
+        commitBarrier.release.complete();
+
+        await expectLater(
+          submitting,
+          throwsA(isA<LearningOwnerChangedException>()),
+        );
+        expect(harness.notifications, 0);
+
+        final db = await handle.open();
+        final scopeRow = await db
+            .customSelect(
+              'SELECT owner_kind, owner_id, course_id, family, revision, '
+              'commit_ordinal FROM learning_scopes',
+            )
+            .getSingle();
+        expect(scopeRow.read<String>('owner_kind'), 'account');
+        expect(scopeRow.read<String>('owner_id'), 'account-42');
+        expect(scopeRow.read<String>('course_id'), 'en-fr');
+        expect(scopeRow.read<String>('family'), 'course');
+        expect(scopeRow.read<int>('revision'), 1);
+        expect(scopeRow.read<int>('commit_ordinal'), 1);
+        expect(await _count(db, 'learning_attempts'), 1);
+        expect(await _count(db, 'learning_command_receipts'), 1);
+        expect(await _count(db, 'supported_sync_outbox'), 1);
+      },
+    );
+
+    test('auth_change_inside_observer_still_prevents_submit_success', () async {
+      final coordinator = harness.coordinator(
+        onCommitted: () => harness.changeAuth(
+          LearningOwner.account('new-account'),
+          generation: 8,
+        ),
+      );
+
+      await expectLater(
+        coordinator.submit(_command()),
+        throwsA(isA<LearningOwnerChangedException>()),
+      );
+      expect(harness.notifications, 1);
+      final db = await harness.handleFor(coordinator).open();
+      expect(await _count(db, 'learning_attempts'), 1);
+      expect(await _scopeRevision(db), 1);
+    });
+
+    test('observer_error_does_not_undo_or_hide_a_stable_auth_commit', () async {
+      final coordinator = harness.coordinator(
+        onCommitted: () => throw StateError('observer failure'),
+      );
+
+      final result = await coordinator.submit(_command());
+
+      expect(result.duplicate, isFalse);
+      expect(harness.notifications, 1);
+      final db = await harness.handleFor(coordinator).open();
+      expect(await _count(db, 'learning_attempts'), 1);
+      expect(await _scopeRevision(db), 1);
+    });
+
+    test(
       'supported_course_events_decode_only_existing_payload_variants',
       () async {
         final coordinator = harness.coordinator();
@@ -814,6 +899,23 @@ class _ScopeCreationGate {
   final Completer<void> release = Completer<void>();
 }
 
+class _SqlCommitBarrier extends QueryInterceptor {
+  final Completer<void> committed = Completer<void>();
+  final Completer<void> release = Completer<void>();
+  bool _armed = false;
+
+  void arm() => _armed = true;
+
+  @override
+  Future<void> commitTransaction(TransactionExecutor inner) async {
+    await inner.send();
+    if (!_armed) return;
+    _armed = false;
+    committed.complete();
+    await release.future;
+  }
+}
+
 class _ScopeCreationBarrierDatabase extends LearningDatabase {
   _ScopeCreationBarrierDatabase(super.connection, this.gate);
 
@@ -870,6 +972,7 @@ class _Harness {
     _TestAdapter? adapter,
     LearningDatabaseHandle? handle,
     LearningStorageScope? scope,
+    void Function()? onCommitted,
   }) {
     final selectedAdapter =
         adapter ?? (scope == null ? this.adapter : newAdapter(scope: scope));
@@ -882,7 +985,10 @@ class _Harness {
       currentAuth: () => auth,
       backendOwner: () => backend,
       clock: () => DateTime.utc(2026, 10, 19),
-      onCommitted: () => notifications++,
+      onCommitted: () {
+        notifications++;
+        onCommitted?.call();
+      },
     );
   }
 
