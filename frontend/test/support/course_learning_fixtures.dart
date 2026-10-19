@@ -104,6 +104,7 @@ LearningCommand sampleCommand(
         authGeneration: 0,
         activityId: 'arcade:sound',
         expected: SlotCursor(generation: 1, sequence: 0, revision: 0),
+        expectedScopeRevision: 0,
         token: tokenFor(1),
         submittedAt: fixedTime,
         action: const ContinueArcadeRound(),

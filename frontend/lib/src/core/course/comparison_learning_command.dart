@@ -53,10 +53,13 @@ final class ComparisonLearningCommand {
       required int authGeneration,
       required this.activityId,
       required this.expected,
+      required int expectedScopeRevision,
       required this.token,
       required this.submittedAt,
       required this.action})
-      : authGeneration = comparisonCounter(authGeneration, 'authGeneration') {
+      : authGeneration = comparisonCounter(authGeneration, 'authGeneration'),
+        expectedScopeRevision = comparisonCounter(
+            expectedScopeRevision, 'expectedScopeRevision') {
     if (activityId != comparisonActivityId ||
         !RegExp(r'^[A-Za-z0-9_-]{22}$').hasMatch(token) ||
         !submittedAt.isUtc) {
@@ -64,11 +67,19 @@ final class ComparisonLearningCommand {
     }
   }
   final ComparisonProfileScope scope;
-  final int authGeneration;
+  final int authGeneration, expectedScopeRevision;
   final String activityId, token;
   final ComparisonCursor expected;
   final DateTime submittedAt;
   final ComparisonAction action;
+}
+
+String comparisonLearningSqlCanonicalCommand(
+    ComparisonLearningCommand command) {
+  final Map<String, Object?> identity = Map<String, Object?>.from(
+      jsonDecode(comparisonCanonicalCommand(command)) as Map<String, dynamic>);
+  identity['expectedScopeRevision'] = command.expectedScopeRevision;
+  return jsonEncode(identity);
 }
 
 String comparisonCanonicalCommand(ComparisonLearningCommand c) {

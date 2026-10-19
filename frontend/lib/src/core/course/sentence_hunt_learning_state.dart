@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'course_attempt.dart';
 import 'course_audio_contract.dart';
-import 'course_learning_transaction.dart';
+import 'learning_storage_types.dart';
 import 'lesson_policy.dart';
 import 'sentence_hunt_content.dart';
 

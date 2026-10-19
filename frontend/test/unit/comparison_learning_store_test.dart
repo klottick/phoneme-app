@@ -117,6 +117,7 @@ void main() {
         authGeneration: start.authGeneration,
         activityId: start.activityId,
         expected: start.expected,
+        expectedScopeRevision: start.expectedScopeRevision,
         token: start.token,
         submittedAt: start.submittedAt,
         action:
@@ -283,6 +284,7 @@ void main() {
         activityId: activity,
         expected: comparisonInitial.slot?.cursor ??
             ComparisonCursor(generation: 0, sequence: 0, revision: 0),
+        expectedScopeRevision: comparisonInitial.revision,
         token: token,
         submittedAt: fixedTime,
         action: StartComparisonRun(
@@ -465,6 +467,7 @@ void main() {
         authGeneration: 4,
         activityId: activity,
         expected: start.expected,
+        expectedScopeRevision: 1,
         token: 'stale-token-0000000000',
         submittedAt: fixedTime,
         action: StartComparisonRun(sessionId: 'other', policy: LessonPolicy()));
@@ -654,6 +657,7 @@ LearningCommand _withV2Token(LearningCommand command, String token) =>
         authGeneration: command.authGeneration,
         activityId: command.activityId,
         expected: command.expected,
+        expectedScopeRevision: command.expectedScopeRevision,
         token: token,
         submittedAt: command.submittedAt,
         action: command.action,

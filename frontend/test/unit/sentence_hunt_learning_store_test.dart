@@ -17,7 +17,7 @@ import 'package:linguist/src/core/course/course_learning_registry.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/course_learning_store.dart';
 import 'package:linguist/src/core/course/course_learning_transition.dart';
-import 'package:linguist/src/core/course/course_learning_transaction.dart';
+import 'package:linguist/src/core/course/learning_storage_types.dart';
 import 'package:linguist/src/core/course/french_comparison_content.dart';
 import 'package:linguist/src/core/course/lesson_policy.dart';
 import 'package:linguist/src/core/course/lesson_section_session.dart';
@@ -66,6 +66,7 @@ void main() {
       sectionId: start.sectionId,
       sectionFingerprint: start.sectionFingerprint,
       expected: start.expected,
+      expectedScopeRevision: start.expectedScopeRevision,
       token: start.token,
       submittedAt: start.submittedAt,
       action: StartSentenceHuntRun(
@@ -521,6 +522,7 @@ void main() {
       sectionId: start.sectionId,
       sectionFingerprint: start.sectionFingerprint,
       expected: start.expected,
+      expectedScopeRevision: 1,
       token: _nextToken(),
       submittedAt: _time,
       action: const AdvanceSentenceHuntItem(),
@@ -535,6 +537,7 @@ void main() {
       sectionFingerprint: start.sectionFingerprint,
       expected:
           const LearningCursorPosition(generation: 0, sequence: 0, revision: 0),
+      expectedScopeRevision: 1,
       token: _nextToken(),
       submittedAt: _time,
       action: StartSentenceHuntRun(

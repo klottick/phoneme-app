@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'course_audio_contract.dart';
-import 'course_learning_transaction.dart';
+import 'learning_storage_types.dart';
 import 'lesson_policy.dart';
 import 'lesson_section_session.dart';
 import 'sentence_hunt_content.dart';
@@ -635,6 +635,7 @@ final class SentenceHuntLearningCodec {
         sequence: _integer(value['sequence'], 'command.sequence'),
         revision: _integer(value['revision'], 'command.revision'),
       ),
+      expectedScopeRevision: 0,
       token: _string(value['token'], 'command.token'),
       submittedAt: _utc(value['submittedAt'], 'command.submittedAt'),
       action: action,

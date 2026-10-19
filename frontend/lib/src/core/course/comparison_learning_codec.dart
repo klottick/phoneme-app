@@ -449,6 +449,7 @@ final class ComparisonLearningCodec {
             generation: _integer(m['generation'], 'generation'),
             sequence: _integer(m['sequence'], 'sequence'),
             revision: _integer(m['revision'], 'revision')),
+        expectedScopeRevision: 0,
         token: _string(m['token'], 'token'),
         submittedAt: _utc(m['submittedAt'], 'submittedAt'),
         action: action);

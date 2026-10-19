@@ -143,6 +143,7 @@ void main() {
           authGeneration: 0,
           activityId: 'lesson:en-fr-u-y',
           expected: SlotCursor(generation: 0, sequence: 0, revision: 0),
+          expectedScopeRevision: 0,
           token: tokenFor(++token),
           submittedAt: fixedTime,
           action: StartLearningRun(options: RunOptions()),
@@ -161,6 +162,7 @@ void main() {
             authGeneration: 0,
             activityId: slot.activityId,
             expected: slot.cursor,
+            expectedScopeRevision: state.revision,
             token: tokenFor(++token),
             submittedAt: fixedTime.add(Duration(seconds: i + 1)),
             action: ChooseSound(

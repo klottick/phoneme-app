@@ -1,5 +1,5 @@
 import 'course_audio_contract.dart';
-import 'course_learning_transaction.dart';
+import 'learning_storage_types.dart';
 import 'lesson_section_session.dart';
 import 'sentence_hunt_content.dart';
 import 'sentence_hunt_learning_command.dart';
@@ -75,6 +75,7 @@ final class SentenceHuntTransitionEngine {
       sectionId: sectionId,
       sectionFingerprint: section.sectionFingerprint,
       expected: expected,
+      expectedScopeRevision: state.revision,
       token: token,
       submittedAt: submittedAt,
       action: normalizedAction,

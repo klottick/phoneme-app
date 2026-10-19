@@ -860,6 +860,7 @@ void main() {
       authGeneration: command.authGeneration,
       activityId: command.activityId,
       expected: command.expected,
+      expectedScopeRevision: command.expectedScopeRevision,
       token: command.token,
       submittedAt: command.submittedAt,
       action: command.action,

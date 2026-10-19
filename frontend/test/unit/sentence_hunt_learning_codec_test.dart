@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/course_audio_contract.dart';
-import 'package:linguist/src/core/course/course_learning_transaction.dart';
+import 'package:linguist/src/core/course/learning_storage_types.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_codec.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
 import 'package:linguist/src/core/course/lesson_section_session.dart';
@@ -61,6 +61,7 @@ void main() {
             sequence: 0,
             revision: 0,
           ),
+          expectedScopeRevision: 0,
           token: '0000000000000000000000',
           submittedAt: DateTime.utc(2026),
           action: const AdvanceSentenceHuntItem(),
@@ -719,6 +720,7 @@ void main() {
           sectionId: sectionId,
           sectionFingerprint: withHistory.section(sectionId).sectionFingerprint,
           expected: restored.slots[sectionId]!.cursor,
+          expectedScopeRevision: restored.revision,
           token: 'currentrun000000000001',
           submittedAt: DateTime.utc(2026),
           action: replacement,
@@ -999,6 +1001,7 @@ void main() {
         sequence: 1,
         revision: 0,
       ),
+      expectedScopeRevision: 0,
       token: token,
       submittedAt: DateTime.utc(2026),
       action: const AdvanceSentenceHuntItem(),
@@ -1067,6 +1070,7 @@ final class _CodecDriver {
         expected: slot?.cursor ??
             const LearningCursorPosition(
                 generation: 0, sequence: 0, revision: 0),
+        expectedScopeRevision: state.revision,
         token: token(),
         submittedAt: now(),
         action: action,

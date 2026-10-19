@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/course_audio_contract.dart';
-import 'package:linguist/src/core/course/course_learning_transaction.dart';
+import 'package:linguist/src/core/course/learning_storage_types.dart';
 import 'package:linguist/src/core/course/lesson_policy.dart';
 import 'package:linguist/src/core/course/lesson_section_session.dart';
 import 'package:linguist/src/core/course/sentence_hunt_content.dart';
@@ -71,6 +71,7 @@ void main() {
           catalogue.section(fixtureSectionIds.first).sectionFingerprint,
       expected:
           const LearningCursorPosition(generation: 0, sequence: 0, revision: 0),
+      expectedScopeRevision: 0,
       token: 'contractdirect00000000',
       submittedAt: DateTime.utc(2026),
       action: StartSentenceHuntRun(
@@ -95,6 +96,76 @@ void main() {
     expect(restored.slots.values.single.checkpoint.sessionId,
         'contract-api-direct');
     expect(codec.encode(restored), raw);
+  });
+
+  test('sentence_hunt_command_captures_scope_revision', () {
+    final _Driver driver = _Driver();
+    final String sectionId = fixtureSectionIds.first;
+    driver.start(0);
+    driver.answerCurrent(sectionId);
+    final SentenceHuntLearningState state = driver.state;
+    final SentenceHuntSection section = driver.catalogue.section(sectionId);
+    final SentenceHuntLearningCommand command = driver.engine.prepare(
+      state: state,
+      sectionId: sectionId,
+      action: const AdvanceSentenceHuntItem(),
+      authGeneration: 0,
+      token: 'abcdefghijklmnopqrstuv',
+      submittedAt: DateTime.utc(2026)
+    );
+
+    expect(command.expectedScopeRevision, state.revision);
+    final canonical =
+        jsonDecode(sentenceHuntLearningSqlCanonicalCommand(command))
+            as Map<String, dynamic>;
+    expect(canonical['activityId'], command.sectionId);
+    expect(canonical['expectedScopeRevision'], state.revision);
+    SentenceHuntLearningCommand withScopeRevision(int revision) =>
+        SentenceHuntLearningCommand(
+          scope: command.scope,
+          authGeneration: command.authGeneration,
+          sectionId: command.sectionId,
+          sectionFingerprint: command.sectionFingerprint,
+          expected: command.expected,
+          expectedScopeRevision: revision,
+          token: command.token,
+          submittedAt: command.submittedAt,
+          action: command.action
+        );
+    expect(withScopeRevision(0).expectedScopeRevision, 0);
+    expect(
+      withScopeRevision(9007199254740991).expectedScopeRevision,
+      9007199254740991
+    );
+    expect(() => withScopeRevision(-1), throwsArgumentError);
+    expect(() => withScopeRevision(9007199254740992), throwsArgumentError);
+    expect(
+      sentenceHuntLearningSqlCanonicalCommand(
+        withScopeRevision(state.revision + 1)
+      ),
+      isNot(sentenceHuntLearningSqlCanonicalCommand(command))
+    );
+
+    final legacy = sentenceHuntCanonicalCommand(command);
+    expect(
+      sentenceHuntCanonicalCommand(withScopeRevision(state.revision + 1)),
+      legacy
+    );
+    expect(
+      legacy,
+      '{"schemaVersion":1,"family":"sentence-hunt","courseId":"en-fr",'
+      '"owner":{"kind":"guest","userId":null},"authGeneration":0,'
+      '"sectionId":"$sectionId",'
+      '"sectionFingerprint":${jsonEncode(section.sectionFingerprint)},'
+      '"generation":1,"sequence":2,"revision":1,'
+      '"token":"abcdefghijklmnopqrstuv",'
+      '"submittedAt":"2026-01-01T00:00:00.000Z",'
+      '"action":{"kind":"advance"}}'
+    );
+    final legacyFields = (jsonDecode(legacy) as Map<String, dynamic>).keys;
+    expect(legacyFields, contains('sectionId'));
+    expect(legacyFields, isNot(contains('expectedScopeRevision')));
+    expect(legacyFields, isNot(contains('activityId')));
   });
 
   test('sentence_start_creates_only_registered_independent_slot', () {
@@ -949,6 +1020,7 @@ final class _Driver {
       expected: expected ??
           slot?.cursor ??
           const LearningCursorPosition(generation: 0, sequence: 0, revision: 0),
+      expectedScopeRevision: state.revision,
       token: tokenOverride ?? token(),
       submittedAt: now(),
       action: action,

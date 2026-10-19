@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/comparison_content.dart';
 import 'package:linguist/src/core/course/comparison_learning_command.dart';
@@ -217,6 +219,7 @@ void main() {
         authGeneration: 4,
         activityId: 'en-fr-phoneme-comparison',
         expected: ComparisonCursor(generation: 0, sequence: 0, revision: 0),
+        expectedScopeRevision: 0,
         token: 'abcdefghijklmnopqrstuv',
         submittedAt: DateTime.utc(2026),
         action: const AdvanceComparisonPair());
@@ -231,10 +234,77 @@ void main() {
             authGeneration: 9007199254740992,
             activityId: 'en-fr-phoneme-comparison',
             expected: ComparisonCursor(generation: 0, sequence: 0, revision: 0),
+            expectedScopeRevision: 0,
             token: 'abcdefghijklmnopqrstuv',
             submittedAt: DateTime.utc(2026),
             action: const AdvanceComparisonPair()),
-        throwsArgumentError);
+        throwsArgumentError
+      );
+    }
+  );
+
+  test('comparison_command_captures_scope_revision', () {
+    final driver = _Driver();
+    driver.start();
+    driver.answerCurrent(true);
+    final state = driver.state;
+    final command = driver.engine.prepare(
+      state: state,
+      activityId: comparisonActivityId,
+      action: const AdvanceComparisonPair(),
+      authGeneration: 0,
+      token: 'abcdefghijklmnopqrstuv',
+      submittedAt: DateTime.utc(2026)
+    );
+
+    expect(command.expectedScopeRevision, state.revision);
+    final canonical =
+        jsonDecode(comparisonLearningSqlCanonicalCommand(command))
+            as Map<String, dynamic>;
+    expect(canonical['activityId'], command.activityId);
+    expect(canonical['expectedScopeRevision'], state.revision);
+    ComparisonLearningCommand withScopeRevision(int revision) =>
+        ComparisonLearningCommand(
+          scope: command.scope,
+          authGeneration: command.authGeneration,
+          activityId: command.activityId,
+          expected: command.expected,
+          expectedScopeRevision: revision,
+          token: command.token,
+          submittedAt: command.submittedAt,
+          action: command.action
+        );
+    expect(withScopeRevision(0).expectedScopeRevision, 0);
+    expect(
+      withScopeRevision(9007199254740991).expectedScopeRevision,
+      9007199254740991
+    );
+    expect(() => withScopeRevision(-1), throwsArgumentError);
+    expect(() => withScopeRevision(9007199254740992), throwsArgumentError);
+    expect(
+      comparisonLearningSqlCanonicalCommand(
+        withScopeRevision(state.revision + 1)
+      ),
+      isNot(comparisonLearningSqlCanonicalCommand(command))
+    );
+
+    final legacy = comparisonCanonicalCommand(command);
+    expect(
+      comparisonCanonicalCommand(withScopeRevision(state.revision + 1)),
+      legacy
+    );
+    expect(
+      legacy,
+      '{"schemaVersion":1,"family":"comparison","courseId":"en-fr",'
+      '"owner":{"kind":"guest","userId":null},"authGeneration":0,'
+      '"activityId":"en-fr-phoneme-comparison","generation":1,'
+      '"sequence":2,"revision":1,"token":"abcdefghijklmnopqrstuv",'
+      '"submittedAt":"2026-01-01T00:00:00.000Z",'
+      '"action":{"kind":"advance"}}'
+    );
+    final legacyFields = (jsonDecode(legacy) as Map<String, dynamic>).keys;
+    expect(legacyFields, contains('activityId'));
+    expect(legacyFields, isNot(contains('expectedScopeRevision')));
   });
 
   test('registered answers derive correctness and pair-only evidence', () {
@@ -279,6 +349,7 @@ void main() {
         authGeneration: 0,
         activityId: comparisonActivityId,
         expected: before.slot!.cursor,
+        expectedScopeRevision: before.revision,
         token: driver.token(),
         submittedAt: driver.now(),
         action: AnswerComparisonPair(ComparePhonemesAnswer(
@@ -368,6 +439,7 @@ void main() {
           authGeneration: 0,
           activityId: comparisonActivityId,
           expected: d.state.slot!.cursor,
+          expectedScopeRevision: d.state.revision,
           token: d.token(),
           submittedAt: d.now(),
           action: action);
@@ -381,6 +453,7 @@ void main() {
         authGeneration: 0,
         activityId: comparisonActivityId,
         expected: ComparisonCursor(generation: 0, sequence: 0, revision: 0),
+        expectedScopeRevision: d.state.revision,
         token: d.token(),
         submittedAt: d.now(),
         action: AnswerComparisonPair(ComparePhonemesAnswer(
