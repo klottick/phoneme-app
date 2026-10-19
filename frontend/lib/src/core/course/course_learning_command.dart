@@ -152,6 +152,7 @@ class LearningCommand {
       required int authGeneration,
       required String activityId,
       required this.expected,
+      required int expectedScopeRevision,
       required String token,
       required this.submittedAt,
       required this.action,
@@ -159,6 +160,8 @@ class LearningCommand {
       required this.candidate,
       required this.feedback})
       : authGeneration = _nonnegative(authGeneration, 'authGeneration'),
+        expectedScopeRevision = _nonnegative(
+            expectedScopeRevision, 'expectedScopeRevision'),
         activityId = _requiredText(activityId, 'activityId'),
         token = _validateToken(token),
         draws = List.unmodifiable(draws) {
@@ -168,7 +171,7 @@ class LearningCommand {
     }
   }
   final LearningScope scope;
-  final int authGeneration;
+  final int authGeneration, expectedScopeRevision;
   final String activityId, token;
   final SlotCursor expected;
   final DateTime submittedAt;

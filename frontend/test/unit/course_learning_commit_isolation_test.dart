@@ -11,7 +11,15 @@ import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/course_learning_persistence.dart';
 import 'package:linguist/src/core/course/course_learning_store.dart';
 import 'package:linguist/src/core/course/course_learning_sync.dart';
-import 'package:linguist/src/core/course/course_learning_transaction.dart';
+import 'package:linguist/src/core/course/course_learning_transaction.dart'
+    show
+        LearningDocumentEnvelope,
+        LearningDocumentFamily,
+        LearningProfileAdapter,
+        LearningTransactionCoordinator,
+        LearningTransactionKernel,
+        LearningTransactionTransition;
+import 'package:linguist/src/core/course/learning_storage_types.dart';
 import 'package:linguist/src/core/course/course_learning_transition.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';

@@ -39,6 +39,7 @@ final class ComparisonLearningTransitionEngine {
         authGeneration: authGeneration,
         activityId: activityId,
         expected: expected,
+        expectedScopeRevision: state.revision,
         token: token,
         submittedAt: submittedAt,
         action: action);

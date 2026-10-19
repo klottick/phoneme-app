@@ -5,7 +5,14 @@ import 'comparison_learning_transition.dart';
 import 'course_attempt.dart';
 import 'course_learning_error.dart';
 import 'course_learning_persistence.dart';
-import 'course_learning_transaction.dart';
+import 'course_learning_transaction.dart'
+    show
+        LearningDocumentEnvelope,
+        LearningDocumentFamily,
+        LearningProfileAdapter,
+        LearningTransactionCoordinator,
+        LearningTransactionTransition;
+import 'learning_storage_types.dart';
 
 export 'comparison_learning_codec.dart' show ComparisonUnavailableException;
 

@@ -74,6 +74,7 @@ void main() {
           authGeneration: prepared.authGeneration,
           activityId: prepared.activityId,
           expected: prepared.expected,
+          expectedScopeRevision: prepared.expectedScopeRevision,
           token: prepared.token,
           submittedAt: prepared.submittedAt,
           action: prepared.action,

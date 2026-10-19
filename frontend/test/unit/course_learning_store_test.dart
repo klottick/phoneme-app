@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_learning_command.dart';
+import 'package:linguist/src/core/course/course_learning_command_codec.dart';
 import 'package:linguist/src/core/course/course_learning_checkpoint.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/course/course_learning_persistence.dart';
@@ -146,6 +147,106 @@ void main() {
     expect(duplicate.state.commitOrdinal, first.state.commitOrdinal);
     expect(duplicate.state.history, hasLength(1));
     expect(persistence.writeCount, writes);
+  });
+
+  test('course_command_captures_scope_revision', () async {
+    final empty = await store.load();
+    final started = await store.submit(
+      store.prepare(
+        state: empty,
+        activityId: activity,
+        action: StartLearningRun(options: RunOptions())
+      )
+    );
+    final state = started.state;
+    final command = store.prepare(
+      state: state,
+      activityId: activity,
+      action: ChooseSound(
+        selectedSound: 'u',
+        audioSource: AttemptAudioSource.pendingRecording
+      )
+    );
+
+    expect(command.expectedScopeRevision, state.revision);
+    final sqlCanonical = CourseLearningCommandCodec.canonicalCommand(command);
+    final canonical = jsonDecode(sqlCanonical) as Map<String, dynamic>;
+    expect(canonical['activityId'], command.activityId);
+    expect(canonical['expectedScopeRevision'], state.revision);
+    final decoded = CourseLearningCommandCodec.decodeCanonicalCommand(
+      sqlCanonical,
+      scope: command.scope
+    );
+    expect(decoded.expectedScopeRevision, state.revision);
+    expect(CourseLearningCommandCodec.canonicalCommand(decoded), sqlCanonical);
+    LearningCommand withScopeRevision(int revision) => LearningCommand(
+      scope: command.scope,
+      authGeneration: command.authGeneration,
+      activityId: command.activityId,
+      expected: command.expected,
+      expectedScopeRevision: revision,
+      token: command.token,
+      submittedAt: command.submittedAt,
+      action: command.action,
+      draws: command.draws,
+      candidate: command.candidate,
+      feedback: command.feedback
+    );
+    expect(withScopeRevision(0).expectedScopeRevision, 0);
+    expect(
+      withScopeRevision(9007199254740991).expectedScopeRevision,
+      9007199254740991
+    );
+    expect(() => withScopeRevision(-1), throwsArgumentError);
+    expect(() => withScopeRevision(9007199254740992), throwsArgumentError);
+    expect(
+      CourseLearningCommandCodec.canonicalCommand(
+        withScopeRevision(state.revision + 1)
+      ),
+      isNot(sqlCanonical)
+    );
+
+    final legacy = CourseLearningCommandCodec.legacyCanonicalCommand(command);
+    expect(
+      CourseLearningCommandCodec.legacyCanonicalCommand(
+        withScopeRevision(state.revision + 1)
+      ),
+      legacy
+    );
+    expect(legacy, const LearningDocumentCodec().canonicalCommand(command));
+    final legacyFields = (jsonDecode(legacy) as Map<String, dynamic>).keys;
+    expect(legacyFields, contains('activityId'));
+    expect(legacyFields, isNot(contains('expectedScopeRevision')));
+
+    final maximumRevision = Map<String, dynamic>.from(canonical)
+      ..['expectedScopeRevision'] = 9007199254740991;
+    final maximumDecoded = CourseLearningCommandCodec.decodeCanonicalCommand(
+      jsonEncode(maximumRevision),
+      scope: command.scope
+    );
+    expect(maximumDecoded.expectedScopeRevision, 9007199254740991);
+
+    final outOfRangeRevision = Map<String, dynamic>.from(canonical)
+      ..['expectedScopeRevision'] = 9007199254740992;
+    expect(
+      () => CourseLearningCommandCodec.decodeCanonicalCommand(
+        jsonEncode(outOfRangeRevision),
+        scope: command.scope
+      ),
+      throwsFormatException
+    );
+
+    final invalidDomainAction = Map<String, dynamic>.from(canonical);
+    invalidDomainAction['action'] = Map<String, dynamic>.from(
+      canonical['action'] as Map<String, dynamic>
+    )..['selectedSound'] = ' ';
+    expect(
+      () => CourseLearningCommandCodec.decodeCanonicalCommand(
+        jsonEncode(invalidDomainAction),
+        scope: command.scope
+      ),
+      throwsFormatException
+    );
   });
 
   test('drill resumes only with nonempty pair IDs in current authored order',
@@ -335,6 +436,7 @@ void main() {
         authGeneration: answer.authGeneration,
         activityId: answer.activityId,
         expected: answer.expected,
+        expectedScopeRevision: answer.expectedScopeRevision,
         token: tokenFor(99),
         submittedAt: answer.submittedAt,
         action: answer.action,
@@ -363,6 +465,7 @@ void main() {
         authGeneration: answer.authGeneration,
         activityId: answer.activityId,
         expected: answer.expected,
+        expectedScopeRevision: answer.expectedScopeRevision,
         token: answer.token,
         submittedAt: answer.submittedAt,
         action: ChooseSound(
@@ -527,6 +630,7 @@ void main() {
         authGeneration: command.authGeneration,
         activityId: id,
         expected: command.expected,
+        expectedScopeRevision: command.expectedScopeRevision,
         token: command.token,
         submittedAt: command.submittedAt,
         action: command.action,

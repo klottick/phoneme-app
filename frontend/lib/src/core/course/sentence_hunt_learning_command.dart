@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'course_learning_transaction.dart';
+import 'learning_storage_types.dart';
 import 'lesson_policy.dart';
 import 'sentence_hunt_content.dart';
 import 'sentence_hunt_learning_state.dart';
@@ -64,10 +64,13 @@ final class SentenceHuntLearningCommand {
     required this.sectionId,
     required this.sectionFingerprint,
     required this.expected,
+    required int expectedScopeRevision,
     required this.token,
     required this.submittedAt,
     required this.action,
-  }) : authGeneration = sentenceHuntCounter(authGeneration, 'authGeneration') {
+  }) : authGeneration = sentenceHuntCounter(authGeneration, 'authGeneration'),
+       expectedScopeRevision = sentenceHuntCounter(
+           expectedScopeRevision, 'expectedScopeRevision') {
     sentenceHuntRequired(sectionId, 'sectionId');
     sentenceHuntRequired(sectionFingerprint, 'sectionFingerprint');
     if (!RegExp(r'^[A-Za-z0-9_-]{22}$').hasMatch(token) || !submittedAt.isUtc) {
@@ -76,7 +79,7 @@ final class SentenceHuntLearningCommand {
   }
 
   final SentenceHuntProfileScope scope;
-  final int authGeneration;
+  final int authGeneration, expectedScopeRevision;
   final String sectionId;
   final String sectionFingerprint;
   final LearningCursorPosition expected;
@@ -87,6 +90,16 @@ final class SentenceHuntLearningCommand {
 
 /// Contracted Task 5 name retained alongside the original implementation name.
 typedef SentenceHuntCommand = SentenceHuntLearningCommand;
+
+/// SQL command identity binds the section's activity and document revision.
+String sentenceHuntLearningSqlCanonicalCommand(
+    SentenceHuntLearningCommand command) {
+  final Map<String, Object?> identity = Map<String, Object?>.from(
+      jsonDecode(sentenceHuntCanonicalCommand(command)) as Map<String, dynamic>);
+  identity['activityId'] = command.sectionId;
+  identity['expectedScopeRevision'] = command.expectedScopeRevision;
+  return jsonEncode(identity);
+}
 
 /// Ordered canonical JSON for receipt identity. Selection IDs are expected to
 /// have been normalized by the registered item in prepare/evaluate first.

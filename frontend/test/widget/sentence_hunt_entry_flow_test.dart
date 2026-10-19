@@ -586,6 +586,7 @@ void main() {
       sectionId: finishReceipt.sectionId,
       sectionFingerprint: finishCommandJson['sectionFingerprint'] as String,
       expected: finishReceipt.before,
+      expectedScopeRevision: beforeFinish.revision,
       token: finishReceipt.token,
       submittedAt:
           DateTime.parse(finishCommandJson['submittedAt'] as String).toUtc(),

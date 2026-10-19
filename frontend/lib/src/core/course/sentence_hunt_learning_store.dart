@@ -1,7 +1,14 @@
 import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/course/course_learning_persistence.dart';
-import 'package:linguist/src/core/course/course_learning_transaction.dart';
+import 'package:linguist/src/core/course/course_learning_transaction.dart'
+    show
+        LearningDocumentEnvelope,
+        LearningDocumentFamily,
+        LearningProfileAdapter,
+        LearningTransactionCoordinator,
+        LearningTransactionTransition;
+import 'package:linguist/src/core/course/learning_storage_types.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_codec.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_command.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';

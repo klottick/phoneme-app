@@ -79,6 +79,7 @@ class LearningTransitionEngine {
       authGeneration: authGeneration,
       activityId: activityId,
       expected: expected,
+      expectedScopeRevision: state.revision,
       token: token,
       submittedAt: submittedAt,
       action: action,
@@ -117,6 +118,7 @@ class LearningTransitionEngine {
         activityId: command.activityId,
         expected: slotBefore?.cursor ??
             SlotCursor(generation: 0, sequence: 0, revision: 0),
+        expectedScopeRevision: command.expectedScopeRevision,
         token: command.token,
         submittedAt: command.submittedAt,
         action: command.action,

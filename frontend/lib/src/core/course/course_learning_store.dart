@@ -6,7 +6,14 @@ import 'course_learning_error.dart';
 import 'course_learning_persistence.dart';
 import 'course_learning_state.dart';
 import 'course_learning_sync.dart';
-import 'course_learning_transaction.dart';
+import 'course_learning_transaction.dart'
+    show
+        LearningDocumentEnvelope,
+        LearningDocumentFamily,
+        LearningProfileAdapter,
+        LearningTransactionCoordinator,
+        LearningTransactionTransition;
+import 'learning_storage_types.dart';
 import 'course_learning_transition.dart';
 
 abstract class CourseLearningStore {
