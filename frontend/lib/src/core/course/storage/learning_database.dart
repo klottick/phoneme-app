@@ -26,6 +26,50 @@ const List<String> _tableNames = <String>[
   'supported_sync_outbox',
 ];
 
+const Map<String, List<String>>
+_expectedForeignKeySignatures = <String, List<String>>{
+  'learning_scopes': <String>[],
+  'learning_content_bindings': <String>[
+    'learning_scopes|scope_id|id|NO ACTION|RESTRICT|NONE',
+  ],
+  'learning_runs': <String>[
+    'learning_scopes|scope_id|id|NO ACTION|RESTRICT|NONE',
+    'learning_content_bindings|content_binding_id|id|NO ACTION|RESTRICT|NONE',
+  ],
+  'learning_attempts': <String>[
+    'learning_scopes|scope_id|id|NO ACTION|RESTRICT|NONE',
+  ],
+  'learning_attempt_values': <String>[
+    'learning_scopes|scope_id|id|NO ACTION|RESTRICT|NONE',
+    'learning_attempts|scope_id,attempt_id|scope_id,attempt_id|NO ACTION|RESTRICT|NONE',
+  ],
+  'learning_attempt_evidence': <String>[
+    'learning_scopes|scope_id|id|NO ACTION|RESTRICT|NONE',
+    'learning_attempts|scope_id,attempt_id|scope_id,attempt_id|NO ACTION|RESTRICT|NONE',
+  ],
+  'learning_command_receipts': <String>[
+    'learning_scopes|scope_id|id|NO ACTION|RESTRICT|NONE',
+  ],
+  'learning_mistakes': <String>[
+    'learning_scopes|scope_id|id|NO ACTION|RESTRICT|NONE',
+  ],
+  'learning_summaries': <String>[
+    'learning_scopes|scope_id|id|NO ACTION|RESTRICT|NONE',
+  ],
+  'learning_completions': <String>[
+    'learning_scopes|scope_id|id|NO ACTION|RESTRICT|NONE',
+  ],
+  'learning_exposure': <String>[
+    'learning_scopes|scope_id|id|NO ACTION|RESTRICT|NONE',
+  ],
+  'learning_best_scores': <String>[
+    'learning_scopes|scope_id|id|NO ACTION|RESTRICT|NONE',
+  ],
+  'supported_sync_outbox': <String>[
+    'learning_scopes|scope_id|id|NO ACTION|RESTRICT|NONE',
+  ],
+};
+
 const Map<String, List<String>> _columnNames = <String, List<String>>{
   'learning_scopes': <String>[
     'id',
@@ -764,6 +808,10 @@ class LearningDatabase extends _$LearningDatabase {
       throw const LearningCorruptException('Learning schema v1 tables differ.');
     }
 
+    final tableSql = await _schemaSqlByName('table');
+    final tablesByName = <String, TableInfo<Table, Object?>>{
+      for (final table in allTables) table.actualTableName: table,
+    };
     for (final entry in _columnNames.entries) {
       final rows = await customSelect('PRAGMA table_info(${entry.key})').get();
       final columns = rows.map((row) => row.read<String>('name')).toList();
@@ -792,29 +840,152 @@ class LearningDatabase extends _$LearningDatabase {
           );
         }
       }
+
+      final actualPrimaryKeyRows =
+          rows.where((row) => row.read<int>('pk') > 0).toList()..sort(
+            (left, right) =>
+                left.read<int>('pk').compareTo(right.read<int>('pk')),
+          );
+      final actualPrimaryKey = actualPrimaryKeyRows
+          .map((row) => row.read<String>('name'))
+          .toList();
+      final expectedPrimaryKey = tablesByName[entry.key]!.$primaryKey
+          .map((column) => column.name)
+          .toList();
+      if (!_sameSequence(actualPrimaryKey, expectedPrimaryKey)) {
+        throw LearningCorruptException(
+          'Learning schema v1 primary key differs in ${entry.key}.',
+        );
+      }
+
+      final expectedChecks = tablesByName[entry.key]!.customConstraints
+          .where(_startsWithCheck)
+          .map(_normalizeSql)
+          .toList();
+      final actualChecks = _splitTableDefinitions(
+        tableSql[entry.key]!,
+      ).where(_startsWithCheck).map(_normalizeSql).toList();
+      if (!_sameNames(actualChecks, expectedChecks)) {
+        throw LearningCorruptException(
+          'Learning schema v1 CHECK constraints differ in ${entry.key}.',
+        );
+      }
     }
 
     final expectedIndexes = <String>[
-      for (final statement in _indexStatements)
-        statement.substring(
-          statement.indexOf('INDEX ') + 'INDEX '.length,
-          statement.indexOf(' ON '),
-        ),
+      for (final statement in _indexStatements) _indexName(statement),
     ];
     if (!_sameNames(await _schemaNames('index'), expectedIndexes)) {
       throw const LearningCorruptException(
         'Learning schema v1 indexes differ.',
       );
     }
+    final indexSql = await _schemaSqlByName('index');
+    for (final statement in _indexStatements) {
+      final definition = _parseIndexDefinition(statement);
+      if (_normalizeSql(indexSql[definition.name] ?? '') !=
+          _normalizeSql(statement)) {
+        throw LearningCorruptException(
+          'Learning schema v1 index ${definition.name} differs.',
+        );
+      }
+
+      final indexList = await customSelect(
+        'PRAGMA index_list(${definition.table})',
+      ).get();
+      final index = indexList.firstWhere(
+        (row) => row.read<String>('name') == definition.name,
+      );
+      if (index.read<int>('unique') != (definition.unique ? 1 : 0) ||
+          index.read<String>('origin') != 'c' ||
+          index.read<int>('partial') != 0) {
+        throw LearningCorruptException(
+          'Learning schema v1 index metadata differs for ${definition.name}.',
+        );
+      }
+
+      final indexColumns = await customSelect(
+        'PRAGMA index_xinfo(${definition.name})',
+      ).get();
+      final keyColumns =
+          indexColumns.where((row) => row.read<int>('key') == 1).toList()..sort(
+            (left, right) =>
+                left.read<int>('seqno').compareTo(right.read<int>('seqno')),
+          );
+      if (keyColumns.length != definition.terms.length) {
+        throw LearningCorruptException(
+          'Learning schema v1 index columns differ for ${definition.name}.',
+        );
+      }
+      for (var index = 0; index < keyColumns.length; index++) {
+        final actual = keyColumns[index];
+        final expectedTerm = _withoutIndexDirection(definition.terms[index]);
+        final expectedDescending = _isDescending(definition.terms[index]);
+        final simpleColumn = RegExp(
+          r'^[A-Za-z_][A-Za-z_0-9]*$',
+        ).hasMatch(expectedTerm);
+        final actualName = actual.data['name'] as String?;
+        final actualCid = actual.read<int>('cid');
+        if ((simpleColumn && (actualName != expectedTerm || actualCid < 0)) ||
+            (!simpleColumn && actualCid != -2) ||
+            actual.read<int>('desc') != (expectedDescending ? 1 : 0)) {
+          throw LearningCorruptException(
+            'Learning schema v1 index term differs for ${definition.name}.',
+          );
+        }
+      }
+    }
+
     final expectedTriggers = <String>[
-      for (final statement in _triggerStatements)
-        statement.split(RegExp(r'\s+'))[2],
+      for (final statement in _triggerStatements) _triggerName(statement),
     ];
     if (!_sameNames(await _schemaNames('trigger'), expectedTriggers)) {
       throw const LearningCorruptException(
         'Learning schema v1 triggers differ.',
       );
     }
+    final triggerSql = await _schemaSqlByName('trigger');
+    for (final statement in _triggerStatements) {
+      final name = _triggerName(statement);
+      if (_normalizeSql(triggerSql[name] ?? '') != _normalizeSql(statement)) {
+        throw LearningCorruptException(
+          'Learning schema v1 trigger $name differs.',
+        );
+      }
+    }
+
+    for (final table in _tableNames) {
+      final rows = await customSelect('PRAGMA foreign_key_list($table)').get();
+      final groups = <int, List<QueryRow>>{};
+      for (final row in rows) {
+        groups.putIfAbsent(row.read<int>('id'), () => <QueryRow>[]).add(row);
+      }
+      final actualForeignKeys = <String>[];
+      for (final group in groups.values) {
+        group.sort(
+          (left, right) =>
+              left.read<int>('seq').compareTo(right.read<int>('seq')),
+        );
+        final first = group.first;
+        actualForeignKeys.add(
+          '${first.read<String>('table')}|'
+          '${group.map((row) => row.read<String>('from')).join(',')}|'
+          '${group.map((row) => row.read<String>('to')).join(',')}|'
+          '${first.read<String>('on_update')}|'
+          '${first.read<String>('on_delete')}|'
+          '${first.read<String>('match')}',
+        );
+      }
+      if (!_sameNames(
+        actualForeignKeys,
+        _expectedForeignKeySignatures[table]!,
+      )) {
+        throw LearningCorruptException(
+          'Learning schema v1 foreign keys differ in $table.',
+        );
+      }
+    }
+
     final foreignKeyViolations = await customSelect(
       'PRAGMA foreign_key_check',
     ).get();
@@ -834,6 +1005,17 @@ class LearningDatabase extends _$LearningDatabase {
     return rows.map((row) => row.read<String>('name')).toList();
   }
 
+  Future<Map<String, String>> _schemaSqlByName(String type) async {
+    final rows = await customSelect(
+      'SELECT name, sql FROM sqlite_schema WHERE type = ? '
+      "AND name NOT LIKE 'sqlite_%' ORDER BY name",
+      variables: <Variable<Object>>[Variable<String>(type)],
+    ).get();
+    return <String, String>{
+      for (final row in rows) row.read<String>('name'): row.read<String>('sql'),
+    };
+  }
+
   bool _sameNames(List<String> actual, List<String> expected) {
     final sortedActual = actual.toList()..sort();
     final sortedExpected = expected.toList()..sort();
@@ -843,7 +1025,146 @@ class LearningDatabase extends _$LearningDatabase {
     }
     return true;
   }
+
+  bool _sameSequence(List<String> actual, List<String> expected) {
+    if (actual.length != expected.length) return false;
+    for (var index = 0; index < actual.length; index++) {
+      if (actual[index] != expected[index]) return false;
+    }
+    return true;
+  }
 }
+
+bool _startsWithCheck(String constraint) =>
+    RegExp(r'^CHECK\b', caseSensitive: false).hasMatch(constraint.trimLeft());
+
+String _normalizeSql(String sql) {
+  final normalized = StringBuffer();
+  String? quote;
+  var needsSpace = false;
+  var previous = '';
+  for (var index = 0; index < sql.length; index++) {
+    final character = sql[index];
+    if (quote != null) {
+      normalized.write(character);
+      if (character == quote) {
+        if (index + 1 < sql.length && sql[index + 1] == quote) {
+          normalized.write(sql[++index]);
+        } else {
+          quote = null;
+        }
+      }
+      previous = character;
+      continue;
+    }
+    if (character == "'" || character == '"' || character == '`') {
+      if (needsSpace && _isWordCharacter(previous)) normalized.write(' ');
+      needsSpace = false;
+      quote = character;
+      normalized.write(character);
+      previous = character;
+    } else if (character.trim().isEmpty) {
+      needsSpace = true;
+    } else {
+      if (needsSpace &&
+          _isWordCharacter(previous) &&
+          _isWordCharacter(character)) {
+        normalized.write(' ');
+      }
+      needsSpace = false;
+      final lowered = character.toLowerCase();
+      normalized.write(lowered);
+      previous = lowered;
+    }
+  }
+  var result = normalized.toString().trim();
+  if (result.endsWith(';')) result = result.substring(0, result.length - 1);
+  return result;
+}
+
+bool _isWordCharacter(String character) =>
+    character.isNotEmpty && RegExp(r'[A-Za-z_0-9]').hasMatch(character);
+
+List<String> _splitTableDefinitions(String sql) {
+  final opening = sql.indexOf('(');
+  if (opening < 0) return const <String>[];
+  return _splitSqlList(sql, opening);
+}
+
+List<String> _splitSqlList(String sql, int opening) {
+  final values = <String>[];
+  var depth = 1;
+  var start = opening + 1;
+  String? quote;
+  for (var index = opening + 1; index < sql.length; index++) {
+    final character = sql[index];
+    if (quote != null) {
+      if (character == quote) {
+        if (index + 1 < sql.length && sql[index + 1] == quote) {
+          index++;
+        } else {
+          quote = null;
+        }
+      }
+      continue;
+    }
+    if (character == "'" || character == '"' || character == '`') {
+      quote = character;
+    } else if (character == '(') {
+      depth++;
+    } else if (character == ')') {
+      depth--;
+      if (depth == 0) {
+        values.add(sql.substring(start, index).trim());
+        return values;
+      }
+    } else if (character == ',' && depth == 1) {
+      values.add(sql.substring(start, index).trim());
+      start = index + 1;
+    }
+  }
+  return const <String>[];
+}
+
+String _indexName(String statement) => _parseIndexDefinition(statement).name;
+
+({String name, String table, bool unique, List<String> terms})
+_parseIndexDefinition(String statement) {
+  final match = RegExp(
+    r'^CREATE\s+(UNIQUE\s+)?INDEX\s+([^\s]+)\s+ON\s+([^\s(]+)\s*\(',
+    caseSensitive: false,
+  ).firstMatch(statement);
+  if (match == null) {
+    throw FormatException('Invalid learning index statement: $statement');
+  }
+  final terms = _splitSqlList(statement, match.end - 1);
+  if (terms.isEmpty) {
+    throw FormatException('Learning index has no terms: $statement');
+  }
+  return (
+    name: match.group(2)!,
+    table: match.group(3)!,
+    unique: match.group(1) != null,
+    terms: terms,
+  );
+}
+
+String _triggerName(String statement) {
+  final match = RegExp(
+    r'^CREATE\s+TRIGGER\s+([^\s]+)',
+    caseSensitive: false,
+  ).firstMatch(statement);
+  if (match == null) {
+    throw FormatException('Invalid learning trigger statement: $statement');
+  }
+  return match.group(1)!;
+}
+
+String _withoutIndexDirection(String term) =>
+    term.replaceFirst(RegExp(r'\s+(?:ASC|DESC)\s*$', caseSensitive: false), '');
+
+bool _isDescending(String term) =>
+    RegExp(r'\s+DESC\s*$', caseSensitive: false).hasMatch(term);
 
 Future<void> _rejectUnsupportedMigration(
   Migrator migrator,
@@ -865,6 +1186,9 @@ class LearningDatabaseHandle {
   Future<void>? _closing;
 
   Future<LearningDatabase> open() {
+    final closing = _closing;
+    if (closing != null) return _openAfterClose(closing);
+
     final pending = _opening;
     if (pending != null) return pending;
 
@@ -874,9 +1198,7 @@ class LearningDatabaseHandle {
     final completer = Completer<LearningDatabase>();
     final shared = completer.future;
     _opening = shared;
-    final Future<void>? closing = _closing;
     Future<LearningDatabase>.sync(() async {
-      if (closing != null) await closing;
       return _openConfigured();
     }).then(
       (LearningDatabase database) {
@@ -892,6 +1214,11 @@ class LearningDatabaseHandle {
       },
     );
     return shared;
+  }
+
+  Future<LearningDatabase> _openAfterClose(Future<void> closing) async {
+    await closing;
+    return open();
   }
 
   Future<LearningDatabase> reopen() async {

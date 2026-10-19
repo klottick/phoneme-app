@@ -1,8 +1,20 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:linguist/src/core/course/comparison_learning_state.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
+import 'package:linguist/src/core/course/course_learning_checkpoint.dart';
+import 'package:linguist/src/core/course/course_learning_registry.dart';
+import 'package:linguist/src/core/course/french_comparison_content.dart';
+import 'package:linguist/src/core/course/french_course.dart';
+import 'package:linguist/src/core/course/lesson_policy.dart';
+import 'package:linguist/src/core/course/lesson_section_session.dart';
+import 'package:linguist/src/core/course/sentence_hunt_content.dart';
+import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
+import 'package:linguist/src/features/arcade/sound_match_engine.dart';
 import 'package:linguist/src/core/course/storage/learning_database.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 
@@ -219,6 +231,287 @@ Future<LearningDatabase> _openDatabase() async {
   );
 }
 
+Future<File> _createVersionOneFile(Directory directory, String name) async {
+  final file = File('${directory.path}/$name.sqlite');
+  final database = await openFileLearningTestDatabase(file);
+  await database.customSelect('SELECT 1').getSingle();
+  await database.close();
+  return file;
+}
+
+void _rewriteSchemaSql(
+  sqlite.Database raw, {
+  required String objectType,
+  required String objectName,
+  required String remove,
+}) {
+  final rows = raw.select(
+    'SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?',
+    <Object?>[objectType, objectName],
+  );
+  if (rows.length != 1) {
+    throw StateError('Expected exactly one $objectType $objectName.');
+  }
+  final String original = rows.single['sql'] as String;
+  final String changed = original.replaceFirst(remove, '');
+  if (changed == original) {
+    throw StateError('Did not find schema fragment to remove: $remove');
+  }
+  raw.execute('PRAGMA writable_schema = ON');
+  raw.execute(
+    'UPDATE sqlite_schema SET sql = ? WHERE type = ? AND name = ?',
+    <Object?>[changed, objectType, objectName],
+  );
+  raw.execute('PRAGMA writable_schema = OFF');
+  raw.execute('PRAGMA schema_version = 99');
+}
+
+Future<void> _expectVersionOneFileRejectedUnchanged(File file) async {
+  final List<int> before = await file.readAsBytes();
+  final database = await openFileLearningTestDatabase(file);
+  try {
+    await expectLater(
+      database.customSelect('SELECT 1').getSingle(),
+      throwsA(isA<LearningCorruptException>()),
+    );
+  } finally {
+    await database.close();
+  }
+  expect(await file.readAsBytes(), orderedEquals(before));
+}
+
+Map<String, String> _maxCurrentCheckpointFixtures() {
+  const int maxSafeInteger = 9007199254740991;
+  const String sessionId = 'AAAAAAAAAAAAAAAAAAAAAA';
+  final policy = LessonPolicy(completionThresholdPercent: 100);
+
+  LessonSectionSession maxSession(
+    List<String> itemIds, {
+    required int contentRevision,
+  }) {
+    final session = LessonSectionSession(
+      itemIds: itemIds,
+      sessionId: sessionId,
+      contentRevision: contentRevision,
+      policy: policy,
+    );
+    for (final _ in itemIds) {
+      session
+        ..submit(false)
+        ..advance();
+    }
+    session.reviewMistakes();
+    final json = session.toJson();
+    final int round = maxSafeInteger ~/ itemIds.length + 1;
+    json['round'] = round;
+    json['attemptCount'] = itemIds.length * (round - 1);
+    return LessonSectionSession.fromJson(
+      json,
+      itemIds: itemIds,
+      contentRevision: contentRevision,
+    );
+  }
+
+  Map<String, Object?> courseSnapshot(ActivitySnapshot snapshot) =>
+      switch (snapshot) {
+        final DiscoveryCheckpoint value => <String, Object?>{
+          'kind': 'discovery',
+          'session': value.session.toJson(),
+        },
+        final LegacyLessonCheckpoint value => <String, Object?>{
+          'kind': 'legacyLesson',
+          'wordIndex': value.wordIndex,
+          'selectedSound': value.selectedSound,
+          'finished': value.finished,
+        },
+        final DrillCheckpoint value => <String, Object?>{
+          'kind': 'drill',
+          'pairIds': value.pairIds,
+          'index': value.index,
+          'correct': value.correct,
+          'ended': value.ended,
+        },
+        final SoundGameCheckpoint value => <String, Object?>{
+          'kind': 'soundGame',
+          'board': <String, Object?>{
+            'board': value.board.board,
+            'stars': (value.board.stars.toList()..sort()),
+          },
+          'clock': <String, Object?>{
+            'remaining': value.clock.remaining,
+            'round': value.clock.round,
+            'score': value.clock.score,
+            'paused': value.clock.paused,
+          },
+        },
+        final WordGameCheckpoint value => <String, Object?>{
+          'kind': 'wordGame',
+          'board': <String, Object?>{
+            'board': value.board.board,
+            'target': value.board.target,
+            'moves': value.board.moves,
+            'combo': value.board.combo,
+            'stars': (value.board.stars.toList()..sort()),
+            'obstacles': (value.board.obstacles.toList()..sort()),
+          },
+          'clock': <String, Object?>{
+            'remaining': value.clock.remaining,
+            'round': value.clock.round,
+            'score': value.clock.score,
+            'paused': value.clock.paused,
+          },
+        },
+      };
+
+  final registry = LearningRegistry.french();
+  final result = <String, String>{};
+  for (final definition in registry.activities) {
+    final ActivitySnapshot snapshot = switch (definition.kind.name) {
+      'discovery' => DiscoveryCheckpoint(
+        session: maxSession(
+          definition.items.map((item) => item.sessionAlias!).toList(),
+          contentRevision: definition.contentRevision,
+        ),
+      ),
+      'legacyLesson' => LegacyLessonCheckpoint(
+        wordIndex: definition.items.length - 1,
+        selectedSound: definition.items
+            .map((item) => item.expectedChoice)
+            .whereType<String>()
+            .reduce(
+              (left, right) =>
+                  utf8.encode(left).length >= utf8.encode(right).length
+                  ? left
+                  : right,
+            ),
+        finished: true,
+      ),
+      'drill' => DrillCheckpoint(
+        pairIds: definition.items.map((item) => item.id).toList(),
+        index: definition.items.length,
+        correct: definition.items.length,
+        ended: true,
+      ),
+      'soundGame' => SoundGameCheckpoint(
+        board: SoundBoardState(
+          board: SoundMatchEngine(random: math.Random(0)).snapshot().board,
+          stars: Set<int>.from(List<int>.generate(36, (index) => index)),
+        ),
+        clock: ArcadeClockState(
+          remaining: 60,
+          round: maxSafeInteger,
+          score: maxSafeInteger,
+          paused: true,
+        ),
+      ),
+      'wordGame' => _maxWordCheckpoint(),
+      _ => throw StateError('Unhandled course fixture ${definition.kind.name}'),
+    };
+    result[definition.kind.name] = jsonEncode(courseSnapshot(snapshot));
+  }
+
+  final comparisonCatalogue = loadFrenchComparisonCatalogue();
+  final comparisonIds = comparisonCatalogue.exercises
+      .map((exercise) => exercise.id)
+      .toList();
+  final comparisonSession = maxSession(
+    comparisonIds,
+    contentRevision: comparisonCatalogue.contentRevision,
+  );
+  final comparisonCheckpoint = ComparisonCheckpoint(
+    scope: ComparisonProfileScope(
+      courseId: 'en-fr',
+      owner: LearningOwner.guest(),
+    ),
+    sessionId: comparisonSession.sessionId,
+    contentRevision: comparisonCatalogue.contentRevision,
+    policy: policy,
+    sessionJson: comparisonSession.toJson(),
+  );
+  result['comparison'] = jsonEncode(<String, Object?>{
+    'sessionId': comparisonCheckpoint.sessionId,
+    'contentRevision': comparisonCheckpoint.contentRevision,
+    'policy': comparisonCheckpoint.policy.toJson(),
+    'session': comparisonCheckpoint.sessionJson,
+  });
+
+  const packagePath = 'assets/audio/fr-sentences';
+  final sentenceCatalogue = decodeFrenchSentencePackage(
+    manifestJson: File('$packagePath/manifest.json').readAsStringSync(),
+    provenanceJson: File('$packagePath/provenance.json').readAsStringSync(),
+    annotationsJson: File('$packagePath/annotations.json').readAsStringSync(),
+    sourceEvidenceJson: File(
+      '$packagePath/source-evidence.json',
+    ).readAsStringSync(),
+  );
+  final sentenceSection = sentenceCatalogue.sections.reduce(
+    (left, right) =>
+        utf8.encode(left.sectionFingerprint).length >=
+            utf8.encode(right.sectionFingerprint).length
+        ? left
+        : right,
+  );
+  final sentenceSession = maxSession(
+    sentenceSection.items.map((item) => item.identity.itemId).toList(),
+    contentRevision: sentenceSection.contentRevision,
+  );
+  final sentenceCheckpoint = SentenceHuntCheckpoint(
+    scope: SentenceHuntProfileScope(
+      courseId: 'en-fr',
+      owner: LearningOwner.guest(),
+    ),
+    sessionId: sentenceSession.sessionId,
+    sectionFingerprint: sentenceSection.sectionFingerprint,
+    contentRevision: sentenceSection.contentRevision,
+    mode: SentenceHuntRunMode.practice,
+    finished: true,
+    policy: policy,
+    sessionJson: sentenceSession.toJson(),
+    runStartRound: 1,
+  );
+  result['sentence-hunt'] = jsonEncode(<String, Object?>{
+    'sessionId': sentenceCheckpoint.sessionId,
+    'sectionFingerprint': sentenceCheckpoint.sectionFingerprint,
+    'contentRevision': sentenceCheckpoint.contentRevision,
+    'mode': sentenceCheckpoint.mode.name,
+    'finished': sentenceCheckpoint.finished,
+    'policy': sentenceCheckpoint.policy.toJson(),
+    'runStartRound': sentenceCheckpoint.runStartRound,
+    'session': sentenceCheckpoint.sessionJson,
+  });
+  return result;
+}
+
+WordGameCheckpoint _maxWordCheckpoint() {
+  const int maxSafeInteger = 9007199254740991;
+  const int moves = maxSafeInteger - (maxSafeInteger % 4);
+  final String target = (moves ~/ 4).isEven ? 'u' : 'y';
+  final List<CourseWord> eligibleWords = frenchWords
+      .where((word) => word.contains(target))
+      .toList();
+  eligibleWords.sort(
+    (left, right) =>
+        utf8.encode(right.text).length.compareTo(utf8.encode(left.text).length),
+  );
+  final String longestWord = eligibleWords.first.text;
+  return WordGameCheckpoint(
+    board: WordBoardState(
+      board: List<String>.filled(16, longestWord),
+      target: target,
+      moves: moves,
+      combo: moves,
+      stars: Set<int>.from(List<int>.generate(16, (index) => index)),
+      obstacles: const <int>{0, 1},
+    ),
+    clock: ArcadeClockState(
+      remaining: 60,
+      round: maxSafeInteger,
+      score: maxSafeInteger,
+      paused: true,
+    ),
+  );
+}
+
 Future<void> _insertValidCourseMistake(LearningDatabase database) =>
     insertRow(database, 'learning_mistakes', <String, Object?>{
       'scope_id': 1,
@@ -376,6 +669,29 @@ Map<String, Object?> _courseOutbox({
 
 void main() {
   group('LearningDatabase schema v1', () {
+    test('constructs measured current typed checkpoint sizing fixtures', () {
+      final fixtures = _maxCurrentCheckpointFixtures();
+      final sizes = <String, int>{
+        for (final entry in fixtures.entries)
+          entry.key: utf8.encode(entry.value).length,
+      };
+
+      expect(sizes.keys.toSet(), <String>{
+        'legacyLesson',
+        'discovery',
+        'drill',
+        'soundGame',
+        'wordGame',
+        'comparison',
+        'sentence-hunt',
+      });
+      expect(sizes['sentence-hunt'], 11066);
+      expect(
+        sizes.values.reduce((left, right) => left > right ? left : right),
+        11066,
+      );
+    });
+
     test(
       'creates the exact normalized schema and queries a verified empty file',
       () async {
@@ -940,6 +1256,315 @@ void main() {
     );
 
     test(
+      'rejects NULL results from discriminated value and JSON checks',
+      () async {
+        final database = await _openDatabase();
+        addTearDown(database.close);
+        await createCoreLearningRows(database);
+
+        for (final (String field, String valueType) in <(String, String)>[
+          ('tile_index', 'int'),
+          ('expected_membership', 'bool'),
+        ]) {
+          await expectSqlRejected(
+            insertRow(database, 'learning_attempt_values', <String, Object?>{
+              'scope_id': 1,
+              'attempt_id': 'attempt-course',
+              'field': field,
+              'ordinal': 10,
+              'value_type': valueType,
+              'text_value': null,
+              'int_value': null,
+              'bool_value': null,
+            }),
+          );
+        }
+
+        await insertRow(database, 'learning_attempt_values', <String, Object?>{
+          'scope_id': 1,
+          'attempt_id': 'attempt-course',
+          'field': 'tile_index',
+          'ordinal': 10,
+          'value_type': 'int',
+          'text_value': null,
+          'int_value': 1,
+          'bool_value': null,
+        });
+        await expectSqlRejected(
+          updateRows(
+            database,
+            'learning_attempt_values',
+            <String, Object?>{
+              'text_value': null,
+              'int_value': null,
+              'bool_value': null,
+            },
+            where: 'scope_id = ? AND attempt_id = ? AND field = ?',
+            whereArgs: <Object?>[1, 'attempt-course', 'tile_index'],
+          ),
+        );
+
+        await insertRow(database, 'learning_attempt_values', <String, Object?>{
+          'scope_id': 1,
+          'attempt_id': 'attempt-course',
+          'field': 'expected_membership',
+          'ordinal': 10,
+          'value_type': 'bool',
+          'text_value': null,
+          'int_value': null,
+          'bool_value': 1,
+        });
+        await expectSqlRejected(
+          updateRows(
+            database,
+            'learning_attempt_values',
+            <String, Object?>{
+              'text_value': null,
+              'int_value': null,
+              'bool_value': null,
+            },
+            where: 'scope_id = ? AND attempt_id = ? AND field = ?',
+            whereArgs: <Object?>[1, 'attempt-course', 'expected_membership'],
+          ),
+        );
+
+        await expectSqlRejected(
+          insertRow(
+            database,
+            'learning_runs',
+            runRow(
+              scopeId: 1,
+              activityId: 'course-b',
+              activityKind: 'drill',
+              contentBindingId: 108,
+              token: 'FFFFFFFFFFFFFFFFFFFFFF',
+              receiptPayload: '{}',
+            ),
+          ),
+        );
+        await expectSqlRejected(
+          insertRow(
+            database,
+            'learning_runs',
+            runRow(
+              scopeId: 1,
+              activityId: 'course-b',
+              activityKind: 'drill',
+              contentBindingId: 108,
+              token: 'LLLLLLLLLLLLLLLLLLLLLL',
+              receiptPayload:
+                  '{"activityId":"course-b","expectedScopeRevision":-1}',
+            ),
+          ),
+        );
+        await expectSqlRejected(
+          updateRows(
+            database,
+            'learning_runs',
+            <String, Object?>{'latest_receipt_payload': '{}'},
+            where: 'scope_id = ? AND activity_id = ?',
+            whereArgs: <Object?>[1, 'course-a'],
+          ),
+        );
+        await expectSqlRejected(
+          updateRows(
+            database,
+            'learning_runs',
+            <String, Object?>{
+              'latest_receipt_payload':
+                  '{"activityId":"course-a","expectedScopeRevision":"0"}',
+            },
+            where: 'scope_id = ? AND activity_id = ?',
+            whereArgs: <Object?>[1, 'course-a'],
+          ),
+        );
+
+        Map<String, Object?> receiptRow({
+          required String token,
+          required String canonicalPayload,
+        }) => <String, Object?>{
+          'scope_id': 1,
+          'activity_id': 'course-a',
+          'token': token,
+          'canonical_payload': canonicalPayload,
+          'before_generation': 0,
+          'before_sequence': 0,
+          'before_cursor_revision': 0,
+          'after_generation': 1,
+          'after_sequence': 2,
+          'after_cursor_revision': 1,
+          'commit_ordinal': 2,
+          'result_activity_id': 'course-a',
+          'result_generation': 1,
+          'result_sequence': 2,
+          'result_cursor_revision': 1,
+        };
+
+        await expectSqlRejected(
+          insertRow(
+            database,
+            'learning_command_receipts',
+            receiptRow(token: 'GGGGGGGGGGGGGGGGGGGGGG', canonicalPayload: '{}'),
+          ),
+        );
+        await expectSqlRejected(
+          insertRow(
+            database,
+            'learning_command_receipts',
+            receiptRow(
+              token: 'HHHHHHHHHHHHHHHHHHHHHH',
+              canonicalPayload: '{"expectedScopeRevision":0}',
+            ),
+          ),
+        );
+        await expectSqlRejected(
+          insertRow(
+            database,
+            'learning_command_receipts',
+            receiptRow(
+              token: 'IIIIIIIIIIIIIIIIIIIIII',
+              canonicalPayload: '{"activityId":"course-a"}',
+            ),
+          ),
+        );
+        await expectSqlRejected(
+          insertRow(
+            database,
+            'learning_command_receipts',
+            receiptRow(
+              token: 'JJJJJJJJJJJJJJJJJJJJJJ',
+              canonicalPayload:
+                  '{"activityId":"course-a","expectedScopeRevision":-1}',
+            ),
+          ),
+        );
+
+        await insertRow(
+          database,
+          'learning_command_receipts',
+          receiptRow(
+            token: 'KKKKKKKKKKKKKKKKKKKKKK',
+            canonicalPayload:
+                '{"activityId":"course-a","expectedScopeRevision":0}',
+          ),
+        );
+        await expectSqlRejected(
+          updateRows(
+            database,
+            'learning_command_receipts',
+            <String, Object?>{'canonical_payload': '{}'},
+            where: 'scope_id = ? AND token = ?',
+            whereArgs: <Object?>[1, 'KKKKKKKKKKKKKKKKKKKKKK'],
+          ),
+        );
+
+        await expectSqlRejected(
+          insertRow(
+            database,
+            'learning_exposure',
+            _courseExposure(
+              activityId: 'missing-presentations',
+              presentations: null,
+            ),
+          ),
+        );
+        await expectSqlRejected(
+          insertRow(
+            database,
+            'learning_exposure',
+            _courseExposure(
+              activityId: 'missing-assistance-mask',
+              assistanceMask: null,
+            ),
+          ),
+        );
+
+        await insertRow(
+          database,
+          'learning_exposure',
+          _courseExposure(activityId: 'update-presentations'),
+        );
+        await expectSqlRejected(
+          updateRows(
+            database,
+            'learning_exposure',
+            <String, Object?>{'presentations': null},
+            where: 'scope_id = ? AND activity_id = ?',
+            whereArgs: <Object?>[1, 'update-presentations'],
+          ),
+        );
+        await insertRow(
+          database,
+          'learning_exposure',
+          _courseExposure(activityId: 'update-assistance-mask'),
+        );
+        await expectSqlRejected(
+          updateRows(
+            database,
+            'learning_exposure',
+            <String, Object?>{'assistance_mask': null},
+            where: 'scope_id = ? AND activity_id = ?',
+            whereArgs: <Object?>[1, 'update-assistance-mask'],
+          ),
+        );
+      },
+    );
+
+    test(
+      'enforces declared SQLite storage classes on inserts and updates',
+      () async {
+        final database = await _openDatabase();
+        addTearDown(database.close);
+        await createCoreLearningRows(database);
+
+        await expectSqlRejected(
+          insertRow(database, 'learning_scopes', <String, Object?>{
+            'id': 20,
+            'owner_kind': 'guest',
+            'owner_id': '',
+            'course_id': 'fractional-revision',
+            'family': 'course',
+            'schema_version': 1,
+            'revision': 0.5,
+            'commit_ordinal': 0,
+            'availability_state': 'available',
+          }),
+        );
+        await expectSqlRejected(
+          updateRows(
+            database,
+            'learning_scopes',
+            <String, Object?>{'revision': 0.5},
+            where: 'id = ?',
+            whereArgs: <Object?>[1],
+          ),
+        );
+
+        await expectSqlRejected(
+          database.customStatement(
+            'INSERT INTO learning_scopes (id, owner_kind, owner_id, course_id, '
+            'family, schema_version, revision, commit_ordinal, availability_state) '
+            "VALUES (20, 'guest', '', x'656e2d6672', 'course', 1, 0, 0, 'available')",
+          ),
+        );
+        await expectSqlRejected(
+          database.customStatement(
+            "UPDATE learning_content_bindings SET activity_id = x'6375727365' "
+            'WHERE id = 101',
+          ),
+        );
+
+        await insertBinding(
+          database,
+          id: 109,
+          scopeId: 1,
+          activityId: 'nullable-text-columns',
+          catalogueFingerprint: 'catalogue-nullables',
+        );
+      },
+    );
+
+    test(
       'normalizes aggregate identities without mutable counts or evidence',
       () async {
         final database = await _openDatabase();
@@ -1385,6 +2010,88 @@ void main() {
       },
     );
 
+    test(
+      'rejects same-name altered indexes and triggers and missing constraints',
+      () async {
+        final directory = await Directory.systemTemp.createTemp(
+          'learning-definition-drift-',
+        );
+        addTearDown(() async => directory.delete(recursive: true));
+        final mutations = <(String, void Function(sqlite.Database raw))>[
+          (
+            'nonunique reversed-order index',
+            (sqlite.Database raw) {
+              raw.execute('DROP INDEX ux_learning_runs_scope_activity');
+              raw.execute(
+                'CREATE INDEX ux_learning_runs_scope_activity '
+                'ON learning_runs(activity_id, scope_id)',
+              );
+            },
+          ),
+          (
+            'unique index without expected expressions',
+            (sqlite.Database raw) {
+              raw.execute('DROP INDEX ux_learning_content_bindings_identity');
+              raw.execute(
+                'CREATE UNIQUE INDEX ux_learning_content_bindings_identity '
+                'ON learning_content_bindings(scope_id, activity_id, '
+                'content_revision, policy_kind, policy_revision, '
+                'catalogue_fingerprint, section_fingerprint, annotation_hash, '
+                'annotation_revision)',
+              );
+            },
+          ),
+          (
+            'no-op same-name trigger',
+            (sqlite.Database raw) {
+              raw.execute(
+                'DROP TRIGGER trg_learning_attempts_scope_family_insert',
+              );
+              raw.execute(
+                'CREATE TRIGGER trg_learning_attempts_scope_family_insert '
+                'BEFORE INSERT ON learning_attempts BEGIN SELECT 1; END',
+              );
+            },
+          ),
+          (
+            'missing CHECK declaration',
+            (sqlite.Database raw) => _rewriteSchemaSql(
+              raw,
+              objectType: 'table',
+              objectName: 'learning_attempts',
+              remove: ', CHECK(correct IN (0, 1))',
+            ),
+          ),
+          (
+            'missing composite foreign key declaration',
+            (sqlite.Database raw) => _rewriteSchemaSql(
+              raw,
+              objectType: 'table',
+              objectName: 'learning_attempt_values',
+              remove:
+                  ', FOREIGN KEY (scope_id, attempt_id) REFERENCES '
+                  'learning_attempts(scope_id, attempt_id) ON DELETE RESTRICT',
+            ),
+          ),
+        ];
+
+        for (final (
+              String description,
+              void Function(sqlite.Database raw) mutate,
+            )
+            in mutations) {
+          final file = await _createVersionOneFile(
+            directory,
+            description.replaceAll(' ', '-'),
+          );
+          final raw = sqlite.sqlite3.open(file.path);
+          mutate(raw);
+          raw.close();
+          await _expectVersionOneFileRejectedUnchanged(file);
+        }
+      },
+    );
+
     test('rolls back a failing synthetic upgrade and keeps v1 rows', () async {
       final directory = await Directory.systemTemp.createTemp(
         'learning-v2-fail-',
@@ -1494,5 +2201,53 @@ void main() {
       expect(await pragmaUserVersion(await retryingHandle.open()), 1);
       await retryingHandle.close();
     });
+
+    test(
+      'open during a pending close waits and returns a fresh usable database',
+      () async {
+        final directory = await Directory.systemTemp.createTemp(
+          'learning-handle-overlap-',
+        );
+        addTearDown(() async => directory.delete(recursive: true));
+        final firstFile = File('${directory.path}/first.sqlite');
+        final secondFile = File('${directory.path}/second.sqlite');
+        final openingGate = Completer<void>();
+        final openingStarted = Completer<void>();
+        var openCount = 0;
+        final handle = LearningDatabaseHandle(
+          open: () async {
+            openCount++;
+            if (openCount == 1) {
+              openingStarted.complete();
+              await openingGate.future;
+              return openFileLearningTestDatabase(firstFile);
+            }
+            return openFileLearningTestDatabase(secondFile);
+          },
+        );
+        addTearDown(handle.close);
+
+        final Future<LearningDatabase> first = handle.open();
+        await openingStarted.future;
+        final Future<void> closing = handle.close();
+        final Future<LearningDatabase> openingAfterClose = handle.open();
+        final bool reusedOpening = identical(openingAfterClose, first);
+        expect(openCount, 1);
+
+        openingGate.complete();
+        final LearningDatabase firstDatabase = await first;
+        await closing;
+        final LearningDatabase secondDatabase = await openingAfterClose;
+        expect(reusedOpening, isFalse);
+        expect(identical(firstDatabase, secondDatabase), isFalse);
+        expect(openCount, 2);
+        expect(await pragmaUserVersion(secondDatabase), 1);
+        expect(
+          (await secondDatabase.customSelect('SELECT 1 AS usable').getSingle())
+              .read<int>('usable'),
+          1,
+        );
+      },
+    );
   });
 }
