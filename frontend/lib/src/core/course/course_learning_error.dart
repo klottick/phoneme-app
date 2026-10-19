@@ -37,3 +37,8 @@ class LearningUnsupportedVersionException extends _LearningException {
 class LearningContentChangedException extends _LearningException {
   const LearningContentChangedException([super.cause]);
 }
+
+final class ComparisonUnavailableException implements Exception {
+  const ComparisonUnavailableException([this.cause]);
+  final Object? cause;
+}
