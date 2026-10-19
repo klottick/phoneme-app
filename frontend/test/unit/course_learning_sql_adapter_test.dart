@@ -162,6 +162,197 @@ void main() {
       },
     );
 
+    test(
+      'discovery checkpoint object key order survives reopen retry and advance',
+      () async {
+        final scenario = await _persistThreeCorrectDiscoveryAnswers(fixture);
+        final answerCommand = scenario.lastAnswerCommand;
+        final checkpointJson = await _checkpointJson(
+          fixture.handle,
+          fixture.storageScope,
+          scenario.activityId,
+        );
+        final checkpoint = jsonDecode(checkpointJson) as Map<String, dynamic>;
+        final checkpointSession = checkpoint['session'] as Map<String, dynamic>;
+        final checkpointAnswers =
+            checkpointSession['latestAnswers'] as Map<String, dynamic>;
+        final receiptCopies = await _receiptCopies(
+          fixture.handle,
+          fixture.storageScope,
+          answerCommand.token,
+          scenario.activityId,
+        );
+        final canonicalPayload = CourseLearningCommandCodec.canonicalCommand(
+          answerCommand,
+        );
+        expect(receiptCopies.latestPayload, canonicalPayload);
+        expect(receiptCopies.historyPayload, canonicalPayload);
+        final candidate =
+            (jsonDecode(canonicalPayload) as Map<String, dynamic>)['candidate']
+                as Map<String, dynamic>;
+        final candidateSession = candidate['session'] as Map<String, dynamic>;
+        final candidateAnswers =
+            candidateSession['latestAnswers'] as Map<String, dynamic>;
+        expect(checkpointAnswers, {'tout': true, 'tu': true, 'rouge': true});
+        expect(checkpointAnswers.keys.toList(), ['tout', 'tu', 'rouge']);
+        expect(candidateAnswers, {'rouge': true, 'tout': true, 'tu': true});
+        expect(candidateAnswers.keys.toList(), ['rouge', 'tout', 'tu']);
+
+        await fixture.handle.close();
+        await fixture.handle.reopen();
+        final reopened = await scenario.repository.load();
+        final reopenedSession =
+            (reopened.activities[scenario.activityId]!.snapshot
+                    as DiscoveryCheckpoint)
+                .session;
+        expect(reopenedSession.position, 2);
+        expect(reopenedSession.attemptCount, 3);
+        expect(reopenedSession.latestAnswers, {
+          'tout': true,
+          'tu': true,
+          'rouge': true,
+        });
+
+        final database = await fixture.handle.open();
+        final scopeId = await database.ensureScope(fixture.storageScope);
+        final countersBeforeRetry = await _scopeRevisionAndOrdinal(
+          fixture.handle,
+          scopeId,
+        );
+        final duplicate = await scenario.repository.submit(answerCommand);
+        expect(duplicate.duplicate, isTrue);
+        expect(duplicate.state.revision, reopened.revision);
+        expect(duplicate.state.commitOrdinal, reopened.commitOrdinal);
+        expect(
+          await _scopeRevisionAndOrdinal(fixture.handle, scopeId),
+          countersBeforeRetry,
+        );
+        expect(
+          await _receiptCopies(
+            fixture.handle,
+            fixture.storageScope,
+            answerCommand.token,
+            scenario.activityId,
+          ),
+          receiptCopies,
+        );
+
+        final advance = scenario.repository.prepare(
+          state: duplicate.state,
+          activityId: scenario.activityId,
+          action: const AdvanceLesson(),
+        );
+        final advanced = await scenario.repository.submit(advance);
+        final advancedSession =
+            (advanced.state.activities[scenario.activityId]!.snapshot
+                    as DiscoveryCheckpoint)
+                .session;
+        expect(advancedSession.position, 3);
+        expect(advancedSession.attemptCount, 3);
+        expect(advancedSession.latestAnswers, {
+          'tout': true,
+          'tu': true,
+          'rouge': true,
+        });
+
+        await fixture.handle.close();
+        await fixture.handle.reopen();
+        final reopenedAfterAdvance = await scenario.repository.load();
+        final finalSession =
+            (reopenedAfterAdvance.activities[scenario.activityId]!.snapshot
+                    as DiscoveryCheckpoint)
+                .session;
+        expect(finalSession.position, 3);
+        expect(finalSession.latestAnswers, {
+          'tout': true,
+          'tu': true,
+          'rouge': true,
+        });
+        expect(
+          await _receiptPayload(
+            fixture.handle,
+            fixture.storageScope,
+            answerCommand.token,
+          ),
+          canonicalPayload,
+        );
+      },
+    );
+
+    test(
+      'discovery checkpoint still rejects a differing boolean value',
+      () async {
+        final scenario = await _persistThreeCorrectDiscoveryAnswers(fixture);
+        final checkpoint =
+            jsonDecode(
+                  await _checkpointJson(
+                    fixture.handle,
+                    fixture.storageScope,
+                    scenario.activityId,
+                  ),
+                )
+                as Map<String, dynamic>;
+        final session = checkpoint['session'] as Map<String, dynamic>;
+        final latestAnswers = session['latestAnswers'] as Map<String, dynamic>;
+        latestAnswers['tout'] = false;
+        await _replaceCheckpointJson(fixture, scenario.activityId, checkpoint);
+
+        await expectLater(
+          scenario.repository.load(),
+          throwsA(isA<LearningCorruptException>()),
+        );
+      },
+    );
+
+    test('discovery checkpoint still rejects a differing value type', () async {
+      final scenario = await _persistThreeCorrectDiscoveryAnswers(fixture);
+      final checkpoint =
+          jsonDecode(
+                await _checkpointJson(
+                  fixture.handle,
+                  fixture.storageScope,
+                  scenario.activityId,
+                ),
+              )
+              as Map<String, dynamic>;
+      final session = checkpoint['session'] as Map<String, dynamic>;
+      final latestAnswers = session['latestAnswers'] as Map<String, dynamic>;
+      latestAnswers['tout'] = 'true';
+      await _replaceCheckpointJson(fixture, scenario.activityId, checkpoint);
+
+      await expectLater(
+        scenario.repository.load(),
+        throwsA(isA<LearningCorruptException>()),
+      );
+    });
+
+    test(
+      'discovery checkpoint still rejects an ordered-list mismatch',
+      () async {
+        final scenario = await _persistThreeCorrectDiscoveryAnswers(fixture);
+        final checkpoint =
+            jsonDecode(
+                  await _checkpointJson(
+                    fixture.handle,
+                    fixture.storageScope,
+                    scenario.activityId,
+                  ),
+                )
+                as Map<String, dynamic>;
+        final session = checkpoint['session'] as Map<String, dynamic>;
+        final queue = session['queue'] as List<dynamic>;
+        final first = queue[0];
+        queue[0] = queue[1];
+        queue[1] = first;
+        await _replaceCheckpointJson(fixture, scenario.activityId, checkpoint);
+
+        await expectLater(
+          scenario.repository.load(),
+          throwsA(isA<LearningCorruptException>()),
+        );
+      },
+    );
+
     for (final retention in [(1, 'latest-only-pruned'), (2000, 'retained')]) {
       for (final invalidRevision in [3, 4]) {
         test(
@@ -1063,6 +1254,70 @@ class _Fixture {
   );
 
   Future<void> close() => handle.close();
+}
+
+Future<
+  ({
+    SqliteCourseLearningRepository repository,
+    LearningCommand lastAnswerCommand,
+    String activityId,
+  })
+>
+_persistThreeCorrectDiscoveryAnswers(_Fixture fixture) async {
+  const activityId = 'lesson:en-fr-u-y';
+  final repository = fixture.repository();
+  final definition = fixture.registry.require(activityId);
+  var state = await repository.load();
+  state = (await repository.submit(
+    repository.prepare(
+      state: state,
+      activityId: activityId,
+      action: StartLearningRun(options: RunOptions()),
+    ),
+  )).state;
+
+  late LearningCommand lastAnswerCommand;
+  for (var index = 0; index < 3; index++) {
+    final item = definition.items[index];
+    lastAnswerCommand = repository.prepare(
+      state: state,
+      activityId: activityId,
+      action: ChooseSound(
+        selectedSound: item.expectedChoice!,
+        audioSource: authoredAudioSource(item)!,
+      ),
+    );
+    state = (await repository.submit(lastAnswerCommand)).state;
+    if (index < 2) {
+      state = (await repository.submit(
+        repository.prepare(
+          state: state,
+          activityId: activityId,
+          action: const AdvanceLesson(),
+        ),
+      )).state;
+    }
+  }
+
+  return (
+    repository: repository,
+    lastAnswerCommand: lastAnswerCommand,
+    activityId: activityId,
+  );
+}
+
+Future<void> _replaceCheckpointJson(
+  _Fixture fixture,
+  String activityId,
+  Map<String, dynamic> checkpoint,
+) async {
+  final database = await fixture.handle.open();
+  final scopeId = await database.ensureScope(fixture.storageScope);
+  await database.customStatement(
+    'UPDATE learning_runs SET checkpoint_json = ? '
+    'WHERE scope_id = ? AND activity_id = ?',
+    [jsonEncode(checkpoint), scopeId, activityId],
+  );
 }
 
 final class _NotificationCounter {

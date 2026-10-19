@@ -1,11 +1,18 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
+import 'package:drift/drift.dart';
+import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
+import 'package:shared_preferences_platform_interface/types.dart'
+    show GetAllParameters;
 import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/course/course_learning_command.dart';
@@ -16,9 +23,16 @@ import 'package:linguist/src/core/course/course_learning_sync.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/course_learning_store.dart';
 import 'package:linguist/src/core/course/course_learning_transition.dart';
+import 'package:linguist/src/core/course/storage/comparison_learning_sql_repository.dart';
+import 'package:linguist/src/core/course/storage/course_learning_sql_repository.dart';
+import 'package:linguist/src/core/course/storage/learning_database.dart'
+    show LearningDatabase, LearningDatabaseHandle;
+import 'package:linguist/src/core/course/storage/sentence_hunt_learning_sql_repository.dart';
+import 'package:linguist/src/core/course/sentence_hunt_learning_providers.dart';
 import 'package:linguist/src/core/course/backend.dart';
 import 'package:linguist/src/core/services/auth_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../support/sqlite_learning_test_harness.dart';
 
 class _AuthNotifier extends AuthController {
   _AuthNotifier() : super(null) {
@@ -75,16 +89,15 @@ User _user(String id) => User.fromJson({
       'created_at': '2026-01-01T00:00:00Z',
     })!;
 
-SupabaseClient _backendClient() =>
-    SupabaseClient('https://learning.example.invalid', 'public-test-key',
+SupabaseClient _backendClient() => SupabaseClient(
+  'https://learning.example.invalid',
+  'public-test-key',
         httpClient: MockClient((request) async {
       final email = (jsonDecode(request.body) as Map)['email'] as String;
       final id = email.split('@').first;
-      final token = '${base64Url.encode(utf8.encode('{"alg":"HS256"}'))}.'
-          '${base64Url.encode(utf8.encode(jsonEncode({
-            'sub': id,
-            'exp': DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600,
-          })))}.signature';
+    final token =
+        '${base64Url.encode(utf8.encode('{"alg":"HS256"}'))}.'
+        '${base64Url.encode(utf8.encode(jsonEncode({'sub': id, 'exp': DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600})))}.signature';
       return http.Response(
           jsonEncode({
             'access_token': token,
@@ -101,25 +114,133 @@ SupabaseClient _backendClient() =>
           }),
           200,
           request: request,
-          headers: {'content-type': 'application/json'});
-    }));
+      headers: {'content-type': 'application/json'},
+    );
+  }),
+);
 
 Future<void> _signIn(SupabaseClient client, String id) async {
   await client.auth.signInWithPassword(
-      email: '$id@example.invalid', password: 'test-password');
+    email: '$id@example.invalid',
+    password: 'test-password',
+  );
 }
 
 void main() {
-  test('provider rebuild tracks owner epoch, not only equal final id',
-      () async {
-    final persistence = _MemoryPersistence();
+  test('all_three_repositories_share_one_app_database_handle', () async {
+    const legacyLearningSentinelKey = 'course.learning.v2.sentinel';
+    const legacyLearningSentinelValue = '{leave-this-value-alone}';
+    final preferencesStore = _RecordingPreferencesStore(<String, Object>{
+      'flutter.theme': 'dark',
+      'flutter.$legacyLearningSentinelKey': legacyLearningSentinelValue,
+    });
+    SharedPreferencesStorePlatform.instance = preferencesStore;
+    SharedPreferences.resetStatic();
+
+    final tempDir = await Directory.systemTemp.createTemp(
+      'learning-sqlite-test-',
+    );
+    final file = File('${tempDir.path}/phoneme_learning.sqlite');
+    final db = await openFileLearningTestDatabase(file);
+    var testDatabaseOpenCount = 0;
+    final testHandle = LearningDatabaseHandle(
+      open: () async {
+        testDatabaseOpenCount++;
+        return db;
+      },
+    );
     final auth = _AuthNotifier();
-    final container = ProviderContainer(overrides: [
-      authControllerProvider.overrideWith((ref) => auth),
-      learningPersistenceProvider.overrideWithValue(persistence),
-      learningCloudTransportProvider.overrideWithValue(null),
+    final container = ProviderContainer(
+      overrides: [
+        authControllerProvider.overrideWith((ref) => auth),
+        learningDatabaseHandleProvider.overrideWithValue(testHandle),
+        learningCloudTransportProvider.overrideWithValue(null),
+      ],
+    );
+    addTearDown(() async {
+      container.dispose();
+      await testHandle.close();
+      await tempDir.delete(recursive: true);
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      courseBackend = null;
+    });
+
+    container.read(learningAuthScopeProvider);
+    auth.emit(const AppAuthState());
+    await Future<void>.delayed(Duration.zero);
+    final handle = container.read(learningDatabaseHandleProvider);
+    final course = container.read(courseLearningStoreProvider);
+    final comparison = container.read(comparisonLearningStoreProvider);
+    final sentenceHunt = await container.read(
+      sentenceHuntLearningStoreProvider.future,
+    );
+    await Future.wait(<Future<void>>[
+      course.load().then<void>((_) {}),
+      comparison.load().then<void>((_) {}),
+      sentenceHunt.load().then<void>((_) {}),
     ]);
-    addTearDown(container.dispose);
+
+    expect((course as SqliteCourseLearningRepository).database, same(handle));
+    expect(
+      (comparison as SqliteComparisonLearningRepository).database,
+      same(handle),
+    );
+    expect(
+      (sentenceHunt as SqliteSentenceHuntLearningRepository).database,
+      same(handle),
+    );
+    expect(testDatabaseOpenCount, 1);
+    final families = await db
+        .customSelect(
+          'SELECT family FROM learning_scopes WHERE owner_kind = ? AND '
+          'owner_id = ? AND course_id = ? ORDER BY family',
+          variables: <Variable<Object>>[
+            const Variable<String>('guest'),
+            const Variable<String>(''),
+            const Variable<String>('en-fr'),
+          ],
+        )
+        .get();
+    expect(families.map((row) => row.read<String>('family')).toSet(), <String>{
+      'course',
+      'comparison',
+      'sentence-hunt',
+    });
+    expect(
+      preferencesStore.readCalls,
+      0,
+      reason: 'the production provider graph must not read preferences',
+    );
+    expect(
+      preferencesStore.writeCalls,
+      0,
+      reason: 'the production provider graph must not write preferences',
+    );
+
+    final unrelatedPreferences = await SharedPreferences.getInstance();
+    expect(unrelatedPreferences.getString('theme'), 'dark');
+    expect(
+      unrelatedPreferences.getString(legacyLearningSentinelKey),
+      legacyLearningSentinelValue,
+    );
+  });
+
+  test(
+    'provider rebuild tracks owner epoch, not only equal final id',
+    () async {
+      final database = await _newFileDatabase();
+      final auth = _AuthNotifier();
+      final container = ProviderContainer(
+        overrides: [
+          authControllerProvider.overrideWith((ref) => auth),
+          learningDatabaseHandleProvider.overrideWithValue(database.handle),
+          learningCloudTransportProvider.overrideWithValue(null),
+        ],
+      );
+      addTearDown(() async {
+        container.dispose();
+        await database.close();
+      });
     final tracker = container.read(learningAuthScopeProvider.notifier);
     final initial = tracker.current;
     expect(initial.ready, isFalse);
@@ -142,27 +263,37 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(tracker.current.generation, returnedEpoch);
     expect(tracker.current.ready, isFalse);
-  });
+    },
+  );
 
   test('initial loading cannot save into guest scope', () async {
-    final container = ProviderContainer(overrides: [
+    final database = await _newFileDatabase();
+    final container = ProviderContainer(
+      overrides: [
       authControllerProvider.overrideWith((ref) => _AuthNotifier()),
-      learningPersistenceProvider.overrideWithValue(_MemoryPersistence()),
+        learningDatabaseHandleProvider.overrideWithValue(database.handle),
       learningCloudTransportProvider.overrideWithValue(null),
-    ]);
-    addTearDown(container.dispose);
+      ],
+    );
+    addTearDown(() async {
+      container.dispose();
+      await database.close();
+    });
     final store = container.read(courseLearningStoreProvider);
     expect(store.scope.owner.isGuest, isTrue);
-    final state = await store.load();
+    await expectLater(
+      store.load(),
+      throwsA(isA<LearningOwnerChangedException>()),
+    );
     expect(
-        () => store.prepare(
-            state: state,
-            activityId: 'lesson:en-fr-u-y',
-            action: StartLearningRun(options: RunOptions())),
-        throwsA(isA<LearningOwnerChangedException>()));
+      database.openCalls,
+      0,
+      reason: 'an unready auth scope cannot access the learning database',
+    );
   });
 
-  test('throwing observer cannot fail an already committed repository write',
+  test(
+    'throwing observer cannot fail an already committed repository write',
       () async {
     final owner = LearningOwner.account('callback-owner');
     final scope = LearningScope(courseId: 'en-fr', owner: owner);
@@ -178,20 +309,24 @@ void main() {
         clock: () => DateTime.utc(2026),
         newToken: () => 'AAAAAAAAAAAAAAAAAAAAAA',
         random: Random(1),
-        onCommitted: () => throw StateError('observer failed'));
+        onCommitted: () => throw StateError('observer failed'),
+      );
     final state = await store.load();
     final command = store.prepare(
         state: state,
         activityId: 'lesson:en-fr-u-y',
-        action: StartLearningRun(options: RunOptions()));
+        action: StartLearningRun(options: RunOptions()),
+      );
 
     final committed = await store.submit(command);
 
     expect(committed.state.activities, contains('lesson:en-fr-u-y'));
     expect((await store.load()).activities, contains('lesson:en-fr-u-y'));
-  });
+    },
+  );
 
-  test('old provider commit after owner rebuild stays on captured scope',
+  test(
+    'old provider commit after owner rebuild stays on captured scope',
       () async {
     final client = _backendClient();
     courseBackend = client;
@@ -200,62 +335,70 @@ void main() {
       courseBackend = null;
       await client.dispose();
     });
-    final persistence = _MemoryPersistence();
+      final barrier = _ProviderSqlCommitBarrier();
+      final database = await _newFileDatabase(barrier: barrier);
     final auth = _AuthNotifier();
-    final container = ProviderContainer(overrides: [
+      final container = ProviderContainer(
+        overrides: [
       authControllerProvider.overrideWith((ref) => auth),
-      learningPersistenceProvider.overrideWithValue(persistence),
+          learningDatabaseHandleProvider.overrideWithValue(database.handle),
       learningCloudTransportProvider.overrideWithValue(null),
-    ]);
-    addTearDown(container.dispose);
+        ],
+      );
+      addTearDown(() async {
+        container.dispose();
+        barrier.releaseCommit();
+        await database.close();
+      });
     container.read(learningAuthScopeProvider);
     auth.emit(AppAuthState(user: _user('old-owner')));
     await Future<void>.delayed(Duration.zero);
     final oldStore = container.read(courseLearningStoreProvider);
     final oldState = await oldStore.load();
-    final oldKey = oldStore.scope.storageKey;
     final command = oldStore.prepare(
         state: oldState,
         activityId: 'lesson:en-fr-u-y',
-        action: StartLearningRun(options: RunOptions()));
+        action: StartLearningRun(options: RunOptions()),
+      );
     var stateNotifications = 0;
     final stateSubscription = container.listen(
-        courseLearningStateProvider, (_, __) => stateNotifications++,
-        fireImmediately: true);
+        courseLearningStateProvider,
+        (_, __) => stateNotifications++,
+        fireImmediately: true,
+      );
     addTearDown(stateSubscription.close);
     await container.read(courseLearningStateProvider.future);
 
-    persistence
-      ..holdNextWrite = true
-      ..writeEntered = Completer<void>()
-      ..writeGate = Completer<bool>();
+      barrier.holdNextCommit();
     final oldCommit = oldStore.submit(command);
-    await persistence.writeEntered!.future;
+      await barrier.commitEntered;
     await _signIn(client, 'new-owner');
     auth.emit(AppAuthState(user: _user('new-owner')));
     await Future<void>.delayed(Duration.zero);
     final newStore = container.read(courseLearningStoreProvider);
     expect(newStore.scope.owner.userId, 'new-owner');
-    final newKey = newStore.scope.storageKey;
-    expect(persistence.readsByKey[newKey] ?? 0, 0);
-    final notificationsBeforeOldCompletion = stateNotifications;
-
-    persistence.writeGate!.complete(true);
-    final commit = await oldCommit;
-    await container.read(courseLearningStateProvider.future);
-    await Future<void>.delayed(Duration.zero);
-
-    expect(commit.state.scope.storageKey, oldKey);
-    expect(commit.state.activities, contains('lesson:en-fr-u-y'));
-    expect(persistence.values, contains(oldKey));
-    expect(persistence.values, isNot(contains(newKey)));
+      barrier.releaseCommit();
+      await expectLater(
+        oldCommit,
+        throwsA(isA<LearningOwnerChangedException>()),
+        reason:
+            'the real commit is durable in its captured scope but not ACKed',
+      );
     final newState = await container.read(courseLearningStateProvider.future);
     expect(newState.activities, isEmpty);
-    expect(persistence.readsByKey[newKey], 1);
-    expect(stateNotifications, greaterThan(notificationsBeforeOldCompletion));
-  });
+      final db = await database.handle.open();
+      expect(await _revision(db, 'old-owner'), 1);
+      expect(await _revision(db, 'new-owner'), 0);
+      expect(
+        stateNotifications,
+        greaterThan(0),
+        reason: 'the replacement owner still receives its own initial load',
+      );
+    },
+  );
 
-  test('live commit refreshes state provider but failed write does not',
+  test(
+    'live commit refreshes state provider but failed write does not',
       () async {
     final client = _backendClient();
     courseBackend = client;
@@ -264,49 +407,63 @@ void main() {
       courseBackend = null;
       await client.dispose();
     });
-    final persistence = _MemoryPersistence();
+      final database = await _newFileDatabase();
     final auth = _AuthNotifier();
-    final container = ProviderContainer(overrides: [
+      final container = ProviderContainer(
+        overrides: [
       authControllerProvider.overrideWith((ref) => auth),
-      learningPersistenceProvider.overrideWithValue(persistence),
+          learningDatabaseHandleProvider.overrideWithValue(database.handle),
       learningCloudTransportProvider.overrideWithValue(null),
-    ]);
-    addTearDown(container.dispose);
+        ],
+      );
+      addTearDown(() async {
+        container.dispose();
+        await database.close();
+      });
     container.read(learningAuthScopeProvider);
     auth.emit(AppAuthState(user: _user('live-owner')));
     await Future<void>.delayed(Duration.zero);
     final store = container.read(courseLearningStoreProvider);
     var notifications = 0;
     final subscription = container.listen(
-        courseLearningStateProvider, (_, __) => notifications++,
-        fireImmediately: true);
+        courseLearningStateProvider,
+        (_, __) => notifications++,
+        fireImmediately: true,
+      );
     addTearDown(subscription.close);
     final initial = await container.read(courseLearningStateProvider.future);
     final initialNotifications = notifications;
     final command = store.prepare(
         state: initial,
         activityId: 'lesson:en-fr-u-y',
-        action: StartLearningRun(options: RunOptions()));
-    persistence.failNextWrite = true;
+        action: StartLearningRun(options: RunOptions()),
+      );
+      final db = await database.handle.open();
+      await db.customStatement('PRAGMA query_only = ON');
 
     await expectLater(store.submit(command), throwsA(isA<Exception>()));
-    await Future<void>.delayed(Duration.zero);
+      await db.customStatement('PRAGMA query_only = OFF');
     expect(notifications, initialNotifications);
 
     final retry = store.prepare(
         state: await store.load(),
         activityId: 'lesson:en-fr-u-y',
-        action: StartLearningRun(options: RunOptions()));
+        action: StartLearningRun(options: RunOptions()),
+      );
     await store.submit(retry);
-    await Future<void>.delayed(Duration.zero);
-    final refreshed = await container.read(courseLearningStateProvider.future);
+      final refreshed = await container.read(
+        courseLearningStateProvider.future,
+      );
     expect(refreshed.activities, contains('lesson:en-fr-u-y'));
     expect(notifications, greaterThan(initialNotifications));
-  });
+    },
+  );
 
   test('same-owner auth readiness updates do not change generation', () {
-    final tracker =
-        LearningAuthTracker(owner: LearningOwner.account('A'), ready: true);
+    final tracker = LearningAuthTracker(
+      owner: LearningOwner.account('A'),
+      ready: true,
+    );
     final generation = tracker.current.generation;
     tracker.observe(owner: LearningOwner.account('A'), ready: false);
     tracker.observe(owner: LearningOwner.account('A'), ready: true);
@@ -317,8 +474,141 @@ void main() {
 
   test('supported synced status does not claim detailed history backup', () {
     const result = SupportedSyncResult(
-        status: SupportedSyncStatus.synced, remainingEvents: 0);
+      status: SupportedSyncStatus.synced,
+      remainingEvents: 0,
+    );
     expect(result.status, SupportedSyncStatus.synced);
     expect(result.remainingEvents, 0);
   });
+}
+
+final class _FileDatabaseHarness {
+  _FileDatabaseHarness(this.directory, this.file, this.barrier);
+
+  final Directory directory;
+  final File file;
+  final _ProviderSqlCommitBarrier? barrier;
+  int openCalls = 0;
+
+  late final LearningDatabaseHandle handle = LearningDatabaseHandle(
+    open: () async {
+      openCalls++;
+      final barrier = this.barrier;
+      if (barrier == null) return openFileLearningTestDatabase(file);
+      return LearningDatabase(
+        DatabaseConnection(NativeDatabase(file).interceptWith(barrier)),
+      );
+    },
+  );
+
+  Future<void> close() async {
+    await handle.close();
+    await directory.delete(recursive: true);
+  }
+}
+
+Future<_FileDatabaseHarness> _newFileDatabase({
+  _ProviderSqlCommitBarrier? barrier,
+}) async {
+  final directory = await Directory.systemTemp.createTemp(
+    'learning-provider-test-',
+  );
+  final file = File('${directory.path}/phoneme_learning.sqlite');
+  return _FileDatabaseHarness(directory, file, barrier);
+}
+
+Future<int> _revision(LearningDatabase db, String userId) async =>
+    (await db
+            .customSelect(
+              'SELECT revision FROM learning_scopes WHERE owner_kind = ? AND '
+              'owner_id = ? AND course_id = ? AND family = ?',
+              variables: <Variable<Object>>[
+                const Variable<String>('account'),
+                Variable<String>(userId),
+                const Variable<String>('en-fr'),
+                const Variable<String>('course'),
+              ],
+            )
+            .getSingle())
+        .read<int>('revision');
+
+final class _ProviderSqlCommitBarrier extends QueryInterceptor {
+  bool _holdCommit = false;
+  bool _learnerWritePendingCommit = false;
+  Completer<void>? _entered;
+  Completer<void>? _release;
+
+  Future<void> get commitEntered => _entered!.future;
+
+  void holdNextCommit() {
+    _holdCommit = true;
+    _entered = Completer<void>();
+    _release = Completer<void>();
+  }
+
+  void releaseCommit() {
+    final release = _release;
+    if (release != null && !release.isCompleted) release.complete();
+  }
+
+  @override
+  Future<void> runCustom(
+    QueryExecutor executor,
+    String statement,
+    List<Object?> args,
+  ) {
+    if (statement.contains('UPDATE learning_scopes SET revision = revision')) {
+      _learnerWritePendingCommit = true;
+    }
+    return executor.runCustom(statement, args);
+  }
+
+  @override
+  Future<int> runUpdate(
+    QueryExecutor executor,
+    String statement,
+    List<Object?> args,
+  ) {
+    if (statement.contains('UPDATE learning_scopes SET revision = revision')) {
+      _learnerWritePendingCommit = true;
+    }
+    return executor.runUpdate(statement, args);
+  }
+
+  @override
+  Future<void> commitTransaction(TransactionExecutor inner) async {
+    await inner.send();
+    if (!_holdCommit || !_learnerWritePendingCommit) return;
+    _holdCommit = false;
+    _learnerWritePendingCommit = false;
+    _entered!.complete();
+    await _release!.future;
+  }
+}
+
+final class _RecordingPreferencesStore extends InMemorySharedPreferencesStore {
+  _RecordingPreferencesStore(super.data) : super.withData();
+
+  int readCalls = 0;
+  int writeCalls = 0;
+
+  @override
+  Future<Map<String, Object>> getAll() {
+    readCalls++;
+    return super.getAll();
+  }
+
+  @override
+  Future<Map<String, Object>> getAllWithParameters(
+    GetAllParameters parameters,
+  ) {
+    readCalls++;
+    return super.getAllWithParameters(parameters);
+  }
+
+  @override
+  Future<bool> setValue(String valueType, String key, Object value) {
+    writeCalls++;
+    return super.setValue(valueType, key, value);
+  }
 }
