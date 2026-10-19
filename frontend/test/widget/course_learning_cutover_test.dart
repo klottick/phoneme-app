@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../integration_test/learning_database_qualification_app.dart'
+    show LearningDatabaseQualificationApp;
 import 'package:linguist/src/core/course/course_audio.dart';
 import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_learning_command.dart';
@@ -30,6 +33,105 @@ class _SilentAudio implements CourseAudio {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('qualification app exposes scoped controls and frozen commands', (
+    tester,
+  ) async {
+    final tempDir = (await tester.runAsync(
+      () => Directory.systemTemp.createTemp('learning-qualification-widget-'),
+    ))!;
+    final file = File('${tempDir.path}/phoneme_learning.sqlite');
+    final handle = LearningDatabaseHandle(
+      open: () => openFileLearningTestDatabase(file),
+    );
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await handle.close();
+      await tempDir.delete(recursive: true);
+    });
+
+    await tester.pumpWidget(
+      LearningDatabaseQualificationApp(
+        database: handle,
+        runId: 'widget-control-test',
+        backendName: 'file-backed native SQLite',
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey<String>('learning-storage-backend')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('learning-storage-run-id')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey<String>('learning-storage-run-id')),
+          )
+          .data,
+      'widget-control-test',
+    );
+    for (final String key in <String>[
+      'learning-storage-seed-retention',
+      'learning-storage-verify-retention',
+      'learning-storage-prepare-command-a',
+      'learning-storage-prepare-command-b',
+      'learning-storage-submit-command-a',
+      'learning-storage-submit-command-b',
+      'learning-storage-discard-ack',
+      'learning-storage-replay-frozen-command',
+      'learning-storage-replay-input',
+      'learning-storage-frozen-command',
+      'learning-storage-result',
+    ]) {
+      expect(find.byKey(ValueKey<String>(key)), findsOneWidget, reason: key);
+    }
+
+    Future<void> tapControl(String key) async {
+      final Finder control = find.byKey(ValueKey<String>(key));
+      await tester.ensureVisible(control);
+      await tester.tap(control);
+      await tester.pumpAndSettle();
+    }
+
+    await tapControl('learning-storage-prepare-command-a');
+    final SelectableText frozenCommand = tester.widget<SelectableText>(
+      find.byKey(const ValueKey<String>('learning-storage-frozen-command')),
+    );
+    final Map<String, dynamic> payloadA =
+        jsonDecode(frozenCommand.data!) as Map<String, dynamic>;
+    await tapControl('learning-storage-prepare-command-b');
+    final SelectableText frozenCommandB = tester.widget<SelectableText>(
+      find.byKey(const ValueKey<String>('learning-storage-frozen-command')),
+    );
+    final Map<String, dynamic> payloadB =
+        jsonDecode(frozenCommandB.data!) as Map<String, dynamic>;
+    expect(payloadB['scope'], payloadA['scope']);
+    expect(payloadB['token'], isNot(payloadA['token']));
+
+    await tapControl('learning-storage-discard-ack');
+    await tapControl('learning-storage-submit-command-a');
+    expect(find.textContaining('acknowledgment discarded'), findsOneWidget);
+    await tapControl('learning-storage-submit-command-b');
+    expect(find.textContaining('conflict'), findsOneWidget);
+
+    final Finder replayInput = find.byKey(
+      const ValueKey<String>('learning-storage-replay-input'),
+    );
+    await tester.ensureVisible(replayInput);
+    await tester.enterText(replayInput, frozenCommand.data!);
+    await tapControl('learning-storage-replay-frozen-command');
+    final SelectableText result = tester.widget<SelectableText>(
+      find.byKey(const ValueKey<String>('learning-storage-result')),
+    );
+    expect(result.data, contains('duplicate=true'));
+    expect(result.data, contains('attempts=1'));
+    expect(result.data, contains('unchanged=true'));
+    expect(result.data, contains('cursor='));
+  });
 
   testWidgets('all learning surfaces use same committed typed state', (
     tester,
@@ -74,20 +176,20 @@ void main() {
     var state = await store.load();
     await store.submit(
       store.prepare(
-      state: state,
-      activityId: 'lesson:en-fr-u-y',
-      action: StartLearningRun(options: RunOptions()),
+        state: state,
+        activityId: 'lesson:en-fr-u-y',
+        action: StartLearningRun(options: RunOptions()),
       ),
     );
     state = await store.load();
     await store.submit(
       store.prepare(
-      state: state,
-      activityId: 'lesson:en-fr-u-y',
-      action: ChooseSound(
-        selectedSound: 'u',
-        audioSource: AttemptAudioSource.pendingRecording,
-      ),
+        state: state,
+        activityId: 'lesson:en-fr-u-y',
+        action: ChooseSound(
+          selectedSound: 'u',
+          audioSource: AttemptAudioSource.pendingRecording,
+        ),
       ),
     );
     final surfaces = <Widget Function()>[
@@ -102,7 +204,7 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-        child: MaterialApp(home: surfaces[index]()),
+          child: MaterialApp(home: surfaces[index]()),
         ),
       );
       await tester.pump();
