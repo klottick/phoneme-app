@@ -231,6 +231,18 @@ const Map<String, List<String>> learningColumnNames = <String, List<String>>{
 Future<LearningDatabase> openFileLearningTestDatabase(File file) async =>
     LearningDatabase(DatabaseConnection(NativeDatabase(file)));
 
+/// Opens an independent file connection with WAL enabled for tests that need a
+/// writer to commit while another connection holds a read snapshot.
+Future<LearningDatabase> openWalFileLearningTestDatabase(File file) async =>
+    LearningDatabase(
+      DatabaseConnection(
+        NativeDatabase(
+          file,
+          setup: (database) => database.execute('PRAGMA journal_mode = WAL'),
+        ),
+      ),
+    );
+
 Future<List<String>> tableNames(LearningDatabase database) async {
   final rows = await database
       .customSelect(
