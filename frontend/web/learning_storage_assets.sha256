@@ -1,0 +1,9 @@
+# Exact upstream release assets; copied unchanged apart from the worker filename.
+# drift_worker.dart.js: drift-2.35.2, 360104 bytes, MIT.
+# https://github.com/simolus3/drift/releases/download/drift-2.35.2/drift_worker.js
+# License: https://github.com/simolus3/drift/blob/drift-2.35.2/LICENSE
+# sqlite3.wasm: sqlite3-3.7.1, 757984 bytes, MIT.
+# https://github.com/simolus3/sqlite3.dart/releases/download/sqlite3-3.7.1/sqlite3.wasm
+# License: https://github.com/simolus3/sqlite3.dart/blob/sqlite3-3.7.1/LICENSE
+191fc9db018d2bbecb1723e81118fcf2c5c094df8644c2fcba2ed51df061e90a  drift_worker.dart.js
+87c1869b533ea4b6daa1f4dc6aa7e9cf3dae6e6ea53f8ed57080c08eb5f64303  sqlite3.wasm
