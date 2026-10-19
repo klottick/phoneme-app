@@ -1,17 +1,50 @@
-# phoneme_app
+# Phoneme app
 
-A new Flutter project.
+## Flutter SDK
 
-## Getting Started
+Use the stable Flutter SDK version in [`.flutter-version`](.flutter-version)
+(Flutter 3.47.7, bundled Dart 3.13.5). Keep it side-by-side with any existing
+Flutter installation; do not upgrade or replace a shared SDK. The version is an
+official stable Flutter tag from <https://github.com/flutter/flutter>.
 
-This project is a starting point for a Flutter application.
+From the repository root, install a separate checkout (choose a new destination
+if this one already exists):
 
-A few resources to get you started if this is your first Flutter project:
+```sh
+FLUTTER_VERSION="$(cat frontend/.flutter-version)"
+FLUTTER_SDK="$HOME/.local/share/flutter-$FLUTTER_VERSION"
+git clone --depth 1 --branch "$FLUTTER_VERSION" --single-branch \
+  https://github.com/flutter/flutter.git "$FLUTTER_SDK"
+"$FLUTTER_SDK/bin/flutter" --version
+export PATH="$FLUTTER_SDK/bin:$PATH"
+```
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+The Flutter tool downloads the matching Dart and engine artifacts into this
+checkout on first use. No global version manager is required.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Frontend checks
+
+From the repository root, with the pinned SDK's `bin` first on `PATH`:
+
+```sh
+cd frontend
+flutter pub get
+dart run build_runner build
+flutter test --platform chrome test/unit/learning_database_connection_web_test.dart
+flutter test test/unit/learning_database_connection_stub_test.dart
+CHROME_BIN=/path/to/chrome
+CHROME_EXECUTABLE="$CHROME_BIN" flutter drive \
+  --driver=test_driver/integration_test.dart \
+  --driver-port=4444 \
+  --chrome-binary="$CHROME_BIN" \
+  --target=integration_test/learning_database_web_test.dart \
+  -d web-server
+flutter build web --release
+flutter analyze
+flutter test
+```
+
+Start a ChromeDriver matching `CHROME_BIN` on port `4444` before the web
+integration-test command. This uses Flutter's Web Server device and the
+WebDriver-launched Chrome; it avoids depending on Flutter's direct Chrome-device
+debug-service startup.
