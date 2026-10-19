@@ -37,7 +37,7 @@ CHROME_EXECUTABLE="$CHROME_BIN" flutter drive \
   --driver=test_driver/integration_test.dart \
   --driver-port=4444 \
   --chrome-binary="$CHROME_BIN" \
-  --target=integration_test/learning_database_web_test.dart \
+  --target=learning_database_web_test_entrypoint.dart \
   -d web-server
 flutter build web --release
 flutter analyze

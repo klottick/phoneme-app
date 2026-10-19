@@ -1,7 +1,7 @@
-import 'package:drift/drift.dart'
-    show DatabaseSchemaEntity, GeneratedDatabase, QueryRow, TableInfo, Variable;
 import 'package:flutter/material.dart';
 import 'package:linguist/src/core/course/storage/learning_database_connection.dart';
+
+import '../test/support/learning_database_smoke.dart';
 
 const String _probeValue = 'learning-storage-task1-persisted';
 
@@ -15,7 +15,7 @@ Future<void> main() async {
 
   final LearningDatabaseConnection databaseConnection =
       await openLearningDatabaseConnection();
-  final _QualificationDatabase database = _QualificationDatabase(
+  final LearningDatabaseSmoke database = LearningDatabaseSmoke(
     databaseConnection.connection,
   );
 
@@ -30,7 +30,7 @@ Future<void> main() async {
 
 class _LearningDatabaseQualificationApp extends StatefulWidget {
   final LearningDatabaseConnection databaseConnection;
-  final _QualificationDatabase database;
+  final LearningDatabaseSmoke database;
   final String probeKey;
 
   const _LearningDatabaseQualificationApp({
@@ -64,7 +64,6 @@ class _LearningDatabaseQualificationAppState
     });
 
     try {
-      await widget.database.ensureProbeTable();
       if (write) {
         await widget.database.writeProbe(widget.probeKey, _probeValue);
       }
@@ -121,35 +120,4 @@ class _LearningDatabaseQualificationAppState
       ),
     );
   }
-}
-
-class _QualificationDatabase extends GeneratedDatabase {
-  _QualificationDatabase(super.executor);
-
-  @override
-  int get schemaVersion => 1;
-
-  @override
-  Iterable<TableInfo> get allTables => const <TableInfo>[];
-
-  @override
-  Iterable<DatabaseSchemaEntity> get allSchemaEntities =>
-      const <DatabaseSchemaEntity>[];
-
-  Future<void> ensureProbeTable() => customStatement(
-    'CREATE TABLE IF NOT EXISTS learning_database_smoke_rows '
-    '(probe_key TEXT NOT NULL PRIMARY KEY, probe_value TEXT NOT NULL)',
-  );
-
-  Future<void> writeProbe(String key, String value) => customStatement(
-    'INSERT INTO learning_database_smoke_rows '
-    '(probe_key, probe_value) VALUES (?, ?) '
-    'ON CONFLICT(probe_key) DO UPDATE SET probe_value = excluded.probe_value',
-    <Object?>[key, value],
-  );
-
-  Future<String?> readProbe(String key) => customSelect(
-    'SELECT probe_value FROM learning_database_smoke_rows WHERE probe_key = ?',
-    variables: <Variable<Object>>[Variable<String>(key)],
-  ).map((QueryRow row) => row.read<String>('probe_value')).getSingleOrNull();
 }

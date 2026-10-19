@@ -18,6 +18,10 @@ void main() {
       DatabaseConnection(NativeDatabase.memory()),
     );
     try {
+      expect(
+        database.allTables.map((table) => table.actualTableName),
+        <String>['learning_database_smoke_rows'],
+      );
       await database.writeProbe('task1-smoke-test', 'sqlite-probe-value');
       expect(
         await database.readProbe('task1-smoke-test'),

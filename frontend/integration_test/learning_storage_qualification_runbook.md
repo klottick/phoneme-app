@@ -12,7 +12,7 @@ In one terminal, from the repository root:
 cd frontend
 PATH="/tmp/opencode/flutter-sdk-task1-3.47.7/bin:$PATH" flutter run \
   -d web-server \
-  -t integration_test/learning_database_qualification_app.dart \
+  -t learning_database_qualification_app_entrypoint.dart \
   --web-hostname 127.0.0.1 \
   --web-port 7357
 ```
@@ -31,7 +31,7 @@ CHROME_EXECUTABLE="$CHROME_BIN" flutter drive \
   --driver=test_driver/integration_test.dart \
   --driver-port=4444 \
   --chrome-binary="$CHROME_BIN" \
-  --target=integration_test/learning_database_web_test.dart \
+  --target=learning_database_web_test_entrypoint.dart \
   -d web-server
 ```
 
