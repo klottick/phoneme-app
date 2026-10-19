@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,9 +10,11 @@ import 'package:linguist/src/core/course/comparison_learning_command.dart';
 import 'package:linguist/src/core/course/comparison_learning_state.dart';
 import 'package:linguist/src/core/course/comparison_learning_transition.dart';
 import 'package:linguist/src/core/course/comparison_learning_store.dart';
+import 'package:linguist/src/core/course/backend.dart';
 import 'package:linguist/src/core/course/course_learning_persistence.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
+import 'package:linguist/src/core/course/french_sentence_package.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/course_skill_summary.dart';
 import 'package:linguist/src/core/course/course_learning_registry.dart';
@@ -19,6 +22,11 @@ import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/french_comparison_content.dart';
 import 'package:linguist/src/core/course/lesson_policy.dart';
 import 'package:linguist/src/core/course/lesson_section_session.dart';
+import 'package:linguist/src/core/course/storage/comparison_learning_sql_repository.dart';
+import 'package:linguist/src/core/course/storage/learning_database.dart'
+    show LearningDatabaseHandle;
+import 'package:linguist/src/core/course/sentence_hunt_learning_providers.dart';
+import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
 import 'package:linguist/src/features/course/comparison_lesson_screen.dart';
 import 'package:linguist/src/features/course/comparison_progress_summary.dart';
 import 'package:linguist/src/features/course/course_progress_screen.dart';
@@ -27,27 +35,57 @@ import 'package:linguist/src/features/course/discovery_lesson_screen.dart';
 import 'package:linguist/src/features/audio/audio_compare_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../support/course_learning_widget_store.dart';
+import '../support/sentence_hunt_fixtures.dart';
+import '../support/sqlite_learning_test_harness.dart';
 
 void main() {
-  setUp(() =>
-      SharedPreferences.setMockInitialValues({'selected_course_id': 'en-fr'}));
+  setUp(
+    () =>
+        SharedPreferences.setMockInitialValues({'selected_course_id': 'en-fr'}),
+  );
 
-  testWidgets('comparison_retry_contains_catalogue_factory_failure',
-      (tester) async {
+  testWidgets('comparison_retry_contains_catalogue_factory_failure', (
+    tester,
+  ) async {
+    final tempDir = (await tester.runAsync(
+      () => Directory.systemTemp.createTemp('comparison-error-'),
+    ))!;
+    var databaseOpenCalls = 0;
+    final trackedHandle = LearningDatabaseHandle(
+      open: () async {
+        databaseOpenCalls++;
+        return openFileLearningTestDatabase(
+          File('${tempDir.path}/learning.sqlite'),
+        );
+      },
+    );
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox());
+      await trackedHandle.close();
+      await tempDir.delete(recursive: true);
+    });
     final v2State = _nonemptyV2State();
     final v2Store = CourseLearningWidgetStore(initialState: v2State);
-    final persistence = _MemoryComparisonPersistence();
-    final tracker =
-        LearningAuthTracker(owner: LearningOwner.guest(), ready: true);
-    await tester.pumpWidget(ProviderScope(overrides: [
+    final tracker = LearningAuthTracker(
+      owner: LearningOwner.guest(),
+      ready: true,
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
       courseLearningStoreProvider.overrideWithValue(v2Store),
       courseLearningStateProvider.overrideWith((ref) async => v2State),
       learningAuthScopeProvider.overrideWith((ref) => tracker),
-      learningPersistenceProvider.overrideWithValue(persistence),
-      comparisonCatalogueProvider.overrideWith((ref) =>
-          throw const ComparisonUnavailableException(
-              FormatException('invalid comparison catalogue'))),
-    ], child: const LinguistApp()));
+          learningDatabaseHandleProvider.overrideWithValue(trackedHandle),
+          comparisonCatalogueProvider.overrideWith(
+            (ref) => throw const ComparisonUnavailableException(
+              FormatException('invalid comparison catalogue'),
+            ),
+          ),
+        ],
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Comparison alpha'), findsOneWidget);
     expect(find.text('Unavailable'), findsOneWidget);
@@ -56,55 +94,225 @@ void main() {
 
     await tester.tap(find.byTooltip('Progress'));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Retry comparison progress'), 200,
-        scrollable: find.byType(Scrollable).first);
+    await tester.scrollUntilVisible(
+      find.text('Retry comparison progress'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.ensureVisible(find.text('Retry comparison progress'));
     await tester.pump();
     expect(find.text('Retry comparison progress'), findsOneWidget);
     expect(
-        find.text('Retry comparison progress').hitTestable(), findsOneWidget);
+      find.text('Retry comparison progress').hitTestable(),
+      findsOneWidget,
+    );
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
     expect(find.text('Retry loading progress'), findsNothing);
-    expect(persistence.readCalls, 0);
-    expect(persistence.writeCalls, 0);
+    expect(databaseOpenCalls, 0);
     await tester.tap(find.text('Retry comparison progress'));
     await tester.pump();
     expect(tester.takeException(), isNull);
     expect(find.text('Retry comparison progress'), findsOneWidget);
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
-    expect(persistence.readCalls, 0);
-    expect(persistence.writeCalls, 0);
+    expect(databaseOpenCalls, 0);
     expect(v2Store.committedState, same(v2State));
     expect(v2Store.prepareCalls, 0);
     expect(v2Store.submitCalls, 0);
 
-    final router =
-        GoRouter.of(tester.element(find.text('Retry comparison progress')));
+    final router = GoRouter.of(
+      tester.element(find.text('Retry comparison progress')),
+    );
     router.go('/home');
     await tester.pumpAndSettle();
     await tester.tap(find.text('Continue discovery'));
     await tester.pumpAndSettle();
     expect(find.byType(DiscoveryLessonScreen), findsOneWidget);
-    expect(persistence.readCalls, 0);
-    expect(persistence.writeCalls, 0);
+    expect(databaseOpenCalls, 0);
   });
+
+  testWidgets(
+    'reopened_comparison_has_no_restored_hearing_and_stale_snapshot_reloads',
+    (tester) async {
+      final tempDir = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('comparison-reopen-'),
+      ))!;
+      courseBackend = null;
+      final file = File('${tempDir.path}/phoneme_learning.sqlite');
+      final catalogue = loadFrenchComparisonCatalogue();
+      final scope = ComparisonProfileScope(
+        courseId: 'en-fr',
+        owner: LearningOwner.guest(),
+      );
+      final seedTracker = LearningAuthTracker(owner: scope.owner, ready: true);
+      final seedHandle = LearningDatabaseHandle(
+        open: () => openFileLearningTestDatabase(file),
+      );
+      final seedContainer = ProviderContainer(
+        overrides: [
+          learningAuthScopeProvider.overrideWith((ref) => seedTracker),
+          learningDatabaseHandleProvider.overrideWithValue(seedHandle),
+          comparisonCatalogueProvider.overrideWithValue(catalogue),
+        ],
+      );
+      final seedStore = seedContainer.read(comparisonLearningStoreProvider);
+      final empty = await seedStore.load();
+      await seedStore.submit(
+        seedStore.prepare(
+          state: empty,
+          activityId: comparisonActivityId,
+          action: StartComparisonRun(
+            sessionId: 'reopened-comparison-run',
+            policy: LessonPolicy(),
+          ),
+        ),
+      );
+      seedContainer.dispose();
+      await seedHandle.close();
+
+      final tracker = LearningAuthTracker(owner: scope.owner, ready: true);
+      final handle = LearningDatabaseHandle(
+        open: () => openFileLearningTestDatabase(file),
+      );
+      final audio = _EntryReferenceAudio();
+      final container = ProviderContainer(
+        overrides: [
+          learningAuthScopeProvider.overrideWith((ref) => tracker),
+          learningDatabaseHandleProvider.overrideWithValue(handle),
+          courseLearningStoreProvider.overrideWithValue(
+            CourseLearningWidgetStore(),
+          ),
+          sentenceHuntLearningStateProvider.overrideWith(
+            (ref) async => SentenceHuntLearningState.empty(
+              SentenceHuntProfileScope(
+                courseId: 'en-fr',
+                owner: LearningOwner.guest(),
+              ),
+            ),
+          ),
+          sentenceHuntCatalogueProvider.overrideWith(
+            (ref) async => syntheticSentenceCatalogue(),
+          ),
+          comparisonCatalogueProvider.overrideWithValue(catalogue),
+          courseReferenceAudioProvider.overrideWithValue(audio),
+        ],
+      );
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox());
+        container.dispose();
+        await handle.close();
+        await tempDir.delete(recursive: true);
+        courseBackend = null;
+      });
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const LinguistApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final router = GoRouter.of(tester.element(find.text('Comparison alpha')));
+      router.go('/course-comparison/$comparisonActivityId');
+      await tester.pumpAndSettle();
+      expect(find.text('Listen to sample A'), findsOneWidget);
+      expect(
+        audio.requests,
+        isEmpty,
+        reason:
+            'a saved checkpoint must not restore playback or hearing grants',
+      );
+      final sameButton = tester.widget<ElevatedButton>(
+        find.widgetWithText(ElevatedButton, 'Same'),
+      );
+      expect(
+        sameButton.onPressed,
+        isNull,
+        reason: 'both comparison samples require fresh hearing',
+      );
+      expect(find.textContaining('Microphone'), findsNothing);
+      expect(find.textContaining('timer'), findsNothing);
+
+      var peerToken = 0;
+      final peer = SqliteComparisonLearningRepository(
+        database: handle,
+        scope: scope,
+        authGeneration: tracker.current.generation,
+        currentAuth: () => tracker.current,
+        backendOwner: () => LearningOwner.guest(),
+        transitions: ComparisonLearningTransitionEngine(catalogue: catalogue),
+        clock: () => DateTime.utc(2026, 10, 19),
+        newToken: () => (++peerToken).toString().padLeft(22, '0'),
+      );
+      final peerState = await peer.load();
+      final peerCommit = await peer.submit(
+        peer.prepare(
+          state: peerState,
+          activityId: comparisonActivityId,
+          action: StartComparisonRun(
+            sessionId: 'concurrent-winner',
+            policy: LessonPolicy(),
+          ),
+        ),
+      );
+      expect(peerCommit.state.revision, 2);
+
+      await tester.tap(find.text('Listen to sample A'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Listen to sample B'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Same'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Saved comparison progress changed. Reload to continue.'),
+        findsOneWidget,
+      );
+      expect(find.text('Reload saved progress'), findsOneWidget);
+
+      await tester.tap(find.text('Reload saved progress'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Saved comparison progress changed. Reload to continue.'),
+        findsNothing,
+      );
+      final reloaded = await peer.load();
+      expect(reloaded.revision, peerCommit.state.revision);
+      expect(
+        reloaded.attempts,
+        isEmpty,
+        reason: 'the stale answer is a conflict, not credited progress',
+      );
+      final sameButtonAfterReload = tester.widget<ElevatedButton>(
+        find.widgetWithText(ElevatedButton, 'Same'),
+      );
+      expect(
+        sameButtonAfterReload.onPressed,
+        isNull,
+        reason: 'reloading the current checkpoint requires fresh hearing',
+      );
+    },
+  );
 
   test('comparison_summary_counts_only_current_committed_evidence', () {
     final d = _Driver();
     final empty = ComparisonProgressSummary.fromState(
-        state: d.state, catalogue: d.catalogue);
+      state: d.state,
+      catalogue: d.catalogue,
+    );
     expect(empty.completedRuns, 0);
     expect(empty.hasCurrentRevisionCompletion, isFalse);
     d.start(); // an active draft/checkpoint is not committed completion.
     final draft = ComparisonProgressSummary.fromState(
-        state: d.state, catalogue: d.catalogue);
+      state: d.state,
+      catalogue: d.catalogue,
+    );
     expect(draft.completedRuns, 0);
     expect(draft.hasCurrentRevisionCompletion, isFalse);
     d.answer(true);
     final base = d.state;
     ComparisonCompletion completion(
-            int threshold, int revision, String activity) =>
-        ComparisonCompletion(
+      int threshold,
+      int revision,
+      String activity,
+    ) => ComparisonCompletion(
           scope: d.scope,
           activityId: activity,
           contentRevision: revision,
@@ -125,13 +333,15 @@ void main() {
             scope: d.scope,
             activityId: comparisonActivityId,
             pairId: 'fr07b-pair-04',
-            contentRevision: 1): ComparisonPairMistake(
+          contentRevision: 1,
+        ): ComparisonPairMistake(
           scope: d.scope,
           key: ComparisonPairMistakeKey(
               scope: d.scope,
               activityId: comparisonActivityId,
               pairId: 'fr07b-pair-04',
-              contentRevision: 1),
+            contentRevision: 1,
+          ),
           firstWrongAt: DateTime.utc(2026),
           latestWrongAt: DateTime.utc(2026, 1, 2),
           failureCount: 2,
@@ -140,13 +350,15 @@ void main() {
             scope: d.scope,
             activityId: comparisonActivityId,
             pairId: 'fr07b-pair-05',
-            contentRevision: 2): ComparisonPairMistake(
+          contentRevision: 2,
+        ): ComparisonPairMistake(
           scope: d.scope,
           key: ComparisonPairMistakeKey(
               scope: d.scope,
               activityId: comparisonActivityId,
               pairId: 'fr07b-pair-05',
-              contentRevision: 2),
+            contentRevision: 2,
+          ),
           firstWrongAt: DateTime.utc(2026),
           latestWrongAt: DateTime.utc(2026),
           failureCount: 1,
@@ -158,12 +370,14 @@ void main() {
             scope: d.scope,
             activityId: comparisonActivityId,
             pairId: 'fr07b-pair-02',
-            contentRevision: 1): ComparisonPairSummary(
+          contentRevision: 1,
+        ): ComparisonPairSummary(
           key: ComparisonSummaryKey(
               scope: d.scope,
               activityId: comparisonActivityId,
               pairId: 'fr07b-pair-02',
-              contentRevision: 1),
+            contentRevision: 1,
+          ),
           firstInRun: ComparisonCount(correct: 2, total: 3),
           repeatInRun: ComparisonCount(correct: 1, total: 2),
           afterDebrief: ComparisonCount(correct: 1, total: 2),
@@ -173,13 +387,17 @@ void main() {
         completion(80, 1, comparisonActivityId),
         completion(70, 1, comparisonActivityId),
         completion(80, 2, comparisonActivityId),
-        completion(80, 1, 'future-activity')
+        completion(80, 1, 'future-activity'),
       ],
     );
     final summary = ComparisonProgressSummary.fromState(
-        state: state, catalogue: d.catalogue);
-    expect(summary.uniqueAttemptedPairs,
-        2); // summary survives bounded attempt pruning
+      state: state,
+      catalogue: d.catalogue,
+    );
+    expect(
+      summary.uniqueAttemptedPairs,
+      2,
+    ); // summary survives bounded attempt pruning
     expect(summary.correctAnswers, 4);
     expect(summary.totalAnswers, 6);
     expect(summary.afterDebriefAnswers, 2); // overlapping, not added twice
@@ -206,9 +424,11 @@ void main() {
             summaries: base.summaries,
             completions: [
               completion(80, 1, comparisonActivityId),
-              completion(80, 1, comparisonActivityId)
-            ]),
-        throwsArgumentError);
+          completion(80, 1, comparisonActivityId),
+        ],
+      ),
+      throwsArgumentError,
+    );
     expect(
         () => ComparisonCompletion(
             scope: d.scope,
@@ -216,55 +436,72 @@ void main() {
             contentRevision: 1,
             policyRevision: 2,
             thresholdPercent: 80,
-            committedAt: DateTime.utc(2026)),
-        throwsArgumentError);
+        committedAt: DateTime.utc(2026),
+      ),
+      throwsArgumentError,
+    );
   });
 
-  testWidgets('comparison_entry_is_additive_and_unknown_is_local',
-      (tester) async {
+  testWidgets('comparison_entry_is_additive_and_unknown_is_local', (
+    tester,
+  ) async {
     final fixture = await _repositoryFixture(tester);
-    final homeLoadAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final homeLoadAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextLoadAck = homeLoadAck;
-    await tester.pumpWidget(ProviderScope(
-        overrides: _repositoryOverrides(fixture), child: const LinguistApp()));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: _repositoryOverrides(fixture),
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.runAsync(() => homeLoadAck.future);
     await tester.pump();
     await tester.pump();
     expect(find.text('Comparison alpha'), findsOneWidget);
     expect(find.text('Continue comparison'), findsOneWidget);
-    final screenLoadAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final screenLoadAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextLoadAck = screenLoadAck;
     final startAck = await _runRealAsync(tester, () async => Completer<void>());
     fixture.store.nextSubmitAck = startAck;
     GoRouter.of(tester.element(find.text('Comparison alpha'))).go(
-        '/course-comparison/en-fr-phoneme-comparison?review=false&pairId=fr07b-pair-01');
+      '/course-comparison/en-fr-phoneme-comparison?review=false&pairId=fr07b-pair-01',
+    );
     for (var i = 0; i < 20 && fixture.store.loadCalls < 2; i++) {
       await tester.pump();
     }
     expect(fixture.store.loadCalls, 2);
     await tester.runAsync(() => screenLoadAck.future);
     await tester.pump();
-    for (var i = 0;
+    for (
+      var i = 0;
         i < 20 &&
             fixture.store.commands
                 .where((c) => c.action is StartComparisonRun)
                 .isEmpty;
-        i++) {
+      i++
+    ) {
       await tester.pump();
     }
-    expect(fixture.store.commands.where((c) => c.action is StartComparisonRun),
-        hasLength(1));
+    expect(
+      fixture.store.commands.where((c) => c.action is StartComparisonRun),
+      hasLength(1),
+    );
     await tester.runAsync(() => startAck.future);
     await tester.pump();
     await _runRealAsync(tester, fixture.store.snapshot);
     await tester.pump();
     await tester.pumpAndSettle();
     expect(find.byType(ComparisonLessonScreen), findsOneWidget);
-    final router =
-        GoRouter.of(tester.element(find.byType(ComparisonLessonScreen)));
+    final router = GoRouter.of(
+      tester.element(find.byType(ComparisonLessonScreen)),
+    );
     final commandsBeforeInvalidRoutes = fixture.store.commands.length;
     for (final uri in [
       '/course-comparison/not-a-comparison',
@@ -280,38 +517,56 @@ void main() {
       router.go(uri);
       await tester.pumpAndSettle();
       expect(
-          find.text('This comparison activity is unavailable.'), findsOneWidget,
-          reason: uri);
+        find.text('This comparison activity is unavailable.'),
+        findsOneWidget,
+        reason: uri,
+      );
     }
     expect(fixture.store.commands.length, commandsBeforeInvalidRoutes);
   });
 
-  testWidgets('comparison_home_entry_survives_independent_progress_error',
-      (tester) async {
+  testWidgets('comparison_home_entry_survives_independent_progress_error', (
+    tester,
+  ) async {
     final discovery = CourseLearningWidgetStore()..failLoad = true;
-    final comparisonScope =
-        ComparisonProfileScope(courseId: 'en-fr', owner: LearningOwner.guest());
-    await tester.pumpWidget(ProviderScope(overrides: [
+    final comparisonScope = ComparisonProfileScope(
+      courseId: 'en-fr',
+      owner: LearningOwner.guest(),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
       courseLearningStoreProvider.overrideWithValue(discovery),
       comparisonLearningStateProvider.overrideWith(
-          (ref) async => ComparisonLearningState.empty(comparisonScope)),
-    ], child: const LinguistApp()));
+            (ref) async => ComparisonLearningState.empty(comparisonScope),
+          ),
+        ],
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Comparison alpha'), findsOneWidget);
     expect(find.text('Retry loading progress'), findsOneWidget);
   });
 
-  testWidgets('invalid_comparison_route_rejects_before_profile_store_factory',
-      (tester) async {
+  testWidgets('invalid_comparison_route_rejects_before_profile_store_factory', (
+    tester,
+  ) async {
     var factories = 0;
     var catalogueFactories = 0;
-    final scope =
-        ComparisonProfileScope(courseId: 'en-fr', owner: LearningOwner.guest());
-    await tester.pumpWidget(ProviderScope(overrides: [
-      courseLearningStoreProvider
-          .overrideWithValue(CourseLearningWidgetStore()),
-      comparisonLearningStateProvider
-          .overrideWith((ref) async => ComparisonLearningState.empty(scope)),
+    final scope = ComparisonProfileScope(
+      courseId: 'en-fr',
+      owner: LearningOwner.guest(),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(
+            CourseLearningWidgetStore(),
+          ),
+          comparisonLearningStateProvider.overrideWith(
+            (ref) async => ComparisonLearningState.empty(scope),
+          ),
       comparisonCatalogueProvider.overrideWith((ref) {
         catalogueFactories++;
         return loadFrenchComparisonCatalogue();
@@ -320,7 +575,10 @@ void main() {
         factories++;
         throw StateError('profile store must not be constructed');
       }),
-    ], child: const LinguistApp()));
+        ],
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Comparison alpha'), findsOneWidget);
     final catalogueFactoryCount = catalogueFactories;
@@ -340,24 +598,33 @@ void main() {
       router.go(uri);
       await tester.pumpAndSettle();
       expect(
-          find.text('This comparison activity is unavailable.'), findsOneWidget,
-          reason: uri);
+        find.text('This comparison activity is unavailable.'),
+        findsOneWidget,
+        reason: uri,
+      );
       expect(factories, 0, reason: 'profile store not constructed for $uri');
-      expect(catalogueFactories, catalogueFactoryCount,
-          reason:
-              'invalid activity/query must not construct catalogue for $uri');
+      expect(
+        catalogueFactories,
+        catalogueFactoryCount,
+        reason: 'invalid activity/query must not construct catalogue for $uri',
+      );
     }
   });
 
-  testWidgets('invalid_activity_and_query_precede_catalogue_and_profile_access',
+  testWidgets(
+    'invalid_activity_and_query_precede_catalogue_and_profile_access',
       (tester) async {
     var catalogueFactories = 0;
     var profileFactories = 0;
-    await tester.pumpWidget(ProviderScope(overrides: [
-      courseLearningStoreProvider
-          .overrideWithValue(CourseLearningWidgetStore()),
-      comparisonLearningStateProvider
-          .overrideWith((ref) => Completer<ComparisonLearningState>().future),
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            courseLearningStoreProvider.overrideWithValue(
+              CourseLearningWidgetStore(),
+            ),
+            comparisonLearningStateProvider.overrideWith(
+              (ref) => Completer<ComparisonLearningState>().future,
+            ),
       comparisonCatalogueProvider.overrideWith((ref) {
         catalogueFactories++;
         return loadFrenchComparisonCatalogue();
@@ -366,7 +633,10 @@ void main() {
         profileFactories++;
         throw StateError('profile must not be constructed');
       }),
-    ], child: const LinguistApp()));
+          ],
+          child: const LinguistApp(),
+        ),
+      );
     await tester.pumpAndSettle();
     expect(find.text('Comparison alpha'), findsOneWidget);
     expect(catalogueFactories, 0);
@@ -380,26 +650,42 @@ void main() {
       router.go(uri);
       await tester.pumpAndSettle();
       expect(
-          find.text('This comparison activity is unavailable.'), findsOneWidget,
-          reason: uri);
+          find.text('This comparison activity is unavailable.'),
+          findsOneWidget,
+          reason: uri,
+        );
       expect(catalogueFactories, 0, reason: 'catalogue before guard: $uri');
       expect(profileFactories, 0, reason: 'profile before guard: $uri');
     }
-  });
+    },
+  );
 
-  testWidgets('corrupt_comparison_catalogue_is_local_unavailable',
-      (tester) async {
+  testWidgets('corrupt_comparison_catalogue_is_local_unavailable', (
+    tester,
+  ) async {
     final v2State = _nonemptyV2State();
-    await tester.pumpWidget(ProviderScope(overrides: [
-      courseLearningStoreProvider
-          .overrideWithValue(CourseLearningWidgetStore()),
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(
+            CourseLearningWidgetStore(),
+          ),
       courseLearningStateProvider.overrideWith((ref) async => v2State),
-      comparisonLearningStateProvider.overrideWith((ref) async =>
-          ComparisonLearningState.empty(ComparisonProfileScope(
-              courseId: 'en-fr', owner: LearningOwner.guest()))),
+          comparisonLearningStateProvider.overrideWith(
+            (ref) async => ComparisonLearningState.empty(
+              ComparisonProfileScope(
+                courseId: 'en-fr',
+                owner: LearningOwner.guest(),
+              ),
+            ),
+          ),
       comparisonCatalogueProvider.overrideWith(
-          (ref) => throw ComparisonContentValidationException([])),
-    ], child: const LinguistApp()));
+            (ref) => throw ComparisonContentValidationException([]),
+          ),
+        ],
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Comparison alpha'), findsOneWidget);
     var router = GoRouter.of(tester.element(find.text('Comparison alpha')));
@@ -408,16 +694,22 @@ void main() {
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
     expect(
         find.text('Existing lessons (includes discovery pilot): 0/5 complete'),
-        findsOneWidget);
+      findsOneWidget,
+    );
     expect(find.text('Comparison practice, not phoneme mastery'), findsNothing);
-    await tester.scrollUntilVisible(find.text('Unavailable'), 160,
-        scrollable: find.byType(Scrollable).first);
+    await tester.scrollUntilVisible(
+      find.text('Unavailable'),
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.pump();
     expect(find.text('Unavailable'), findsOneWidget);
     expect(
         find.text(
-            'Supported backup is pending; local commits remain saved on this device.'),
-        findsOneWidget);
+        'Supported backup is pending; local commits remain saved on this device.',
+      ),
+      findsOneWidget,
+    );
     router = GoRouter.of(tester.element(find.byType(CourseProgressScreen)));
     router.go('/course-review');
     await tester.pumpAndSettle();
@@ -426,34 +718,50 @@ void main() {
     router = GoRouter.of(tester.element(find.byType(CourseProgressScreen)));
     router.go('/course-progress');
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Unavailable'), 160,
-        scrollable: find.byType(Scrollable).first);
+    await tester.scrollUntilVisible(
+      find.text('Unavailable'),
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.pump();
     expect(find.text('Unavailable'), findsOneWidget);
     expect(find.text('Comparison pairs attempted: 0/10'), findsNothing);
     router = GoRouter.of(tester.element(find.byType(CourseProgressScreen)));
-    router
-        .go('/course-comparison/en-fr-phoneme-comparison?pairId=fr07b-pair-01');
+    router.go(
+      '/course-comparison/en-fr-phoneme-comparison?pairId=fr07b-pair-01',
+    );
     await tester.pumpAndSettle();
     expect(
-        find.text('This comparison activity is unavailable.'), findsOneWidget);
+      find.text('This comparison activity is unavailable.'),
+      findsOneWidget,
+    );
   });
 
-  testWidgets('comparison_state_error_keeps_entry_and_recovery_action',
-      (tester) async {
+  testWidgets('comparison_state_error_keeps_entry_and_recovery_action', (
+    tester,
+  ) async {
     final fixture = await _repositoryFixture(tester);
     final discoveryStore = CourseLearningWidgetStore();
     fixture.persistence.failNextRead = true;
-    final initialLoad =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final initialLoad = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextLoadAck = initialLoad;
-    await tester.pumpWidget(ProviderScope(overrides: [
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
       courseLearningStoreProvider.overrideWithValue(discoveryStore),
-      learningAuthScopeProvider.overrideWith((ref) =>
-          LearningAuthTracker(owner: fixture.scope.owner, ready: true)),
+          learningAuthScopeProvider.overrideWith(
+            (ref) =>
+                LearningAuthTracker(owner: fixture.scope.owner, ready: true),
+          ),
       comparisonCatalogueProvider.overrideWithValue(fixture.catalogue),
       comparisonLearningStoreProvider.overrideWithValue(fixture.store),
-    ], child: const LinguistApp()));
+        ],
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.runAsync(() => initialLoad.future);
     await tester.pumpAndSettle();
@@ -462,23 +770,29 @@ void main() {
     await tester.ensureVisible(find.text('Open comparison recovery'));
     final retryAck = await _runRealAsync(tester, () async => Completer<void>());
     fixture.store.nextLoadAck = retryAck;
-    final recoveryStartAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final recoveryStartAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextSubmitAck = recoveryStartAck;
     await tester.tap(find.text('Open comparison recovery'));
     await tester.pump();
     await tester.runAsync(() => retryAck.future);
     await tester.pump();
-    for (var i = 0;
+    for (
+      var i = 0;
         i < 20 &&
             fixture.store.commands
                 .where((c) => c.action is StartComparisonRun)
                 .isEmpty;
-        i++) {
+      i++
+    ) {
       await tester.pump();
     }
-    expect(fixture.store.commands.where((c) => c.action is StartComparisonRun),
-        hasLength(1));
+    expect(
+      fixture.store.commands.where((c) => c.action is StartComparisonRun),
+      hasLength(1),
+    );
     await tester.runAsync(() => recoveryStartAck.future);
     await tester.pump();
     expect(find.byType(ComparisonLessonScreen), findsOneWidget);
@@ -486,24 +800,35 @@ void main() {
     expect(discoveryStore.loadCalls, greaterThanOrEqualTo(1));
   });
 
-  testWidgets('v2_failure_does_not_hide_comparison_entry_or_count',
-      (tester) async {
-    final scope =
-        ComparisonProfileScope(courseId: 'en-fr', owner: LearningOwner.guest());
-    await tester.pumpWidget(ProviderScope(overrides: [
-      courseLearningStoreProvider
-          .overrideWithValue(CourseLearningWidgetStore()..failLoad = true),
-      comparisonLearningStateProvider
-          .overrideWith((ref) async => ComparisonLearningState.empty(scope)),
-    ], child: const LinguistApp()));
+  testWidgets('v2_failure_does_not_hide_comparison_entry_or_count', (
+    tester,
+  ) async {
+    final scope = ComparisonProfileScope(
+      courseId: 'en-fr',
+      owner: LearningOwner.guest(),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(
+            CourseLearningWidgetStore()..failLoad = true,
+          ),
+          comparisonLearningStateProvider.overrideWith(
+            (ref) async => ComparisonLearningState.empty(scope),
+          ),
+        ],
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Comparison alpha'), findsOneWidget);
     expect(find.text('Continue comparison'), findsOneWidget);
     expect(find.text('Retry loading progress'), findsOneWidget);
   });
 
-  testWidgets('home_offers_review_only_for_committed_current_completion',
-      (tester) async {
+  testWidgets('home_offers_review_only_for_committed_current_completion', (
+    tester,
+  ) async {
     final driver = _Driver()..start();
     driver.answer(true);
     final state = driver.state;
@@ -524,32 +849,47 @@ void main() {
           policyRevision: 1,
           thresholdPercent: 80,
           committedAt: DateTime.utc(2026),
-        )
+        ),
       ],
     );
-    await tester.pumpWidget(ProviderScope(overrides: [
-      courseLearningStoreProvider
-          .overrideWithValue(CourseLearningWidgetStore()),
-      comparisonLearningStateProvider.overrideWith((ref) async => committed),
-    ], child: const LinguistApp()));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(
+            CourseLearningWidgetStore(),
+          ),
+          comparisonLearningStateProvider.overrideWith(
+            (ref) async => committed,
+          ),
+        ],
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Review comparison'), findsOneWidget);
     expect(find.text('Practise again'), findsOneWidget);
   });
 
-  testWidgets('home_continue_resumes_active_draft_without_mutation',
-      (tester) async {
+  testWidgets('home_continue_resumes_active_draft_without_mutation', (
+    tester,
+  ) async {
     final fixture = await _repositoryFixture(tester);
     final seeded = await _seedActiveDraft(tester, fixture.store);
     final before = await _runRealAsync(tester, fixture.store.snapshot);
     expect(before.checkpoint!.sessionJson, seeded.checkpoint!.sessionJson);
     expect(before.completions, isEmpty);
     final commandsBefore = fixture.store.commands.length;
-    final homeLoadAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final homeLoadAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextLoadAck = homeLoadAck;
-    await tester.pumpWidget(ProviderScope(
-        overrides: _repositoryOverrides(fixture), child: const LinguistApp()));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: _repositoryOverrides(fixture),
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.runAsync(() => homeLoadAck.future);
     await tester.pump();
@@ -557,12 +897,16 @@ void main() {
     expect(find.text('Continue comparison'), findsOneWidget);
     expect(find.text('Review comparison'), findsNothing);
     final homeLoadCalls = fixture.store.loadCalls;
-    final screenLoadAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final screenLoadAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextLoadAck = screenLoadAck;
     await tester.ensureVisible(find.text('Continue comparison'));
-    final continueButton =
-        find.widgetWithText(FilledButton, 'Continue comparison');
+    final continueButton = find.widgetWithText(
+      FilledButton,
+      'Continue comparison',
+    );
     expect(tester.widget<FilledButton>(continueButton).onPressed, isNotNull);
     await tester.tap(continueButton);
     await tester.pump();
@@ -571,10 +915,11 @@ void main() {
     await tester.pump();
     expect(find.byType(ComparisonLessonScreen), findsOneWidget);
     expect(
-        GoRouterState.of(tester.element(find.byType(ComparisonLessonScreen)))
-            .uri
-            .toString(),
-        '/course-comparison/en-fr-phoneme-comparison');
+      GoRouterState.of(
+        tester.element(find.byType(ComparisonLessonScreen)),
+      ).uri.toString(),
+      '/course-comparison/en-fr-phoneme-comparison',
+    );
     expect(find.byType(ComparisonLessonScreen), findsOneWidget);
     final after = await _runRealAsync(tester, fixture.store.snapshot);
     expect(after.checkpoint!.sessionJson, before.checkpoint!.sessionJson);
@@ -582,19 +927,29 @@ void main() {
     expect(fixture.store.commands.length, commandsBefore);
   });
 
-  testWidgets('home_review_and_practise_again_preserve_completed_debrief',
-      (tester) async {
+  testWidgets('home_review_and_practise_again_preserve_completed_debrief', (
+    tester,
+  ) async {
     final fixture = await _repositoryFixture(tester);
-    final completed =
-        await _seedCompletedRun(tester, fixture.store, fixture.catalogue);
+    final completed = await _seedCompletedRun(
+      tester,
+      fixture.store,
+      fixture.catalogue,
+    );
     expect(completed.completions, hasLength(1));
     final completedJson = completed.checkpoint!.sessionJson;
     final commandsBefore = fixture.store.commands.length;
-    final homeLoadAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final homeLoadAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextLoadAck = homeLoadAck;
-    await tester.pumpWidget(ProviderScope(
-        overrides: _repositoryOverrides(fixture), child: const LinguistApp()));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: _repositoryOverrides(fixture),
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.runAsync(() => homeLoadAck.future);
     await tester.pump();
@@ -615,20 +970,28 @@ void main() {
     expect(find.byType(ComparisonLessonScreen), findsOneWidget);
     router = GoRouter.of(tester.element(find.byType(ComparisonLessonScreen)));
     expect(
-        GoRouterState.of(tester.element(find.byType(ComparisonLessonScreen)))
-            .uri
-            .toString(),
-        '/course-comparison/en-fr-phoneme-comparison?review=true');
+      GoRouterState.of(
+        tester.element(find.byType(ComparisonLessonScreen)),
+      ).uri.toString(),
+      '/course-comparison/en-fr-phoneme-comparison?review=true',
+    );
     expect(find.text('Comparison debrief'), findsOneWidget);
     var after = await _runRealAsync(tester, fixture.store.snapshot);
     expect(after.checkpoint!.sessionJson, completedJson);
     expect(after.completions, hasLength(1));
-    expect(after.completions.single.policyRevision,
-        completed.completions.single.policyRevision);
-    expect(after.completions.single.thresholdPercent,
-        completed.completions.single.thresholdPercent);
-    expect(fixture.store.commands.length, commandsBefore,
-        reason: 'Review entry must not automatically start another run');
+    expect(
+      after.completions.single.policyRevision,
+      completed.completions.single.policyRevision,
+    );
+    expect(
+      after.completions.single.thresholdPercent,
+      completed.completions.single.thresholdPercent,
+    );
+    expect(
+      fixture.store.commands.length,
+      commandsBefore,
+      reason: 'Review entry must not automatically start another run',
+    );
 
     router.pop();
     await tester.pumpAndSettle();
@@ -644,48 +1007,70 @@ void main() {
     expect(find.byType(ComparisonLessonScreen), findsOneWidget);
     router = GoRouter.of(tester.element(find.byType(ComparisonLessonScreen)));
     expect(
-        GoRouterState.of(tester.element(find.byType(ComparisonLessonScreen)))
-            .uri
-            .toString(),
-        '/course-comparison/en-fr-phoneme-comparison');
+      GoRouterState.of(
+        tester.element(find.byType(ComparisonLessonScreen)),
+      ).uri.toString(),
+      '/course-comparison/en-fr-phoneme-comparison',
+    );
     expect(find.text('Comparison debrief'), findsOneWidget);
     after = await _runRealAsync(tester, fixture.store.snapshot);
     expect(after.checkpoint!.sessionJson, completedJson);
     expect(after.completions, hasLength(1));
-    expect(after.completions.single.policyRevision,
-        completed.completions.single.policyRevision);
-    expect(after.completions.single.thresholdPercent,
-        completed.completions.single.thresholdPercent);
-    expect(fixture.store.commands.length, commandsBefore,
-        reason: 'Home Practise again must preserve the saved debrief');
     expect(
-        find.widgetWithText(OutlinedButton, 'Practise again'), findsOneWidget,
-        reason: 'new run remains an explicit saved-debrief action');
+      after.completions.single.policyRevision,
+      completed.completions.single.policyRevision,
+    );
+    expect(
+      after.completions.single.thresholdPercent,
+      completed.completions.single.thresholdPercent,
+    );
+    expect(
+      fixture.store.commands.length,
+      commandsBefore,
+      reason: 'Home Practise again must preserve the saved debrief',
+    );
+    expect(
+      find.widgetWithText(OutlinedButton, 'Practise again'),
+      findsOneWidget,
+      reason: 'new run remains an explicit saved-debrief action',
+    );
   });
 
-  testWidgets('comparison_and_discovery_load_failures_are_independent',
-      (tester) async {
+  testWidgets('comparison_and_discovery_load_failures_are_independent', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(360, 640);
     tester.view.devicePixelRatio = 1;
     tester.platformDispatcher.textScaleFactorTestValue = 2;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(
-        () => tester.platformDispatcher.clearTextScaleFactorTestValue());
-    final courseScope =
-        LearningScope(courseId: 'en-fr', owner: LearningOwner.guest());
+      () => tester.platformDispatcher.clearTextScaleFactorTestValue(),
+    );
+    final courseScope = LearningScope(
+      courseId: 'en-fr',
+      owner: LearningOwner.guest(),
+    );
     final courseState = CourseLearningState.empty(courseScope);
     final driver = _Driver()..start();
     driver.answer(true);
     final comparisonState = driver.state;
-    await tester.pumpWidget(ProviderScope(overrides: [
-      courseLearningStoreProvider
-          .overrideWithValue(CourseLearningWidgetStore()),
-      courseLearningStateProvider
-          .overrideWith((ref) async => throw StateError('v2 unavailable')),
-      comparisonLearningStateProvider
-          .overrideWith((ref) async => comparisonState),
-    ], child: const LinguistApp()));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(
+            CourseLearningWidgetStore(),
+          ),
+          courseLearningStateProvider.overrideWith(
+            (ref) async => throw StateError('v2 unavailable'),
+          ),
+          comparisonLearningStateProvider.overrideWith(
+            (ref) async => comparisonState,
+          ),
+        ],
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Progress'));
     await tester.pumpAndSettle();
@@ -704,27 +1089,42 @@ void main() {
       await tester.pumpAndSettle();
       for (final label in labels) {
         await tester.ensureVisible(find.text(label));
-        expect(find.text(label), findsOneWidget,
-            reason: 'scale $scale: $label');
+        expect(
+          find.text(label),
+          findsOneWidget,
+          reason: 'scale $scale: $label',
+        );
         expect(tester.takeException(), isNull, reason: 'scale $scale');
       }
     }
     expect(courseState.commitOrdinal, 0);
   });
 
-  testWidgets('home_primary_legacy_and_audio_compare_keep_real_destinations',
-      (tester) async {
+  testWidgets('home_primary_legacy_and_audio_compare_keep_real_destinations', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1600, 1200);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(ProviderScope(overrides: [
-      courseLearningStoreProvider
-          .overrideWithValue(CourseLearningWidgetStore()),
-      comparisonLearningStateProvider.overrideWith((ref) async =>
-          ComparisonLearningState.empty(ComparisonProfileScope(
-              courseId: 'en-fr', owner: LearningOwner.guest()))),
-    ], child: const LinguistApp()));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(
+            CourseLearningWidgetStore(),
+          ),
+          comparisonLearningStateProvider.overrideWith(
+            (ref) async => ComparisonLearningState.empty(
+              ComparisonProfileScope(
+                courseId: 'en-fr',
+                owner: LearningOwner.guest(),
+              ),
+            ),
+          ),
+        ],
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     final router = GoRouter.of(tester.element(find.text('Continue discovery')));
     await tester.tap(find.text('Continue discovery'));
@@ -740,8 +1140,11 @@ void main() {
     for (final (title, id) in legacy) {
       router.pop();
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(find.text(title), 220,
-          scrollable: find.byType(Scrollable).first);
+      await tester.scrollUntilVisible(
+        find.text(title),
+        220,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.tap(find.text(title));
       await tester.pumpAndSettle();
       expect(find.byType(CourseLessonScreen), findsOneWidget, reason: title);
@@ -749,17 +1152,23 @@ void main() {
           tester
               .widget<CourseLessonScreen>(find.byType(CourseLessonScreen))
               .lessonId,
-          id);
+        id,
+      );
     }
 
     router.pop();
     await tester.pumpAndSettle();
     final homeScroll = find
         .descendant(
-            of: find.byType(ListView).first, matching: find.byType(Scrollable))
+          of: find.byType(ListView).first,
+          matching: find.byType(Scrollable),
+        )
         .first;
-    await tester.scrollUntilVisible(find.text('Practice tools'), 220,
-        scrollable: homeScroll);
+    await tester.scrollUntilVisible(
+      find.text('Practice tools'),
+      220,
+      scrollable: homeScroll,
+    );
     await tester.tap(find.text('Practice tools'));
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView).first, const Offset(0, -500));
@@ -770,28 +1179,39 @@ void main() {
     expect(find.byType(AudioCompareScreen), findsOneWidget);
   });
 
-  testWidgets('comparison_pair_review_preserves_finite_queue_context',
-      (tester) async {
+  testWidgets('comparison_pair_review_preserves_finite_queue_context', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1100, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final fixture = await _repositoryFixture(tester);
     final audio = _EntryReferenceAudio();
-    final seeded = await _seedDebrief(tester, fixture.store, fixture.catalogue,
-        wrongIndexes: {0, 3});
+    final seeded = await _seedDebrief(
+      tester,
+      fixture.store,
+      fixture.catalogue,
+      wrongIndexes: {0, 3},
+    );
     final seededSession = LessonSectionSession.fromJson(
         Map<String, dynamic>.from(seeded.checkpoint!.sessionJson),
         itemIds: fixture.catalogue.exercises.map((e) => e.id).toList(),
-        contentRevision: 1);
+      contentRevision: 1,
+    );
     expect(seededSession.unresolvedItemIds, ['fr07b-pair-01', 'fr07b-pair-04']);
     final initialCommands = fixture.store.commands.length;
     final loadAck = await _runRealAsync(tester, () async => Completer<void>());
     fixture.store.nextLoadAck = loadAck;
-    await tester.pumpWidget(ProviderScope(overrides: [
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
       ..._repositoryOverrides(fixture),
       courseReferenceAudioProvider.overrideWithValue(audio),
-    ], child: const LinguistApp()));
+        ],
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.runAsync(() => loadAck.future);
     await tester.pumpAndSettle();
@@ -801,8 +1221,10 @@ void main() {
     final mistake = find.text('Comparison pair fr07b-pair-04');
     await tester.ensureVisible(mistake);
     expect(mistake, findsOneWidget);
-    final screenLoadAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final screenLoadAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextLoadAck = screenLoadAck;
     await tester.tap(mistake);
     await tester.pump();
@@ -813,11 +1235,16 @@ void main() {
     expect(find.text('Comparison debrief'), findsOneWidget);
     final unchanged = await _runRealAsync(tester, fixture.store.snapshot);
     expect(unchanged.checkpoint!.sessionJson, seeded.checkpoint!.sessionJson);
-    expect(fixture.store.commands.length, initialCommands,
-        reason: 'opening pair context must not start or mutate a run');
+    expect(
+      fixture.store.commands.length,
+      initialCommands,
+      reason: 'opening pair context must not start or mutate a run',
+    );
 
-    final reviewAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final reviewAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextSubmitAck = reviewAck;
     await tester.ensureVisible(find.text('Review unresolved pairs'));
     await tester.tap(find.text('Review unresolved pairs'));
@@ -828,25 +1255,31 @@ void main() {
     final session = LessonSectionSession.fromJson(
         Map<String, dynamic>.from(active.checkpoint!.sessionJson),
         itemIds: fixture.catalogue.exercises.map((e) => e.id).toList(),
-        contentRevision: 1);
+      contentRevision: 1,
+    );
     expect(session.queue, ['fr07b-pair-01', 'fr07b-pair-04']);
     expect(session.position, 0);
     expect(session.currentItemId, 'fr07b-pair-01');
     expect(fixture.store.commands.length, initialCommands + 1);
 
     final unchangedActiveJson = active.checkpoint!.sessionJson;
-    final resumeAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final resumeAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextLoadAck = resumeAck;
     router.go(
-        '/course-comparison/en-fr-phoneme-comparison?pairId=fr07b-pair-04&review=true');
+      '/course-comparison/en-fr-phoneme-comparison?pairId=fr07b-pair-04&review=true',
+    );
     await tester.pump();
     await tester.runAsync(() => resumeAck.future);
     await tester.pumpAndSettle();
     final resumed = await _runRealAsync(tester, fixture.store.snapshot);
-    expect(resumed.checkpoint!.sessionJson, unchangedActiveJson,
-        reason:
-            'deep link must resume, not reorder or advance active checkpoint');
+    expect(
+      resumed.checkpoint!.sessionJson,
+      unchangedActiveJson,
+      reason: 'deep link must resume, not reorder or advance active checkpoint',
+    );
     expect(find.text('Listen to sample A'), findsOneWidget);
     expect(fixture.store.commands.length, initialCommands + 1);
 
@@ -861,13 +1294,18 @@ void main() {
       expect(audio.requests.last, exercise.sampleB.referenceId);
       expect(find.text('Same'), findsOneWidget);
       expect(find.text('Different'), findsOneWidget);
-      final answerAck =
-          await _runRealAsync(tester, () async => Completer<void>());
+      final answerAck = await _runRealAsync(
+        tester,
+        () async => Completer<void>(),
+      );
       fixture.store.nextSubmitAck = answerAck;
-      await tester.tap(find.text(
+      await tester.tap(
+        find.text(
           exercise.expectedRelation == PhonemeRelation.same
               ? 'Same'
-              : 'Different'));
+              : 'Different',
+        ),
+      );
       await tester.pump();
       await tester.runAsync(() => answerAck.future);
       await tester.pump();
@@ -875,10 +1313,13 @@ void main() {
       final currentSession = LessonSectionSession.fromJson(
           Map<String, dynamic>.from(current.checkpoint!.sessionJson),
           itemIds: fixture.catalogue.exercises.map((e) => e.id).toList(),
-          contentRevision: 1);
+        contentRevision: 1,
+      );
       expect(currentSession.currentItemId, pairId);
-      final advanceAck =
-          await _runRealAsync(tester, () async => Completer<void>());
+      final advanceAck = await _runRealAsync(
+        tester,
+        () async => Completer<void>(),
+      );
       fixture.store.nextSubmitAck = advanceAck;
       await tester.tap(find.text('Continue'));
       await tester.pump();
@@ -888,7 +1329,8 @@ void main() {
       final advancedSession = LessonSectionSession.fromJson(
           Map<String, dynamic>.from(advanced.checkpoint!.sessionJson),
           itemIds: fixture.catalogue.exercises.map((e) => e.id).toList(),
-          contentRevision: 1);
+        contentRevision: 1,
+      );
       if (queueIndex == 0) {
         expect(advancedSession.currentItemId, 'fr07b-pair-04');
         expect(advancedSession.queue, ['fr07b-pair-01', 'fr07b-pair-04']);
@@ -900,19 +1342,23 @@ void main() {
     final completedSession = LessonSectionSession.fromJson(
         Map<String, dynamic>.from(afterQueue.checkpoint!.sessionJson),
         itemIds: fixture.catalogue.exercises.map((e) => e.id).toList(),
-        contentRevision: 1);
+      contentRevision: 1,
+    );
     expect(completedSession.phase, LessonSectionPhase.debrief);
     expect(completedSession.queue, ['fr07b-pair-01', 'fr07b-pair-04']);
     expect(
         fixture.store.commands.where((c) => c.action is AnswerComparisonPair),
-        hasLength(12));
+      hasLength(12),
+    );
     expect(
         fixture.store.commands.where((c) => c.action is AdvanceComparisonPair),
-        hasLength(12));
+      hasLength(12),
+    );
   });
 
-  testWidgets('comparison_finish_ack_retry_and_duplicate_receipt_are_durable',
-      (tester) async {
+  testWidgets('comparison_finish_ack_retry_and_duplicate_receipt_are_durable', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1100, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -923,13 +1369,20 @@ void main() {
     final v2State = _nonemptyV2State();
     final v2Store = CourseLearningWidgetStore(initialState: v2State);
     final audio = _EntryReferenceAudio();
-    final homeLoadAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final homeLoadAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextLoadAck = homeLoadAck;
-    await tester.pumpWidget(ProviderScope(overrides: [
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
       ..._progressRepositoryOverrides(fixture, v2Store, v2State),
       courseReferenceAudioProvider.overrideWithValue(audio),
-    ], child: const LinguistApp()));
+        ],
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.runAsync(() => homeLoadAck.future);
     await tester.pump();
@@ -947,8 +1400,10 @@ void main() {
     router.routerDelegate.addListener(recordPop);
     addTearDown(() => router.routerDelegate.removeListener(recordPop));
 
-    final screenLoadAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final screenLoadAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     final startAck = await _runRealAsync(tester, () async => Completer<void>());
     fixture.store.nextLoadAck = screenLoadAck;
     fixture.store.nextSubmitAck = startAck;
@@ -975,15 +1430,22 @@ void main() {
       await tester.tap(find.text('Listen to sample B'));
       await tester.pump();
       expect(audio.requests.last, exercise.sampleB.referenceId);
-      final answerAck =
-          await _runRealAsync(tester, () async => Completer<void>());
-      final continueAck =
-          await _runRealAsync(tester, () async => Completer<void>());
+      final answerAck = await _runRealAsync(
+        tester,
+        () async => Completer<void>(),
+      );
+      final continueAck = await _runRealAsync(
+        tester,
+        () async => Completer<void>(),
+      );
       fixture.store.nextSubmitAck = answerAck;
-      await tester.tap(find.text(
+      await tester.tap(
+        find.text(
           exercise.expectedRelation == PhonemeRelation.same
               ? 'Same'
-              : 'Different'));
+              : 'Different',
+        ),
+      );
       await tester.pump();
       await tester.runAsync(() => answerAck.future);
       await tester.pump();
@@ -1005,9 +1467,11 @@ void main() {
 
     final rawBefore = Map<String, String>.from(fixture.persistence.values);
     final provider = ProviderScope.containerOf(
-        tester.element(find.byType(ComparisonLessonScreen)));
-    final providerCommittedBefore =
-        provider.read(comparisonLearningStateProvider).value!;
+      tester.element(find.byType(ComparisonLessonScreen)),
+    );
+    final providerCommittedBefore = provider
+        .read(comparisonLearningStateProvider)
+        .value!;
     final committedBefore = terminal;
     final completionIdentity = fixture.tracker.current;
     var notificationScopeAlive = true;
@@ -1024,7 +1488,8 @@ void main() {
     final prewriteSession = LessonSectionSession.fromJson(
         Map<String, dynamic>.from(committedBefore.slot!.checkpoint.sessionJson),
         itemIds: fixture.catalogue.exercises.map((e) => e.id).toList(),
-        contentRevision: 1);
+      contentRevision: 1,
+    );
     expect(prewriteSession.phase, LessonSectionPhase.debrief);
     expect(providerCommittedBefore.completions, isEmpty);
     final firstGate = await _newPersistenceWriteGate(tester, fail: true);
@@ -1038,24 +1503,33 @@ void main() {
     final firstCommand = fixture.store.commands.last;
     expect(
         firstCommand.action,
-        isA<FinishComparisonRun>()
-            .having((a) => a.recordCompletion, 'recordCompletion', true));
+      isA<FinishComparisonRun>().having(
+        (a) => a.recordCompletion,
+        'recordCompletion',
+        true,
+      ),
+    );
     expect(find.byType(ComparisonLessonScreen), findsOneWidget);
     expect(popCount, 0);
     expect(committedBefore.completions, isEmpty);
-    final firstHeldProviderState =
-        provider.read(comparisonLearningStateProvider).value!;
+    final firstHeldProviderState = provider
+        .read(comparisonLearningStateProvider)
+        .value!;
     expect(firstHeldProviderState.completions, isEmpty);
     expect(
         ComparisonProgressSummary.fromState(
-                state: firstHeldProviderState, catalogue: fixture.catalogue)
-            .completedRuns,
-        0);
+        state: firstHeldProviderState,
+        catalogue: fixture.catalogue,
+      ).completedRuns,
+      0,
+    );
     expect(
         ComparisonProgressSummary.fromState(
-                state: committedBefore, catalogue: fixture.catalogue)
-            .completedRuns,
-        0);
+        state: committedBefore,
+        catalogue: fixture.catalogue,
+      ).completedRuns,
+      0,
+    );
     expect(fixture.persistence.values, rawBefore);
     expect(v2Store.committedState, same(v2ObjectBefore));
     expect(v2Store.prepareCalls, v2PrepareBefore);
@@ -1066,10 +1540,14 @@ void main() {
     expect(find.text('Retry saving'), findsOneWidget);
     expect(find.byType(ComparisonLessonScreen), findsOneWidget);
     expect(popCount, 0);
-    expect(provider.read(comparisonLearningStateProvider).value!.completions,
-        isEmpty);
-    expect((await _runRealAsync(tester, fixture.store.snapshot)).completions,
-        isEmpty);
+    expect(
+      provider.read(comparisonLearningStateProvider).value!.completions,
+      isEmpty,
+    );
+    expect(
+      (await _runRealAsync(tester, fixture.store.snapshot)).completions,
+      isEmpty,
+    );
 
     final retryGate = await _newPersistenceWriteGate(tester);
     addTearDown(() => retryGate.releaseIfHeld());
@@ -1082,17 +1560,22 @@ void main() {
     expect(fixture.store.commands.last, same(firstCommand));
     expect(find.byType(ComparisonLessonScreen), findsOneWidget);
     expect(popCount, 0);
-    final retryHeldProviderState =
-        provider.read(comparisonLearningStateProvider).value!;
+    final retryHeldProviderState = provider
+        .read(comparisonLearningStateProvider)
+        .value!;
     expect(retryHeldProviderState.completions, isEmpty);
     expect(
         ComparisonProgressSummary.fromState(
-                state: retryHeldProviderState, catalogue: fixture.catalogue)
-            .completedRuns,
-        0);
+        state: retryHeldProviderState,
+        catalogue: fixture.catalogue,
+      ).completedRuns,
+      0,
+    );
     expect(fixture.persistence.values, rawBefore);
-    final refreshReadGate =
-        await _newPersistenceReadGate(tester, key: fixture.scope.storageKey);
+    final refreshReadGate = await _newPersistenceReadGate(
+      tester,
+      key: fixture.scope.storageKey,
+    );
     addTearDown(() => refreshReadGate.releaseIfHeld());
     fixture.persistence.readGates[fixture.scope.storageKey] = refreshReadGate;
     final loadsBeforeRefresh = fixture.store.loadCalls;
@@ -1102,9 +1585,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
     }
     expect(popCount, 1);
-    for (var frame = 0;
+    for (
+      var frame = 0;
         frame < 30 && find.byType(ComparisonLessonScreen).evaluate().isNotEmpty;
-        frame++) {
+      frame++
+    ) {
       await tester.pump(const Duration(milliseconds: 16));
     }
     expect(find.byType(ComparisonLessonScreen), findsNothing);
@@ -1113,8 +1598,11 @@ void main() {
     await _waitForLoadCall(tester, fixture.store, loadsBeforeRefresh + 1);
     await tester.runAsync(() => refreshReadGate.entered.future);
     await tester.pump();
-    expect(find.text('Comparison completion policies: 1'), findsNothing,
-        reason: 'the ACK-triggered reload is still held');
+    expect(
+      find.text('Comparison completion policies: 1'),
+      findsNothing,
+      reason: 'the ACK-triggered reload is still held',
+    );
     final autoRefresh = provider.read(comparisonLearningStateProvider.future);
     await _releasePersistenceRead(tester, refreshReadGate);
     await tester.runAsync(() => autoRefresh);
@@ -1123,7 +1611,9 @@ void main() {
     final durable = await _runRealAsync(tester, fixture.store.snapshot);
     expect(durable.completions, hasLength(1));
     final durableSummary = ComparisonProgressSummary.fromState(
-        state: durable, catalogue: fixture.catalogue);
+      state: durable,
+      catalogue: fixture.catalogue,
+    );
     expect(durableSummary.completedRuns, 1);
     expect(durableSummary.completionLabel, 'Comparison completion policies: 1');
     expect(v2Store.committedState, same(v2ObjectBefore));
@@ -1136,18 +1626,25 @@ void main() {
     expect(find.text('Comparison completion policies: 1'), findsOneWidget);
 
     final receiptCount = durable.receipts.length;
-    final duplicate =
-        await _runRealAsync(tester, () => fixture.store.submit(firstCommand));
+    final duplicate = await _runRealAsync(
+      tester,
+      () => fixture.store.submit(firstCommand),
+    );
     expect(duplicate.state.completions, hasLength(1));
     expect(duplicate.state.receipts, hasLength(receiptCount));
     expect(
         ComparisonProgressSummary.fromState(
-                state: duplicate.state, catalogue: fixture.catalogue)
-            .completedRuns,
-        1);
+        state: duplicate.state,
+        catalogue: fixture.catalogue,
+      ).completedRuns,
+      1,
+    );
     await tester.pump();
-    expect(popCount, 1,
-        reason: 'duplicate receipt does not cause another route pop');
+    expect(
+      popCount,
+      1,
+      reason: 'duplicate receipt does not cause another route pop',
+    );
     expect(find.text('Comparison completion policies: 1'), findsOneWidget);
   });
 
@@ -1158,23 +1655,36 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final fixture = await _repositoryFixture(tester);
     final terminal = await _seedDebrief(
-        tester, fixture.store, fixture.catalogue,
-        wrongIndexes: {0, 3});
+      tester,
+      fixture.store,
+      fixture.catalogue,
+      wrongIndexes: {0, 3},
+    );
     final firstFinish = fixture.store.prepare(
         state: terminal,
         activityId: comparisonActivityId,
-        action: const FinishComparisonRun(recordCompletion: true));
+      action: const FinishComparisonRun(recordCompletion: true),
+    );
     final committed = await _runRealAsync(
-        tester, () async => (await fixture.store.submit(firstFinish)).state);
+      tester,
+      () async => (await fixture.store.submit(firstFinish)).state,
+    );
     expect(committed.completions, hasLength(1));
-    final homeLoadAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final homeLoadAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextLoadAck = homeLoadAck;
     final audio = _EntryReferenceAudio();
-    await tester.pumpWidget(ProviderScope(overrides: [
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
       ..._repositoryOverrides(fixture),
       courseReferenceAudioProvider.overrideWithValue(audio),
-    ], child: const LinguistApp()));
+        ],
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.runAsync(() => homeLoadAck.future);
     await tester.pump();
@@ -1192,8 +1702,10 @@ void main() {
 
     router.routerDelegate.addListener(recordPop);
     addTearDown(() => router.routerDelegate.removeListener(recordPop));
-    final reviewLoadAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final reviewLoadAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextLoadAck = reviewLoadAck;
     await tester.tap(find.text('Review comparison'));
     await tester.pump();
@@ -1202,8 +1714,10 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
     expect(find.text('Comparison debrief'), findsOneWidget);
-    final reviewAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final reviewAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextSubmitAck = reviewAck;
     await tester.tap(find.text('Review unresolved pairs'));
     await tester.pump();
@@ -1213,12 +1727,15 @@ void main() {
     final reviewSession = LessonSectionSession.fromJson(
         Map<String, dynamic>.from(reviewState.checkpoint!.sessionJson),
         itemIds: fixture.catalogue.exercises.map((e) => e.id).toList(),
-        contentRevision: 1);
+      contentRevision: 1,
+    );
     expect(reviewSession.queue, ['fr07b-pair-01', 'fr07b-pair-04']);
     expect(reviewSession.position, 0);
     expect(reviewSession.currentItemId, 'fr07b-pair-01');
-    final resumeAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final resumeAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextLoadAck = resumeAck;
     router.pop();
     await tester.pumpAndSettle();
@@ -1233,27 +1750,36 @@ void main() {
       final currentSession = LessonSectionSession.fromJson(
           Map<String, dynamic>.from(current.checkpoint!.sessionJson),
           itemIds: fixture.catalogue.exercises.map((e) => e.id).toList(),
-          contentRevision: 1);
-      final exercise =
-          fixture.catalogue.exercise(currentSession.currentItemId!);
+        contentRevision: 1,
+      );
+      final exercise = fixture.catalogue.exercise(
+        currentSession.currentItemId!,
+      );
       await tester.tap(find.text('Listen to sample A'));
       await tester.pump();
       expect(audio.requests.last, exercise.sampleA.referenceId);
       await tester.tap(find.text('Listen to sample B'));
       await tester.pump();
       expect(audio.requests.last, exercise.sampleB.referenceId);
-      final answerAck =
-          await _runRealAsync(tester, () async => Completer<void>());
+      final answerAck = await _runRealAsync(
+        tester,
+        () async => Completer<void>(),
+      );
       fixture.store.nextSubmitAck = answerAck;
-      await tester.tap(find.text(
+      await tester.tap(
+        find.text(
           exercise.expectedRelation == PhonemeRelation.same
               ? 'Same'
-              : 'Different'));
+              : 'Different',
+        ),
+      );
       await tester.pump();
       await tester.runAsync(() => answerAck.future);
       await tester.pumpAndSettle();
-      final advanceAck =
-          await _runRealAsync(tester, () async => Completer<void>());
+      final advanceAck = await _runRealAsync(
+        tester,
+        () async => Completer<void>(),
+      );
       fixture.store.nextSubmitAck = advanceAck;
       await tester.tap(find.text('Continue'));
       await tester.pump();
@@ -1261,12 +1787,16 @@ void main() {
       await tester.pumpAndSettle();
     }
     expect(find.text('Comparison debrief'), findsOneWidget);
-    final beforeReviewFinish =
-        await _runRealAsync(tester, fixture.store.snapshot);
+    final beforeReviewFinish = await _runRealAsync(
+      tester,
+      fixture.store.snapshot,
+    );
     expect(beforeReviewFinish.completions, hasLength(1));
     final popsBeforeReviewFinish = popCount;
-    final reviewFinishAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final reviewFinishAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextSubmitAck = reviewFinishAck;
     await tester.tap(find.text('Finish comparison'));
     await tester.pump();
@@ -1276,22 +1806,36 @@ void main() {
     expect(find.byType(ComparisonLessonScreen), findsNothing);
     expect(find.text('Comparison alpha'), findsOneWidget);
     expect(popCount, popsBeforeReviewFinish + 1);
-    final afterReviewFinish =
-        await _runRealAsync(tester, fixture.store.snapshot);
+    final afterReviewFinish = await _runRealAsync(
+      tester,
+      fixture.store.snapshot,
+    );
     expect(afterReviewFinish.completions, hasLength(1));
-    expect(afterReviewFinish.completions.single.activityId,
-        committed.completions.single.activityId);
-    expect(afterReviewFinish.completions.single.contentRevision,
-        committed.completions.single.contentRevision);
-    expect(afterReviewFinish.completions.single.thresholdPercent,
-        committed.completions.single.thresholdPercent);
-    expect(afterReviewFinish.completions.single.committedAt,
-        committed.completions.single.committedAt);
+    expect(
+      afterReviewFinish.completions.single.activityId,
+      committed.completions.single.activityId,
+    );
+    expect(
+      afterReviewFinish.completions.single.contentRevision,
+      committed.completions.single.contentRevision,
+    );
+    expect(
+      afterReviewFinish.completions.single.thresholdPercent,
+      committed.completions.single.thresholdPercent,
+    );
+    expect(
+      afterReviewFinish.completions.single.committedAt,
+      committed.completions.single.committedAt,
+    );
     final finishCommand = fixture.store.commands.last;
     expect(
         finishCommand.action,
-        isA<FinishComparisonRun>()
-            .having((a) => a.recordCompletion, 'recordCompletion', false));
+      isA<FinishComparisonRun>().having(
+        (a) => a.recordCompletion,
+        'recordCompletion',
+        false,
+      ),
+    );
   });
 
   testWidgets('comparison_owner_refresh_a_to_b_to_a_isolation', (tester) async {
@@ -1302,45 +1846,81 @@ void main() {
 
     final ownerA = LearningOwner.account('task6-owner-a');
     final ownerB = LearningOwner.account('task6-owner-b');
+    final databaseDir = (await tester.runAsync(
+      () => Directory.systemTemp.createTemp('comparison-owner-refresh-'),
+    ))!;
+    final databaseHandle = LearningDatabaseHandle(
+      open: () async => openFileLearningTestDatabase(
+        File('${databaseDir.path}/learning.sqlite'),
+      ),
+    );
+    addTearDown(() async {
+      await databaseHandle.close();
+      await databaseDir.delete(recursive: true);
+    });
     final tracker = LearningAuthTracker(owner: ownerA, ready: true);
     final ownerFixture = await _newOwnerRefreshFixture(tester, tracker);
     final seedA = await _runRealAsync(
-        tester, () async => ownerFixture.createStore(ownerA, 0));
-    final completedA =
-        await _seedCompletedRun(tester, seedA, ownerFixture.catalogue);
+      tester,
+      () async => ownerFixture.createStore(ownerA, 0),
+    );
+    final completedA = await _seedCompletedRun(
+      tester,
+      seedA,
+      ownerFixture.catalogue,
+    );
     expect(completedA.completions, hasLength(1));
-    final bytesA = ownerFixture.persistence.values[
-        ComparisonProfileScope(courseId: 'en-fr', owner: ownerA).storageKey]!;
+    final bytesA =
+        ownerFixture.persistence.values[ComparisonProfileScope(
+          courseId: 'en-fr',
+          owner: ownerA,
+        ).storageKey]!;
 
     tracker.observe(owner: ownerB, ready: true);
     final seedB = await _runRealAsync(
-        tester, () async => ownerFixture.createStore(ownerB, 1));
-    final evidenceB =
-        await _seedFirstOwnerAnswer(tester, seedB, ownerFixture.catalogue);
+      tester,
+      () async => ownerFixture.createStore(ownerB, 1),
+    );
+    final evidenceB = await _seedFirstOwnerAnswer(
+      tester,
+      seedB,
+      ownerFixture.catalogue,
+    );
     expect(evidenceB.completions, isEmpty);
     expect(evidenceB.summaries.values.single.firstInRun.total, 1);
-    final bytesB = ownerFixture.persistence.values[
-        ComparisonProfileScope(courseId: 'en-fr', owner: ownerB).storageKey]!;
+    final bytesB =
+        ownerFixture.persistence.values[ComparisonProfileScope(
+          courseId: 'en-fr',
+          owner: ownerB,
+        ).storageKey]!;
     tracker.observe(owner: ownerA, ready: true);
 
     final v2State = _nonemptyV2State();
     final v2Store = CourseLearningWidgetStore(initialState: v2State);
-    final initialAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final initialAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     ownerFixture.pendingLoadAcks[(ownerA.userId!, 2)] = initialAck;
-    await tester.pumpWidget(ProviderScope(
+    await tester.pumpWidget(
+      ProviderScope(
       overrides: [
         courseLearningStoreProvider.overrideWithValue(v2Store),
         courseLearningStateProvider.overrideWith((ref) async => v2State),
         learningAuthScopeProvider.overrideWith((ref) => tracker),
-        learningPersistenceProvider.overrideWithValue(ownerFixture.persistence),
+          learningDatabaseHandleProvider.overrideWithValue(databaseHandle),
         comparisonCatalogueProvider.overrideWithValue(ownerFixture.catalogue),
         comparisonLearningStoreProvider.overrideWith((ref) {
-          final identity = ref.watch(learningAuthScopeProvider.select(
-              (auth) => (owner: auth.owner, generation: auth.generation)));
+            final identity = ref.watch(
+              learningAuthScopeProvider.select(
+                (auth) => (owner: auth.owner, generation: auth.generation),
+              ),
+            );
           var isAlive = true;
           ref.onDispose(() => isAlive = false);
-          return ownerFixture.createStore(identity.owner, identity.generation,
+            return ownerFixture.createStore(
+              identity.owner,
+              identity.generation,
               onCommitted: () {
             final current = tracker.current;
             if (!isAlive ||
@@ -1349,11 +1929,13 @@ void main() {
               return;
             }
             ref.invalidate(comparisonLearningStateProvider);
-          });
+              },
+            );
         }),
       ],
       child: const LinguistApp(),
-    ));
+      ),
+    );
     await tester.pumpAndSettle();
     final storeA2 = ownerFixture.storeFor(ownerA, 2);
     await tester.runAsync(() => initialAck.future);
@@ -1364,9 +1946,10 @@ void main() {
     expect(find.text('Continue comparison'), findsNothing);
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
 
-    final gateB = await _newPersistenceReadGate(tester,
-        key: ComparisonProfileScope(courseId: 'en-fr', owner: ownerB)
-            .storageKey);
+    final gateB = await _newPersistenceReadGate(
+      tester,
+      key: ComparisonProfileScope(courseId: 'en-fr', owner: ownerB).storageKey,
+    );
     addTearDown(() => gateB.releaseIfHeld());
     ownerFixture.persistence.readGates[gateB.key] = gateB;
     tracker.observe(owner: ownerB, ready: true);
@@ -1389,24 +1972,29 @@ void main() {
     expect(find.text('Continue comparison'), findsOneWidget);
     expect(find.text('Review comparison'), findsNothing);
     expect(
-        ownerFixture.persistence.values[
-            ComparisonProfileScope(courseId: 'en-fr', owner: ownerA)
-                .storageKey],
-        bytesA);
+      ownerFixture.persistence.values[ComparisonProfileScope(
+        courseId: 'en-fr',
+        owner: ownerA,
+      ).storageKey],
+      bytesA,
+    );
     expect(
-        ownerFixture.persistence.values[
-            ComparisonProfileScope(courseId: 'en-fr', owner: ownerB)
-                .storageKey],
-        bytesB);
+      ownerFixture.persistence.values[ComparisonProfileScope(
+        courseId: 'en-fr',
+        owner: ownerB,
+      ).storageKey],
+      bytesB,
+    );
 
     final router = GoRouter.of(tester.element(find.text('Comparison alpha')));
     router.go('/course-progress');
     await tester.pumpAndSettle();
     expect(find.text('Comparison pairs attempted: 1/10'), findsOneWidget);
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
-    final gateA = await _newPersistenceReadGate(tester,
-        key: ComparisonProfileScope(courseId: 'en-fr', owner: ownerA)
-            .storageKey);
+    final gateA = await _newPersistenceReadGate(
+      tester,
+      key: ComparisonProfileScope(courseId: 'en-fr', owner: ownerA).storageKey,
+    );
     addTearDown(() => gateA.releaseIfHeld());
     ownerFixture.persistence.readGates[gateA.key] = gateA;
     tracker.observe(owner: ownerA, ready: true);
@@ -1416,8 +2004,10 @@ void main() {
     expect(find.text('Comparison completion policies: 0'), findsNothing);
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
     final storeA4 = ownerFixture.storeFor(ownerA, 4);
-    final aReturnAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final aReturnAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     storeA4.nextLoadAck = aReturnAck;
     await _releasePersistenceRead(tester, gateA);
     await tester.runAsync(() => aReturnAck.future);
@@ -1426,10 +2016,11 @@ void main() {
     expect(find.text('Comparison completion policies: 1'), findsOneWidget);
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
 
-    final failedBRead = await _newPersistenceReadGate(tester,
-        key:
-            ComparisonProfileScope(courseId: 'en-fr', owner: ownerB).storageKey,
-        fail: true);
+    final failedBRead = await _newPersistenceReadGate(
+      tester,
+      key: ComparisonProfileScope(courseId: 'en-fr', owner: ownerB).storageKey,
+      fail: true,
+    );
     addTearDown(() => failedBRead.releaseIfHeld());
     ownerFixture.persistence.readGates[failedBRead.key] = failedBRead;
     tracker.observe(owner: ownerB, ready: true);
@@ -1439,8 +2030,10 @@ void main() {
     expect(find.text('Comparison completion policies: 1'), findsNothing);
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
     final storeB5 = ownerFixture.storeFor(ownerB, 5);
-    final failedLoadAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final failedLoadAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     storeB5.nextLoadAck = failedLoadAck;
     await _releasePersistenceRead(tester, failedBRead);
     await tester.runAsync(() => failedLoadAck.future);
@@ -1451,8 +2044,10 @@ void main() {
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
     expect(
         find.text(
-            'Supported backup is pending; local commits remain saved on this device.'),
-        findsOneWidget);
+        'Supported backup is pending; local commits remain saved on this device.',
+      ),
+      findsOneWidget,
+    );
 
     router.go('/home');
     await tester.pumpAndSettle();
@@ -1470,8 +2065,10 @@ void main() {
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
 
     final retryAck = await _runRealAsync(tester, () async => Completer<void>());
-    final recoveredAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final recoveredAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     storeB5.nextRetryAck = retryAck;
     storeB5.nextLoadAck = recoveredAck;
     final loadsBeforeRetry = storeB5.loadCalls;
@@ -1493,15 +2090,19 @@ void main() {
     expect(find.text('Review comparison'), findsNothing);
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
     expect(
-        ownerFixture.persistence.values[
-            ComparisonProfileScope(courseId: 'en-fr', owner: ownerA)
-                .storageKey],
-        bytesA);
+      ownerFixture.persistence.values[ComparisonProfileScope(
+        courseId: 'en-fr',
+        owner: ownerA,
+      ).storageKey],
+      bytesA,
+    );
     expect(
-        ownerFixture.persistence.values[
-            ComparisonProfileScope(courseId: 'en-fr', owner: ownerB)
-                .storageKey],
-        bytesB);
+      ownerFixture.persistence.values[ComparisonProfileScope(
+        courseId: 'en-fr',
+        owner: ownerB,
+      ).storageKey],
+      bytesB,
+    );
     expect(storeA2.commands, isEmpty);
     expect(storeB3.commands, isEmpty);
     expect(storeA4.commands, isEmpty);
@@ -1511,21 +2112,31 @@ void main() {
     expect(v2Store.submitCalls, 0);
   });
 
-  testWidgets('comparison_progress_retry_is_independent_from_v2_retry',
-      (tester) async {
+  testWidgets('comparison_progress_retry_is_independent_from_v2_retry', (
+    tester,
+  ) async {
     final fixture = await _repositoryFixture(tester);
     fixture.persistence.failNextRead = true;
-    final initialLoad =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final initialLoad = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextLoadAck = initialLoad;
     final v2Store = CourseLearningWidgetStore()..failLoad = true;
-    await tester.pumpWidget(ProviderScope(overrides: [
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
       courseLearningStoreProvider.overrideWithValue(v2Store),
-      learningAuthScopeProvider.overrideWith((ref) =>
-          LearningAuthTracker(owner: fixture.scope.owner, ready: true)),
+          learningAuthScopeProvider.overrideWith(
+            (ref) =>
+                LearningAuthTracker(owner: fixture.scope.owner, ready: true),
+          ),
       comparisonCatalogueProvider.overrideWithValue(fixture.catalogue),
       comparisonLearningStoreProvider.overrideWithValue(fixture.store),
-    ], child: const LinguistApp()));
+        ],
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.runAsync(() => initialLoad.future);
     await tester.pumpAndSettle();
@@ -1534,11 +2145,12 @@ void main() {
     expect(find.text('Retry loading progress'), findsOneWidget);
     expect(find.text('Retry comparison progress'), findsOneWidget);
     final container = ProviderScope.containerOf(
-        tester.element(find.byType(CourseProgressScreen)));
+      tester.element(find.byType(CourseProgressScreen)),
+    );
     expect(
-        identical(
-            container.read(comparisonLearningStoreProvider), fixture.store),
-        isTrue);
+      identical(container.read(comparisonLearningStoreProvider), fixture.store),
+      isTrue,
+    );
     await tester.tap(find.text('Retry comparison progress'));
     await tester.pump();
     await _runRealAsync(tester, fixture.store.snapshot);
@@ -1549,8 +2161,10 @@ void main() {
     expect(fixture.store.retryFailure, isNull);
     expect(v2Store.retryLoadCalls, 0);
     await tester.scrollUntilVisible(
-        find.text('Comparison pairs attempted: 0/10'), 200,
-        scrollable: find.byType(Scrollable).first);
+      find.text('Comparison pairs attempted: 0/10'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Comparison pairs attempted: 0/10'), findsOneWidget);
     expect(find.text('Retry loading progress'), findsOneWidget);
     await tester.tap(find.text('Retry loading progress'));
@@ -1559,8 +2173,10 @@ void main() {
     expect(v2Store.retryLoadCalls, 1);
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
     await tester.scrollUntilVisible(
-        find.text('Comparison pairs attempted: 0/10'), 200,
-        scrollable: find.byType(Scrollable).first);
+      find.text('Comparison pairs attempted: 0/10'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Comparison pairs attempted: 0/10'), findsOneWidget);
   });
 
@@ -1574,29 +2190,44 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       addTearDown(
-          () => tester.platformDispatcher.clearTextScaleFactorTestValue());
+          () => tester.platformDispatcher.clearTextScaleFactorTestValue(),
+        );
 
       final fixture = await _repositoryFixture(tester);
       final seeded = await _seedDebrief(
-          tester, fixture.store, fixture.catalogue,
-          wrongIndexes: {0, 3});
+          tester,
+          fixture.store,
+          fixture.catalogue,
+          wrongIndexes: {0, 3},
+        );
       final before = await _runRealAsync(tester, fixture.store.snapshot);
       final initialCommands = fixture.store.commands.length;
       fixture.persistence.failNextRead = true;
       final v2Store = CourseLearningWidgetStore();
-      final homeLoadAck =
-          await _runRealAsync(tester, () async => Completer<void>());
+        final homeLoadAck = await _runRealAsync(
+          tester,
+          () async => Completer<void>(),
+        );
       fixture.store.nextLoadAck = homeLoadAck;
-      await tester.pumpWidget(ProviderScope(
+        await tester.pumpWidget(
+          ProviderScope(
           overrides: _progressRepositoryOverrides(
-              fixture, v2Store, _nonemptyV2State()),
-          child: const LinguistApp()));
+              fixture,
+              v2Store,
+              _nonemptyV2State(),
+            ),
+            child: const LinguistApp(),
+          ),
+        );
       await tester.pumpAndSettle();
       await tester.runAsync(() => homeLoadAck.future);
       await tester.pump();
       await tester.pump();
-      await tester.scrollUntilVisible(find.text('Comparison alpha'), 140,
-          scrollable: find.byType(Scrollable).first);
+        await tester.scrollUntilVisible(
+          find.text('Comparison alpha'),
+          140,
+          scrollable: find.byType(Scrollable).first,
+        );
       await tester.tap(find.byTooltip('Progress'));
       await tester.pumpAndSettle();
       expect(find.byType(CourseProgressScreen), findsOneWidget);
@@ -1604,34 +2235,50 @@ void main() {
       expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
       expect(
           find.text(
-              'Existing lessons (includes discovery pilot): 0/5 complete'),
-          findsOneWidget);
+            'Existing lessons (includes discovery pilot): 0/5 complete',
+          ),
+          findsOneWidget,
+        );
       await tester.scrollUntilVisible(
-          find.textContaining('1 correct / 2 answers'), 160,
-          scrollable: find.byType(Scrollable).first);
+          find.textContaining('1 correct / 2 answers'),
+          160,
+          scrollable: find.byType(Scrollable).first,
+        );
       expect(find.textContaining('1 correct / 2 answers'), findsOneWidget);
       expect(
           find.textContaining(
-              'Supported backup covers scores and answer totals.'),
-          findsOneWidget);
+            'Supported backup covers scores and answer totals.',
+          ),
+          findsOneWidget,
+        );
       expect(
           find.textContaining(
-              'Supported backup is pending; local commits remain saved on this device.'),
-          findsOneWidget);
-      var router =
-          GoRouter.of(tester.element(find.byType(CourseProgressScreen)));
+            'Supported backup is pending; local commits remain saved on this device.',
+          ),
+          findsOneWidget,
+        );
+        var router = GoRouter.of(
+          tester.element(find.byType(CourseProgressScreen)),
+        );
       router.go('/course-review');
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
-          find.text('Unresolved · 2 incorrect answers'), 160,
-          scrollable: find.byType(Scrollable).first);
+          find.text('Unresolved · 2 incorrect answers'),
+          160,
+          scrollable: find.byType(Scrollable).first,
+        );
       expect(find.text('/i/ · Listening'), findsOneWidget);
       expect(find.text('Unresolved · 2 incorrect answers'), findsOneWidget);
       final v2Mistake = find.text('/i/ · Listening');
-      final mistakeScrollable =
-          find.ancestor(of: v2Mistake, matching: find.byType(Scrollable)).first;
-      await tester.scrollUntilVisible(v2Mistake, 160,
-          scrollable: mistakeScrollable, maxScrolls: 100);
+        final mistakeScrollable = find
+            .ancestor(of: v2Mistake, matching: find.byType(Scrollable))
+            .first;
+        await tester.scrollUntilVisible(
+          v2Mistake,
+          160,
+          scrollable: mistakeScrollable,
+          maxScrolls: 100,
+        );
       await tester.pump();
       final mistakeRect = tester.getRect(v2Mistake);
       expect(mistakeRect.bottom, greaterThan(56));
@@ -1640,10 +2287,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(CourseLessonScreen), findsOneWidget);
       expect(
-          GoRouterState.of(tester.element(find.byType(CourseLessonScreen)))
-              .uri
-              .toString(),
-          '/course-lesson/en-fr-vowels?review=true');
+          GoRouterState.of(
+            tester.element(find.byType(CourseLessonScreen)),
+          ).uri.toString(),
+          '/course-lesson/en-fr-vowels?review=true',
+        );
       router = GoRouter.of(tester.element(find.byType(CourseLessonScreen)));
       router.pop();
       await tester.pumpAndSettle();
@@ -1652,19 +2300,28 @@ void main() {
       router.go('/course-progress');
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
-          find.text('Retry comparison progress'), 160,
-          scrollable: find.byType(Scrollable).first, maxScrolls: 120);
+          find.text('Retry comparison progress'),
+          160,
+          scrollable: find.byType(Scrollable).first,
+          maxScrolls: 120,
+        );
       await tester.pump();
       expect(find.text('Retry comparison progress'), findsOneWidget);
       expect(
-          find.text('Comparison practice, not phoneme mastery'), findsOneWidget,
-          reason: 'practice disclaimer remains honest in unavailable state');
+          find.text('Comparison practice, not phoneme mastery'),
+          findsOneWidget,
+          reason: 'practice disclaimer remains honest in unavailable state',
+        );
       expect(find.text('Comparison pairs attempted: 10/10'), findsNothing);
 
-      final retryAck =
-          await _runRealAsync(tester, () async => Completer<void>());
-      final recoveredLoadAck =
-          await _runRealAsync(tester, () async => Completer<void>());
+        final retryAck = await _runRealAsync(
+          tester,
+          () async => Completer<void>(),
+        );
+        final recoveredLoadAck = await _runRealAsync(
+          tester,
+          () async => Completer<void>(),
+        );
       fixture.store.nextRetryAck = retryAck;
       fixture.store.nextLoadAck = recoveredLoadAck;
       final loadsBeforeRetry = fixture.store.loadCalls;
@@ -1672,8 +2329,11 @@ void main() {
       final v2PrepareBefore = v2Store.prepareCalls;
       final v2SubmitBefore = v2Store.submitCalls;
       await tester.scrollUntilVisible(
-          find.text('Retry comparison progress'), 160,
-          scrollable: find.byType(Scrollable).first, maxScrolls: 120);
+          find.text('Retry comparison progress'),
+          160,
+          scrollable: find.byType(Scrollable).first,
+          maxScrolls: 120,
+        );
       await tester.pump();
       await tester.tap(find.text('Retry comparison progress'));
       await tester.pump();
@@ -1698,19 +2358,31 @@ void main() {
         'Unresolved comparison pairs: 2',
       ];
       for (final label in labels) {
-        await tester.scrollUntilVisible(find.text(label), 160,
-            scrollable: find.byType(Scrollable).first);
-        expect(find.text(label), findsOneWidget,
-            reason: 'scale $scale: $label');
+          await tester.scrollUntilVisible(
+            find.text(label),
+            160,
+            scrollable: find.byType(Scrollable).first,
+          );
+          expect(
+            find.text(label),
+            findsOneWidget,
+            reason: 'scale $scale: $label',
+          );
         expect(tester.takeException(), isNull, reason: 'scale $scale');
       }
       final pair04 = find.text('Comparison pair fr07b-pair-04');
-      await tester.scrollUntilVisible(pair04, 160,
-          scrollable: find.byType(Scrollable).first, maxScrolls: 120);
+        await tester.scrollUntilVisible(
+          pair04,
+          160,
+          scrollable: find.byType(Scrollable).first,
+          maxScrolls: 120,
+        );
       await tester.pump();
       expect(pair04, findsOneWidget);
-      final screenLoadAck =
-          await _runRealAsync(tester, () async => Completer<void>());
+        final screenLoadAck = await _runRealAsync(
+          tester,
+          () async => Completer<void>(),
+        );
       fixture.store.nextLoadAck = screenLoadAck;
       final loadsBeforeLink = fixture.store.loadCalls;
       await tester.tap(pair04);
@@ -1720,10 +2392,11 @@ void main() {
       await tester.pump();
       expect(find.byType(ComparisonLessonScreen), findsOneWidget);
       expect(
-          GoRouterState.of(tester.element(find.byType(ComparisonLessonScreen)))
-              .uri
-              .toString(),
-          '/course-comparison/en-fr-phoneme-comparison?pairId=fr07b-pair-04&review=true');
+          GoRouterState.of(
+            tester.element(find.byType(ComparisonLessonScreen)),
+          ).uri.toString(),
+          '/course-comparison/en-fr-phoneme-comparison?pairId=fr07b-pair-04&review=true',
+        );
       expect(find.text('Requested pair: fr07b-pair-04'), findsOneWidget);
       expect(find.text('Comparison debrief'), findsOneWidget);
       final after = await _runRealAsync(tester, fixture.store.snapshot);
@@ -1731,35 +2404,53 @@ void main() {
       expect(after.completions, seeded.completions);
       expect(fixture.store.commands.length, initialCommands);
       expect(tester.takeException(), isNull, reason: 'scale $scale');
-    });
+      },
+    );
   }
 
-  testWidgets('comparison_data_and_pair_link_survive_v2_progress_error',
-      (tester) async {
+  testWidgets('comparison_data_and_pair_link_survive_v2_progress_error', (
+    tester,
+  ) async {
     final fixture = await _repositoryFixture(tester);
-    final seeded = await _seedDebrief(tester, fixture.store, fixture.catalogue,
-        wrongIndexes: {0, 3});
+    final seeded = await _seedDebrief(
+      tester,
+      fixture.store,
+      fixture.catalogue,
+      wrongIndexes: {0, 3},
+    );
     final before = await _runRealAsync(tester, fixture.store.snapshot);
     final commandsBefore = fixture.store.commands.length;
-    final homeLoadAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    final homeLoadAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextLoadAck = homeLoadAck;
     final v2Store = CourseLearningWidgetStore()..failLoad = true;
-    await tester.pumpWidget(ProviderScope(overrides: [
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
       courseLearningStoreProvider.overrideWithValue(v2Store),
-      learningAuthScopeProvider.overrideWith((ref) =>
-          LearningAuthTracker(owner: fixture.scope.owner, ready: true)),
+          learningAuthScopeProvider.overrideWith(
+            (ref) =>
+                LearningAuthTracker(owner: fixture.scope.owner, ready: true),
+          ),
       comparisonCatalogueProvider.overrideWithValue(fixture.catalogue),
       comparisonLearningStoreProvider.overrideWithValue(fixture.store),
-    ], child: const LinguistApp()));
+        ],
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.runAsync(() => homeLoadAck.future);
     await tester.pump();
     await tester.tap(find.byTooltip('Progress'));
     await tester.pumpAndSettle();
     expect(find.text('Retry loading progress'), findsOneWidget);
-    expect(find.text('Discovery lessons: 0/1 complete'), findsNothing,
-        reason: 'do not show stale v2 counts after its load error');
+    expect(
+      find.text('Discovery lessons: 0/1 complete'),
+      findsNothing,
+      reason: 'do not show stale v2 counts after its load error',
+    );
     const labels = [
       'Comparison practice, not phoneme mastery',
       'Comparison pairs attempted: 10/10',
@@ -1769,15 +2460,23 @@ void main() {
       'Unresolved comparison pairs: 2',
     ];
     for (final label in labels) {
-      await tester.scrollUntilVisible(find.text(label), 160,
-          scrollable: find.byType(Scrollable).first);
+      await tester.scrollUntilVisible(
+        find.text(label),
+        160,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.text(label), findsOneWidget, reason: label);
     }
     final pair04 = find.text('Comparison pair fr07b-pair-04');
-    await tester.scrollUntilVisible(pair04, 160,
-        scrollable: find.byType(Scrollable).first);
-    final screenLoadAck =
-        await _runRealAsync(tester, () async => Completer<void>());
+    await tester.scrollUntilVisible(
+      pair04,
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
+    final screenLoadAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
     fixture.store.nextLoadAck = screenLoadAck;
     final loadsBeforeLink = fixture.store.loadCalls;
     await tester.tap(pair04);
@@ -1798,7 +2497,9 @@ final class _Driver {
   _Driver()
       : catalogue = loadFrenchComparisonCatalogue(),
         scope = ComparisonProfileScope(
-            courseId: 'en-fr', owner: LearningOwner.guest()) {
+        courseId: 'en-fr',
+        owner: LearningOwner.guest(),
+      ) {
     engine = ComparisonLearningTransitionEngine(catalogue: catalogue);
     state = ComparisonLearningState.empty(scope);
   }
@@ -1816,21 +2517,25 @@ final class _Driver {
         action: action,
         authGeneration: 0,
         token: token(),
-        submittedAt: now());
+      submittedAt: now(),
+    );
     state = engine
         .evaluate(state: state, command: command, committedAt: now())
         .nextState;
   }
 
   void start() => act(
-      StartComparisonRun(sessionId: 'test-session', policy: LessonPolicy()));
+    StartComparisonRun(sessionId: 'test-session', policy: LessonPolicy()),
+  );
   void answer(bool correct) {
     final json = state.checkpoint!.sessionJson;
     final id = json['currentItemId'] as String? ?? 'fr07b-pair-01';
     final exercise = catalogue.exercise(id);
-    final session = LessonSectionSession.fromJson(json as Map<String, dynamic>,
+    final session = LessonSectionSession.fromJson(
+      json as Map<String, dynamic>,
         itemIds: catalogue.exercises.map((e) => e.id).toList(),
-        contentRevision: 1);
+      contentRevision: 1,
+    );
     final answer = correct
         ? exercise.expectedRelation
         : (exercise.expectedRelation == PhonemeRelation.same
@@ -1849,17 +2554,25 @@ final class _Driver {
             round: session.round,
             pairId: id,
             profile: scope,
-            uiGeneration: time.millisecondsSinceEpoch)
+          uiGeneration: time.millisecondsSinceEpoch,
+        ),
     ];
-    act(AnswerComparisonPair(ComparePhonemesAnswer(
+    act(
+      AnswerComparisonPair(
+        ComparePhonemesAnswer(
         selectedRelation: answer,
         expectedRelationSnapshot: exercise.expectedRelation,
-        observations: observations)));
+          observations: observations,
+        ),
+      ),
+    );
   }
 }
 
 Future<T> _runRealAsync<T>(
-    WidgetTester tester, Future<T> Function() task) async {
+  WidgetTester tester,
+  Future<T> Function() task,
+) async {
   final result = await tester.runAsync(task);
   if (result == null) throw StateError('real async operation returned null');
   return result;
@@ -1925,13 +2638,19 @@ final class _PersistenceReadGate {
   }
 }
 
-Future<_PersistenceReadGate> _newPersistenceReadGate(WidgetTester tester,
-        {required String key, bool fail = false}) =>
-    _runRealAsync(
-        tester, () async => _PersistenceReadGate(key: key, fail: fail));
+Future<_PersistenceReadGate> _newPersistenceReadGate(
+  WidgetTester tester, {
+  required String key,
+  bool fail = false,
+}) => _runRealAsync(
+  tester,
+  () async => _PersistenceReadGate(key: key, fail: fail),
+);
 
 Future<void> _releasePersistenceRead(
-    WidgetTester tester, _PersistenceReadGate gate) async {
+  WidgetTester tester,
+  _PersistenceReadGate gate,
+) async {
   await _runRealAsync(tester, () async {
     gate.releaseIfHeld();
     return true;
@@ -1948,12 +2667,15 @@ final class _PersistenceWriteGate {
   }
 }
 
-Future<_PersistenceWriteGate> _newPersistenceWriteGate(WidgetTester tester,
-        {bool fail = false}) =>
-    _runRealAsync(tester, () async => _PersistenceWriteGate(fail: fail));
+Future<_PersistenceWriteGate> _newPersistenceWriteGate(
+  WidgetTester tester, {
+  bool fail = false,
+}) => _runRealAsync(tester, () async => _PersistenceWriteGate(fail: fail));
 
 Future<void> _releasePersistenceWrite(
-    WidgetTester tester, _PersistenceWriteGate gate) async {
+  WidgetTester tester,
+  _PersistenceWriteGate gate,
+) async {
   await _runRealAsync(tester, () async {
     gate.releaseIfHeld();
     return true;
@@ -1974,9 +2696,11 @@ final class _RepositoryComparisonStore implements ComparisonLearningStore {
   Future<T> _stable<T>(Future<T> Function() operation) {
     final result = Completer<T>();
     zone.runGuarded(() {
-      Future<T>.sync(operation).then(result.complete,
+      Future<T>.sync(operation).then(
+        result.complete,
           onError: (Object error, StackTrace stack) =>
-              result.completeError(error, stack));
+            result.completeError(error, stack),
+      );
     });
     return result.future;
   }
@@ -2018,11 +2742,11 @@ final class _RepositoryComparisonStore implements ComparisonLearningStore {
   }
 
   @override
-  ComparisonLearningCommand prepare(
-          {required ComparisonLearningState state,
+  ComparisonLearningCommand prepare({
+    required ComparisonLearningState state,
           required String activityId,
-          required ComparisonAction action}) =>
-      delegate.prepare(state: state, activityId: activityId, action: action);
+    required ComparisonAction action,
+  }) => delegate.prepare(state: state, activityId: activityId, action: action);
   @override
   Future<ComparisonCommit> submit(ComparisonLearningCommand command) {
     commands.add(command);
@@ -2040,8 +2764,14 @@ final class _RepositoryComparisonStore implements ComparisonLearningStore {
 }
 
 final class _RepositoryFixture {
-  _RepositoryFixture(this.catalogue, this.scope, this.persistence, this.store,
-      this.tracker, this.commitNotification);
+  _RepositoryFixture(
+    this.catalogue,
+    this.scope,
+    this.persistence,
+    this.store,
+    this.tracker,
+    this.commitNotification,
+  );
   final ComparisonCatalogue catalogue;
   final ComparisonProfileScope scope;
   final _MemoryComparisonPersistence persistence;
@@ -2057,7 +2787,11 @@ final class _CommitNotification {
 
 final class _OwnerRefreshFixture {
   _OwnerRefreshFixture(
-      this.tracker, this.persistence, this.catalogue, this.stableZone);
+    this.tracker,
+    this.persistence,
+    this.catalogue,
+    this.stableZone,
+  );
   final LearningAuthTracker tracker;
   final _MemoryComparisonPersistence persistence;
   final ComparisonCatalogue catalogue;
@@ -2066,8 +2800,11 @@ final class _OwnerRefreshFixture {
   final stores = <(String, int), _RepositoryComparisonStore>{};
   final pendingLoadAcks = <(String, int), Completer<void>>{};
 
-  _RepositoryComparisonStore createStore(LearningOwner owner, int generation,
-      {void Function()? onCommitted}) {
+  _RepositoryComparisonStore createStore(
+    LearningOwner owner,
+    int generation, {
+    void Function()? onCommitted,
+  }) {
     final identity = (owner.isGuest ? 'guest' : owner.userId!, generation);
     final cached = stores[identity];
     if (cached != null) return cached;
@@ -2100,26 +2837,32 @@ final class _OwnerRefreshFixture {
 }
 
 Future<_OwnerRefreshFixture> _newOwnerRefreshFixture(
-        WidgetTester tester, LearningAuthTracker tracker) =>
-    _runRealAsync(
+  WidgetTester tester,
+  LearningAuthTracker tracker,
+) => _runRealAsync(
         tester,
         () async => _OwnerRefreshFixture(
             tracker,
             _MemoryComparisonPersistence(),
             loadFrenchComparisonCatalogue(),
-            Zone.current));
+    Zone.current,
+  ),
+);
 
 final class _EntryReferenceAudio implements CourseReferenceAudio {
   final requests = <String>[];
   @override
-  Future<CourseAudioResult> playReference(String referenceId,
-      {CourseAudioUse use = CourseAudioUse.alphaPractice,
+  Future<CourseAudioResult> playReference(
+    String referenceId, {
+    CourseAudioUse use = CourseAudioUse.alphaPractice,
       CourseAudioVariant variant = CourseAudioVariant.normal,
-      bool allowPracticeTts = false}) async {
+    bool allowPracticeTts = false,
+  }) async {
     requests.add(referenceId);
     return CourseAudioResult.completed(
         referenceId: referenceId,
-        source: CourseAudioSource.unverifiedRecording);
+      source: CourseAudioSource.unverifiedRecording,
+    );
   }
 
   @override
@@ -2134,7 +2877,9 @@ Future<_RepositoryFixture> _repositoryFixture(WidgetTester tester) =>
     _runRealAsync(tester, () async {
       final catalogue = loadFrenchComparisonCatalogue();
       final scope = ComparisonProfileScope(
-          courseId: 'en-fr', owner: LearningOwner.guest());
+        courseId: 'en-fr',
+        owner: LearningOwner.guest(),
+      );
       final tracker = LearningAuthTracker(owner: scope.owner, ready: true);
       final persistence = _MemoryComparisonPersistence();
       final commitNotification = _CommitNotification();
@@ -2156,26 +2901,33 @@ Future<_RepositoryFixture> _repositoryFixture(WidgetTester tester) =>
           persistence,
           _RepositoryComparisonStore(repository, Zone.current),
           tracker,
-          commitNotification);
+        commitNotification,
+      );
     });
 
-Future<ComparisonLearningState> _seedDebrief(WidgetTester tester,
-        _RepositoryComparisonStore store, ComparisonCatalogue catalogue,
-        {Set<int> wrongIndexes = const {}}) =>
-    _runRealAsync(tester, () async {
+Future<ComparisonLearningState> _seedDebrief(
+  WidgetTester tester,
+  _RepositoryComparisonStore store,
+  ComparisonCatalogue catalogue, {
+  Set<int> wrongIndexes = const {},
+}) => _runRealAsync(tester, () async {
       var state = await store.load();
       var command = store.prepare(
           state: state,
           activityId: comparisonActivityId,
           action: StartComparisonRun(
-              sessionId: 'task6-b-seed', policy: LessonPolicy()));
+      sessionId: 'task6-b-seed',
+      policy: LessonPolicy(),
+    ),
+  );
       state = (await store.submit(command)).state;
       for (var index = 0; index < catalogue.exercises.length; index++) {
         final slot = state.slot!;
         final session = LessonSectionSession.fromJson(
             Map<String, dynamic>.from(slot.checkpoint.sessionJson),
             itemIds: catalogue.exercises.map((e) => e.id).toList(),
-            contentRevision: 1);
+      contentRevision: 1,
+    );
         final exercise = catalogue.exercise(session.currentItemId!);
         final correct = !wrongIndexes.contains(index);
         final selected = correct
@@ -2195,40 +2947,52 @@ Future<ComparisonLearningState> _seedDebrief(WidgetTester tester,
                 round: session.round,
                 pairId: exercise.id,
                 profile: slot.scope,
-                uiGeneration: 1)
+          uiGeneration: 1,
+        ),
         ];
         command = store.prepare(
             state: state,
             activityId: comparisonActivityId,
-            action: AnswerComparisonPair(ComparePhonemesAnswer(
+      action: AnswerComparisonPair(
+        ComparePhonemesAnswer(
                 selectedRelation: selected,
                 expectedRelationSnapshot: exercise.expectedRelation,
-                observations: observations)));
+          observations: observations,
+        ),
+      ),
+    );
         state = (await store.submit(command)).state;
         command = store.prepare(
             state: state,
             activityId: comparisonActivityId,
-            action: const AdvanceComparisonPair());
+      action: const AdvanceComparisonPair(),
+    );
         state = (await store.submit(command)).state;
       }
       return state;
     });
 
-Future<ComparisonLearningState> _seedFirstOwnerAnswer(WidgetTester tester,
-        _RepositoryComparisonStore store, ComparisonCatalogue catalogue) =>
-    _runRealAsync(tester, () async {
+Future<ComparisonLearningState> _seedFirstOwnerAnswer(
+  WidgetTester tester,
+  _RepositoryComparisonStore store,
+  ComparisonCatalogue catalogue,
+) => _runRealAsync(tester, () async {
       var state = await store.load();
       var command = store.prepare(
           state: state,
           activityId: comparisonActivityId,
           action: StartComparisonRun(
-              sessionId: 'task6-owner-b-evidence', policy: LessonPolicy()));
+      sessionId: 'task6-owner-b-evidence',
+      policy: LessonPolicy(),
+    ),
+  );
       state = (await store.submit(command)).state;
       final slot = state.slot!;
       final session = LessonSectionSession.fromJson(
           Map<String, dynamic>.from(slot.checkpoint.sessionJson),
           itemIds: catalogue.exercises.map((e) => e.id).toList(),
-          contentRevision: 1);
+    contentRevision: 1,
+  );
       final exercise = catalogue.exercise(session.currentItemId!);
       final observations = [
         for (final sample in [exercise.sampleA, exercise.sampleB])
@@ -2242,48 +3006,65 @@ Future<ComparisonLearningState> _seedFirstOwnerAnswer(WidgetTester tester,
               round: session.round,
               pairId: exercise.id,
               profile: slot.scope,
-              uiGeneration: 1)
+        uiGeneration: 1,
+      ),
       ];
       command = store.prepare(
           state: state,
           activityId: comparisonActivityId,
-          action: AnswerComparisonPair(ComparePhonemesAnswer(
+    action: AnswerComparisonPair(
+      ComparePhonemesAnswer(
               selectedRelation: exercise.expectedRelation,
               expectedRelationSnapshot: exercise.expectedRelation,
-              observations: observations)));
+        observations: observations,
+      ),
+    ),
+  );
       state = (await store.submit(command)).state;
       command = store.prepare(
           state: state,
           activityId: comparisonActivityId,
-          action: const AdvanceComparisonPair());
+    action: const AdvanceComparisonPair(),
+  );
       return (await store.submit(command)).state;
     });
 
 Future<ComparisonLearningState> _seedActiveDraft(
-        WidgetTester tester, _RepositoryComparisonStore store) =>
-    _runRealAsync(tester, () async {
+  WidgetTester tester,
+  _RepositoryComparisonStore store,
+) => _runRealAsync(tester, () async {
       final state = await store.load();
       final command = store.prepare(
           state: state,
           activityId: comparisonActivityId,
           action: StartComparisonRun(
-              sessionId: 'task6-b1-active-home', policy: LessonPolicy()));
+      sessionId: 'task6-b1-active-home',
+      policy: LessonPolicy(),
+    ),
+  );
       return (await store.submit(command)).state;
     });
 
-Future<ComparisonLearningState> _seedCompletedRun(WidgetTester tester,
-        _RepositoryComparisonStore store, ComparisonCatalogue catalogue) =>
-    _seedDebrief(tester, store, catalogue)
-        .then((terminal) => _runRealAsync(tester, () async {
+Future<ComparisonLearningState> _seedCompletedRun(
+  WidgetTester tester,
+  _RepositoryComparisonStore store,
+  ComparisonCatalogue catalogue,
+) => _seedDebrief(tester, store, catalogue).then(
+  (terminal) => _runRealAsync(tester, () async {
               final finish = store.prepare(
                   state: terminal,
                   activityId: comparisonActivityId,
-                  action: const FinishComparisonRun(recordCompletion: true));
+      action: const FinishComparisonRun(recordCompletion: true),
+    );
               return (await store.submit(finish)).state;
-            }));
+  }),
+);
 
 Future<void> _waitForLoadCall(
-    WidgetTester tester, _RepositoryComparisonStore store, int expected) async {
+  WidgetTester tester,
+  _RepositoryComparisonStore store,
+  int expected,
+) async {
   for (var frame = 0; frame < 30 && store.loadCalls < expected; frame++) {
     await tester.pump();
   }
@@ -2291,7 +3072,10 @@ Future<void> _waitForLoadCall(
 }
 
 Future<void> _waitForCommandCount(
-    WidgetTester tester, _RepositoryComparisonStore store, int expected) async {
+  WidgetTester tester,
+  _RepositoryComparisonStore store,
+  int expected,
+) async {
   for (var frame = 0; frame < 30 && store.commands.length < expected; frame++) {
     await tester.pump();
   }
@@ -2299,16 +3083,17 @@ Future<void> _waitForCommandCount(
 }
 
 List<Override> _repositoryOverrides(_RepositoryFixture fixture) => [
-      courseLearningStoreProvider
-          .overrideWithValue(CourseLearningWidgetStore()),
+  courseLearningStoreProvider.overrideWithValue(CourseLearningWidgetStore()),
       learningAuthScopeProvider.overrideWith((ref) => fixture.tracker),
       comparisonCatalogueProvider.overrideWithValue(fixture.catalogue),
       comparisonLearningStoreProvider.overrideWithValue(fixture.store),
     ];
 
-List<Override> _progressRepositoryOverrides(_RepositoryFixture fixture,
-        CourseLearningWidgetStore v2Store, CourseLearningState v2State) =>
-    [
+List<Override> _progressRepositoryOverrides(
+  _RepositoryFixture fixture,
+  CourseLearningWidgetStore v2Store,
+  CourseLearningState v2State,
+) => [
       courseLearningStoreProvider.overrideWithValue(v2Store),
       courseLearningStateProvider.overrideWith((ref) async => v2State),
       learningAuthScopeProvider.overrideWith((ref) => fixture.tracker),
@@ -2318,18 +3103,22 @@ List<Override> _progressRepositoryOverrides(_RepositoryFixture fixture,
 
 CourseLearningState _nonemptyV2State() {
   const userId = 'progress-v2-user';
-  final scope =
-      LearningScope(courseId: 'en-fr', owner: LearningOwner.account(userId));
+  final scope = LearningScope(
+    courseId: 'en-fr',
+    owner: LearningOwner.account(userId),
+  );
   final registry = LearningRegistry.french();
   final activity = registry.require('lesson:en-fr-vowels');
-  final item = activity.items
-      .firstWhere((candidate) => candidate.targetSounds.contains('i'));
+  final item = activity.items.firstWhere(
+    (candidate) => candidate.targetSounds.contains('i'),
+  );
   final mistakeKey = MistakeKey(
       activityId: activity.id,
       itemId: item.id,
       contentRevision: activity.contentRevision,
       skill: LearningSkill.listening,
-      targetSound: 'i');
+    targetSound: 'i',
+  );
   return CourseLearningState(
     scope: scope,
     revision: 2,
@@ -2354,7 +3143,10 @@ CourseLearningState _nonemptyV2State() {
         origin: AttemptOrigin.practice,
         presentation: AttemptPresentation.firstInRun,
         assistance: const {},
-      ): SkillCount(total: 2, correct: 1),
+      ): SkillCount(
+        total: 2,
+        correct: 1,
+      ),
     },
     completions: const [],
     bestScores: const {'arcade:sound': 37, 'arcade:word': 19},
@@ -2367,7 +3159,8 @@ CourseLearningState _nonemptyV2State() {
             sound: 'i',
             skill: LearningSkill.listening,
             correct: true,
-            activity: activity.id),
+          activity: activity.id,
+        ),
       ),
     ],
   );

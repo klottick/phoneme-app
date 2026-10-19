@@ -6,14 +6,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'backend.dart';
 import 'course_attempt.dart';
 import 'course_learning_error.dart';
-import 'course_learning_persistence.dart';
 import 'course_learning_providers.dart'
-    show learningAuthScopeProvider, learningPersistenceProvider;
+    show learningAuthScopeProvider, learningDatabaseHandleProvider;
 import 'french_sentence_package.dart' show sentenceHuntCatalogueProvider;
 import 'sentence_hunt_content.dart';
 import 'sentence_hunt_learning_transition.dart';
 import 'sentence_hunt_learning_state.dart';
 import 'sentence_hunt_learning_store.dart';
+import 'storage/learning_database.dart';
+import 'storage/sentence_hunt_learning_sql_repository.dart';
 
 final _sentenceHuntLearningStateRevisionProvider =
     StateProvider<int>((ref) => 0);
@@ -34,8 +35,8 @@ final FutureProvider<SentenceHuntLearningStore>
   final tracker = ref.read(learningAuthScopeProvider.notifier);
   final stateRevision =
       ref.read(_sentenceHuntLearningStateRevisionProvider.notifier);
-  final LearningPersistence persistence =
-      ref.watch(learningPersistenceProvider);
+  final LearningDatabaseHandle database =
+      ref.watch(learningDatabaseHandleProvider);
   final SentenceHuntCatalogue catalogue =
       await ref.watch(sentenceHuntCatalogueProvider.future);
 
@@ -55,12 +56,12 @@ final FutureProvider<SentenceHuntLearningStore>
     throw const LearningOwnerChangedException();
   }
 
-  return SentenceHuntLearningRepository(
+  return SqliteSentenceHuntLearningRepository(
+    database: database,
     scope: SentenceHuntProfileScope(courseId: 'en-fr', owner: identity.owner),
     authGeneration: identity.generation,
     currentAuth: () => tracker.current,
     backendOwner: backendOwner,
-    persistence: persistence,
     transitions: SentenceHuntTransitionEngine(catalogue: catalogue),
     clock: () => DateTime.now().toUtc(),
     newToken: _newSentenceHuntToken,

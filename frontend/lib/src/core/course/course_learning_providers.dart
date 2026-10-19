@@ -1,8 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_service.dart';
 import 'comparison_content.dart';
 import 'comparison_learning_state.dart';
@@ -11,23 +11,35 @@ import 'comparison_learning_transition.dart';
 import 'french_comparison_content.dart';
 import 'backend.dart';
 import 'course_attempt.dart';
-import 'course_learning_persistence.dart';
 import 'course_learning_registry.dart';
 import 'course_learning_state.dart';
 import 'course_learning_store.dart';
 import 'course_learning_sync.dart';
 import 'course_learning_transition.dart';
+import 'storage/comparison_learning_sql_repository.dart';
+import 'storage/course_learning_sql_repository.dart';
+import 'storage/learning_database.dart'
+    show LearningDatabase, LearningDatabaseHandle;
+import 'storage/learning_database_connection.dart';
 
 class LearningAuthTracker extends StateNotifier<LearningAuthScope> {
   LearningAuthTracker({required LearningOwner owner, required bool ready})
-      : super(LearningAuthScope(owner: owner, generation: 0, ready: ready));
+      : super(LearningAuthScope(owner: owner, generation: 0, ready: ready)) {
+    _current = state;
+  }
 
-  LearningAuthScope get current => state;
+  late LearningAuthScope _current;
+
+  LearningAuthScope get current => _current;
 
   void observe({required LearningOwner owner, required bool ready}) {
-    final generation = state.generation + (state.owner == owner ? 0 : 1);
-    state =
-        LearningAuthScope(owner: owner, generation: generation, ready: ready);
+    final generation = _current.generation + (_current.owner == owner ? 0 : 1);
+    _current = LearningAuthScope(
+      owner: owner,
+      generation: generation,
+      ready: ready,
+    );
+    state = _current;
   }
 }
 
@@ -56,8 +68,16 @@ final learningAuthScopeProvider =
 final learningRegistryProvider =
     Provider<LearningRegistry>((ref) => LearningRegistry.french());
 
-final learningPersistenceProvider = Provider<LearningPersistence>((ref) =>
-    PreferencesLearningPersistence(preferences: SharedPreferences.getInstance));
+final learningDatabaseHandleProvider =
+    Provider<LearningDatabaseHandle>((ref) {
+  final handle = LearningDatabaseHandle(
+      open: () async {
+        final connection = await openLearningDatabaseConnection();
+        return LearningDatabase(connection.connection);
+      });
+  ref.onDispose(() => unawaited(handle.close()));
+  return handle;
+});
 
 final learningCloudTransportProvider = Provider<LearningCloudTransport?>((ref) {
   final client = courseBackend;
@@ -73,16 +93,16 @@ final courseLearningStoreProvider = Provider<CourseLearningStore>((ref) {
       .select((auth) => (owner: auth.owner, generation: auth.generation)));
   final tracker = ref.read(learningAuthScopeProvider.notifier);
   final stateRevision = ref.read(_courseLearningStateRevisionProvider.notifier);
-  final persistence = ref.watch(learningPersistenceProvider);
+  final database = ref.watch(learningDatabaseHandleProvider);
   final registry = ref.watch(learningRegistryProvider);
   final cloud = ref.watch(learningCloudTransportProvider);
   final scope = LearningScope(courseId: 'en-fr', owner: identity.owner);
-  return CourseLearningRepository(
+  return SqliteCourseLearningRepository(
+      database: database,
       scope: scope,
       authGeneration: identity.generation,
       currentAuth: () => tracker.current,
       backendOwner: _backendOwner,
-      persistence: persistence,
       transitions: LearningTransitionEngine(registry),
       cloud: cloud,
       clock: () => DateTime.now().toUtc(),
@@ -132,14 +152,14 @@ final comparisonLearningStoreProvider =
   final tracker = ref.read(learningAuthScopeProvider.notifier);
   final stateRevision =
       ref.read(_comparisonLearningStateRevisionProvider.notifier);
-  final persistence = ref.watch(learningPersistenceProvider);
+  final database = ref.watch(learningDatabaseHandleProvider);
   final catalogue = ref.read(comparisonCatalogueProvider);
-  return ComparisonLearningRepository(
+  return SqliteComparisonLearningRepository(
+      database: database,
       scope: ComparisonProfileScope(courseId: 'en-fr', owner: identity.owner),
       authGeneration: identity.generation,
       currentAuth: () => tracker.current,
       backendOwner: _backendOwner,
-      persistence: persistence,
       transitions: ComparisonLearningTransitionEngine(catalogue: catalogue),
       clock: () => DateTime.now().toUtc(),
       newToken: _newToken,

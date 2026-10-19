@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,8 +13,11 @@ import 'package:linguist/src/core/course/course_audio.dart';
 import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_learning_checkpoint.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
+import 'package:linguist/src/core/course/storage/learning_database.dart'
+    show LearningDatabaseHandle;
 import 'package:linguist/src/features/course/course_lesson_screen.dart';
 import '../support/course_learning_widget_store.dart';
+import '../support/sqlite_learning_test_harness.dart';
 
 class TestFrenchAudio implements CourseAudio {
   TestFrenchAudio({this.fail = false});
@@ -83,7 +87,23 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
   testWidgets('onboard into a directional course and open silent arcade',
       (tester) async {
-    await tester.pumpWidget(const ProviderScope(child: LinguistApp()));
+    final tempDir = (await tester.runAsync(
+      () => Directory.systemTemp.createTemp('course-flow-sqlite-'),
+    ))!;
+    final handle = LearningDatabaseHandle(
+      open: () => openFileLearningTestDatabase(
+        File('${tempDir.path}/phoneme_learning.sqlite'),
+      ),
+    );
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox());
+      await handle.close();
+      await tempDir.delete(recursive: true);
+    });
+    await tester.pumpWidget(ProviderScope(
+      overrides: [learningDatabaseHandleProvider.overrideWithValue(handle)],
+      child: const LinguistApp(),
+    ));
     await tester.pumpAndSettle();
     expect(find.text('I speak English'), findsOneWidget);
     await tester.tap(find.text('Start English → French'));

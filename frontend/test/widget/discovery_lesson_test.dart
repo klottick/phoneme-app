@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:drift/drift.dart' as drift;
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,11 +11,12 @@ import 'package:linguist/src/app.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
 import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_learning_checkpoint.dart';
-import 'package:linguist/src/core/course/course_learning_codec.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/course_learning_command.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
+import 'package:linguist/src/core/course/storage/learning_database.dart'
+    show LearningDatabase, LearningDatabaseHandle;
 import 'package:linguist/src/core/course/comparison_learning_state.dart';
 import 'package:linguist/src/core/course/lesson_policy.dart';
 import 'package:linguist/src/core/course/lesson_section.dart';
@@ -22,7 +26,6 @@ import 'package:linguist/src/features/course/discovery_lesson_screen.dart';
 import 'package:linguist/src/features/course/discovery_section_view.dart';
 import 'package:linguist/src/routing/app_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 import '../support/course_learning_widget_store.dart';
 
 class FakeAudio implements CourseAudio {
@@ -48,6 +51,72 @@ class FakeAudio implements CourseAudio {
   @override
   Future<void> stop() async {
     stops++;
+  }
+}
+
+final class _DiscoverySqlTransactionInterceptor extends drift.QueryInterceptor {
+  bool _learningWritePendingCommit = false;
+  Completer<void>? _nextLearningWrite;
+
+  Future<void> waitForNextLearningTransaction() {
+    if (_nextLearningWrite != null && !_nextLearningWrite!.isCompleted) {
+      throw StateError('A learning write is already being awaited.');
+    }
+    final next = Completer<void>();
+    _nextLearningWrite = next;
+    return next.future;
+  }
+
+  @override
+  Future<void> runCustom(
+    drift.QueryExecutor executor,
+    String statement,
+    List<Object?> args,
+  ) async {
+    await executor.runCustom(statement, args);
+    _recordLearningWrite(statement);
+  }
+
+  @override
+  Future<int> runUpdate(
+    drift.QueryExecutor executor,
+    String statement,
+    List<Object?> args,
+  ) async {
+    final result = await executor.runUpdate(statement, args);
+    _recordLearningWrite(statement);
+    return result;
+  }
+
+  @override
+  Future<void> commitTransaction(drift.TransactionExecutor inner) async {
+    await inner.send();
+    _finishLearningWrite();
+  }
+
+  @override
+  Future<void> rollbackTransaction(drift.TransactionExecutor inner) async {
+    try {
+      await inner.rollback();
+    } finally {
+      _finishLearningWrite();
+    }
+  }
+
+  void _recordLearningWrite(String statement) {
+    if (statement.startsWith(
+      'UPDATE learning_scopes SET revision = ?, commit_ordinal = ?',
+    )) {
+      _learningWritePendingCommit = true;
+    }
+  }
+
+  void _finishLearningWrite() {
+    if (!_learningWritePendingCommit) return;
+    _learningWritePendingCommit = false;
+    final next = _nextLearningWrite;
+    _nextLearningWrite = null;
+    if (next != null && !next.isCompleted) next.complete();
   }
 }
 
@@ -84,21 +153,6 @@ class CountingNavigatorObserver extends NavigatorObserver {
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
     popCount++;
     super.didPop(route, previousRoute);
-  }
-}
-
-class FailablePreferences extends InMemorySharedPreferencesStore {
-  FailablePreferences() : super.withData(const {});
-
-  bool failWrites = false;
-
-  @override
-  Future<bool> setValue(String valueType, String key, Object value) {
-    if (failWrites) {
-      failWrites = false;
-      return Future.value(false);
-    }
-    return super.setValue(valueType, key, value);
   }
 }
 
@@ -2681,10 +2735,55 @@ void main() {
   group('real typed repository integration', () {
     testWidgets('two stacked instances recover through explicit typed reload',
         (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
       SharedPreferences.setMockInitialValues({});
       addTearDown(() => SharedPreferences.setMockInitialValues({}));
-      final prefs = FailablePreferences();
-      SharedPreferencesStorePlatform.instance = prefs;
+      final tempDir = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('discovery-sqlite-'),
+      ))!;
+      final interceptor = _DiscoverySqlTransactionInterceptor();
+      final databaseFile = File('${tempDir.path}/phoneme_learning.sqlite');
+      final handle = LearningDatabaseHandle(
+        open: () async => LearningDatabase(
+          drift.DatabaseConnection(
+            NativeDatabase(databaseFile).interceptWith(interceptor),
+          ),
+        ),
+      );
+      final audio = FakeAudio();
+      final container = ProviderContainer(
+        overrides: [
+          courseAudioProvider.overrideWithValue(audio),
+          learningDatabaseHandleProvider.overrideWithValue(handle),
+        ],
+      );
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox());
+        container.dispose();
+        await handle.close();
+        await tempDir.delete(recursive: true);
+      });
+      final database = (await tester.runAsync(handle.open))!;
+      Future<int> attemptCount() async {
+        final row = await tester.runAsync(
+          () => database
+              .customSelect(
+                'SELECT COUNT(*) AS row_count FROM learning_attempts',
+              )
+              .getSingle(),
+        );
+        return row!.read<int>('row_count');
+      }
+      Future<void> tapAndWaitForLearningTransaction(Finder target) async {
+        final completed = interceptor.waitForNextLearningTransaction();
+        await tester.tap(target);
+        await tester.pump();
+        await tester.runAsync(
+          () => completed.timeout(const Duration(seconds: 5)),
+        );
+        await tester.pumpAndSettle();
+      }
       final router = GoRouter(initialLocation: '/home', routes: [
         GoRoute(
             path: '/home',
@@ -2696,19 +2795,21 @@ void main() {
                 child: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'))),
       ]);
       addTearDown(router.dispose);
-      final audio = FakeAudio();
-      await tester.pumpWidget(ProviderScope(
-          overrides: [courseAudioProvider.overrideWithValue(audio)],
-          child: MaterialApp.router(routerConfig: router)));
+      await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ));
       await tester.pumpAndSettle();
+      final firstStart = interceptor.waitForNextLearningTransaction();
       router.push('/lesson');
+      await tester.pump();
+      await tester.runAsync(() => firstStart);
       await tester.pumpAndSettle();
       router.push('/lesson');
       await tester.pumpAndSettle();
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('/u/'));
-      await tester.pumpAndSettle();
+      await tapAndWaitForLearningTransaction(find.text('/u/'));
       expect(find.text('Correct'), findsOneWidget);
       router.pop();
       await tester.pumpAndSettle();
@@ -2721,48 +2822,52 @@ void main() {
       await tester.tap(find.text('Reload saved progress'));
       await tester.pumpAndSettle();
       expect(find.text('Correct'), findsOneWidget);
-      await tester.tap(find.text('Next word'));
-      await tester.pumpAndSettle();
+      await tapAndWaitForLearningTransaction(find.text('Next word'));
       expect(find.text('Item 2 of 10'), findsOneWidget);
-      prefs.failWrites = true;
+      final attemptsBeforeFailure = await attemptCount();
+      expect(attemptsBeforeFailure, 1);
+      await tester.runAsync(() => database.customStatement('''
+        CREATE TRIGGER fail_discovery_answer
+        BEFORE INSERT ON learning_attempts
+        BEGIN SELECT RAISE(ABORT, 'injected discovery answer failure'); END
+      '''));
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('/y/'));
       await tester.pumpAndSettle();
       expect(find.text('Correct'), findsOneWidget);
       expect(find.textContaining('could not be saved'), findsOneWidget);
-      final scope =
-          LearningScope(courseId: 'en-fr', owner: LearningOwner.guest());
-      final preferences = await SharedPreferences.getInstance();
-      var persisted = preferences.getString(scope.storageKey);
-      expect(persisted, isNotNull);
-      var committed = const LearningDocumentCodec().decode(persisted!, scope);
-      expect(committed.history, hasLength(1),
-          reason: 'the failed answer did not publish into real preferences');
-      prefs.failWrites = false;
-      await tester.tap(find.text('Retry saving'));
-      await tester.pumpAndSettle();
-      committed = const LearningDocumentCodec()
-          .decode(preferences.getString(scope.storageKey)!, scope);
-      expect(committed.history, hasLength(2),
+      expect(await attemptCount(), attemptsBeforeFailure,
+          reason: 'the failed answer was not committed to SQLite');
+      await tester.runAsync(
+        () => database.customStatement('DROP TRIGGER fail_discovery_answer'),
+      );
+      await tapAndWaitForLearningTransaction(find.text('Retry saving'));
+      expect(await attemptCount(), attemptsBeforeFailure + 1,
           reason: 'retry commits the answer exactly once');
-      await tester.tap(find.text('Next word'));
-      await tester.pumpAndSettle();
+      await tapAndWaitForLearningTransaction(find.text('Next word'));
+      expect(find.text('Item 3 of 10'), findsOneWidget);
       for (var i = 2; i < 10; i++) {
+        expect(find.text('Item ${i + 1} of 10'), findsOneWidget);
         await tester.tap(find.text('Listen to the word'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('/${expectedSounds[i]}/'));
-        await tester.pumpAndSettle();
-        await advance(tester, last: i == 9);
+        await tapAndWaitForLearningTransaction(
+          find.text('/${expectedSounds[i]}/'),
+        );
+        expect(find.text('Correct'), findsOneWidget);
+        await tapAndWaitForLearningTransaction(
+          find.text(i == 9 ? 'See section explanation' : 'Next word'),
+        );
+        if (i < 9) {
+          expect(find.text('Item ${i + 2} of 10'), findsOneWidget);
+        }
       }
       expect(find.text('Section debrief'), findsOneWidget);
-      await tester.tap(find.text('Finish section'));
-      await tester.pumpAndSettle();
-      persisted = preferences.getString(scope.storageKey);
-      expect(persisted, isNotNull,
-          reason: 'the real preferences repository wrote its typed document');
-      committed = const LearningDocumentCodec().decode(persisted!, scope);
-      expect(committed.history, hasLength(10));
+      await tapAndWaitForLearningTransaction(find.text('Finish section'));
+      final committed = await tester.runAsync(
+        () => container.read(courseLearningStoreProvider).load(),
+      );
+      expect(committed!.history, hasLength(10));
       expect(committed.completions.map((entry) => entry.lessonId),
           contains('en-fr-u-y'));
       expect(committed.activities['lesson:en-fr-u-y']?.snapshot,

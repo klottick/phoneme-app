@@ -516,7 +516,10 @@ final class CourseLearningSqlAdapter
         command.expectedScopeRevision > learningMaxSafeInteger ||
         receiptOrdinal < 1 ||
         receiptOrdinal > commitOrdinal ||
-        _checkpointCodec.encode(command.candidate) != checkpointJson) {
+        !_jsonValuesEqualIgnoringObjectKeyOrder(
+          jsonDecode(_checkpointCodec.encode(command.candidate)),
+          jsonDecode(checkpointJson),
+        )) {
       throw const LearningCorruptException();
     }
     final latestReceipt = _SqlReceipt(
@@ -1878,6 +1881,29 @@ final class CourseLearningSqlAdapter
       );
     }
   }
+}
+
+bool _jsonValuesEqualIgnoringObjectKeyOrder(Object? left, Object? right) {
+  if (left is Map && right is Map) {
+    if (left.length != right.length ||
+        left.keys.any((Object? key) => !right.containsKey(key))) {
+      return false;
+    }
+    return left.entries.every(
+      (MapEntry<Object?, Object?> entry) =>
+          _jsonValuesEqualIgnoringObjectKeyOrder(entry.value, right[entry.key]),
+    );
+  }
+  if (left is List && right is List) {
+    if (left.length != right.length) return false;
+    for (var index = 0; index < left.length; index++) {
+      if (!_jsonValuesEqualIgnoringObjectKeyOrder(left[index], right[index])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return left.runtimeType == right.runtimeType && left == right;
 }
 
 final class _PendingSlot {

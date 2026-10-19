@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,8 +20,15 @@ import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/course_learning_store.dart';
 import 'package:linguist/src/core/course/course_learning_sync.dart';
 import 'package:linguist/src/core/course/course_skill_summary.dart';
+import 'package:linguist/src/core/course/french_sentence_package.dart';
+import 'package:linguist/src/core/course/sentence_hunt_learning_providers.dart';
+import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
+import 'package:linguist/src/core/course/storage/learning_database.dart'
+    show LearningDatabase, LearningDatabaseHandle;
 import 'package:linguist/src/features/course/course_progress_screen.dart';
 import 'package:linguist/src/features/home/home_screen.dart';
+import '../support/sentence_hunt_fixtures.dart';
+import '../support/sqlite_learning_test_harness.dart';
 import '../support/course_learning_widget_store.dart';
 
 class _UnexpectedSyncStore extends CourseLearningWidgetStore {
@@ -45,21 +53,22 @@ class _HeldSyncStore extends CourseLearningWidgetStore {
 }
 
 Override _comparisonPresentationOverride() =>
-    comparisonLearningStateProvider.overrideWith((ref) async =>
-        ComparisonLearningState.empty(ComparisonProfileScope(
-            courseId: 'en-fr', owner: LearningOwner.guest())));
+    comparisonLearningStateProvider.overrideWith(
+      (ref) async => ComparisonLearningState.empty(
+        ComparisonProfileScope(courseId: 'en-fr', owner: LearningOwner.guest()),
+      ),
+    );
 
-SupabaseClient _authenticatedBackend() =>
-    SupabaseClient('https://progress.example.invalid', 'public-test-key',
+SupabaseClient _authenticatedBackend() => SupabaseClient(
+  'https://progress.example.invalid',
+  'public-test-key',
         authOptions: const AuthClientOptions(autoRefreshToken: false),
         httpClient: MockClient((request) async {
       final email = (jsonDecode(request.body) as Map)['email'] as String;
       final id = email.split('@').first;
-      final token = '${base64Url.encode(utf8.encode('{"alg":"HS256"}'))}.'
-          '${base64Url.encode(utf8.encode(jsonEncode({
-            'sub': id,
-            'exp': DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600,
-          })))}.signature';
+    final token =
+        '${base64Url.encode(utf8.encode('{"alg":"HS256"}'))}.'
+        '${base64Url.encode(utf8.encode(jsonEncode({'sub': id, 'exp': DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600})))}.signature';
       return http.Response(
         jsonEncode({
           'access_token': token,
@@ -78,11 +87,14 @@ SupabaseClient _authenticatedBackend() =>
         request: request,
         headers: {'content-type': 'application/json'},
       );
-    }));
+  }),
+);
 
 Future<void> _signIn(SupabaseClient client) async {
   await client.auth.signInWithPassword(
-      email: 'progress-user@example.invalid', password: 'test-password');
+    email: 'progress-user@example.invalid',
+    password: 'test-password',
+  );
 }
 
 void main() {
@@ -93,12 +105,31 @@ void main() {
     courseBackend = null;
   });
 
-  testWidgets('progress explains the new format and assessment boundary',
-      (tester) async {
-    await tester.pumpWidget(ProviderScope(
-      overrides: [_comparisonPresentationOverride()],
+  testWidgets('progress explains the new format and assessment boundary', (
+    tester,
+  ) async {
+    final LearningOwner guest = LearningOwner.guest();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStateProvider.overrideWith(
+            (ref) async => CourseLearningState.empty(
+              LearningScope(courseId: 'en-fr', owner: guest),
+            ),
+          ),
+          _comparisonPresentationOverride(),
+          sentenceHuntCatalogueProvider.overrideWith(
+            (ref) async => syntheticSentenceCatalogue(),
+          ),
+          sentenceHuntLearningStateProvider.overrideWith(
+            (ref) async => SentenceHuntState.empty(
+              SentenceHuntProfileScope(courseId: 'en-fr', owner: guest),
+            ),
+          ),
+        ],
       child: const MaterialApp(home: CourseProgressScreen()),
-    ));
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(
@@ -110,10 +141,104 @@ void main() {
     expect(find.textContaining('not assessed'), findsWidgets);
   });
 
-  testWidgets('wrong first and successful retry stay separately visible',
-      (tester) async {
+  testWidgets('sqlite_open_failure_stays_unavailable_until_same_handle_retry', (
+    tester,
+  ) async {
+    const legacyKey = 'course.learning.v2.sentinel';
+    const legacyValue = '{leave-this-value-alone}';
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'theme': 'dark',
+      legacyKey: legacyValue,
+    });
+    final tempDir = (await tester.runAsync(
+      () => Directory.systemTemp.createTemp('learning-progress-'),
+    ))!;
+    final file = File('${tempDir.path}/phoneme_learning.sqlite');
+    final firstOpen = Completer<LearningDatabase>();
+    var openCalls = 0;
+    final handle = LearningDatabaseHandle(
+      open: () async {
+        openCalls++;
+        if (openCalls == 1) return firstOpen.future;
+        return openFileLearningTestDatabase(file);
+      },
+    );
+    final guest = LearningOwner.guest();
+    final container = ProviderContainer(
+      overrides: [
+        learningAuthScopeProvider.overrideWith(
+          (ref) => LearningAuthTracker(owner: guest, ready: true),
+        ),
+        learningDatabaseHandleProvider.overrideWithValue(handle),
+        _comparisonPresentationOverride(),
+        sentenceHuntCatalogueProvider.overrideWith(
+          (ref) async => syntheticSentenceCatalogue(),
+        ),
+        sentenceHuntLearningStateProvider.overrideWith(
+          (ref) async => SentenceHuntState.empty(
+            SentenceHuntProfileScope(courseId: 'en-fr', owner: guest),
+          ),
+        ),
+      ],
+    );
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox());
+      container.dispose();
+      await handle.close();
+      await tempDir.delete(recursive: true);
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+    });
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: CourseProgressScreen()),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(
+      find.text('Discovery lessons: 0/1 complete'),
+      findsNothing,
+      reason: 'an unopened database is unknown, not a verified empty state',
+    );
+    firstOpen.completeError(StateError('synthetic SQLite open failure'));
+    await tester.runAsync(() async {
+      try {
+        await container.read(courseLearningStateProvider.future);
+      } on Object {
+        // The widget owns the user-facing unavailable state.
+      }
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('Retry loading progress'), findsOneWidget);
+    expect(find.text('Discovery lessons: 0/1 complete'), findsNothing);
+
+    final originalHandle = container.read(learningDatabaseHandleProvider);
+    await tester.tap(find.text('Retry loading progress'));
+    await tester.pumpAndSettle();
+    expect(
+      container.read(learningDatabaseHandleProvider),
+      same(originalHandle),
+    );
+    expect(openCalls, 2);
+    expect(
+      find.text('Discovery lessons: 0/1 complete'),
+      findsOneWidget,
+      reason: 'zero is shown only after a successful validated empty query',
+    );
+    final preferences = await SharedPreferences.getInstance();
+    expect(preferences.getString('theme'), 'dark');
+    expect(preferences.getString(legacyKey), legacyValue);
+  });
+
+  testWidgets('wrong first and successful retry stay separately visible', (
+    tester,
+  ) async {
     final scope = LearningScope(
-        courseId: 'en-fr', owner: LearningOwner.account('progress-user'));
+      courseId: 'en-fr',
+      owner: LearningOwner.account('progress-user'),
+    );
     final state = CourseLearningState(
       scope: scope,
       revision: 1,
@@ -128,21 +253,30 @@ void main() {
           origin: AttemptOrigin.practice,
           presentation: AttemptPresentation.firstInRun,
           assistance: const {},
-        ): SkillCount(total: 1, correct: 0),
+        ): SkillCount(
+          total: 1,
+          correct: 0,
+        ),
         SummaryKey(
           sound: 'u',
           skill: LearningSkill.listening,
           origin: AttemptOrigin.practice,
           presentation: AttemptPresentation.repeatInRun,
           assistance: const {AssistanceFlag.explanationVisible},
-        ): SkillCount(total: 1, correct: 1),
+        ): SkillCount(
+          total: 1,
+          correct: 1,
+        ),
         SummaryKey(
           sound: 'u',
           skill: LearningSkill.listening,
           origin: AttemptOrigin.game,
           presentation: AttemptPresentation.firstInRun,
           assistance: const {AssistanceFlag.graphemeHint},
-        ): SkillCount(total: 3, correct: 2),
+        ): SkillCount(
+          total: 3,
+          correct: 2,
+        ),
       },
       completions: const [],
       bestScores: const {},
@@ -160,52 +294,70 @@ void main() {
         ),
       ],
     );
-    await tester.pumpWidget(ProviderScope(
+    await tester.pumpWidget(
+      ProviderScope(
       overrides: [
         courseLearningStateProvider.overrideWith((ref) async => state),
         _comparisonPresentationOverride(),
       ],
       child: const MaterialApp(home: CourseProgressScreen()),
-    ));
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(
-        find.textContaining('Practice · first presentation'), findsOneWidget);
+      find.textContaining('Practice · first presentation'),
+      findsOneWidget,
+    );
     expect(find.textContaining('0 correct / 1 answer'), findsOneWidget);
     expect(
-        find.textContaining('Practice · repeat presentation'), findsOneWidget);
+      find.textContaining('Practice · repeat presentation'),
+      findsOneWidget,
+    );
     expect(find.textContaining('1 correct / 1 answer'), findsOneWidget);
     expect(find.textContaining('assisted'), findsWidgets);
     await tester.scrollUntilVisible(
-        find.textContaining('Game · first presentation'), 180);
+      find.textContaining('Game · first presentation'),
+      180,
+    );
     expect(find.textContaining('Game · first presentation'), findsOneWidget);
     expect(find.textContaining('2 correct / 3 answers'), findsOneWidget);
     expect(find.textContaining('sample'), findsWidgets);
     expect(find.textContaining('pending recording'), findsWidgets);
     expect(
-        find.textContaining(
-            'Supported backup covers scores and answer totals.'),
-        findsOneWidget);
+      find.textContaining('Supported backup covers scores and answer totals.'),
+      findsOneWidget,
+    );
     expect(
         find.textContaining(
-            'Detailed history, mistakes and lesson resume stay on this device.'),
-        findsOneWidget);
+        'Detailed history, mistakes and lesson resume stay on this device.',
+      ),
+      findsOneWidget,
+    );
     expect(
         find.textContaining(
-            'Supported backup is pending; local commits remain saved on this device.'),
-        findsOneWidget);
-    expect(find.textContaining('Offline'), findsNothing,
-        reason: 'pending backup does not establish the learner is offline');
+        'Supported backup is pending; local commits remain saved on this device.',
+      ),
+      findsOneWidget,
+    );
     expect(
-        find.textContaining(
-            'Earlier server totals were not reset or imported.'),
-        findsWidgets);
+      find.textContaining('Offline'),
+      findsNothing,
+      reason: 'pending backup does not establish the learner is offline',
+    );
+    expect(
+      find.textContaining('Earlier server totals were not reset or imported.'),
+      findsWidgets,
+    );
   });
 
-  testWidgets('progress displays both committed arcade best-score keys',
-      (tester) async {
-    final scope =
-        LearningScope(courseId: 'en-fr', owner: LearningOwner.guest());
+  testWidgets('progress displays both committed arcade best-score keys', (
+    tester,
+  ) async {
+    final scope = LearningScope(
+      courseId: 'en-fr',
+      owner: LearningOwner.guest(),
+    );
     final state = CourseLearningState(
       scope: scope,
       revision: 0,
@@ -218,21 +370,24 @@ void main() {
       bestScores: const {'arcade:sound': 42, 'arcade:word': 73},
       pending: const [],
     );
-    await tester.pumpWidget(ProviderScope(
+    await tester.pumpWidget(
+      ProviderScope(
       overrides: [
         courseLearningStateProvider.overrideWith((ref) async => state),
         _comparisonPresentationOverride(),
       ],
       child: const MaterialApp(home: CourseProgressScreen()),
-    ));
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Sound Match: 42'), findsOneWidget);
     expect(find.text('Word Match: 73'), findsOneWidget);
   });
 
-  testWidgets('progress sync reports unexpected errors without escaping',
-      (tester) async {
+  testWidgets('progress sync reports unexpected errors without escaping', (
+    tester,
+  ) async {
     final backend = _authenticatedBackend();
     courseBackend = backend;
     await _signIn(backend);
@@ -241,17 +396,21 @@ void main() {
       backend.auth.dispose();
     });
     final scope = LearningScope(
-        courseId: 'en-fr', owner: LearningOwner.account('progress-user'));
+      courseId: 'en-fr',
+      owner: LearningOwner.account('progress-user'),
+    );
     final state = CourseLearningState.empty(scope);
     final store = _UnexpectedSyncStore(scope: scope);
-    await tester.pumpWidget(ProviderScope(
+    await tester.pumpWidget(
+      ProviderScope(
       overrides: [
         courseLearningStoreProvider.overrideWithValue(store),
         courseLearningStateProvider.overrideWith((ref) async => state),
         _comparisonPresentationOverride(),
       ],
       child: const MaterialApp(home: CourseProgressScreen()),
-    ));
+      ),
+    );
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Sync supported progress'));
@@ -260,13 +419,16 @@ void main() {
 
     expect(
         find.text(
-            'Supported backup status could not be checked. Local commits remain saved on this device.'),
-        findsOneWidget);
+        'Supported backup status could not be checked. Local commits remain saved on this device.',
+      ),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('progress sync feedback is fenced after owner replacement',
-      (tester) async {
+  testWidgets('progress sync feedback is fenced after owner replacement', (
+    tester,
+  ) async {
     final backend = _authenticatedBackend();
     courseBackend = backend;
     await _signIn(backend);
@@ -275,7 +437,9 @@ void main() {
       backend.auth.dispose();
     });
     final scope = LearningScope(
-        courseId: 'en-fr', owner: LearningOwner.account('progress-user'));
+      courseId: 'en-fr',
+      owner: LearningOwner.account('progress-user'),
+    );
     final state = CourseLearningState.empty(scope);
     final oldStore = _HeldSyncStore(scope: scope);
     final newStore = CourseLearningWidgetStore(scope: scope);
@@ -285,21 +449,26 @@ void main() {
       ref.watch(epoch);
       return activeStore;
     });
-    final container = ProviderContainer(overrides: [
+    final container = ProviderContainer(
+      overrides: [
       selectedStore.overrideWith((ref) {
         ref.watch(epoch);
         return activeStore;
       }),
-      courseLearningStoreProvider
-          .overrideWith((ref) => ref.watch(selectedStore)),
+        courseLearningStoreProvider.overrideWith(
+          (ref) => ref.watch(selectedStore),
+        ),
       courseLearningStateProvider.overrideWith((ref) async => state),
       _comparisonPresentationOverride(),
-    ]);
+      ],
+    );
     addTearDown(container.dispose);
-    await tester.pumpWidget(UncontrolledProviderScope(
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
       container: container,
       child: const MaterialApp(home: CourseProgressScreen()),
-    ));
+      ),
+    );
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Sync supported progress'));
@@ -308,23 +477,33 @@ void main() {
     activeStore = newStore;
     container.read(epoch.notifier).state++;
     await tester.pump();
-    oldStore.result.complete(const SupportedSyncResult(
+    oldStore.result.complete(
+      const SupportedSyncResult(
       status: SupportedSyncStatus.pending,
       remainingEvents: 2,
-    ));
+      ),
+    );
     await tester.pump();
 
-    expect(find.textContaining('Supported backup pending'), findsNothing,
-        reason: 'retired owner feedback must not be shown on the replacement');
-    expect(find.textContaining('Supported scores and answer totals backed up'),
-        findsNothing);
+    expect(
+      find.textContaining('Supported backup pending'),
+      findsNothing,
+      reason: 'retired owner feedback must not be shown on the replacement',
+    );
+    expect(
+      find.textContaining('Supported scores and answer totals backed up'),
+      findsNothing,
+    );
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('home completion uses committed current-revision records only',
-      (tester) async {
-    final scope =
-        LearningScope(courseId: 'en-fr', owner: LearningOwner.guest());
+  testWidgets('home completion uses committed current-revision records only', (
+    tester,
+  ) async {
+    final scope = LearningScope(
+      courseId: 'en-fr',
+      owner: LearningOwner.guest(),
+    );
     final currentRevision = LearningRegistry.french()
         .require('lesson:en-fr-vowels')
         .contentRevision;
@@ -357,29 +536,34 @@ void main() {
       bestScores: const {},
       pending: const [],
     );
-    await tester.pumpWidget(ProviderScope(
+    await tester.pumpWidget(
+      ProviderScope(
       overrides: [
         courseLearningStateProvider.overrideWith((ref) async => state),
-        _comparisonPresentationOverride()
+          _comparisonPresentationOverride(),
       ],
       child: const MaterialApp(home: HomeScreen()),
-    ));
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
     expect(find.text('Continue discovery'), findsOneWidget);
   });
 
-  testWidgets('home retry-loading calls retryLoad before refreshing state',
-      (tester) async {
+  testWidgets('home retry-loading calls retryLoad before refreshing state', (
+    tester,
+  ) async {
     final store = CourseLearningWidgetStore()..failLoad = true;
-    await tester.pumpWidget(ProviderScope(
+    await tester.pumpWidget(
+      ProviderScope(
       overrides: [
         courseLearningStoreProvider.overrideWithValue(store),
-        _comparisonPresentationOverride()
+          _comparisonPresentationOverride(),
       ],
       child: const MaterialApp(home: HomeScreen()),
-    ));
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Retry loading progress'), findsOneWidget);
     await tester.tap(find.text('Retry loading progress'));
@@ -388,16 +572,19 @@ void main() {
     expect(find.text('Continue discovery'), findsOneWidget);
   });
 
-  testWidgets('progress retry-loading calls retryLoad before refreshing state',
+  testWidgets(
+    'progress retry-loading calls retryLoad before refreshing state',
       (tester) async {
     final store = CourseLearningWidgetStore()..failLoad = true;
-    await tester.pumpWidget(ProviderScope(
+      await tester.pumpWidget(
+        ProviderScope(
       overrides: [
         courseLearningStoreProvider.overrideWithValue(store),
-        _comparisonPresentationOverride()
+            _comparisonPresentationOverride(),
       ],
       child: const MaterialApp(home: CourseProgressScreen()),
-    ));
+        ),
+      );
     await tester.pumpAndSettle();
     expect(find.text('Retry loading progress'), findsOneWidget);
     await tester.tap(find.text('Retry loading progress'));
@@ -406,11 +593,14 @@ void main() {
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
     expect(
         find.text('Existing lessons (includes discovery pilot): 0/5 complete'),
-        findsOneWidget);
-  });
+        findsOneWidget,
+      );
+    },
+  );
 
   for (final surface in ['home', 'progress']) {
-    testWidgets('$surface retry completion cannot refresh a replacement owner',
+    testWidgets(
+      '$surface retry completion cannot refresh a replacement owner',
         (tester) async {
       final oldStore = CourseLearningWidgetStore();
       final newStore = CourseLearningWidgetStore();
@@ -426,22 +616,28 @@ void main() {
         ref.watch(epoch);
         return activeStore;
       });
-      final container = ProviderContainer(overrides: [
+        final container = ProviderContainer(
+          overrides: [
         selectedStore.overrideWith((ref) {
           ref.watch(epoch);
           return activeStore;
         }),
-        courseLearningStoreProvider
-            .overrideWith((ref) => ref.watch(selectedStore)),
+            courseLearningStoreProvider.overrideWith(
+              (ref) => ref.watch(selectedStore),
+            ),
         _comparisonPresentationOverride(),
-      ]);
+          ],
+        );
       addTearDown(container.dispose);
-      final page =
-          surface == 'home' ? const HomeScreen() : const CourseProgressScreen();
-      await tester.pumpWidget(UncontrolledProviderScope(
+        final page = surface == 'home'
+            ? const HomeScreen()
+            : const CourseProgressScreen();
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
         container: container,
         child: MaterialApp(home: page),
-      ));
+          ),
+        );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Retry loading progress'));
       await tester.pump();
@@ -453,16 +649,23 @@ void main() {
       expect(newStore.loadCalls, 1);
       retryGate.complete();
       await tester.pumpAndSettle();
-      expect(newStore.loadCalls, 1,
+        expect(
+          newStore.loadCalls,
+          1,
           reason:
-              'the retired owner result must not invalidate new owner state');
-    });
+              'the retired owner result must not invalidate new owner state',
+        );
+      },
+    );
   }
 
-  testWidgets('unavailable mistakes are labeled and cannot route to review',
-      (tester) async {
-    final scope =
-        LearningScope(courseId: 'en-fr', owner: LearningOwner.guest());
+  testWidgets('unavailable mistakes are labeled and cannot route to review', (
+    tester,
+  ) async {
+    final scope = LearningScope(
+      courseId: 'en-fr',
+      owner: LearningOwner.guest(),
+    );
     final key = MistakeKey(
       activityId: 'lesson:removed-content',
       itemId: 'removed-word',
@@ -492,17 +695,21 @@ void main() {
       bestScores: const {},
       pending: const [],
     );
-    await tester.pumpWidget(ProviderScope(
+    await tester.pumpWidget(
+      ProviderScope(
       overrides: [
         courseLearningStateProvider.overrideWith((ref) async => state),
         _comparisonPresentationOverride(),
       ],
       child: const MaterialApp(home: CourseProgressScreen(review: true)),
-    ));
+      ),
+    );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Unavailable content · not reviewable'),
-        findsOneWidget);
+    expect(
+      find.textContaining('Unavailable content · not reviewable'),
+      findsOneWidget,
+    );
     final tile = tester.widget<ListTile>(find.byType(ListTile).last);
     expect(tile.onTap, isNull);
   });
