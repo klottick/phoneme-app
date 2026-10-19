@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
@@ -12,6 +13,7 @@ import 'package:linguist/src/core/course/learning_storage_types.dart';
 import 'package:linguist/src/core/course/storage/learning_database.dart';
 import 'package:linguist/src/core/course/storage/learning_sql_transaction.dart';
 import 'package:linguist/src/core/course/storage/learning_storage_scope.dart';
+import 'package:sqlite3/sqlite3.dart' show SqlError, SqliteException;
 
 import '../support/sqlite_learning_test_harness.dart';
 
@@ -307,31 +309,210 @@ void main() {
     });
 
     test('independent_connections_commit_one_divergent_command', () async {
-      final leftAdapter = harness.adapter;
-      final leftCoordinator = harness.coordinator(adapter: leftAdapter);
-      final leftGate = _PersistGate();
-      leftAdapter.persistGate = leftGate;
-      final leftSubmit = leftCoordinator.submit(_command());
-      await leftGate.entered.future;
-
-      final rightAdapter = harness.newAdapter();
-      final rightObserved = Completer<void>();
-      rightAdapter.onAuthGenerationRead = rightObserved.complete;
-      final rightCoordinator = harness.coordinator(adapter: rightAdapter);
-      final rightSubmit = rightCoordinator.submit(
-        _command(token: _rightToken, eventId: 'right-event'),
+      final leftCommitApplied = Completer<void>();
+      final releaseLeftCommitReturn = Completer<void>();
+      final leftBarrier = _IndependentWriteBarrier.left(
+        commitApplied: leftCommitApplied,
+        releaseCommitReturn: releaseLeftCommitReturn,
       );
-      await rightObserved.future;
-      leftGate.release.complete();
+      final rightBarrier = _IndependentWriteBarrier.right(
+        leftCommitApplied: leftCommitApplied,
+      );
+      final leftHandle = LearningDatabaseHandle(
+        open: () async => LearningDatabase(
+          DatabaseConnection(
+            NativeDatabase.createInBackground(file).interceptWith(leftBarrier),
+          ),
+        ),
+      );
+      final rightHandle = LearningDatabaseHandle(
+        open: () async => LearningDatabase(
+          DatabaseConnection(
+            NativeDatabase.createInBackground(
+              file,
+              setup: (database) =>
+                  database.execute('PRAGMA busy_timeout = 5000'),
+            ).interceptWith(rightBarrier),
+          ),
+        ),
+      );
+      final busyProbeHandle = LearningDatabaseHandle(
+        open: () async => LearningDatabase(
+          DatabaseConnection(
+            NativeDatabase(
+              file,
+              setup: (database) => database.execute('PRAGMA busy_timeout = 0'),
+            ),
+          ),
+        ),
+      );
+      harness.handles.addAll(<LearningDatabaseHandle>[
+        leftHandle,
+        rightHandle,
+        busyProbeHandle,
+      ]);
+
+      final leftAdapter = harness.newAdapter();
+      final rightAdapter = harness.newAdapter();
+      final leftCoordinator = harness.coordinator(
+        adapter: leftAdapter,
+        handle: leftHandle,
+      );
+      final rightCoordinator = harness.coordinator(
+        adapter: rightAdapter,
+        handle: rightHandle,
+      );
+
+      // Initialize both real file connections and their shared scope before
+      // either learner writer is held. The third connection is also opened
+      // now, with a zero busy timeout for an explicit SQLITE_BUSY probe.
+      expect((await leftCoordinator.load()).revision, 0);
+      expect((await rightCoordinator.load()).revision, 0);
+      final leftDb = await leftHandle.open();
+      final rightDb = await rightHandle.open();
+      final busyProbeDb = await busyProbeHandle.open();
+      await busyProbeDb.customSelect('SELECT 1 AS ready').getSingle();
+      expect(identical(leftDb, rightDb), isFalse);
+      leftBarrier.resetTransactionCounters();
+      leftBarrier.armLearnerCommit();
+      rightBarrier.resetTransactionCounters();
+      rightBarrier.armLearnerBegin();
+
+      final leftPersistGate = _PersistGate();
+      leftAdapter.persistGate = leftPersistGate;
+      late final Map<String, int> committedRows;
+      late final Future<_TestResult> rightSubmit;
+      late final Future<_TestResult> leftSubmit;
+      try {
+        // Submit right first. Its existing-scope ensureScope transaction runs
+        // to completion; park the following learner transaction before its
+        // BEGIN IMMEDIATE is dispatched to SQLite.
+        rightSubmit = rightCoordinator.submit(
+          _command(token: _rightToken, eventId: 'right-event'),
+        );
+        await Future.any<void>(<Future<void>>[
+          rightBarrier.learnerBeginReady.future,
+          rightSubmit.then<void>(
+            (_) => throw StateError(
+              'Right submit completed before its learner transaction began.',
+            ),
+          ),
+        ]);
+        expect(rightBarrier.transactionOpenCount, 2);
+        expect(rightBarrier.nestedTransactionCount, 1);
+        expect(rightBarrier.topLevelCommitCount, 1);
+
+        // This immediate third-connection probe confirms right's scope ensure
+        // transaction is already committed while its learner BEGIN is parked.
+        SqliteException? parkedBusyError;
+        try {
+          await busyProbeDb.customStatement('BEGIN IMMEDIATE');
+          await busyProbeDb.customStatement('ROLLBACK');
+        } on SqliteException catch (error) {
+          parkedBusyError = error;
+        }
+        expect(
+          parkedBusyError == null,
+          isTrue,
+          reason:
+              'Right scope setup still holds a SQLite writer: $parkedBusyError',
+        );
+
+        // The left connection now acquires the real SQLite writer lock and
+        // pauses inside adapter persistence, after the command transaction's
+        // BEGIN and scope-lock UPDATE have both completed.
+        leftSubmit = leftCoordinator.submit(_command());
+        await Future.any<void>(<Future<void>>[
+          leftPersistGate.entered.future,
+          leftSubmit.then<void>(
+            (_) => throw StateError(
+              'Left submit completed before its writer was held.',
+            ),
+            onError: (Object error, StackTrace stackTrace) => throw StateError(
+              'Left submit failed before its writer was held: '
+              '${error is LearningUnavailableException ? error.cause : error}',
+            ),
+          ),
+        ]);
+
+        // Dispatch right's learner BEGIN IMMEDIATE while left still owns the
+        // writer lock. Its ensureOpen future must remain pending until SQLite
+        // releases that lock; the command body cannot reach receipt lookup.
+        rightBarrier.allowLearnerBegin.complete();
+        await rightBarrier.learnerBeginDispatched.future;
+        SqliteException? busyError;
+        try {
+          await busyProbeDb.customStatement('BEGIN IMMEDIATE');
+          await busyProbeDb.customStatement('ROLLBACK');
+        } on SqliteException catch (error) {
+          busyError = error;
+        }
+        expect(busyError != null, isTrue);
+        expect(busyError!.resultCode, SqlError.SQLITE_BUSY);
+        expect(rightBarrier.learnerTransactionOpened.isCompleted, isFalse);
+        expect(rightAdapter.receiptLookupCount, 0);
+        expect(rightAdapter.persistCalls, 0);
+
+        // Finish the left command through a real SQLite COMMIT, but hold the
+        // interceptor future after COMMIT so the right BEGIN can be observed
+        // acquiring the released SQLite writer lock before either submit ends.
+        leftPersistGate.release.complete();
+        await Future.any<void>(<Future<void>>[
+          leftBarrier.learnerCommitApplied.future,
+          leftSubmit.then<void>(
+            (_) => throw StateError(
+              'Left submit returned before the commit barrier.',
+            ),
+          ),
+        ]);
+        await Future.any<void>(<Future<void>>[
+          rightBarrier.learnerTransactionOpened.future,
+          rightSubmit.then<void>(
+            (_) => throw StateError(
+              'Right submit completed before its transaction-open signal.',
+            ),
+          ),
+        ]);
+        expect(rightBarrier.learnerBeginCompletedAfterLeftCommit, isTrue);
+        committedRows = await _independentWriteRowCounts(busyProbeDb);
+        expect(committedRows, <String, int>{
+          'attempts': 1,
+          'receipts': 1,
+          'outbox': 1,
+          'revision': 1,
+          'commitOrdinal': 1,
+        });
+      } finally {
+        // Always let both real SQLite transaction attempts drain, including on
+        // assertion failure, so teardown never masks the original result.
+        if (!rightBarrier.allowLearnerBegin.isCompleted) {
+          rightBarrier.allowLearnerBegin.complete();
+        }
+        if (!rightBarrier.allowLearnerCommandBody.isCompleted) {
+          rightBarrier.allowLearnerCommandBody.complete();
+        }
+        if (!leftPersistGate.release.isCompleted) {
+          leftPersistGate.release.complete();
+        }
+        if (!releaseLeftCommitReturn.isCompleted) {
+          releaseLeftCommitReturn.complete();
+        }
+      }
 
       final committed = await leftSubmit;
       expect(committed.duplicate, isFalse);
       await expectLater(rightSubmit, throwsA(isA<LearningConflictException>()));
-      final leftDb = await harness.handleFor(leftCoordinator).open();
-      final rightDb = await harness.handleFor(rightCoordinator).open();
-      expect(identical(leftDb, rightDb), isFalse);
-      expect(await _count(leftDb, 'learning_command_receipts'), 1);
-      expect(await _count(rightDb, 'learning_attempts'), 1);
+      expect(rightAdapter.receiptLookupCount, 1);
+      expect(rightAdapter.persistCalls, 0);
+      expect(committedRows, <String, int>{
+        'attempts': 1,
+        'receipts': 1,
+        'outbox': 1,
+        'revision': 1,
+        'commitOrdinal': 1,
+      });
+      expect(await _independentWriteRowCounts(rightDb), committedRows);
+      expect(await _independentWriteRowCounts(busyProbeDb), committedRows);
     });
 
     test('load_reads_one_consistent_normalized_snapshot', () async {
@@ -899,6 +1080,153 @@ class _ScopeCreationGate {
   final Completer<void> release = Completer<void>();
 }
 
+class _IndependentWriteBarrier extends QueryInterceptor {
+  _IndependentWriteBarrier.left({
+    required Completer<void> commitApplied,
+    required Completer<void> releaseCommitReturn,
+  }) : _isRight = false,
+       _leftCommitApplied = commitApplied,
+       learnerCommitApplied = commitApplied,
+       _releaseCommitReturn = releaseCommitReturn;
+
+  _IndependentWriteBarrier.right({required Completer<void> leftCommitApplied})
+    : _isRight = true,
+      _leftCommitApplied = leftCommitApplied,
+      learnerCommitApplied = Completer<void>(),
+      _releaseCommitReturn = null;
+
+  final bool _isRight;
+  final Completer<void> _leftCommitApplied;
+  final Completer<void> learnerCommitApplied;
+  final Completer<void>? _releaseCommitReturn;
+
+  final Completer<void> learnerBeginReady = Completer<void>();
+  final Completer<void> allowLearnerBegin = Completer<void>();
+  final Completer<void> learnerBeginDispatched = Completer<void>();
+  final Completer<void> learnerTransactionOpened = Completer<void>();
+  final Completer<void> allowLearnerCommandBody = Completer<void>();
+
+  int _transactionOpenCount = 0;
+  int _commitCount = 0;
+  int _rightTopLevelCommitCount = 0;
+  int _nestedTransactionCount = 0;
+  bool _pauseLearnerCommit = false;
+  bool _pauseLearnerBegin = false;
+  bool learnerBeginCompletedAfterLeftCommit = false;
+  final Set<TransactionExecutor> _nestedTransactions =
+      HashSet<TransactionExecutor>.identity();
+  final Set<TransactionExecutor> _openedTransactions =
+      HashSet<TransactionExecutor>.identity();
+
+  int get transactionOpenCount => _transactionOpenCount;
+  int get nestedTransactionCount => _nestedTransactionCount;
+  int get topLevelCommitCount =>
+      _isRight ? _rightTopLevelCommitCount : _commitCount;
+
+  void resetTransactionCounters() {
+    _transactionOpenCount = 0;
+    _commitCount = 0;
+    _rightTopLevelCommitCount = 0;
+    _nestedTransactionCount = 0;
+    _nestedTransactions.clear();
+    _openedTransactions.clear();
+  }
+
+  void armLearnerCommit() {
+    if (_isRight) throw StateError('Only the left barrier pauses its commit.');
+    _pauseLearnerCommit = true;
+  }
+
+  void armLearnerBegin() {
+    if (!_isRight) throw StateError('Only the right barrier pauses its begin.');
+    _pauseLearnerBegin = true;
+  }
+
+  @override
+  TransactionExecutor beginTransaction(QueryExecutor parent) {
+    final transaction = parent.beginTransaction();
+    if (parent is TransactionExecutor) {
+      _nestedTransactionCount++;
+      _nestedTransactions.add(transaction);
+    }
+    return transaction;
+  }
+
+  @override
+  Future<bool> ensureOpen(
+    QueryExecutor executor,
+    QueryExecutorUser user,
+  ) async {
+    if (executor is TransactionExecutor &&
+        _nestedTransactions.contains(executor)) {
+      return executor.ensureOpen(user);
+    }
+    if (executor is TransactionExecutor && !_openedTransactions.add(executor)) {
+      // Drift may ensureOpen() an already-open parent again before creating a
+      // nested savepoint (LearningDatabase.ensureScope does this).
+      return executor.ensureOpen(user);
+    }
+    if (!_isRight || executor is! TransactionExecutor) {
+      return executor.ensureOpen(user);
+    }
+
+    if (!_pauseLearnerBegin) return executor.ensureOpen(user);
+
+    _transactionOpenCount++;
+    if (_transactionOpenCount == 1) {
+      // This is submit's ensureScope() transaction. It runs before the left
+      // writer is held so this test isolates the command transaction below.
+      return executor.ensureOpen(user);
+    }
+    if (_transactionOpenCount != 2) {
+      throw StateError(
+        'Unexpected right-side transaction before test completion.',
+      );
+    }
+
+    learnerBeginReady.complete();
+    await allowLearnerBegin.future;
+
+    // Calling ensureOpen starts Drift's real BEGIN IMMEDIATE. It does not
+    // resolve until SQLite grants the independent connection its writer lock.
+    final opening = executor.ensureOpen(user);
+    learnerBeginDispatched.complete();
+    final opened = await opening;
+    learnerBeginCompletedAfterLeftCommit = _leftCommitApplied.isCompleted;
+    learnerTransactionOpened.complete();
+    await allowLearnerCommandBody.future;
+    return opened;
+  }
+
+  @override
+  Future<void> commitTransaction(TransactionExecutor inner) async {
+    if (_nestedTransactions.remove(inner)) {
+      await inner.send();
+      return;
+    }
+    if (_isRight) {
+      _rightTopLevelCommitCount++;
+      await inner.send();
+      return;
+    }
+
+    final commitNumber = ++_commitCount;
+    await inner.send();
+    if (!_pauseLearnerCommit || commitNumber != 2) return;
+
+    // The first transaction is the existing-scope ensureScope() operation;
+    // pause only after the second (learner command) COMMIT reached SQLite.
+    learnerCommitApplied.complete();
+    await _releaseCommitReturn!.future;
+  }
+
+  @override
+  Future<void> rollbackTransaction(TransactionExecutor inner) async {
+    _nestedTransactions.remove(inner);
+    await inner.rollback();
+  }
+}
+
 class _SqlCommitBarrier extends QueryInterceptor {
   final Completer<void> committed = Completer<void>();
   final Completer<void> release = Completer<void>();
@@ -1030,6 +1358,8 @@ class _TestAdapter
   _LoadGate? loadGate;
   String? checkpointOverride;
   void Function()? onAuthGenerationRead;
+  int receiptLookupCount = 0;
+  int persistCalls = 0;
   final List<_TestState> duplicateStates = <_TestState>[];
 
   @override
@@ -1109,6 +1439,7 @@ class _TestAdapter
     int scopeId,
     String token,
   ) async {
+    receiptLookupCount++;
     final historyRows = await db
         .customSelect(
           'SELECT activity_id, token, canonical_payload, before_generation, '
@@ -1241,6 +1572,7 @@ class _TestAdapter
     _Command command,
     _TestState after,
   ) async {
+    persistCalls++;
     final checkpointJson = checkpointOverride ?? '{}';
     checkpointOverride = null;
     final gate = persistGate;
@@ -1423,6 +1755,16 @@ Future<int> _scopeCommitOrdinal(LearningDatabase db) async =>
             .customSelect('SELECT commit_ordinal FROM learning_scopes')
             .getSingle())
         .read<int>('commit_ordinal');
+
+Future<Map<String, int>> _independentWriteRowCounts(
+  LearningDatabase db,
+) async => <String, int>{
+  'attempts': await _count(db, 'learning_attempts'),
+  'receipts': await _count(db, 'learning_command_receipts'),
+  'outbox': await _count(db, 'supported_sync_outbox'),
+  'revision': await _scopeRevision(db),
+  'commitOrdinal': await _scopeCommitOrdinal(db),
+};
 
 Future<int> _totalChanges(LearningDatabase db) async =>
     (await db.customSelect('SELECT total_changes() AS count').getSingle())
