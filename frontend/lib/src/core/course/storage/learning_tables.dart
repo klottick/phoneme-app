@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 const int learningMaxSafeInteger = 9007199254740991;
+const int learningMaxCheckpointBytes = 1048576;
 
 class LearningScopes extends Table {
   @override
@@ -116,6 +117,7 @@ class LearningRuns extends Table {
     'CHECK(run_start_round IS NULL OR run_start_round BETWEEN 1 AND 9007199254740991)',
     'CHECK(json_valid(checkpoint_json) AND json_type(checkpoint_json) = \'object\')',
     'CHECK(length(checkpoint_json) > 1)',
+    'CHECK(length(CAST(checkpoint_json AS BLOB)) <= $learningMaxCheckpointBytes)',
     'CHECK(length(latest_receipt_token) = 22 AND latest_receipt_token NOT GLOB \'*[^A-Za-z0-9_-]*\')',
     "CHECK(json_valid(latest_receipt_payload) AND json_type(latest_receipt_payload) = 'object')",
     r"CHECK(json_type(latest_receipt_payload, '$.activityId') IS 'text' AND json_extract(latest_receipt_payload, '$.activityId') = activity_id)",

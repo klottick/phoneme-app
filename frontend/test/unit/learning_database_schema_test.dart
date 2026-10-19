@@ -16,6 +16,7 @@ import 'package:linguist/src/core/course/sentence_hunt_content.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
 import 'package:linguist/src/features/arcade/sound_match_engine.dart';
 import 'package:linguist/src/core/course/storage/learning_database.dart';
+import 'package:linguist/src/core/course/storage/learning_tables.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 
 import '../support/learning_migration_failure_probe.dart';
@@ -278,6 +279,26 @@ Future<void> _expectVersionOneFileRejectedUnchanged(File file) async {
     await database.close();
   }
   expect(await file.readAsBytes(), orderedEquals(before));
+}
+
+String _checkpointJsonWithUtf8ByteLength(int byteLength) {
+  const String prefix = '{"payload":"';
+  const String suffix = '"}';
+  final int payloadBytes =
+      byteLength - utf8.encode(prefix).length - utf8.encode(suffix).length;
+  if (payloadBytes < 0) {
+    throw ArgumentError.value(byteLength, 'byteLength', 'too small');
+  }
+  final String multibytePayload = List<String>.filled(
+    payloadBytes ~/ 2,
+    'é',
+  ).join();
+  final String payload = '$multibytePayload${payloadBytes.isOdd ? 'a' : ''}';
+  final String json = jsonEncode(<String, String>{'payload': payload});
+  if (utf8.encode(json).length != byteLength) {
+    throw StateError('JSON did not encode to the requested UTF-8 byte length.');
+  }
+  return json;
 }
 
 Map<String, String> _maxCurrentCheckpointFixtures() {
@@ -690,6 +711,171 @@ void main() {
         sizes.values.reduce((left, right) => left > right ? left : right),
         11066,
       );
+      expect(
+        sizes.values.every((size) => size <= learningMaxCheckpointBytes),
+        isTrue,
+      );
+    });
+
+    test(
+      'accepts exact UTF-8 checkpoint budget and rejects one byte over on INSERT',
+      () async {
+        final database = await _openDatabase();
+        addTearDown(database.close);
+        await createCoreLearningRows(database);
+
+        final String exactJson = _checkpointJsonWithUtf8ByteLength(
+          learningMaxCheckpointBytes,
+        );
+        final String oversizedJson = _checkpointJsonWithUtf8ByteLength(
+          learningMaxCheckpointBytes + 1,
+        );
+        expect(learningMaxCheckpointBytes, 1048576);
+        expect(utf8.encode(exactJson).length, learningMaxCheckpointBytes);
+        expect(exactJson.length, lessThan(learningMaxCheckpointBytes));
+        expect(
+          utf8.encode(oversizedJson).length,
+          learningMaxCheckpointBytes + 1,
+        );
+        expect(oversizedJson.length, lessThan(learningMaxCheckpointBytes));
+
+        await insertBinding(
+          database,
+          id: 109,
+          scopeId: 1,
+          activityId: 'budget-exact',
+          catalogueFingerprint: 'catalogue-1',
+        );
+        await insertBinding(
+          database,
+          id: 110,
+          scopeId: 1,
+          activityId: 'budget-over',
+          catalogueFingerprint: 'catalogue-1',
+        );
+        await insertRow(
+          database,
+          'learning_runs',
+          runRow(
+            scopeId: 1,
+            activityId: 'budget-exact',
+            activityKind: 'discovery',
+            contentBindingId: 109,
+            token: 'EEEEEEEEEEEEEEEEEEEEEE',
+            checkpointJson: exactJson,
+          ),
+        );
+        await expectSqlRejected(
+          insertRow(
+            database,
+            'learning_runs',
+            runRow(
+              scopeId: 1,
+              activityId: 'budget-over',
+              activityKind: 'discovery',
+              contentBindingId: 110,
+              token: 'FFFFFFFFFFFFFFFFFFFFFF',
+              checkpointJson: oversizedJson,
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'rejects one-byte-over UTF-8 checkpoint UPDATE and rolls back transaction',
+      () async {
+        final database = await _openDatabase();
+        addTearDown(database.close);
+        await createCoreLearningRows(database);
+
+        final String exactJson = _checkpointJsonWithUtf8ByteLength(
+          learningMaxCheckpointBytes,
+        );
+        final String oversizedJson = _checkpointJsonWithUtf8ByteLength(
+          learningMaxCheckpointBytes + 1,
+        );
+        expect(utf8.encode(exactJson).length, learningMaxCheckpointBytes);
+        expect(
+          utf8.encode(oversizedJson).length,
+          learningMaxCheckpointBytes + 1,
+        );
+        await updateRows(
+          database,
+          'learning_runs',
+          <String, Object?>{'checkpoint_json': exactJson},
+          where: 'scope_id = ? AND activity_id = ?',
+          whereArgs: <Object?>[1, 'course-a'],
+        );
+        await expectLater(
+          database.transaction(() async {
+            await updateRows(
+              database,
+              'learning_scopes',
+              <String, Object?>{'revision': 1, 'commit_ordinal': 1},
+              where: 'id = ?',
+              whereArgs: <Object?>[1],
+            );
+            await updateRows(
+              database,
+              'learning_runs',
+              <String, Object?>{'checkpoint_json': oversizedJson},
+              where: 'scope_id = ? AND activity_id = ?',
+              whereArgs: <Object?>[1, 'course-a'],
+            );
+          }),
+          throwsA(anything),
+        );
+
+        final revision = await database
+            .customSelect('SELECT revision FROM learning_scopes WHERE id = 1')
+            .getSingle();
+        final checkpoint = await database
+            .customSelect(
+              'SELECT checkpoint_json FROM learning_runs '
+              "WHERE scope_id = 1 AND activity_id = 'course-a'",
+            )
+            .getSingle();
+        expect(revision.read<int>('revision'), 0);
+        expect(checkpoint.read<String>('checkpoint_json'), exactJson);
+      },
+    );
+
+    test('retains checkpoint JSON-object and storage-class checks', () async {
+      final database = await _openDatabase();
+      addTearDown(database.close);
+      await createCoreLearningRows(database);
+
+      for (final invalidJson in <String>['not-json', '[]', 'null']) {
+        await expectSqlRejected(
+          updateRows(
+            database,
+            'learning_runs',
+            <String, Object?>{'checkpoint_json': invalidJson},
+            where: 'scope_id = ? AND activity_id = ?',
+            whereArgs: <Object?>[1, 'course-a'],
+          ),
+        );
+      }
+      await expectSqlRejected(
+        database.customStatement(
+          'UPDATE learning_runs SET checkpoint_json = NULL '
+          "WHERE scope_id = 1 AND activity_id = 'course-a'",
+        ),
+      );
+      await expectSqlRejected(
+        database.customStatement(
+          "UPDATE learning_runs SET checkpoint_json = CAST('{}' AS BLOB) "
+          "WHERE scope_id = 1 AND activity_id = 'course-a'",
+        ),
+      );
+      final checkpoint = await database
+          .customSelect(
+            'SELECT checkpoint_json FROM learning_runs '
+            "WHERE scope_id = 1 AND activity_id = 'course-a'",
+          )
+          .getSingle();
+      expect(checkpoint.read<String>('checkpoint_json'), '{}');
     });
 
     test(
