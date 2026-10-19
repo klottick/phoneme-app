@@ -73,7 +73,28 @@ void main() {
           'comparison',
           'sentence-hunt',
         ]) {
-          expect(beforeClose.rowCountsByFamily[family]?['attempts'], 2000);
+          final Map<String, Object?> pruneEvidence =
+              beforeClose.postCapPruneEvidenceByFamily[family]!;
+          expect(pruneEvidence['observed'], isTrue);
+          expect(pruneEvidence['attemptCountBefore'], 2000);
+          expect(pruneEvidence['receiptCountBefore'], 2000);
+          expect(
+            pruneEvidence['attemptCountAfter'],
+            beforeClose.rowCountsByFamily[family]?['attempts'],
+          );
+          expect(pruneEvidence['receiptCountAfter'], 2000);
+          expect(pruneEvidence['newAttemptIds'], isNotEmpty);
+          expect(pruneEvidence['evictedAttemptIds'], isNotEmpty);
+          expect(pruneEvidence['sqlRowsMatchReloadedState'], isTrue);
+          expect(
+            (pruneEvidence['newAttemptIds']! as List).length,
+            pruneEvidence['expectedNewAttemptCount'],
+          );
+          expect(
+            pruneEvidence['attemptIdsAfter'],
+            pruneEvidence['sqlAttemptIdsAfter'],
+          );
+          expect(pruneEvidence['sqlRowsMatchExpectedRetainedIds'], isTrue);
           expect(beforeClose.rowCountsByFamily[family]?['receipts'], 2000);
           expect(
             afterReopen.rowCountsByFamily[family],
@@ -88,6 +109,11 @@ void main() {
             beforeClose.latestReceiptByFamily[family],
           );
         }
+        expect(
+          beforeClose
+              .postCapPruneEvidenceByFamily['course']!['completeCourseBatches'],
+          isTrue,
+        );
         // ignore: avoid_print
         print('TASK9 WEB runId=$_runId report=${afterReopen.toJson()}');
       } finally {

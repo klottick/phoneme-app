@@ -57,6 +57,83 @@ void main() {
         'comparison': true,
         'sentence-hunt': true,
       });
+      final Map<String, Object?> recoveryJson = evidence.toJson();
+      expect(
+        recoveryJson['canonicalPayloadBytesIdenticalByFamily'],
+        <String, bool>{
+          'course': true,
+          'comparison': true,
+          'sentence-hunt': true,
+        },
+      );
+      expect(recoveryJson['replayedWithDecodedCommandByFamily'], <String, bool>{
+        'course': true,
+        'comparison': true,
+        'sentence-hunt': true,
+      });
+      final Map<String, String> rowsAfterFirstCommit = Map<String, String>.from(
+        recoveryJson['normalizedRowsAfterFirstCommitByFamily'] as Map,
+      );
+      final Map<String, String> rowsAfterReplay = Map<String, String>.from(
+        recoveryJson['normalizedRowsAfterReplayByFamily'] as Map,
+      );
+      final Map<String, Map<String, int>> countsAfterFirstCommit =
+          (recoveryJson['normalizedRowCountsAfterFirstCommitByFamily'] as Map)
+              .map(
+                (Object? key, Object? value) =>
+                    MapEntry<String, Map<String, int>>(
+                      key! as String,
+                      Map<String, int>.from(value! as Map),
+                    ),
+              );
+      final Map<String, Map<String, int>> countsAfterReplay =
+          (recoveryJson['normalizedRowCountsAfterReplayByFamily'] as Map).map(
+            (Object? key, Object? value) => MapEntry<String, Map<String, int>>(
+              key! as String,
+              Map<String, int>.from(value! as Map),
+            ),
+          );
+      expect(rowsAfterReplay, rowsAfterFirstCommit);
+      expect(countsAfterReplay, countsAfterFirstCommit);
+      expect(rowsAfterFirstCommit.keys, hasLength(3));
+      for (final String family in <String>[
+        'course',
+        'comparison',
+        'sentence-hunt',
+      ]) {
+        final List<dynamic> snapshot =
+            jsonDecode(rowsAfterFirstCommit[family]!) as List<dynamic>;
+        expect(
+          countsAfterFirstCommit[family]!.values.fold<int>(
+            0,
+            (int total, int count) => total + count,
+          ),
+          greaterThan(0),
+        );
+        final Set<String> tableNames = <String>{
+          for (final dynamic entry in snapshot)
+            (entry as Map<String, dynamic>)['table']! as String,
+        };
+        expect(
+          tableNames,
+          containsAll(<String>[
+            'learning_scopes',
+            'learning_content_bindings',
+            'learning_runs',
+            'learning_attempts',
+            'learning_attempt_values',
+            'learning_attempt_evidence',
+            'learning_command_receipts',
+            'learning_mistakes',
+            'learning_summaries',
+            'learning_completions',
+            'learning_exposure',
+            'learning_best_scores',
+            'supported_sync_outbox',
+          ]),
+        );
+      }
+      expect(countsAfterFirstCommit['course']?['supported_sync_outbox'], 1);
       expect(evidence.attemptCountAfterFirstCommit, <String, int>{
         'course': 1,
         'comparison': 1,

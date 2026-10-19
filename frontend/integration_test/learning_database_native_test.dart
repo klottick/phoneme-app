@@ -60,7 +60,28 @@ void main() {
           'comparison',
           'sentence-hunt',
         ]) {
-          expect(beforeReopen.rowCountsByFamily[family]?['attempts'], 2000);
+          final Map<String, Object?> pruneEvidence =
+              beforeReopen.postCapPruneEvidenceByFamily[family]!;
+          expect(pruneEvidence['observed'], isTrue);
+          expect(pruneEvidence['attemptCountBefore'], 2000);
+          expect(pruneEvidence['receiptCountBefore'], 2000);
+          expect(
+            pruneEvidence['attemptCountAfter'],
+            beforeReopen.rowCountsByFamily[family]?['attempts'],
+          );
+          expect(pruneEvidence['receiptCountAfter'], 2000);
+          expect(pruneEvidence['newAttemptIds'], isNotEmpty);
+          expect(pruneEvidence['evictedAttemptIds'], isNotEmpty);
+          expect(pruneEvidence['sqlRowsMatchReloadedState'], isTrue);
+          expect(
+            (pruneEvidence['newAttemptIds']! as List).length,
+            pruneEvidence['expectedNewAttemptCount'],
+          );
+          expect(
+            pruneEvidence['attemptIdsAfter'],
+            pruneEvidence['sqlAttemptIdsAfter'],
+          );
+          expect(pruneEvidence['sqlRowsMatchExpectedRetainedIds'], isTrue);
           expect(beforeReopen.rowCountsByFamily[family]?['receipts'], 2000);
           expect(
             afterReopen.rowCountsByFamily[family],
@@ -75,6 +96,11 @@ void main() {
             beforeReopen.latestReceiptByFamily[family],
           );
         }
+        expect(
+          beforeReopen
+              .postCapPruneEvidenceByFamily['course']!['completeCourseBatches'],
+          isTrue,
+        );
 
         const String concurrencyRunId = '$_runId-native-concurrency';
         final LearningCommand commandA = await prepareCourseCommandProbe(

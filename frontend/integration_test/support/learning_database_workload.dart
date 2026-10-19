@@ -33,6 +33,7 @@ import 'package:linguist/src/core/course/sentence_hunt_learning_store.dart'
     show SentenceHuntCommit;
 import 'package:linguist/src/core/course/sentence_hunt_learning_transition.dart';
 import 'package:linguist/src/core/course/storage/comparison_learning_sql_repository.dart';
+import 'package:linguist/src/core/course/storage/comparison_learning_command_codec.dart';
 import 'package:linguist/src/core/course/storage/course_learning_sql_adapter.dart';
 import 'package:linguist/src/core/course/storage/course_learning_sql_repository.dart';
 import 'package:linguist/src/core/course/storage/learning_database.dart'
@@ -40,6 +41,7 @@ import 'package:linguist/src/core/course/storage/learning_database.dart'
 import 'package:linguist/src/core/course/storage/learning_sql_transaction.dart';
 import 'package:linguist/src/core/course/storage/learning_storage_scope.dart';
 import 'package:linguist/src/core/course/storage/sentence_hunt_learning_sql_repository.dart';
+import 'package:linguist/src/core/course/storage/sentence_hunt_learning_command_codec.dart';
 import 'package:linguist/src/features/arcade/word_match_engine.dart';
 
 import '../../test/support/sentence_hunt_fixtures.dart';
@@ -49,27 +51,39 @@ const String _courseActivityId = 'lesson:en-fr-u-y';
 const String _courseGameActivityId = 'arcade:word';
 const int learningQualificationAuthGeneration = 17;
 
-const Map<String, String> learningOverflowQualificationStatusByFamily =
-    <String, String>{
-      'course':
-          'OPEN — SQL-backed 4,096/4,097 atomicity is not qualified. '
-          'Validator-only synthetic tests cover activities, mistakes, '
-          'summaries, completions, best scores, and exposure; they do not '
-          'persist rows or prove SQLite overflow rollback.',
-      'comparison':
-          'OPEN — the public comparison catalogue requires exactly 10 '
-          'exercises, so a valid 4,097th pair identity cannot be constructed '
-          'without changing production content or validation. SQL overflow '
-          'atomicity is not demonstrated.',
-      'sentence-hunt':
-          'OPEN — SQL-backed 4,096/4,097 atomicity is not qualified. Synthetic '
-          'validator and SQL-adapter evaluation tests exercise valid aggregate '
-          'identities in memory but do not persist rows or prove SQLite '
-          'overflow rollback.',
-    };
+const Map<String, String>
+learningOverflowQualificationStatusByFamily = <String, String>{
+  'course':
+      'OPEN — SQL-backed 4,096/4,097 atomicity is not qualified. '
+      'Validator-only synthetic tests cover activities, mistakes, '
+      'summaries, completions, best scores, and exposure; they do not '
+      'persist rows or prove SQLite overflow rollback. A repository-backed '
+      'proof needs thousands of valid transitions because the public '
+      'command path has no multi-identity seed operation; the prior 2,000 '
+      'course fixture took 249,343 ms, so that route was not safely bounded '
+      'for this unit.',
+  'comparison':
+      'OPEN — the public comparison catalogue requires exactly 10 '
+      'exercises, so a valid 4,097th pair identity cannot be constructed '
+      'without changing production content or validation. Its constructor '
+      'is private and the public validator rejects non-10 catalogues. SQL '
+      'overflow atomicity is not demonstrated; the controller must resolve '
+      'this acceptance conflict.',
+  'sentence-hunt':
+      'OPEN — SQL-backed 4,096/4,097 atomicity is not qualified. Synthetic '
+      'validator and SQL-adapter evaluation tests exercise valid aggregate '
+      'identities in memory but do not persist rows or prove SQLite '
+      'overflow rollback. The current valid synthetic catalogue has 15 '
+      'items; a SQL proof needs a validator-accepted 4,097-identity fixture '
+      'and thousands of repository answer commits. One valid answer submit '
+      'on the retained 786-attempt copy took 2,299 ms, so that route was '
+      'not safely bounded for this unit.',
+};
 
 final Map<String, Map<String, int>> _lastSeedDurations =
     <String, Map<String, int>>{};
+final Map<String, Map<String, Map<String, Object?>>>
+_postCapPruneEvidenceByRun = <String, Map<String, Map<String, Object?>>>{};
 
 final class LearningWorkloadReport {
   const LearningWorkloadReport({
@@ -81,6 +95,7 @@ final class LearningWorkloadReport {
     required this.durationsMillisecondsByFamily,
     required this.pruneResultByFamily,
     required this.overflowResultByFamily,
+    required this.postCapPruneEvidenceByFamily,
   });
 
   final Map<String, Map<String, int>> rowCountsByFamily;
@@ -91,6 +106,7 @@ final class LearningWorkloadReport {
   final Map<String, Map<String, int>> durationsMillisecondsByFamily;
   final Map<String, String> pruneResultByFamily;
   final Map<String, String> overflowResultByFamily;
+  final Map<String, Map<String, Object?>> postCapPruneEvidenceByFamily;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'rowCountsByFamily': rowCountsByFamily,
@@ -101,6 +117,7 @@ final class LearningWorkloadReport {
     'durationsMillisecondsByFamily': durationsMillisecondsByFamily,
     'pruneResultByFamily': pruneResultByFamily,
     'overflowResultByFamily': overflowResultByFamily,
+    'postCapPruneEvidenceByFamily': postCapPruneEvidenceByFamily,
   };
 }
 
@@ -113,6 +130,12 @@ final class LearningRecoveryEvidence {
     required this.attemptCountAfterFirstCommit,
     required this.outboxRowsAfterReplay,
     required this.frozenCommandPayloads,
+    required this.canonicalPayloadBytesIdenticalByFamily,
+    required this.replayedWithDecodedCommandByFamily,
+    required this.normalizedRowsAfterFirstCommitByFamily,
+    required this.normalizedRowsAfterReplayByFamily,
+    required this.normalizedRowCountsAfterFirstCommitByFamily,
+    required this.normalizedRowCountsAfterReplayByFamily,
   });
 
   final Map<String, bool> failedWritesRolledBack;
@@ -122,6 +145,13 @@ final class LearningRecoveryEvidence {
   final Map<String, int> attemptCountAfterFirstCommit;
   final int outboxRowsAfterReplay;
   final Map<String, String> frozenCommandPayloads;
+  final Map<String, bool> canonicalPayloadBytesIdenticalByFamily;
+  final Map<String, bool> replayedWithDecodedCommandByFamily;
+  final Map<String, String> normalizedRowsAfterFirstCommitByFamily;
+  final Map<String, String> normalizedRowsAfterReplayByFamily;
+  final Map<String, Map<String, int>>
+  normalizedRowCountsAfterFirstCommitByFamily;
+  final Map<String, Map<String, int>> normalizedRowCountsAfterReplayByFamily;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'failedWritesRolledBack': failedWritesRolledBack,
@@ -131,6 +161,16 @@ final class LearningRecoveryEvidence {
     'attemptCountAfterFirstCommit': attemptCountAfterFirstCommit,
     'outboxRowsAfterReplay': outboxRowsAfterReplay,
     'frozenCommandPayloads': frozenCommandPayloads,
+    'canonicalPayloadBytesIdenticalByFamily':
+        canonicalPayloadBytesIdenticalByFamily,
+    'replayedWithDecodedCommandByFamily': replayedWithDecodedCommandByFamily,
+    'normalizedRowsAfterFirstCommitByFamily':
+        normalizedRowsAfterFirstCommitByFamily,
+    'normalizedRowsAfterReplayByFamily': normalizedRowsAfterReplayByFamily,
+    'normalizedRowCountsAfterFirstCommitByFamily':
+        normalizedRowCountsAfterFirstCommitByFamily,
+    'normalizedRowCountsAfterReplayByFamily':
+        normalizedRowCountsAfterReplayByFamily,
   };
 }
 
@@ -162,6 +202,10 @@ Future<void> seedLearningAtRetentionLimits(
   await _seedCourse(handle, harness);
   await _seedComparison(handle, harness);
   await _seedSentenceHunt(handle, harness);
+  _postCapPruneEvidenceByRun[runId] = await _exercisePostCapPruning(
+    handle,
+    harness,
+  );
 }
 
 /// Loads every family through its production repository and reports normalized
@@ -247,13 +291,23 @@ Future<LearningWorkloadReport> verifyLearningAtRetentionLimits(
       },
   };
 
+  final Map<String, Map<String, Object?>>? postCapEvidence =
+      _postCapPruneEvidenceByRun[runId];
   final Map<String, String> pruneResults = <String, String>{
     for (final String family in _families)
-      family:
-          'retained attempts=${rowCounts[family]!['attempts']}, '
-          'retained receipts=${rowCounts[family]!['receipts']}, '
-          'typed summaries/mistakes/completions/exposure reloaded; '
-          'latest receipt proof=${latestReceipts[family]}',
+      family: postCapEvidence?[family] == null
+          ? 'OPEN — post-cap prune was not observed in this process/run; '
+                'retained attempts=${rowCounts[family]!['attempts']}, '
+                'retained receipts=${rowCounts[family]!['receipts']}, '
+                'latest receipt proof=${latestReceipts[family]}'
+          : 'OBSERVED post-cap write/prune '
+                'attempts before/after='
+                '${postCapEvidence![family]!['attemptCountBefore']}/'
+                '${postCapEvidence[family]!['attemptCountAfter']}; '
+                'retained attempts=${rowCounts[family]!['attempts']}, '
+                'retained receipts=${rowCounts[family]!['receipts']}, '
+                'typed summaries/mistakes/completions/exposure reloaded; '
+                'latest receipt proof=${latestReceipts[family]}',
   };
   return LearningWorkloadReport(
     rowCountsByFamily: rowCounts,
@@ -264,8 +318,529 @@ Future<LearningWorkloadReport> verifyLearningAtRetentionLimits(
     durationsMillisecondsByFamily: durations,
     pruneResultByFamily: pruneResults,
     overflowResultByFamily: learningOverflowQualificationStatusByFamily,
+    postCapPruneEvidenceByFamily:
+        postCapEvidence ?? const <String, Map<String, Object?>>{},
   );
 }
+
+Future<Map<String, Map<String, Object?>>> _exercisePostCapPruning(
+  LearningDatabaseHandle handle,
+  _WorkloadHarness harness,
+) async => <String, Map<String, Object?>>{
+  'course': await _exerciseCoursePostCapPrune(handle, harness),
+  'comparison': await _exerciseComparisonPostCapPrune(handle, harness),
+  'sentence-hunt': await _exerciseSentencePostCapPrune(handle, harness),
+};
+
+Future<Map<String, Object?>> _exerciseCoursePostCapPrune(
+  LearningDatabaseHandle handle,
+  _WorkloadHarness harness,
+) async {
+  final SqliteCourseLearningRepository repository = harness.courseRepository(
+    handle,
+  );
+  final CourseLearningState beforeState = await repository.load();
+  final LearningDatabase database = await handle.open();
+  final int attemptCountBefore = await _rowCount(
+    database,
+    'learning_attempts',
+    harness.courseStorageScope,
+  );
+  final int receiptCountBefore = await _rowCount(
+    database,
+    'learning_command_receipts',
+    harness.courseStorageScope,
+  );
+  final List<Map<String, Object?>> sqlBefore = await _attemptRows(
+    database,
+    harness.courseStorageScope,
+  );
+  var state = await _startCourseWordGame(repository, beforeState);
+  List<int>? chain;
+  for (var restart = 0; restart < 100 && chain == null; restart++) {
+    final WordGameCheckpoint checkpoint =
+        state.activities[_courseGameActivityId]!.snapshot as WordGameCheckpoint;
+    final WordMatchEngine game = WordMatchEngine.fromState(
+      checkpoint.board,
+      random: Random(991),
+    );
+    for (final int size in <int>[3, 4, 5]) {
+      chain = _targetPath(game, size);
+      if (chain != null) break;
+    }
+    if (chain == null) state = await _startCourseWordGame(repository, state);
+  }
+  if (chain == null) {
+    throw StateError('Could not prepare a valid post-cap course answer.');
+  }
+  final CourseLearningState afterCommit = await _submitCourse(
+    repository,
+    state,
+    _courseGameActivityId,
+    LinkWordTiles(indices: chain, elapsedSeconds: 0),
+  );
+  final CourseLearningState afterState = await repository.load();
+  final int attemptCountAfter = await _rowCount(
+    database,
+    'learning_attempts',
+    harness.courseStorageScope,
+  );
+  final int receiptCountAfter = await _rowCount(
+    database,
+    'learning_command_receipts',
+    harness.courseStorageScope,
+  );
+  final List<Map<String, Object?>> sqlAfter = await _attemptRows(
+    database,
+    harness.courseStorageScope,
+  );
+  final List<AttemptBatch> beforeBatches = beforeState.history;
+  final List<AttemptBatch> afterBatches = afterState.history;
+  final Set<String> afterTokens = <String>{
+    for (final AttemptBatch batch in afterBatches) batch.token,
+  };
+  final List<AttemptBatch> evictedBatches = beforeBatches
+      .where((AttemptBatch batch) => !afterTokens.contains(batch.token))
+      .toList(growable: false);
+  final Set<String> beforeIds = <String>{
+    for (final AttemptBatch batch in beforeBatches)
+      for (final CourseAttempt attempt in batch.attempts) attempt.submissionId,
+  };
+  final Set<String> afterIds = <String>{
+    for (final AttemptBatch batch in afterBatches)
+      for (final CourseAttempt attempt in batch.attempts) attempt.submissionId,
+  };
+  final Set<String> sqlAfterIds = <String>{
+    for (final Map<String, Object?> row in sqlAfter)
+      row['attempt_id']! as String,
+  };
+  final bool eachBatchWasKeptOrEvicted = beforeBatches.every((
+    AttemptBatch batch,
+  ) {
+    final int retained = batch.attempts
+        .where(
+          (CourseAttempt attempt) => afterIds.contains(attempt.submissionId),
+        )
+        .length;
+    return retained == 0 || retained == batch.attempts.length;
+  });
+  final bool sqlRetainedOnlyCompleteBatches = _hasCompleteSqlBatches(sqlAfter);
+  final List<String> newlyAddedIds = afterIds.difference(beforeIds).toList()
+    ..sort();
+  final List<String> evictedIds = beforeIds.difference(afterIds).toList()
+    ..sort();
+  final bool observed =
+      attemptCountBefore == _retainedRows &&
+      receiptCountBefore == _retainedRows &&
+      attemptCountAfter <= _retainedRows &&
+      receiptCountAfter == _retainedRows &&
+      evictedBatches.isNotEmpty &&
+      newlyAddedIds.length == chain.length &&
+      evictedIds.isNotEmpty &&
+      eachBatchWasKeptOrEvicted &&
+      sqlRetainedOnlyCompleteBatches &&
+      afterIds.length == attemptCountAfter &&
+      afterState.history.length == afterCommit.history.length &&
+      _sameStringIds(sqlAfterIds, afterIds);
+  if (!observed) {
+    throw StateError('Post-cap course prune failed its identity invariants.');
+  }
+  return <String, Object?>{
+    ..._postCapIdentityEvidence(
+      attemptCountBefore: attemptCountBefore,
+      attemptCountAfter: attemptCountAfter,
+      receiptCountBefore: receiptCountBefore,
+      receiptCountAfter: receiptCountAfter,
+      beforeIds: beforeIds,
+      afterIds: afterIds,
+      sqlAfterIds: sqlAfterIds,
+      expectedNewAttemptCount: chain.length,
+    ),
+    'observed': observed,
+    'completeCourseBatches': sqlRetainedOnlyCompleteBatches,
+    'completeEvictedBatches': eachBatchWasKeptOrEvicted,
+    'evictedBatchTokens': <String>[
+      for (final AttemptBatch batch in evictedBatches) batch.token,
+    ],
+    'evictedBatchAttemptIds': <List<String>>[
+      for (final AttemptBatch batch in evictedBatches)
+        <String>[
+          for (final CourseAttempt attempt in batch.attempts)
+            attempt.submissionId,
+        ],
+    ],
+    'survivingBatchTokens': <String>[
+      for (final AttemptBatch batch in afterBatches) batch.token,
+    ],
+    'survivingBatchAttemptIds': <List<String>>[
+      for (final AttemptBatch batch in afterBatches)
+        <String>[
+          for (final CourseAttempt attempt in batch.attempts)
+            attempt.submissionId,
+        ],
+    ],
+    'sqlRowsMatchReloadedState': _sameStringIds(sqlAfterIds, afterIds),
+    'attemptIdsBefore': beforeIds.toList()..sort(),
+    'attemptIdsAfter': afterIds.toList()..sort(),
+    'newAttemptIds': newlyAddedIds,
+    'evictedAttemptIds': evictedIds,
+    'survivingAttemptIds': afterIds.toList()..sort(),
+    'receiptPruneObserved':
+        receiptCountBefore == _retainedRows &&
+        receiptCountAfter == _retainedRows,
+    'answerBatchSize': chain.length,
+    'sqlAttemptRowsBefore': sqlBefore.length,
+  };
+}
+
+Future<Map<String, Object?>> _exerciseComparisonPostCapPrune(
+  LearningDatabaseHandle handle,
+  _WorkloadHarness harness,
+) async {
+  final SqliteComparisonLearningRepository repository = harness
+      .comparisonRepository(handle);
+  final ComparisonLearningState beforeState = await repository.load();
+  final LearningDatabase database = await handle.open();
+  final int attemptCountBefore = await _rowCount(
+    database,
+    'learning_attempts',
+    harness.comparisonStorageScope,
+  );
+  final int receiptCountBefore = await _rowCount(
+    database,
+    'learning_command_receipts',
+    harness.comparisonStorageScope,
+  );
+  final List<Map<String, Object?>> sqlBefore = await _attemptRows(
+    database,
+    harness.comparisonStorageScope,
+  );
+  var state = (await harness.commitComparison(
+    repository,
+    beforeState,
+    StartComparisonRun(
+      sessionId: 'task9-post-cap-${harness.runId}-comparison',
+      policy: LessonPolicy(),
+    ),
+  )).state;
+  final LessonSectionSession session = _comparisonSession(
+    state,
+    harness.catalogue,
+  );
+  final ComparisonExercise exercise = harness.catalogue.exercise(
+    session.currentItemId!,
+  );
+  state = (await harness.commitComparison(
+    repository,
+    state,
+    AnswerComparisonPair(
+      _comparisonAnswer(
+        harness,
+        exercise,
+        runGeneration: state.slot!.cursor.generation,
+        round: session.round,
+        correct: true,
+      ),
+    ),
+  )).state;
+  final ComparisonLearningState afterState = await repository.load();
+  final int attemptCountAfter = await _rowCount(
+    database,
+    'learning_attempts',
+    harness.comparisonStorageScope,
+  );
+  final int receiptCountAfter = await _rowCount(
+    database,
+    'learning_command_receipts',
+    harness.comparisonStorageScope,
+  );
+  final List<Map<String, Object?>> sqlAfter = await _attemptRows(
+    database,
+    harness.comparisonStorageScope,
+  );
+  final List<String> beforeIds = <String>[
+    for (final Map<String, Object?> row in sqlBefore)
+      row['attempt_id']! as String,
+  ];
+  final List<String> afterIds = <String>[
+    for (final Map<String, Object?> row in sqlAfter)
+      row['attempt_id']! as String,
+  ];
+  final Set<String> beforeStateKeys = <String>{
+    for (final ComparisonPairAttempt attempt in beforeState.attempts)
+      jsonEncode(<Object?>[
+        attempt.activityId,
+        attempt.runGeneration,
+        attempt.sequence,
+      ]),
+  };
+  final Set<String> afterStateKeys = <String>{
+    for (final ComparisonPairAttempt attempt in afterState.attempts)
+      jsonEncode(<Object?>[
+        attempt.activityId,
+        attempt.runGeneration,
+        attempt.sequence,
+      ]),
+  };
+  final Set<String> beforeSqlKeys = _attemptRowKeys(sqlBefore);
+  final Set<String> afterSqlKeys = _attemptRowKeys(sqlAfter);
+  final bool sqlMatchesReloadedState =
+      _sameStringIds(beforeStateKeys, beforeSqlKeys) &&
+      _sameStringIds(afterStateKeys, afterSqlKeys);
+  final Map<String, Object?> evidence = _postCapIdentityEvidence(
+    attemptCountBefore: attemptCountBefore,
+    attemptCountAfter: attemptCountAfter,
+    receiptCountBefore: receiptCountBefore,
+    receiptCountAfter: receiptCountAfter,
+    beforeIds: beforeIds.toSet(),
+    afterIds: afterIds.toSet(),
+    sqlAfterIds: afterIds.toSet(),
+    expectedNewAttemptCount: 1,
+  );
+  final bool observed =
+      attemptCountBefore == _retainedRows &&
+      receiptCountBefore == _retainedRows &&
+      attemptCountAfter <= _retainedRows &&
+      receiptCountAfter == _retainedRows &&
+      (evidence['newAttemptIds']! as List).length == 1 &&
+      (evidence['evictedAttemptIds']! as List).isNotEmpty &&
+      afterState.attempts.length == attemptCountAfter &&
+      sqlMatchesReloadedState;
+  if (!observed) {
+    throw StateError(
+      'Post-cap comparison prune failed its identity invariants.',
+    );
+  }
+  return <String, Object?>{
+    ...evidence,
+    'observed': observed,
+    'sqlRowsMatchReloadedState': sqlMatchesReloadedState,
+    'typedAttemptKeysBefore': beforeStateKeys.toList()..sort(),
+    'typedAttemptKeysAfter': afterStateKeys.toList()..sort(),
+    'sqlAttemptKeysBefore': beforeSqlKeys.toList()..sort(),
+    'sqlAttemptKeysAfter': afterSqlKeys.toList()..sort(),
+    'receiptPruneObserved': true,
+    'sqlAttemptRowsBefore': sqlBefore.length,
+  };
+}
+
+Future<Map<String, Object?>> _exerciseSentencePostCapPrune(
+  LearningDatabaseHandle handle,
+  _WorkloadHarness harness,
+) async {
+  final SqliteSentenceHuntLearningRepository repository = harness
+      .sentenceHuntRepository(handle);
+  final SentenceHuntLearningState beforeState = await repository.load();
+  final LearningDatabase database = await handle.open();
+  final int attemptCountBefore = await _rowCount(
+    database,
+    'learning_attempts',
+    harness.sentenceStorageScope,
+  );
+  final int receiptCountBefore = await _rowCount(
+    database,
+    'learning_command_receipts',
+    harness.sentenceStorageScope,
+  );
+  final List<Map<String, Object?>> sqlBefore = await _attemptRows(
+    database,
+    harness.sentenceStorageScope,
+  );
+  final SentenceHuntSection section = harness.sentenceCatalogue.sections.first;
+  var state = (await harness.commitSentence(
+    repository,
+    beforeState,
+    section.id,
+    StartSentenceHuntRun(
+      sessionId: 'task9-post-cap-${harness.runId}-sentence',
+      policy: section.policy,
+      mode: SentenceHuntRunMode.practice,
+    ),
+  )).state;
+  final LessonSectionSession session = _sentenceSession(state, section);
+  final SentenceHuntItem item = harness.sentenceCatalogue.item(
+    section.id,
+    session.currentItemId!,
+  );
+  state = (await harness.commitSentence(
+    repository,
+    state,
+    section.id,
+    AnswerSentenceHuntItem(
+      _sentenceAnswer(
+        harness,
+        item,
+        runGeneration: state.slots[section.id]!.cursor.generation,
+        round: session.round,
+        correct: true,
+      ),
+    ),
+  )).state;
+  final SentenceHuntLearningState afterState = await repository.load();
+  final int attemptCountAfter = await _rowCount(
+    database,
+    'learning_attempts',
+    harness.sentenceStorageScope,
+  );
+  final int receiptCountAfter = await _rowCount(
+    database,
+    'learning_command_receipts',
+    harness.sentenceStorageScope,
+  );
+  final List<Map<String, Object?>> sqlAfter = await _attemptRows(
+    database,
+    harness.sentenceStorageScope,
+  );
+  final List<String> beforeIds = <String>[
+    for (final Map<String, Object?> row in sqlBefore)
+      row['attempt_id']! as String,
+  ];
+  final List<String> afterIds = <String>[
+    for (final Map<String, Object?> row in sqlAfter)
+      row['attempt_id']! as String,
+  ];
+  final Set<String> beforeStateKeys = <String>{
+    for (final SentenceHuntAttempt attempt in beforeState.attempts)
+      jsonEncode(<Object?>[
+        attempt.content.sectionId,
+        attempt.runGeneration,
+        attempt.sequence,
+      ]),
+  };
+  final Set<String> afterStateKeys = <String>{
+    for (final SentenceHuntAttempt attempt in afterState.attempts)
+      jsonEncode(<Object?>[
+        attempt.content.sectionId,
+        attempt.runGeneration,
+        attempt.sequence,
+      ]),
+  };
+  final Set<String> beforeSqlKeys = _attemptRowKeys(sqlBefore);
+  final Set<String> afterSqlKeys = _attemptRowKeys(sqlAfter);
+  final bool sqlMatchesReloadedState =
+      _sameStringIds(beforeStateKeys, beforeSqlKeys) &&
+      _sameStringIds(afterStateKeys, afterSqlKeys);
+  final Map<String, Object?> evidence = _postCapIdentityEvidence(
+    attemptCountBefore: attemptCountBefore,
+    attemptCountAfter: attemptCountAfter,
+    receiptCountBefore: receiptCountBefore,
+    receiptCountAfter: receiptCountAfter,
+    beforeIds: beforeIds.toSet(),
+    afterIds: afterIds.toSet(),
+    sqlAfterIds: afterIds.toSet(),
+    expectedNewAttemptCount: 1,
+  );
+  final bool observed =
+      attemptCountBefore == _retainedRows &&
+      receiptCountBefore == _retainedRows &&
+      attemptCountAfter <= _retainedRows &&
+      receiptCountAfter == _retainedRows &&
+      (evidence['newAttemptIds']! as List).length == 1 &&
+      (evidence['evictedAttemptIds']! as List).isNotEmpty &&
+      afterState.attempts.length == attemptCountAfter &&
+      sqlMatchesReloadedState;
+  if (!observed) {
+    throw StateError(
+      'Post-cap sentence-hunt prune failed its identity invariants.',
+    );
+  }
+  return <String, Object?>{
+    ...evidence,
+    'observed': observed,
+    'sqlRowsMatchReloadedState': sqlMatchesReloadedState,
+    'typedAttemptKeysBefore': beforeStateKeys.toList()..sort(),
+    'typedAttemptKeysAfter': afterStateKeys.toList()..sort(),
+    'sqlAttemptKeysBefore': beforeSqlKeys.toList()..sort(),
+    'sqlAttemptKeysAfter': afterSqlKeys.toList()..sort(),
+    'receiptPruneObserved': true,
+    'sqlAttemptRowsBefore': sqlBefore.length,
+  };
+}
+
+Map<String, Object?> _postCapIdentityEvidence({
+  required int attemptCountBefore,
+  required int attemptCountAfter,
+  required int receiptCountBefore,
+  required int receiptCountAfter,
+  required Set<String> beforeIds,
+  required Set<String> afterIds,
+  required Set<String> sqlAfterIds,
+  required int expectedNewAttemptCount,
+}) {
+  final List<String> sortedBefore = beforeIds.toList()..sort();
+  final List<String> sortedAfter = afterIds.toList()..sort();
+  final List<String> sortedSqlAfter = sqlAfterIds.toList()..sort();
+  final List<String> addedIds = afterIds.difference(beforeIds).toList()..sort();
+  final List<String> evictedIds = beforeIds.difference(afterIds).toList()
+    ..sort();
+  return <String, Object?>{
+    'attemptCountBefore': attemptCountBefore,
+    'attemptCountAfter': attemptCountAfter,
+    'receiptCountBefore': receiptCountBefore,
+    'receiptCountAfter': receiptCountAfter,
+    'attemptIdsBefore': sortedBefore,
+    'attemptIdsAfter': sortedAfter,
+    'newAttemptIds': addedIds,
+    'evictedAttemptIds': evictedIds,
+    'survivingAttemptIds': sortedAfter,
+    'expectedNewAttemptCount': expectedNewAttemptCount,
+    'sqlAttemptIdsAfter': sortedSqlAfter,
+    'sqlRowsMatchExpectedRetainedIds': _sameStringIds(sqlAfterIds, afterIds),
+  };
+}
+
+Future<List<Map<String, Object?>>> _attemptRows(
+  LearningDatabase database,
+  LearningStorageScope scope,
+) async {
+  final int scopeId = await _scopeId(database, scope);
+  final List<QueryRow> rows = await database
+      .customSelect(
+        'SELECT attempt_id, activity_id, run_generation, command_sequence, '
+        'batch_index FROM learning_attempts WHERE scope_id = ? '
+        'ORDER BY commit_ordinal, batch_index',
+        variables: <Variable<Object>>[Variable<int>(scopeId)],
+      )
+      .get();
+  return <Map<String, Object?>>[
+    for (final QueryRow row in rows)
+      <String, Object?>{
+        'attempt_id': row.read<String>('attempt_id'),
+        'activity_id': row.read<String>('activity_id'),
+        'run_generation': row.read<int>('run_generation'),
+        'command_sequence': row.read<int>('command_sequence'),
+        'batch_index': row.read<int>('batch_index'),
+      },
+  ];
+}
+
+Set<String> _attemptRowKeys(List<Map<String, Object?>> rows) => <String>{
+  for (final Map<String, Object?> row in rows)
+    jsonEncode(<Object?>[
+      row['activity_id'],
+      row['run_generation'],
+      row['command_sequence'],
+    ]),
+};
+
+bool _hasCompleteSqlBatches(List<Map<String, Object?>> rows) {
+  final Map<String, List<int>> batches = <String, List<int>>{};
+  for (final Map<String, Object?> row in rows) {
+    final String key =
+        '${row['activity_id']}:${row['run_generation']}:'
+        '${row['command_sequence']}';
+    batches.putIfAbsent(key, () => <int>[]).add(row['batch_index']! as int);
+  }
+  return batches.values.every((List<int> indices) {
+    indices.sort();
+    return indices.asMap().entries.every(
+      (MapEntry<int, int> entry) => entry.key == entry.value,
+    );
+  });
+}
+
+bool _sameStringIds(Set<String> left, Set<String> right) =>
+    left.length == right.length && left.containsAll(right);
 
 /// Injects a family-specific failure after an answer's normalized row has
 /// started to persist, verifies the complete file snapshot is unchanged after
@@ -283,6 +858,14 @@ Future<LearningRecoveryEvidence> qualifyLearningRecovery(
   final Map<String, bool> duplicateReplay = <String, bool>{};
   final Map<String, int> attemptCounts = <String, int>{};
   final Map<String, String> frozenPayloads = <String, String>{};
+  final Map<String, bool> canonicalBytesIdentical = <String, bool>{};
+  final Map<String, bool> replayedWithDecodedCommand = <String, bool>{};
+  final Map<String, String> rowsAfterFirstCommit = <String, String>{};
+  final Map<String, String> rowsAfterReplay = <String, String>{};
+  final Map<String, Map<String, int>> countsAfterFirstCommit =
+      <String, Map<String, int>>{};
+  final Map<String, Map<String, int>> countsAfterReplay =
+      <String, Map<String, int>>{};
   var courseOutboxRows = 0;
 
   final LearningDatabase firstDb = await firstConnection.open();
@@ -297,6 +880,28 @@ Future<LearningRecoveryEvidence> qualifyLearningRecovery(
     harness,
     firstConnection,
   );
+  final String coursePayload = CourseLearningCommandCodec.canonicalCommand(
+    course.command,
+  );
+  frozenPayloads['course'] = coursePayload;
+  final LearningCommand firstCourseCommand =
+      CourseLearningCommandCodec.decodeCanonicalCommand(
+        coursePayload,
+        scope: harness.courseDomainScope,
+      );
+  final LearningCommand replayCourseCommand =
+      CourseLearningCommandCodec.decodeCanonicalCommand(
+        coursePayload,
+        scope: harness.courseDomainScope,
+      );
+  canonicalBytesIdentical['course'] = _sameUtf8Bytes(
+    coursePayload,
+    CourseLearningCommandCodec.canonicalCommand(replayCourseCommand),
+  );
+  replayedWithDecodedCommand['course'] = !identical(
+    course.command,
+    replayCourseCommand,
+  );
   final LearningDatabase courseDb = await firstConnection.open();
   final String courseSnapshotBefore = await _scopeSnapshot(
     courseDb,
@@ -309,7 +914,7 @@ Future<LearningRecoveryEvidence> qualifyLearningRecovery(
     BEGIN SELECT RAISE(ABORT, 'task9 injected course failure'); END
   ''');
   final bool courseFailure = await _failsWithSaveError(
-    course.repository.submit(course.command),
+    course.repository.submit(firstCourseCommand),
   );
   await courseDb.customStatement(
     'DROP TRIGGER task9_reject_course_attempt_value',
@@ -322,26 +927,28 @@ Future<LearningRecoveryEvidence> qualifyLearningRecovery(
   afterValues['course'] = courseSnapshotAfter;
   rolledBack['course'] =
       courseFailure && courseSnapshotBefore == courseSnapshotAfter;
-  await course.repository.submit(course.command); // Intentional lost ACK.
-  attemptCounts['course'] = await _rowCount(
+  await course.repository.submit(firstCourseCommand); // Intentional lost ACK.
+  final _ScopedSnapshot courseFirstCommit = await _readScopedSnapshot(
     independentDb,
-    'learning_attempts',
     harness.courseStorageScope,
   );
-  frozenPayloads['course'] = CourseLearningCommandCodec.canonicalCommand(
-    course.command,
-  );
+  rowsAfterFirstCommit['course'] = courseFirstCommit.rows;
+  countsAfterFirstCommit['course'] = courseFirstCommit.counts;
+  attemptCounts['course'] = courseFirstCommit.counts['learning_attempts']!;
   final LearningCommit courseReplay = await harness
       .courseRepository(independentConnection)
-      .submit(course.command);
+      .submit(replayCourseCommand);
+  final _ScopedSnapshot courseAfterReplay = await _readScopedSnapshot(
+    independentDb,
+    harness.courseStorageScope,
+  );
+  rowsAfterReplay['course'] = courseAfterReplay.rows;
+  countsAfterReplay['course'] = courseAfterReplay.counts;
   duplicateReplay['course'] =
       courseReplay.duplicate &&
-      await _rowCount(
-            independentDb,
-            'learning_attempts',
-            harness.courseStorageScope,
-          ) ==
-          attemptCounts['course'];
+      courseAfterReplay.rows == courseFirstCommit.rows &&
+      _sameCounts(courseAfterReplay.counts, courseFirstCommit.counts) &&
+      courseAfterReplay.counts['learning_attempts'] == attemptCounts['course'];
   courseOutboxRows = await _rowCount(
     independentDb,
     'supported_sync_outbox',
@@ -351,6 +958,29 @@ Future<LearningRecoveryEvidence> qualifyLearningRecovery(
   final _RecoveryComparison comparison = await _prepareComparisonRecovery(
     harness,
     firstConnection,
+  );
+  final String comparisonPayload =
+      ComparisonLearningCommandCodec.canonicalCommand(comparison.command);
+  frozenPayloads['comparison'] = comparisonPayload;
+  final ComparisonLearningCommand firstComparisonCommand =
+      ComparisonLearningCommandCodec.decodeCanonicalCommand(
+        comparisonPayload,
+        scope: harness.comparisonDomainScope,
+        catalogue: harness.catalogue,
+      );
+  final ComparisonLearningCommand replayComparisonCommand =
+      ComparisonLearningCommandCodec.decodeCanonicalCommand(
+        comparisonPayload,
+        scope: harness.comparisonDomainScope,
+        catalogue: harness.catalogue,
+      );
+  canonicalBytesIdentical['comparison'] = _sameUtf8Bytes(
+    comparisonPayload,
+    ComparisonLearningCommandCodec.canonicalCommand(replayComparisonCommand),
+  );
+  replayedWithDecodedCommand['comparison'] = !identical(
+    comparison.command,
+    replayComparisonCommand,
   );
   final LearningDatabase comparisonDb = await firstConnection.open();
   final String comparisonSnapshotBefore = await _scopeSnapshot(
@@ -364,7 +994,7 @@ Future<LearningRecoveryEvidence> qualifyLearningRecovery(
     BEGIN SELECT RAISE(ABORT, 'task9 injected comparison failure'); END
   ''');
   final bool comparisonFailure = await _failsWithSaveError(
-    comparison.repository.submit(comparison.command),
+    comparison.repository.submit(firstComparisonCommand),
   );
   await comparisonDb.customStatement(
     'DROP TRIGGER task9_reject_comparison_evidence',
@@ -378,31 +1008,59 @@ Future<LearningRecoveryEvidence> qualifyLearningRecovery(
   rolledBack['comparison'] =
       comparisonFailure && comparisonSnapshotBefore == comparisonSnapshotAfter;
   await comparison.repository.submit(
-    comparison.command,
+    firstComparisonCommand,
   ); // Intentional lost ACK.
-  attemptCounts['comparison'] = await _rowCount(
+  final _ScopedSnapshot comparisonFirstCommit = await _readScopedSnapshot(
     independentDb,
-    'learning_attempts',
     harness.comparisonStorageScope,
   );
-  frozenPayloads['comparison'] = comparisonLearningSqlCanonicalCommand(
-    comparison.command,
-  );
+  rowsAfterFirstCommit['comparison'] = comparisonFirstCommit.rows;
+  countsAfterFirstCommit['comparison'] = comparisonFirstCommit.counts;
+  attemptCounts['comparison'] =
+      comparisonFirstCommit.counts['learning_attempts']!;
   final ComparisonCommit comparisonReplay = await harness
       .comparisonRepository(independentConnection)
-      .submit(comparison.command);
+      .submit(replayComparisonCommand);
+  final _ScopedSnapshot comparisonAfterReplay = await _readScopedSnapshot(
+    independentDb,
+    harness.comparisonStorageScope,
+  );
+  rowsAfterReplay['comparison'] = comparisonAfterReplay.rows;
+  countsAfterReplay['comparison'] = comparisonAfterReplay.counts;
   duplicateReplay['comparison'] =
       comparisonReplay.duplicate &&
-      await _rowCount(
-            independentDb,
-            'learning_attempts',
-            harness.comparisonStorageScope,
-          ) ==
+      comparisonAfterReplay.rows == comparisonFirstCommit.rows &&
+      _sameCounts(comparisonAfterReplay.counts, comparisonFirstCommit.counts) &&
+      comparisonAfterReplay.counts['learning_attempts'] ==
           attemptCounts['comparison'];
 
   final _RecoverySentence sentence = await _prepareSentenceRecovery(
     harness,
     firstConnection,
+  );
+  final String sentencePayload = SentenceHuntCommandCodec.canonicalCommand(
+    sentence.command,
+  );
+  frozenPayloads['sentence-hunt'] = sentencePayload;
+  final SentenceHuntLearningCommand firstSentenceCommand =
+      SentenceHuntCommandCodec.decodeCanonicalCommand(
+        sentencePayload,
+        scope: harness.sentenceDomainScope,
+        catalogue: harness.sentenceCatalogue,
+      );
+  final SentenceHuntLearningCommand replaySentenceCommand =
+      SentenceHuntCommandCodec.decodeCanonicalCommand(
+        sentencePayload,
+        scope: harness.sentenceDomainScope,
+        catalogue: harness.sentenceCatalogue,
+      );
+  canonicalBytesIdentical['sentence-hunt'] = _sameUtf8Bytes(
+    sentencePayload,
+    SentenceHuntCommandCodec.canonicalCommand(replaySentenceCommand),
+  );
+  replayedWithDecodedCommand['sentence-hunt'] = !identical(
+    sentence.command,
+    replaySentenceCommand,
   );
   final LearningDatabase sentenceDb = await firstConnection.open();
   final String sentenceSnapshotBefore = await _scopeSnapshot(
@@ -416,7 +1074,7 @@ Future<LearningRecoveryEvidence> qualifyLearningRecovery(
     BEGIN SELECT RAISE(ABORT, 'task9 injected sentence failure'); END
   ''');
   final bool sentenceFailure = await _failsWithSaveError(
-    sentence.repository.submit(sentence.command),
+    sentence.repository.submit(firstSentenceCommand),
   );
   await sentenceDb.customStatement(
     'DROP TRIGGER task9_reject_sentence_evidence',
@@ -429,25 +1087,31 @@ Future<LearningRecoveryEvidence> qualifyLearningRecovery(
   afterValues['sentence-hunt'] = sentenceSnapshotAfter;
   rolledBack['sentence-hunt'] =
       sentenceFailure && sentenceSnapshotBefore == sentenceSnapshotAfter;
-  await sentence.repository.submit(sentence.command); // Intentional lost ACK.
-  attemptCounts['sentence-hunt'] = await _rowCount(
+  await sentence.repository.submit(
+    firstSentenceCommand,
+  ); // Intentional lost ACK.
+  final _ScopedSnapshot sentenceFirstCommit = await _readScopedSnapshot(
     independentDb,
-    'learning_attempts',
     harness.sentenceStorageScope,
   );
-  frozenPayloads['sentence-hunt'] = sentenceHuntLearningSqlCanonicalCommand(
-    sentence.command,
-  );
+  rowsAfterFirstCommit['sentence-hunt'] = sentenceFirstCommit.rows;
+  countsAfterFirstCommit['sentence-hunt'] = sentenceFirstCommit.counts;
+  attemptCounts['sentence-hunt'] =
+      sentenceFirstCommit.counts['learning_attempts']!;
   final SentenceHuntCommit sentenceReplay = await harness
       .sentenceHuntRepository(independentConnection)
-      .submit(sentence.command);
+      .submit(replaySentenceCommand);
+  final _ScopedSnapshot sentenceAfterReplay = await _readScopedSnapshot(
+    independentDb,
+    harness.sentenceStorageScope,
+  );
+  rowsAfterReplay['sentence-hunt'] = sentenceAfterReplay.rows;
+  countsAfterReplay['sentence-hunt'] = sentenceAfterReplay.counts;
   duplicateReplay['sentence-hunt'] =
       sentenceReplay.duplicate &&
-      await _rowCount(
-            independentDb,
-            'learning_attempts',
-            harness.sentenceStorageScope,
-          ) ==
+      sentenceAfterReplay.rows == sentenceFirstCommit.rows &&
+      _sameCounts(sentenceAfterReplay.counts, sentenceFirstCommit.counts) &&
+      sentenceAfterReplay.counts['learning_attempts'] ==
           attemptCounts['sentence-hunt'];
 
   return LearningRecoveryEvidence(
@@ -458,6 +1122,12 @@ Future<LearningRecoveryEvidence> qualifyLearningRecovery(
     attemptCountAfterFirstCommit: attemptCounts,
     outboxRowsAfterReplay: courseOutboxRows,
     frozenCommandPayloads: frozenPayloads,
+    canonicalPayloadBytesIdenticalByFamily: canonicalBytesIdentical,
+    replayedWithDecodedCommandByFamily: replayedWithDecodedCommand,
+    normalizedRowsAfterFirstCommitByFamily: rowsAfterFirstCommit,
+    normalizedRowsAfterReplayByFamily: rowsAfterReplay,
+    normalizedRowCountsAfterFirstCommitByFamily: countsAfterFirstCommit,
+    normalizedRowCountsAfterReplayByFamily: countsAfterReplay,
   );
 }
 
@@ -846,6 +1516,43 @@ Future<int> _rowCountById(
             )
             .getSingle())
         .read<int>('row_count');
+
+final class _ScopedSnapshot {
+  const _ScopedSnapshot(this.rows, this.counts);
+
+  final String rows;
+  final Map<String, int> counts;
+}
+
+Future<_ScopedSnapshot> _readScopedSnapshot(
+  LearningDatabase database,
+  LearningStorageScope scope,
+) async {
+  final String rows = await _scopeSnapshot(database, scope);
+  final List<Object?> tables = jsonDecode(rows) as List<Object?>;
+  final Map<String, int> counts = <String, int>{};
+  for (final Object? tableValue in tables) {
+    final Map<String, dynamic> table = tableValue as Map<String, dynamic>;
+    counts[table['table']! as String] = (table['rows']! as List).length;
+  }
+  return _ScopedSnapshot(rows, counts);
+}
+
+bool _sameCounts(Map<String, int> left, Map<String, int> right) =>
+    left.length == right.length &&
+    left.entries.every(
+      (MapEntry<String, int> entry) => right[entry.key] == entry.value,
+    );
+
+bool _sameUtf8Bytes(String frozen, String recanonicalized) {
+  final List<int> frozenBytes = utf8.encode(frozen);
+  final List<int> recanonicalizedBytes = utf8.encode(recanonicalized);
+  if (frozenBytes.length != recanonicalizedBytes.length) return false;
+  for (var index = 0; index < frozenBytes.length; index++) {
+    if (frozenBytes[index] != recanonicalizedBytes[index]) return false;
+  }
+  return true;
+}
 
 Future<int> _logicalPageBytes(LearningDatabase database) async {
   final QueryRow pageCount = await database
