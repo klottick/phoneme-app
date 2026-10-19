@@ -3,14 +3,12 @@ import 'dart:convert';
 import 'comparison_content.dart';
 import 'comparison_learning_command.dart';
 import 'comparison_learning_state.dart';
+import 'course_learning_error.dart' show ComparisonUnavailableException;
 import 'course_audio_contract.dart';
 import 'lesson_policy.dart';
 import 'lesson_section_session.dart';
 
-final class ComparisonUnavailableException implements Exception {
-  const ComparisonUnavailableException([this.cause]);
-  final Object? cause;
-}
+export 'course_learning_error.dart' show ComparisonUnavailableException;
 
 final class ComparisonLearningCodec {
   const ComparisonLearningCodec();

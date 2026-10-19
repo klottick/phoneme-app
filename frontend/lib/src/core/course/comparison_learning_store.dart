@@ -14,7 +14,7 @@ import 'course_learning_transaction.dart'
         LearningTransactionTransition;
 import 'learning_storage_types.dart';
 
-export 'comparison_learning_codec.dart' show ComparisonUnavailableException;
+export 'course_learning_error.dart' show ComparisonUnavailableException;
 
 abstract interface class ComparisonLearningStore {
   ComparisonProfileScope get scope;
