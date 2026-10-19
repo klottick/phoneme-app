@@ -1109,19 +1109,18 @@ final class ComparisonLearningSqlAdapter
       if (byBucket.containsKey(bucket)) throw const LearningCorruptException();
       byBucket[bucket] = count;
     }
+    for (final byBucket in buckets.values) {
+      // The writer always stores every bucket, including zero-valued counts.
+      // An identity with no detail rows is still an aggregate, not a sparse set.
+      if (byBucket.length != 3) throw const LearningCorruptException();
+    }
     return <ComparisonSummaryKey, ComparisonPairSummary>{
       for (final entry in buckets.entries)
         entry.key: ComparisonPairSummary(
           key: entry.key,
-          firstInRun:
-              entry.value['firstInRun'] ??
-              ComparisonCount(correct: 0, total: 0),
-          repeatInRun:
-              entry.value['repeatInRun'] ??
-              ComparisonCount(correct: 0, total: 0),
-          afterDebrief:
-              entry.value['afterDebrief'] ??
-              ComparisonCount(correct: 0, total: 0),
+          firstInRun: entry.value['firstInRun']!,
+          repeatInRun: entry.value['repeatInRun']!,
+          afterDebrief: entry.value['afterDebrief']!,
         ),
     };
   }

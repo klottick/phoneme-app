@@ -346,6 +346,138 @@ void main() {
     );
 
     test(
+      'rejects a missing nonzero summary bucket after detail pruning',
+      () async {
+        final repository = fixture.repository(historyLimit: 2);
+        final scopeId = await _populatePrunedSummaries(fixture, repository);
+        final intact = await repository.load();
+        const prunedPair = 'fr07b-pair-01';
+        expect(
+          await _attemptCountForPair(fixture.handle, scopeId, prunedPair),
+          0,
+        );
+        final summary = intact.summaries.entries
+            .singleWhere((entry) => entry.key.pairId == prunedPair)
+            .value;
+        expect(summary.firstInRun.correct, 0);
+        expect(summary.firstInRun.total, 1);
+        expect(summary.repeatInRun.correct, 0);
+        expect(summary.repeatInRun.total, 0);
+        expect(summary.afterDebrief.correct, 0);
+        expect(summary.afterDebrief.total, 0);
+        final intactRows = await _comparisonSummaryRows(
+          fixture.handle,
+          scopeId,
+          pairId: prunedPair,
+        );
+        expect(intactRows, hasLength(3));
+        expect(intactRows.map((row) => row['bucket']).toSet(), {
+          'firstInRun',
+          'repeatInRun',
+          'afterDebrief',
+        });
+        expect(intactRows.singleWhere((row) => row['bucket'] == 'firstInRun'), {
+          'pair_id': prunedPair,
+          'bucket': 'firstInRun',
+          'correct': 0,
+          'total': 1,
+        });
+        expect(
+          intactRows.singleWhere((row) => row['bucket'] == 'repeatInRun'),
+          {
+            'pair_id': prunedPair,
+            'bucket': 'repeatInRun',
+            'correct': 0,
+            'total': 0,
+          },
+        );
+        expect(
+          intactRows.singleWhere((row) => row['bucket'] == 'afterDebrief'),
+          {
+            'pair_id': prunedPair,
+            'bucket': 'afterDebrief',
+            'correct': 0,
+            'total': 0,
+          },
+        );
+
+        final db = await fixture.handle.open();
+        await db.customStatement(
+          'DELETE FROM learning_summaries WHERE scope_id = ? '
+          "AND family = 'comparison' AND activity_id = ? AND pair_id = ? "
+          'AND bucket = ?',
+          [scopeId, comparisonActivityId, prunedPair, 'firstInRun'],
+        );
+        final summaryRowsBeforeLoad = await _comparisonSummaryRows(
+          fixture.handle,
+          scopeId,
+        );
+        expect(
+          summaryRowsBeforeLoad.where((row) => row['pair_id'] == prunedPair),
+          hasLength(2),
+        );
+        final headerBeforeLoad = await _scopeHeader(fixture.handle, scopeId);
+        final notificationsBeforeLoad = fixture.notifications;
+
+        await expectLater(
+          repository.load(),
+          throwsA(isA<LearningCorruptException>()),
+        );
+        expect(
+          await _comparisonSummaryRows(fixture.handle, scopeId),
+          summaryRowsBeforeLoad,
+        );
+        expect(await _scopeHeader(fixture.handle, scopeId), headerBeforeLoad);
+        expect(fixture.notifications, notificationsBeforeLoad);
+      },
+    );
+
+    test('rejects a missing zero-valued summary bucket', () async {
+      final repository = fixture.repository(historyLimit: 2);
+      final scopeId = await _populatePrunedSummaries(fixture, repository);
+      final intact = await repository.load();
+      const prunedPair = 'fr07b-pair-01';
+      expect(
+        await _attemptCountForPair(fixture.handle, scopeId, prunedPair),
+        0,
+      );
+      final summary = intact.summaries.entries
+          .singleWhere((entry) => entry.key.pairId == prunedPair)
+          .value;
+      expect(summary.repeatInRun.correct, 0);
+      expect(summary.repeatInRun.total, 0);
+
+      final db = await fixture.handle.open();
+      await db.customStatement(
+        'DELETE FROM learning_summaries WHERE scope_id = ? '
+        "AND family = 'comparison' AND activity_id = ? AND pair_id = ? "
+        'AND bucket = ?',
+        [scopeId, comparisonActivityId, prunedPair, 'repeatInRun'],
+      );
+      final summaryRowsBeforeLoad = await _comparisonSummaryRows(
+        fixture.handle,
+        scopeId,
+      );
+      expect(
+        summaryRowsBeforeLoad.where((row) => row['pair_id'] == prunedPair),
+        hasLength(2),
+      );
+      final headerBeforeLoad = await _scopeHeader(fixture.handle, scopeId);
+      final notificationsBeforeLoad = fixture.notifications;
+
+      await expectLater(
+        repository.load(),
+        throwsA(isA<LearningCorruptException>()),
+      );
+      expect(
+        await _comparisonSummaryRows(fixture.handle, scopeId),
+        summaryRowsBeforeLoad,
+      );
+      expect(await _scopeHeader(fixture.handle, scopeId), headerBeforeLoad);
+      expect(fixture.notifications, notificationsBeforeLoad);
+    });
+
+    test(
       'latest_receipt_scope_revision_must_precede_current_on_load_and_lookup',
       () async {
         final repository = fixture.repository();
@@ -474,6 +606,49 @@ final class _Fixture {
           .read<int>('id');
 
   Future<void> close() => handle.close();
+}
+
+Future<int> _populatePrunedSummaries(
+  _Fixture fixture,
+  SqliteComparisonLearningRepository repository,
+) async {
+  var state = await repository.load();
+  state = (await fixture.commit(
+    repository,
+    state,
+    StartComparisonRun(
+      sessionId: 'summary-pruning-session',
+      policy: LessonPolicy(),
+    ),
+  )).state;
+  for (var index = 0; index < fixture.catalogue.exercises.length; index++) {
+    final session = fixture.session(state);
+    state = (await fixture.commit(
+      repository,
+      state,
+      AnswerComparisonPair(
+        _answerFor(
+          fixture,
+          pairId: session.currentItemId!,
+          runGeneration: state.slot!.cursor.generation,
+          round: session.round,
+          correct: index != 0,
+        ),
+      ),
+    )).state;
+    state = (await fixture.commit(
+      repository,
+      state,
+      const AdvanceComparisonPair(),
+    )).state;
+  }
+  state = (await fixture.commit(
+    repository,
+    state,
+    const FinishComparisonRun(recordCompletion: true),
+  )).state;
+  expect(state.summaries, hasLength(fixture.catalogue.exercises.length));
+  return fixture.scopeId(await fixture.handle.open());
 }
 
 ComparePhonemesAnswer _answerFor(
@@ -631,5 +806,77 @@ Future<Map<String, int>> _detailCounts(
     'receipts': receipts,
     'summaries': summaries,
     'completions': completions,
+  };
+}
+
+Future<int> _attemptCountForPair(
+  LearningDatabaseHandle handle,
+  int scopeId,
+  String pairId,
+) async {
+  final db = await handle.open();
+  return (await db
+          .customSelect(
+            'SELECT count(*) AS count FROM learning_attempts '
+            'WHERE scope_id = ? AND item_id = ?',
+            variables: [Variable<int>(scopeId), Variable<String>(pairId)],
+          )
+          .getSingle())
+      .read<int>('count');
+}
+
+Future<List<Map<String, Object>>> _comparisonSummaryRows(
+  LearningDatabaseHandle handle,
+  int scopeId, {
+  String? pairId,
+}) async {
+  final db = await handle.open();
+  final rows = await db
+      .customSelect(
+        'SELECT pair_id, bucket, correct, total FROM learning_summaries '
+        'WHERE scope_id = ? AND family = ? AND activity_id = ? '
+        '${pairId == null ? '' : 'AND pair_id = ? '}'
+        'ORDER BY activity_id, pair_id, bucket',
+        variables: [
+          Variable<int>(scopeId),
+          const Variable<String>('comparison'),
+          const Variable<String>(comparisonActivityId),
+          if (pairId != null) Variable<String>(pairId),
+        ],
+      )
+      .get();
+  return [
+    for (final row in rows)
+      {
+        'pair_id': row.read<String>('pair_id'),
+        'bucket': row.read<String>('bucket'),
+        'correct': row.read<int>('correct'),
+        'total': row.read<int>('total'),
+      },
+  ];
+}
+
+Future<Map<String, Object>> _scopeHeader(
+  LearningDatabaseHandle handle,
+  int scopeId,
+) async {
+  final db = await handle.open();
+  final row = await db
+      .customSelect(
+        'SELECT owner_kind, owner_id, course_id, family, schema_version, '
+        'revision, commit_ordinal, availability_state FROM learning_scopes '
+        'WHERE id = ?',
+        variables: [Variable<int>(scopeId)],
+      )
+      .getSingle();
+  return {
+    'owner_kind': row.read<String>('owner_kind'),
+    'owner_id': row.read<String>('owner_id'),
+    'course_id': row.read<String>('course_id'),
+    'family': row.read<String>('family'),
+    'schema_version': row.read<int>('schema_version'),
+    'revision': row.read<int>('revision'),
+    'commit_ordinal': row.read<int>('commit_ordinal'),
+    'availability_state': row.read<String>('availability_state'),
   };
 }
