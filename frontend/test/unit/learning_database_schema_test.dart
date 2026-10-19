@@ -246,6 +246,63 @@ void _rewriteSchemaSql(
   required String objectName,
   required String remove,
 }) {
+  _mutateSchemaSql(
+    raw,
+    objectType: objectType,
+    objectName: objectName,
+    mutate: (String original) {
+      final String changed = original.replaceFirst(remove, '');
+      if (changed == original) {
+        throw StateError('Did not find schema fragment to remove: $remove');
+      }
+      return changed;
+    },
+  );
+}
+
+void _replaceSchemaSql(
+  sqlite.Database raw, {
+  required String objectType,
+  required String objectName,
+  required String find,
+  required String replaceWith,
+}) => _mutateSchemaSql(
+  raw,
+  objectType: objectType,
+  objectName: objectName,
+  mutate: (String original) {
+    final String changed = original.replaceFirst(find, replaceWith);
+    if (changed == original) {
+      throw StateError('Did not find schema fragment to replace: $find');
+    }
+    return changed;
+  },
+);
+
+void _appendTableConstraint(
+  sqlite.Database raw, {
+  required String tableName,
+  required String constraint,
+}) => _mutateSchemaSql(
+  raw,
+  objectType: 'table',
+  objectName: tableName,
+  mutate: (String original) {
+    final int closing = original.lastIndexOf(')');
+    if (closing < 0) {
+      throw StateError('Table definition has no closing parenthesis.');
+    }
+    return '${original.substring(0, closing)}, $constraint'
+        '${original.substring(closing)}';
+  },
+);
+
+void _mutateSchemaSql(
+  sqlite.Database raw, {
+  required String objectType,
+  required String objectName,
+  required String Function(String original) mutate,
+}) {
   final rows = raw.select(
     'SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?',
     <Object?>[objectType, objectName],
@@ -254,9 +311,9 @@ void _rewriteSchemaSql(
     throw StateError('Expected exactly one $objectType $objectName.');
   }
   final String original = rows.single['sql'] as String;
-  final String changed = original.replaceFirst(remove, '');
+  final String changed = mutate(original);
   if (changed == original) {
-    throw StateError('Did not find schema fragment to remove: $remove');
+    throw StateError('Schema mutation did not change $objectType $objectName.');
   }
   raw.execute('PRAGMA writable_schema = ON');
   raw.execute(
@@ -2278,6 +2335,45 @@ void main() {
       },
     );
 
+    test(
+      'rejects unmodeled inline UNIQUE table constraints unchanged',
+      () async {
+        final directory = await Directory.systemTemp.createTemp(
+          'learning-inline-unique-drift-',
+        );
+        addTearDown(() async => directory.delete(recursive: true));
+        final file = await _createVersionOneFile(directory, 'inline-unique');
+        final raw = sqlite.sqlite3.open(file.path);
+        _appendTableConstraint(
+          raw,
+          tableName: 'learning_attempts',
+          constraint: 'UNIQUE (scope_id, activity_id)',
+        );
+        raw.close();
+
+        await _expectVersionOneFileRejectedUnchanged(file);
+      },
+    );
+
+    test('rejects unmodeled column DEFAULT clauses unchanged', () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'learning-column-default-drift-',
+      );
+      addTearDown(() async => directory.delete(recursive: true));
+      final file = await _createVersionOneFile(directory, 'column-default');
+      final raw = sqlite.sqlite3.open(file.path);
+      _replaceSchemaSql(
+        raw,
+        objectType: 'table',
+        objectName: 'learning_attempts',
+        find: '"answer_kind" TEXT NOT NULL',
+        replaceWith: '"answer_kind" TEXT NOT NULL DEFAULT \'soundChoice\'',
+      );
+      raw.close();
+
+      await _expectVersionOneFileRejectedUnchanged(file);
+    });
+
     test('rolls back a failing synthetic upgrade and keeps v1 rows', () async {
       final directory = await Directory.systemTemp.createTemp(
         'learning-v2-fail-',
@@ -2417,15 +2513,28 @@ void main() {
         await openingStarted.future;
         final Future<void> closing = handle.close();
         final Future<LearningDatabase> openingAfterClose = handle.open();
+        final Future<LearningDatabase> secondOpeningAfterClose = handle.open();
         final bool reusedOpening = identical(openingAfterClose, first);
+        final bool sharedPostCloseOpening = identical(
+          openingAfterClose,
+          secondOpeningAfterClose,
+        );
         expect(openCount, 1);
 
         openingGate.complete();
         final LearningDatabase firstDatabase = await first;
         await closing;
-        final LearningDatabase secondDatabase = await openingAfterClose;
+        final List<LearningDatabase> reopenedDatabases = await Future.wait(
+          <Future<LearningDatabase>>[
+            openingAfterClose,
+            secondOpeningAfterClose,
+          ],
+        );
+        final LearningDatabase secondDatabase = reopenedDatabases.first;
         expect(reusedOpening, isFalse);
+        expect(sharedPostCloseOpening, isTrue);
         expect(identical(firstDatabase, secondDatabase), isFalse);
+        expect(identical(reopenedDatabases[0], reopenedDatabases[1]), isTrue);
         expect(openCount, 2);
         expect(await pragmaUserVersion(secondDatabase), 1);
         expect(

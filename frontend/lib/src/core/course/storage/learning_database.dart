@@ -802,6 +802,68 @@ class LearningDatabase extends _$LearningDatabase {
     await _validateSchemaV1();
   }
 
+  String _expectedCreateTableStatement(TableInfo<Table, Object?> table) {
+    // Drift keeps Migrator._writeCreateTable private. Mirror its pinned
+    // construction from TableInfo so validation covers the complete definition.
+    final context = GenerationContext.fromDb(this);
+    context.buffer.write(
+      'CREATE TABLE IF NOT EXISTS '
+      '${context.identifier(table.aliasedName)} (',
+    );
+
+    var hasAutoIncrement = false;
+    for (var index = 0; index < table.$columns.length; index++) {
+      final column = table.$columns[index];
+      hasAutoIncrement |= column.hasAutoIncrement;
+      column.writeColumnDefinition(context);
+      if (index < table.$columns.length - 1) context.buffer.write(', ');
+    }
+
+    final dslTable = table.asDslTable;
+    if (!dslTable.dontWriteConstraints) {
+      if (table.$primaryKey.isNotEmpty && !hasAutoIncrement) {
+        final primaryKey = table.$primaryKey.toList(growable: false);
+        context.buffer.write(', PRIMARY KEY (');
+        for (var index = 0; index < primaryKey.length; index++) {
+          context.buffer.write(
+            primaryKey[index].escapedNameFor(context.dialect),
+          );
+          if (index < primaryKey.length - 1) context.buffer.write(', ');
+        }
+        context.buffer.write(')');
+      }
+
+      for (final uniqueKey in table.uniqueKeys) {
+        context.buffer.write(', UNIQUE (');
+        final columns = uniqueKey.toList(growable: false);
+        for (var index = 0; index < columns.length; index++) {
+          context.buffer.write(columns[index].escapedNameFor(context.dialect));
+          if (index < columns.length - 1) context.buffer.write(', ');
+        }
+        context.buffer.write(')');
+      }
+    }
+
+    for (final constraint in dslTable.customConstraints) {
+      context.buffer
+        ..write(', ')
+        ..write(constraint);
+    }
+    context.buffer.write(')');
+
+    final options = <String>[
+      if (dslTable.withoutRowId) 'WITHOUT ROWID',
+      if (dslTable.isStrict) 'STRICT',
+    ].join(', ');
+    if (options.isNotEmpty) {
+      context.buffer
+        ..write(' ')
+        ..write(options);
+    }
+    context.buffer.write(';');
+    return context.sql;
+  }
+
   Future<void> _validateSchemaV1() async {
     final tables = await _schemaNames('table');
     if (!_sameNames(tables, _tableNames)) {
@@ -813,6 +875,18 @@ class LearningDatabase extends _$LearningDatabase {
       for (final table in allTables) table.actualTableName: table,
     };
     for (final entry in _columnNames.entries) {
+      final expectedTableSql = _expectedCreateTableStatement(
+        tablesByName[entry.key]!,
+      );
+      final actualTableSql = tableSql[entry.key];
+      if (actualTableSql == null ||
+          _normalizeCreateTableSql(actualTableSql) !=
+              _normalizeCreateTableSql(expectedTableSql)) {
+        throw LearningCorruptException(
+          'Learning schema v1 table definition differs in ${entry.key}.',
+        );
+      }
+
       final rows = await customSelect('PRAGMA table_info(${entry.key})').get();
       final columns = rows.map((row) => row.read<String>('name')).toList();
       if (!_sameNames(columns, entry.value)) {
@@ -1082,6 +1156,13 @@ String _normalizeSql(String sql) {
   return result;
 }
 
+String _normalizeCreateTableSql(String sql) => _normalizeSql(
+  sql.replaceFirst(
+    RegExp(r'^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\b', caseSensitive: false),
+    'CREATE TABLE',
+  ),
+);
+
 bool _isWordCharacter(String character) =>
     character.isNotEmpty && RegExp(r'[A-Za-z_0-9]').hasMatch(character);
 
@@ -1183,6 +1264,7 @@ class LearningDatabaseHandle {
   final Future<LearningDatabase> Function() _openConfigured;
   LearningDatabase? _database;
   Future<LearningDatabase>? _opening;
+  Future<LearningDatabase>? _openingAfterClose;
   Future<void>? _closing;
 
   Future<LearningDatabase> open() {
@@ -1216,9 +1298,28 @@ class LearningDatabaseHandle {
     return shared;
   }
 
-  Future<LearningDatabase> _openAfterClose(Future<void> closing) async {
-    await closing;
-    return open();
+  Future<LearningDatabase> _openAfterClose(Future<void> closing) {
+    final pending = _openingAfterClose;
+    if (pending != null) return pending;
+
+    final completer = Completer<LearningDatabase>();
+    final shared = completer.future;
+    _openingAfterClose = shared;
+    Future<void>.sync(() async {
+      try {
+        await closing;
+        if (identical(_openingAfterClose, shared)) {
+          _openingAfterClose = null;
+        }
+        completer.complete(await open());
+      } on Object catch (error, stackTrace) {
+        if (identical(_openingAfterClose, shared)) {
+          _openingAfterClose = null;
+        }
+        completer.completeError(error, stackTrace);
+      }
+    });
+    return shared;
   }
 
   Future<LearningDatabase> reopen() async {
