@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../../../features/arcade/sound_match_engine.dart';
 import '../../../features/arcade/word_match_engine.dart';
 import '../course_attempt.dart';
 import 'course_learning_checkpoint_codec.dart';
@@ -320,6 +321,9 @@ final class CourseLearningStateValidator {
             attempt.skill != LearningSkill.listening ||
             attempt.origin != AttemptOrigin.game ||
             answer.wordId != item.id ||
+            !SoundMatchEngine.families.contains(answer.selectedFamily) ||
+            !SoundMatchEngine.families.contains(answer.expectedFamily) ||
+            attempt.audioSource != authoredAudioSource(item) ||
             !_sameOrder(attempt.targetSounds, [answer.expectedFamily]) ||
             !_validTarget(definition, item, answer.expectedFamily)) {
           throw const FormatException('Invalid sound-cue attempt.');
@@ -330,6 +334,7 @@ final class CourseLearningStateValidator {
             attempt.skill != LearningSkill.spelling ||
             attempt.origin != AttemptOrigin.game ||
             answer.wordId != item.id ||
+            attempt.audioSource != AttemptAudioSource.notApplicable ||
             !_sameOrder(attempt.targetSounds, [answer.targetSound]) ||
             !WordMatchEngine.targets.contains(answer.targetSound) ||
             answer.expectedMembership !=

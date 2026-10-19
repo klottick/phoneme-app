@@ -134,7 +134,7 @@ final class CourseLearningSqlAdapter
       final pendingSlots = <String, _PendingSlot>{};
       final latestReceipts = <String, _SqlReceipt>{};
       for (final row in runRows) {
-        final pending = _readRunRow(row, scopeId, commitOrdinal);
+        final pending = _readRunRow(row, scopeId, revision, commitOrdinal);
         if (pendingSlots.containsKey(pending.activityId)) {
           throw const LearningCorruptException();
         }
@@ -229,6 +229,7 @@ final class CourseLearningSqlAdapter
     String token,
   ) async {
     try {
+      final currentHeader = await _currentScopeHeader(db, scopeId);
       final historyRows = await db
           .customSelect(
             'SELECT activity_id, token, canonical_payload, before_generation, '
@@ -260,8 +261,17 @@ final class CourseLearningSqlAdapter
         throw const LearningCorruptException();
       }
       final found = <_SqlReceipt>[
-        if (historyRows.isNotEmpty) _readHistoryReceipt(historyRows.single),
-        if (latestRows.isNotEmpty) _readLatestReceipt(latestRows.single, null),
+        if (historyRows.isNotEmpty)
+          _readHistoryReceipt(
+            historyRows.single,
+            revision: currentHeader.revision,
+          ),
+        if (latestRows.isNotEmpty)
+          _readLatestReceipt(
+            latestRows.single,
+            revision: currentHeader.revision,
+            commitOrdinal: currentHeader.commitOrdinal,
+          ),
       ];
       if (found.isEmpty) return null;
       for (final receipt in found.skip(1)) {
@@ -418,7 +428,12 @@ final class CourseLearningSqlAdapter
     return LearningCommit(state: current, slot: slot, duplicate: true);
   }
 
-  _PendingSlot _readRunRow(QueryRow row, int scopeId, int commitOrdinal) {
+  _PendingSlot _readRunRow(
+    QueryRow row,
+    int scopeId,
+    int revision,
+    int commitOrdinal,
+  ) {
     if (row.read<int>('scope_id') != scopeId) {
       throw const LearningCorruptException();
     }
@@ -497,6 +512,7 @@ final class CourseLearningSqlAdapter
     if (command.activityId != activityId ||
         command.token != token ||
         _cursor(command.expected) != before ||
+        command.expectedScopeRevision >= revision ||
         command.expectedScopeRevision > learningMaxSafeInteger ||
         receiptOrdinal < 1 ||
         receiptOrdinal > commitOrdinal ||
@@ -550,12 +566,11 @@ final class CourseLearningSqlAdapter
     final tokens = <String>{};
     final cursors = <String>{};
     for (final row in rows) {
-      final receipt = _readHistoryReceipt(row);
+      final receipt = _readHistoryReceipt(row, revision: revision);
       final stored = receipt.stored;
       if (!tokens.add(stored.token) ||
           !cursors.add(_receiptCursorKey(stored.activityId, stored.after)) ||
-          stored.commitOrdinal > commitOrdinal ||
-          receipt.commandExpectedRevision > revision) {
+          stored.commitOrdinal > commitOrdinal) {
         throw const LearningCorruptException();
       }
       receipts.add(receipt);
@@ -563,7 +578,7 @@ final class CourseLearningSqlAdapter
     return receipts;
   }
 
-  _SqlReceipt _readHistoryReceipt(QueryRow row) {
+  _SqlReceipt _readHistoryReceipt(QueryRow row, {required int revision}) {
     final activityId = _requiredText(row.read<String>('activity_id'));
     final token = _requiredText(row.read<String>('token'));
     final payload = row.read<String>('canonical_payload');
@@ -593,7 +608,8 @@ final class CourseLearningSqlAdapter
         _cursor(command.expected) != before ||
         resultActivityId != activityId ||
         result != after ||
-        commit < 1) {
+        commit < 1 ||
+        command.expectedScopeRevision >= revision) {
       throw const LearningCorruptException();
     }
     return _SqlReceipt(
@@ -613,7 +629,11 @@ final class CourseLearningSqlAdapter
     );
   }
 
-  _SqlReceipt _readLatestReceipt(QueryRow row, int? commitOrdinal) {
+  _SqlReceipt _readLatestReceipt(
+    QueryRow row, {
+    required int revision,
+    required int commitOrdinal,
+  }) {
     final activityId = _requiredText(row.read<String>('activity_id'));
     final token = _requiredText(row.read<String>('latest_receipt_token'));
     final payload = row.read<String>('latest_receipt_payload');
@@ -628,14 +648,14 @@ final class CourseLearningSqlAdapter
       revision: row.read<int>('cursor_revision'),
     );
     final receiptOrdinal = row.read<int>('latest_receipt_commit_ordinal');
-    if (commitOrdinal != null && receiptOrdinal > commitOrdinal) {
-      throw const LearningCorruptException();
-    }
     final command = _decodeCommand(payload);
     if (command.activityId != activityId ||
         command.token != token ||
         command.scope != _domainScope ||
-        _cursor(command.expected) != before) {
+        _cursor(command.expected) != before ||
+        command.expectedScopeRevision >= revision ||
+        receiptOrdinal < 1 ||
+        receiptOrdinal > commitOrdinal) {
       throw const LearningCorruptException();
     }
     return _SqlReceipt(
@@ -653,6 +673,34 @@ final class CourseLearningSqlAdapter
         command,
       ),
     );
+  }
+
+  Future<({int revision, int commitOrdinal})> _currentScopeHeader(
+    LearningDatabase db,
+    int scopeId,
+  ) async {
+    final rows = await db
+        .customSelect(
+          'SELECT owner_kind, owner_id, course_id, family, revision, '
+          'commit_ordinal FROM learning_scopes WHERE id = ?',
+          variables: <Variable<Object>>[Variable<int>(scopeId)],
+        )
+        .get();
+    if (rows.length != 1) throw const LearningCorruptException();
+    final row = rows.single;
+    final revision = row.read<int>('revision');
+    final commitOrdinal = row.read<int>('commit_ordinal');
+    if (row.read<String>('owner_kind') != scope.ownerKind ||
+        row.read<String>('owner_id') != scope.ownerId ||
+        row.read<String>('course_id') != scope.courseId ||
+        row.read<String>('family') != scope.databaseFamily ||
+        revision < 0 ||
+        revision > learningMaxSafeInteger ||
+        commitOrdinal < 0 ||
+        commitOrdinal > revision) {
+      throw const LearningCorruptException();
+    }
+    return (revision: revision, commitOrdinal: commitOrdinal);
   }
 
   LearningCommand _decodeCommand(String payload) {
@@ -1860,7 +1908,6 @@ final class _SqlReceipt {
   final LearningStoredReceipt stored;
   final LearningCommand command;
   final String legacyCanonical;
-  int get commandExpectedRevision => command.expectedScopeRevision;
 }
 
 final class _AttemptGroup {

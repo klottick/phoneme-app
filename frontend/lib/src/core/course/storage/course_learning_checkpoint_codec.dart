@@ -186,7 +186,7 @@ final class CourseLearningCheckpointCodec {
           );
           _keys(boardValue, const {'board', 'stars'}, 'sound game board');
           final board = SoundBoardState(
-            board: _strings(boardValue['board'], 'board'),
+            board: _stringSequence(boardValue['board'], 'board'),
             stars: _integerSet(boardValue['stars'], 'stars'),
           );
           SoundMatchEngine.fromState(board, random: _CheckpointRandom());
@@ -216,7 +216,7 @@ final class CourseLearningCheckpointCodec {
             'obstacles',
           }, 'word game board');
           final board = WordBoardState(
-            board: _strings(boardValue['board'], 'board'),
+            board: _stringSequence(boardValue['board'], 'board'),
             target: _string(boardValue['target'], 'target'),
             moves: _integer(boardValue['moves'], 'moves'),
             combo: _integer(boardValue['combo'], 'combo'),
@@ -363,6 +363,11 @@ List<String> _strings(Object? value, String name) {
     throw FormatException('$name contains duplicates.');
   }
   return result;
+}
+
+List<String> _stringSequence(Object? value, String name) {
+  if (value is! List) throw FormatException('$name must be a list.');
+  return value.map((entry) => _string(entry, name)).toList();
 }
 
 Set<int> _integerSet(Object? value, String name) {
