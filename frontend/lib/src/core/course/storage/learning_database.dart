@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:drift/drift.dart';
 
 import '../course_learning_error.dart';
+import 'learning_storage_scope.dart';
 import 'learning_tables.dart';
 
 part 'learning_database.g.dart';
@@ -751,6 +752,82 @@ class LearningDatabase extends _$LearningDatabase {
 
   @override
   int get schemaVersion => _targetSchemaVersion;
+
+  /// Inserts the exact owner/course/family scope if it does not yet exist.
+  /// Drift opening runs the configured schema verification before this query.
+  Future<int> ensureScope(LearningStorageScope scope) => transaction(() async {
+    await customUpdate(
+      'INSERT INTO learning_scopes '
+      '(owner_kind, owner_id, course_id, family, schema_version, revision, '
+      'commit_ordinal, availability_state) '
+      "VALUES (?, ?, ?, ?, 1, 0, 0, 'available') "
+      'ON CONFLICT(owner_kind, owner_id, course_id, family) DO NOTHING',
+      variables: <Variable<Object>>[
+        Variable<String>(scope.ownerKind),
+        Variable<String>(scope.ownerId),
+        Variable<String>(scope.courseId),
+        Variable<String>(scope.databaseFamily),
+      ],
+      updates: <TableInfo>{learningScopes},
+    );
+    final rows = await customSelect(
+      'SELECT id, owner_kind, owner_id, course_id, family '
+      'FROM learning_scopes WHERE owner_kind = ? AND owner_id = ? '
+      'AND course_id = ? AND family = ?',
+      variables: <Variable<Object>>[
+        Variable<String>(scope.ownerKind),
+        Variable<String>(scope.ownerId),
+        Variable<String>(scope.courseId),
+        Variable<String>(scope.databaseFamily),
+      ],
+    ).get();
+    if (rows.length != 1) {
+      throw const LearningCorruptException();
+    }
+    final row = rows.single;
+    if (row.read<String>('owner_kind') != scope.ownerKind ||
+        row.read<String>('owner_id') != scope.ownerId ||
+        row.read<String>('course_id') != scope.courseId ||
+        row.read<String>('family') != scope.databaseFamily) {
+      throw const LearningCorruptException();
+    }
+    return row.read<int>('id');
+  });
+
+  /// Acquires SQLite's write lock before a learner mutation reads its snapshot.
+  Future<int> acquireLearningScopeWriteLock(int scopeId) async {
+    final changedRows = await customUpdate(
+      'UPDATE learning_scopes SET revision = revision WHERE id = ?',
+      variables: <Variable<Object>>[Variable<int>(scopeId)],
+      updates: <TableInfo>{learningScopes},
+    );
+    if (changedRows != 1) {
+      throw const LearningCorruptException();
+    }
+    return changedRows;
+  }
+
+  /// Advances scope counters only when both previously-read counters still
+  /// match. Callers run this after persisting all related rows in one SQLite
+  /// transaction so a failed compare-and-swap rolls those rows back as well.
+  Future<int> compareAndSwapLearningScope({
+    required int scopeId,
+    required int expectedRevision,
+    required int expectedCommitOrdinal,
+    required int nextRevision,
+    required int nextCommitOrdinal,
+  }) => customUpdate(
+    'UPDATE learning_scopes SET revision = ?, commit_ordinal = ? '
+    'WHERE id = ? AND revision = ? AND commit_ordinal = ?',
+    variables: <Variable<Object>>[
+      Variable<int>(nextRevision),
+      Variable<int>(nextCommitOrdinal),
+      Variable<int>(scopeId),
+      Variable<int>(expectedRevision),
+      Variable<int>(expectedCommitOrdinal),
+    ],
+    updates: <TableInfo>{learningScopes},
+  );
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
