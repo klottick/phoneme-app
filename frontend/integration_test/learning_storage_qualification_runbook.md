@@ -87,24 +87,31 @@ report.
 
 ### Current evidence and open gates (2026-10-20)
 
-- A local actual-Chrome 156/sharedIndexedDb **course-only subset** was observed:
-  two-tab stale-command conflict, exact frozen-command lost-ack replay with one
-  attempt, and same-profile browser restart. This is not comparison or
-  sentence-hunt evidence, not the 2,000-row three-family retention workload, and
-  not deployed-origin qualification.
-- Full-retention and full-cap qualification remain **OPEN**. The comparison
-  4,096→4,097 identity boundary is **UNREACHABLE / NOT RUN**, not a pass, under
-  the unchanged exact-10-exercise catalogue. The reachable comparison bounds
-  are 10 mistake identities, 10 typed summary identities (30 SQL bucket rows),
-  100 completion-threshold identities, and one slot. The focused file-SQL test
-  below covers those reachable bounds; it is fixture construction, not a
-  100-SQL-run or 2,000-command workload. Course and sentence-hunt SQL overflow
-  qualification remains OPEN pending their own tests.
-- Android/iOS runs were explicitly deferred by the user; native qualification
-  remains OPEN and is not waived. The platform procedures below are retained for
-  later authorized work and are not permission to run them now.
+- Scoped PoC proof at source `fbf8660`: course six/sentence four persisted across
+  SQL4096→4097; sentence4096 summary IDs are 16,384 SQL bucket rows. The subset
+  also observed actual Chrome 156/sharedIndexedDb course-only two-tab stale
+  conflict, exact frozen-command lost-ack replay (one attempt), and same-profile
+  restart. Review/controller verification passed; this is not full-retention or
+  all-family restart evidence, nor deployed-origin qualification.
+- Verification evidence: 1,608 reported passes across 115 existing files in 15
+  serial batches (excluding SQL recovery/retention files); separately 27 focused
+  tests (10 SQL overflow + 14 recovery/widget + 3 bounded-prune/status; widget
+  overlap means these are not 27 additional unique tests). Full analysis,
+  whitespace, and JS release build passed. The build had existing `flutter_tts`
+  WASM dry-run warnings and does not qualify WASM/runtime behavior. Actual Chrome
+  evidence is the course subset only.
+- Full 2,000-detail retention, full-retention browser restart, Android/iOS,
+  quota denial, unsupported-runtime, and deployed-origin/header/auth-popup
+  checks remain unrun or incomplete. They are nonblocking PoC limitations, not
+  PASS, support guarantees, or capacity claims. Comparison 4,096→4,097 remains
+  **UNREACHABLE / NOT RUN** under the unchanged exact-10-exercise catalogue;
+  reachable bounds are 10 mistake identities, 10 typed summary identities,
+  100 completion-threshold identities, and one slot. Generic 4,096 is
+  **UNREACHABLE / NOT RUN**, not a pass. Preserve basic correctness, privacy,
+  owner/auth isolation, and caps. Procedures below remain future qualification
+  guidance, not authorization for the deferred workload.
 
-### Comparison reachable aggregate bounds — focused file-SQL test
+### Deferred comparison reachable aggregate bounds — focused file-SQL test
 
 From `frontend`, with the task-local SDK path above:
 
@@ -116,7 +123,7 @@ PATH="/home/klottick/develop/flutter-3.47.7-sqlite/bin:$PATH" \
   'comparison_reachable_aggregate_bounds_roundtrip_and_reject_extras_write_free'
 ```
 
-This test legally evaluates thresholds 1–100 in memory with the comparison SQL
+This future qualification procedure evaluates thresholds 1–100 in memory with the comparison SQL
 adapter, then persists the final validator-accepted fixture in one setup
 transaction using the real adapter and scope CAS. It reopens and loads through
 the typed repository, submits one normal repository command, and checks

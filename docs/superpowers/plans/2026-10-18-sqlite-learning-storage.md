@@ -594,6 +594,12 @@ expect(await unrelatedPreferences.getString(legacyLearningSentinelKey),
 
 ## Task 9: Qualify real native/web behavior, restart, and full retention
 
+### Pre-alpha PoC acceptance amendment (2026-10-20)
+
+Per the user's scope reduction — “I don't care that much about that, this is pre alpha poc, doesn't need to be totally resilient” — expensive full-retention restart and additional resilience/platform qualification are deferred and do not block this PoC delivery. This is a scope reduction, not a PASS, support statement, capacity guarantee, or production-resilience claim; every unrun or incomplete qualification remains explicitly unqualified. Retain basic correctness, privacy and owner/auth isolation, production caps, independent review, and normal GitHub checks/protections. No new hardening, expensive restart, native-tooling or quota experiment is authorized, and Task 10 is out of scope. The original procedures below remain as future qualification guidance; production invariants and tests are not weakened.
+
+Current scoped evidence and limitations are recorded in `frontend/integration_test/learning_storage_qualification_runbook.md`.
+
 **Files:**
 - Create: `frontend/integration_test/learning_database_native_test.dart`
 - Extend: `frontend/integration_test/learning_database_web_test.dart`, `learning_database_qualification_app.dart`, `frontend/integration_test/learning_storage_qualification_runbook.md`, `frontend/test_driver/integration_test.dart`
