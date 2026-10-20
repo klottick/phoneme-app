@@ -32,6 +32,30 @@ void main() {
   final String? retainedFixturePath =
       Platform.environment['TASK9_RETAINED_FIXTURE'];
 
+  test('default_shared_prune_status_requires_exact_receipt_proofs', () {
+    const Map<String, Object?> validEvidence = <String, Object?>{
+      'basePrunePredicatesPassed': true,
+      'receiptExpectedIdentityMatch': true,
+      'receiptPrunePreservedExpectedIdentities': true,
+      'currentRunLatestReceiptPersisted': true,
+    };
+    expect(learningPostCapPruneObservedFromEvidence(validEvidence), isTrue);
+    for (final String failedProof in <String>[
+      'receiptExpectedIdentityMatch',
+      'receiptPrunePreservedExpectedIdentities',
+      'currentRunLatestReceiptPersisted',
+    ]) {
+      expect(
+        learningPostCapPruneObservedFromEvidence(<String, Object?>{
+          ...validEvidence,
+          failedProof: false,
+        }),
+        isFalse,
+        reason: 'failed $failedProof must not yield default OBSERVED status',
+      );
+    }
+  });
+
   test('small_course_history_prunes_whole_sql_answer_batches', () async {
     final Directory directory = await Directory.systemTemp.createTemp(
       'sqlite-learning-small-prune-',
@@ -137,6 +161,13 @@ void main() {
       ]) {
         final Map<String, Object?> evidence =
             report.postCapPruneEvidenceByFamily[family]!;
+        expect(
+          report.pruneResultByFamily[family],
+          startsWith('OBSERVED'),
+          reason: '$family shared workload status follows exact evidence',
+        );
+        expect(evidence['observed'], isTrue);
+        expect(evidence['basePrunePredicatesPassed'], isTrue);
         expect(evidence['receiptIdentitiesBefore'], isNotEmpty);
         expect(evidence['receiptIdentitiesAfter'], isNotEmpty);
         expect(evidence['expectedNewCommandReceiptIdentities'], isNotEmpty);
@@ -189,8 +220,8 @@ void main() {
             reason: '$family ${table.key} baseline',
           );
         }
-          // ignore: avoid_print
-          print(
+        // ignore: avoid_print
+        print(
           'TASK9 AGGREGATE family=$family proof=${jsonEncode(<String, Object?>{'sqlBefore': evidence['aggregateSqlBefore'], 'typedBefore': evidence['aggregateExpectedBeforeRows'], 'sqlAfter': evidence['aggregateSqlAfter'], 'typedExpectedAfter': evidence['aggregateExpectedAfterRows'], 'tableProof': tableProof, 'unaffectedRowsPreserved': evidence['aggregateUnaffectedRowsPreserved'], 'preservedIdentityCount': evidence['aggregatePreservedIdentityCount'], 'negativeControlsRejected': evidence['aggregateNegativeControlsRejected']})}',
         );
         expect(evidence['aggregateBefore'], isNotEmpty);

@@ -121,6 +121,14 @@ final class LearningWorkloadReport {
   };
 }
 
+/// Shared exact gate for per-family `observed` and default report status.
+bool learningPostCapPruneObservedFromEvidence(Map<String, Object?>? evidence) =>
+    evidence != null &&
+    evidence['basePrunePredicatesPassed'] == true &&
+    evidence['receiptExpectedIdentityMatch'] == true &&
+    evidence['receiptPrunePreservedExpectedIdentities'] == true &&
+    evidence['currentRunLatestReceiptPersisted'] == true;
+
 final class LearningRecoveryEvidence {
   const LearningRecoveryEvidence({
     required this.failedWritesRolledBack,
@@ -303,19 +311,22 @@ Future<LearningWorkloadReport> verifyLearningAtRetentionLimits(
       _postCapPruneEvidenceByRun[runId];
   final Map<String, String> pruneResults = <String, String>{
     for (final String family in _families)
-      family: postCapEvidence?[family] == null
-          ? 'OPEN — post-cap prune was not observed in this process/run; '
-                'retained attempts=${rowCounts[family]!['attempts']}, '
-                'retained receipts=${rowCounts[family]!['receipts']}, '
-                'latest receipt proof=${latestReceipts[family]}'
-          : 'OBSERVED post-cap write/prune '
+      family: learningPostCapPruneObservedFromEvidence(postCapEvidence?[family])
+          ? 'OBSERVED post-cap write/prune '
                 'attempts before/after='
                 '${postCapEvidence![family]!['attemptCountBefore']}/'
                 '${postCapEvidence[family]!['attemptCountAfter']}; '
                 'retained attempts=${rowCounts[family]!['attempts']}, '
                 'retained receipts=${rowCounts[family]!['receipts']}, '
                 'typed summaries/mistakes/completions/exposure reloaded; '
-                'latest receipt proof=${latestReceipts[family]}',
+                'latest receipt proof=${latestReceipts[family]}'
+          : postCapEvidence?[family] == null
+          ? 'OPEN — post-cap prune was not observed in this process/run; '
+                'retained attempts=${rowCounts[family]!['attempts']}, '
+                'retained receipts=${rowCounts[family]!['receipts']}, '
+                'latest receipt proof=${latestReceipts[family]}'
+          : 'OPEN — post-cap evidence exists but exact receipt or aggregate '
+                'proof is incomplete; latest receipt proof=${latestReceipts[family]}',
   };
   return LearningWorkloadReport(
     rowCountsByFamily: rowCounts,
@@ -483,7 +494,24 @@ Future<Map<String, Object?>> _exerciseCoursePostCapPrune(
     ..sort();
   final List<String> evictedIds = beforeIds.difference(afterIds).toList()
     ..sort();
-  final bool observed =
+  final Map<String, Object?> receiptIdentityEvidence = _expectedReceiptEvidence(
+    before: receiptIdsBefore,
+    after: receiptIdsAfter,
+    tracedNewCommands: expectedNewCommandReceipts,
+    ordinalDelta: afterState.commitOrdinal - beforeState.commitOrdinal,
+    limit: harness.historyLimit,
+  );
+  final bool receiptPrunePreservedExpectedIdentities = _receiptPrunePreserved(
+    receiptIdsBefore,
+    receiptIdsAfter,
+    harness.historyLimit,
+    expectedNewReceipts: afterState.commitOrdinal - beforeState.commitOrdinal,
+  );
+  final bool currentRunLatestReceiptPersisted = _receiptContainsLatest(
+    receiptIdsAfter,
+    _courseLatestReceipt(afterState),
+  );
+  final bool basePrunePredicatesPassed =
       attemptCountBefore == harness.historyLimit &&
       receiptCountBefore == harness.historyLimit &&
       attemptCountAfter <= harness.historyLimit &&
@@ -497,6 +525,14 @@ Future<Map<String, Object?>> _exerciseCoursePostCapPrune(
       afterState.history.length == afterCommit.history.length &&
       _sameStringIds(sqlAfterIds, afterIds) &&
       aggregateSqlMatchesExpected;
+  final bool observed =
+      learningPostCapPruneObservedFromEvidence(<String, Object?>{
+        'basePrunePredicatesPassed': basePrunePredicatesPassed,
+        ...receiptIdentityEvidence,
+        'receiptPrunePreservedExpectedIdentities':
+            receiptPrunePreservedExpectedIdentities,
+        'currentRunLatestReceiptPersisted': currentRunLatestReceiptPersisted,
+      });
   if (!observed) {
     throw StateError('Post-cap course prune failed its identity invariants.');
   }
@@ -540,28 +576,16 @@ Future<Map<String, Object?>> _exerciseCoursePostCapPrune(
     'newAttemptIds': newlyAddedIds,
     'evictedAttemptIds': evictedIds,
     'survivingAttemptIds': afterIds.toList()..sort(),
+    'basePrunePredicatesPassed': basePrunePredicatesPassed,
     'receiptPruneObserved':
         receiptCountBefore == harness.historyLimit &&
         receiptCountAfter == harness.historyLimit,
     'receiptIdentitiesBefore': receiptIdsBefore,
     'receiptIdentitiesAfter': receiptIdsAfter,
-    ..._expectedReceiptEvidence(
-      before: receiptIdsBefore,
-      after: receiptIdsAfter,
-      tracedNewCommands: expectedNewCommandReceipts,
-      ordinalDelta: afterState.commitOrdinal - beforeState.commitOrdinal,
-      limit: harness.historyLimit,
-    ),
-    'receiptPrunePreservedExpectedIdentities': _receiptPrunePreserved(
-      receiptIdsBefore,
-      receiptIdsAfter,
-      harness.historyLimit,
-      expectedNewReceipts: afterState.commitOrdinal - beforeState.commitOrdinal,
-    ),
-    'currentRunLatestReceiptPersisted': _receiptContainsLatest(
-      receiptIdsAfter,
-      _courseLatestReceipt(afterState),
-    ),
+    ...receiptIdentityEvidence,
+    'receiptPrunePreservedExpectedIdentities':
+        receiptPrunePreservedExpectedIdentities,
+    'currentRunLatestReceiptPersisted': currentRunLatestReceiptPersisted,
     'aggregateBefore': aggregateBefore,
     'aggregateExpectedAfter': _courseSummaryValues(afterCommit),
     'aggregateReloadedAfter': _courseSummaryValues(afterState),
@@ -730,7 +754,30 @@ Future<Map<String, Object?>> _exerciseComparisonPostCapPrune(
     sqlAfterIds: afterIds.toSet(),
     expectedNewAttemptCount: 1,
   );
-  final bool observed =
+  final Map<String, Object?> receiptIdentityEvidence = _expectedReceiptEvidence(
+    before: receiptIdsBefore,
+    after: receiptIdsAfter,
+    tracedNewCommands: expectedNewCommandReceipts,
+    ordinalDelta: afterState.commitOrdinal - beforeState.commitOrdinal,
+    limit: harness.historyLimit,
+  );
+  final bool receiptPrunePreservedExpectedIdentities = _receiptPrunePreserved(
+    receiptIdsBefore,
+    receiptIdsAfter,
+    harness.historyLimit,
+    expectedNewReceipts: afterState.commitOrdinal - beforeState.commitOrdinal,
+  );
+  final String latestReceiptToken = afterState.receipts
+      .reduce(
+        (left, right) =>
+            left.commitOrdinal > right.commitOrdinal ? left : right,
+      )
+      .token;
+  final bool currentRunLatestReceiptPersisted = _receiptContainsLatest(
+    receiptIdsAfter,
+    latestReceiptToken,
+  );
+  final bool basePrunePredicatesPassed =
       attemptCountBefore == harness.historyLimit &&
       receiptCountBefore == harness.historyLimit &&
       attemptCountAfter <= harness.historyLimit &&
@@ -740,6 +787,14 @@ Future<Map<String, Object?>> _exerciseComparisonPostCapPrune(
       afterState.attempts.length == attemptCountAfter &&
       sqlMatchesReloadedState &&
       aggregateSqlMatchesExpected;
+  final bool observed =
+      learningPostCapPruneObservedFromEvidence(<String, Object?>{
+        'basePrunePredicatesPassed': basePrunePredicatesPassed,
+        ...receiptIdentityEvidence,
+        'receiptPrunePreservedExpectedIdentities':
+            receiptPrunePreservedExpectedIdentities,
+        'currentRunLatestReceiptPersisted': currentRunLatestReceiptPersisted,
+      });
   if (!observed) {
     throw StateError(
       'Post-cap comparison prune failed its identity invariants.',
@@ -748,36 +803,21 @@ Future<Map<String, Object?>> _exerciseComparisonPostCapPrune(
   return <String, Object?>{
     ...evidence,
     'observed': observed,
+    'basePrunePredicatesPassed': basePrunePredicatesPassed,
     'sqlRowsMatchReloadedState': sqlMatchesReloadedState,
     'typedAttemptKeysBefore': beforeStateKeys.toList()..sort(),
     'typedAttemptKeysAfter': afterStateKeys.toList()..sort(),
     'sqlAttemptKeysBefore': beforeSqlKeys.toList()..sort(),
     'sqlAttemptKeysAfter': afterSqlKeys.toList()..sort(),
-    'receiptPruneObserved': true,
+    'receiptPruneObserved':
+        receiptCountBefore == harness.historyLimit &&
+        receiptCountAfter == harness.historyLimit,
     'receiptIdentitiesBefore': receiptIdsBefore,
     'receiptIdentitiesAfter': receiptIdsAfter,
-    ..._expectedReceiptEvidence(
-      before: receiptIdsBefore,
-      after: receiptIdsAfter,
-      tracedNewCommands: expectedNewCommandReceipts,
-      ordinalDelta: afterState.commitOrdinal - beforeState.commitOrdinal,
-      limit: harness.historyLimit,
-    ),
-    'receiptPrunePreservedExpectedIdentities': _receiptPrunePreserved(
-      receiptIdsBefore,
-      receiptIdsAfter,
-      harness.historyLimit,
-      expectedNewReceipts: afterState.commitOrdinal - beforeState.commitOrdinal,
-    ),
-    'currentRunLatestReceiptPersisted': _receiptContainsLatest(
-      receiptIdsAfter,
-      afterState.receipts
-          .reduce(
-            (left, right) =>
-                left.commitOrdinal > right.commitOrdinal ? left : right,
-          )
-          .token,
-    ),
+    ...receiptIdentityEvidence,
+    'receiptPrunePreservedExpectedIdentities':
+        receiptPrunePreservedExpectedIdentities,
+    'currentRunLatestReceiptPersisted': currentRunLatestReceiptPersisted,
     'aggregateBefore': aggregateBefore,
     'aggregateExpectedAfter': _comparisonSummaryValues(state),
     'aggregateReloadedAfter': _comparisonSummaryValues(afterState),
@@ -946,7 +986,24 @@ Future<Map<String, Object?>> _exerciseSentencePostCapPrune(
     sqlAfterIds: afterIds.toSet(),
     expectedNewAttemptCount: 1,
   );
-  final bool observed =
+  final Map<String, Object?> receiptIdentityEvidence = _expectedReceiptEvidence(
+    before: receiptIdsBefore,
+    after: receiptIdsAfter,
+    tracedNewCommands: expectedNewCommandReceipts,
+    ordinalDelta: afterState.commitOrdinal - beforeState.commitOrdinal,
+    limit: harness.historyLimit,
+  );
+  final bool receiptPrunePreservedExpectedIdentities = _receiptPrunePreserved(
+    receiptIdsBefore,
+    receiptIdsAfter,
+    harness.historyLimit,
+    expectedNewReceipts: afterState.commitOrdinal - beforeState.commitOrdinal,
+  );
+  final bool currentRunLatestReceiptPersisted = _receiptContainsLatest(
+    receiptIdsAfter,
+    _sentenceLatestReceipt(afterState),
+  );
+  final bool basePrunePredicatesPassed =
       attemptCountBefore == harness.historyLimit &&
       receiptCountBefore == harness.historyLimit &&
       attemptCountAfter <= harness.historyLimit &&
@@ -956,6 +1013,14 @@ Future<Map<String, Object?>> _exerciseSentencePostCapPrune(
       afterState.attempts.length == attemptCountAfter &&
       sqlMatchesReloadedState &&
       aggregateSqlMatchesExpected;
+  final bool observed =
+      learningPostCapPruneObservedFromEvidence(<String, Object?>{
+        'basePrunePredicatesPassed': basePrunePredicatesPassed,
+        ...receiptIdentityEvidence,
+        'receiptPrunePreservedExpectedIdentities':
+            receiptPrunePreservedExpectedIdentities,
+        'currentRunLatestReceiptPersisted': currentRunLatestReceiptPersisted,
+      });
   if (!observed) {
     throw StateError(
       'Post-cap sentence-hunt prune failed its identity invariants.',
@@ -964,31 +1029,21 @@ Future<Map<String, Object?>> _exerciseSentencePostCapPrune(
   return <String, Object?>{
     ...evidence,
     'observed': observed,
+    'basePrunePredicatesPassed': basePrunePredicatesPassed,
     'sqlRowsMatchReloadedState': sqlMatchesReloadedState,
     'typedAttemptKeysBefore': beforeStateKeys.toList()..sort(),
     'typedAttemptKeysAfter': afterStateKeys.toList()..sort(),
     'sqlAttemptKeysBefore': beforeSqlKeys.toList()..sort(),
     'sqlAttemptKeysAfter': afterSqlKeys.toList()..sort(),
-    'receiptPruneObserved': true,
+    'receiptPruneObserved':
+        receiptCountBefore == harness.historyLimit &&
+        receiptCountAfter == harness.historyLimit,
     'receiptIdentitiesBefore': receiptIdsBefore,
     'receiptIdentitiesAfter': receiptIdsAfter,
-    ..._expectedReceiptEvidence(
-      before: receiptIdsBefore,
-      after: receiptIdsAfter,
-      tracedNewCommands: expectedNewCommandReceipts,
-      ordinalDelta: afterState.commitOrdinal - beforeState.commitOrdinal,
-      limit: harness.historyLimit,
-    ),
-    'receiptPrunePreservedExpectedIdentities': _receiptPrunePreserved(
-      receiptIdsBefore,
-      receiptIdsAfter,
-      harness.historyLimit,
-      expectedNewReceipts: afterState.commitOrdinal - beforeState.commitOrdinal,
-    ),
-    'currentRunLatestReceiptPersisted': _receiptContainsLatest(
-      receiptIdsAfter,
-      _sentenceLatestReceipt(afterState),
-    ),
+    ...receiptIdentityEvidence,
+    'receiptPrunePreservedExpectedIdentities':
+        receiptPrunePreservedExpectedIdentities,
+    'currentRunLatestReceiptPersisted': currentRunLatestReceiptPersisted,
     'aggregateBefore': aggregateBefore,
     'aggregateExpectedAfter': _sentenceSummaryValues(state),
     'aggregateReloadedAfter': _sentenceSummaryValues(afterState),
@@ -3003,11 +3058,14 @@ Future<CourseLearningState> _submitCourse(
     activityId: activityId,
     action: action,
   );
+  final String preparedToken = command.token;
+  final String preparedCanonicalSqlPayload =
+      CourseLearningCommandCodec.canonicalCommand(command);
   final LearningCommit commit = await repository.submit(command);
   receiptTrace?.add(
     jsonEncode(<Object?>[
-      command.token,
-      CourseLearningCommandCodec.canonicalCommand(command),
+      preparedToken,
+      preparedCanonicalSqlPayload,
       commit.state.commitOrdinal,
     ]),
   );
@@ -3751,11 +3809,14 @@ final class _WorkloadHarness {
       activityId: catalogue.activityId,
       action: action,
     );
+    final String preparedToken = command.token;
+    final String preparedCanonicalSqlPayload =
+        ComparisonLearningCommandCodec.canonicalCommand(command);
     final ComparisonCommit commit = await repository.submit(command);
     receiptTrace?.add(
       jsonEncode(<Object?>[
-        command.token,
-        ComparisonLearningCommandCodec.canonicalCommand(command),
+        preparedToken,
+        preparedCanonicalSqlPayload,
         commit.state.commitOrdinal,
       ]),
     );
@@ -3774,11 +3835,14 @@ final class _WorkloadHarness {
       sectionId: sectionId,
       action: action,
     );
+    final String preparedToken = command.token;
+    final String preparedCanonicalSqlPayload =
+        SentenceHuntCommandCodec.canonicalCommand(command);
     final SentenceHuntCommit commit = await repository.submit(command);
     receiptTrace?.add(
       jsonEncode(<Object?>[
-        command.token,
-        SentenceHuntCommandCodec.canonicalCommand(command),
+        preparedToken,
+        preparedCanonicalSqlPayload,
         commit.state.commitOrdinal,
       ]),
     );
