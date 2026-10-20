@@ -57,6 +57,15 @@ void main() {
         backendName: 'file-backed native SQLite',
       ),
     );
+    final SemanticsHandle semantics = tester.ensureSemantics();
+    expect(
+      tester
+          .getSemantics(
+            find.byKey(const ValueKey<String>('learning-storage-result')),
+          )
+          .label,
+      'Ready for SQLite qualification.',
+    );
 
     expect(
       find.byKey(const ValueKey<String>('learning-storage-backend')),
@@ -103,18 +112,50 @@ void main() {
     );
     final Map<String, dynamic> payloadA =
         jsonDecode(frozenCommand.data!) as Map<String, dynamic>;
+    expect(
+      tester
+          .getSemantics(
+            find.byKey(
+              const ValueKey<String>('learning-storage-frozen-command'),
+            ),
+          )
+          .label,
+      frozenCommand.data,
+    );
     await tapControl('learning-storage-prepare-command-b');
     final SelectableText frozenCommandB = tester.widget<SelectableText>(
       find.byKey(const ValueKey<String>('learning-storage-frozen-command')),
     );
     final Map<String, dynamic> payloadB =
         jsonDecode(frozenCommandB.data!) as Map<String, dynamic>;
+    expect(frozenCommandB.data, isNot(frozenCommand.data));
+    expect(
+      tester
+          .getSemantics(
+            find.byKey(
+              const ValueKey<String>('learning-storage-frozen-command'),
+            ),
+          )
+          .label,
+      frozenCommandB.data,
+    );
     expect(payloadB['scope'], payloadA['scope']);
     expect(payloadB['token'], isNot(payloadA['token']));
 
     await tapControl('learning-storage-discard-ack');
     await tapControl('learning-storage-submit-command-a');
     expect(find.textContaining('acknowledgment discarded'), findsOneWidget);
+    final SelectableText submittedResult = tester.widget<SelectableText>(
+      find.byKey(const ValueKey<String>('learning-storage-result')),
+    );
+    expect(
+      tester
+          .getSemantics(
+            find.byKey(const ValueKey<String>('learning-storage-result')),
+          )
+          .label,
+      submittedResult.data,
+    );
     await tapControl('learning-storage-submit-command-b');
     expect(find.textContaining('conflict'), findsOneWidget);
 
@@ -131,6 +172,7 @@ void main() {
     expect(result.data, contains('attempts=1'));
     expect(result.data, contains('unchanged=true'));
     expect(result.data, contains('cursor='));
+    semantics.dispose();
   });
 
   testWidgets('all learning surfaces use same committed typed state', (

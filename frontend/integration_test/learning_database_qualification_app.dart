@@ -338,9 +338,13 @@ class _Task9QualificationAppState
               title: const Text('Discard next submit acknowledgment'),
             ),
             const Text('Frozen canonical command (copy exactly between tabs):'),
-            SelectableText(
-              _frozenCommand,
-              key: const ValueKey<String>('learning-storage-frozen-command'),
+            Semantics(
+              label: _frozenCommand,
+              excludeSemantics: true,
+              child: SelectableText(
+                _frozenCommand,
+                key: const ValueKey<String>('learning-storage-frozen-command'),
+              ),
             ),
             TextField(
               key: const ValueKey<String>('learning-storage-replay-input'),
@@ -364,9 +368,13 @@ class _Task9QualificationAppState
               const SizedBox(height: 8),
             ],
             const Text('Result, row counts and SQL cursors:'),
-            SelectableText(
-              _result,
-              key: const ValueKey<String>('learning-storage-result'),
+            Semantics(
+              label: _result,
+              excludeSemantics: true,
+              child: SelectableText(
+                _result,
+                key: const ValueKey<String>('learning-storage-result'),
+              ),
             ),
           ],
         ),
