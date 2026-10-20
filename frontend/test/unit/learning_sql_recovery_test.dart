@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
@@ -7,9 +8,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_audio_contract.dart';
 import 'package:linguist/src/core/course/course_learning_checkpoint.dart';
+import 'package:linguist/src/core/course/course_learning_command.dart';
 import 'package:linguist/src/core/course/course_learning_registry.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
+import 'package:linguist/src/core/course/course_learning_store.dart'
+    show LearningCommit;
+import 'package:linguist/src/core/course/course_learning_transition.dart';
 import 'package:linguist/src/core/course/course_skill_summary.dart';
 import 'package:linguist/src/core/course/lesson_section_session.dart';
 import 'package:linguist/src/core/course/sentence_hunt_content.dart';
@@ -18,9 +23,13 @@ import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_transition.dart';
 import 'package:linguist/src/core/course/storage/learning_database.dart'
     show LearningDatabase, LearningDatabaseHandle;
+import 'package:linguist/src/core/course/storage/course_learning_sql_adapter.dart';
+import 'package:linguist/src/core/course/storage/course_learning_sql_repository.dart';
 import 'package:linguist/src/core/course/storage/course_learning_state_validator.dart';
+import 'package:linguist/src/core/course/storage/sentence_hunt_learning_sql_repository.dart';
 import 'package:linguist/src/core/course/storage/sentence_hunt_learning_sql_adapter.dart';
 import 'package:linguist/src/core/course/storage/sentence_hunt_learning_storage_validator.dart';
+import 'package:linguist/src/features/arcade/word_match_engine.dart';
 import 'package:linguist/src/core/course/learning_storage_types.dart'
     show LearningCursorPosition;
 import '../../integration_test/support/learning_database_workload.dart';
@@ -297,6 +306,56 @@ void main() {
       }
     },
   );
+
+  for (final String aggregate in <String>[
+    'activities',
+    'mistakes',
+    'summaries',
+    'completions',
+    'bestScores',
+    'exposure',
+  ]) {
+    test('course_sql_${aggregate}_4096_to_4097_rejects_write_free', () async {
+      final Map<String, Object?> evidence = await _qualifyCourseSqlOverflow(
+        aggregate,
+      );
+      expect(evidence['controlCommittedBelowCap'], isTrue);
+      expect(evidence['loadedTypedIdentitiesBeforeOverflow'], 4096);
+      expect(evidence['sqlRowsBeforeOverflow'], 4096);
+      expect(evidence['typedCapacityRejected'], isTrue);
+      expect(
+        evidence['normalizedSnapshotUnchangedAfterIndependentReopen'],
+        isTrue,
+      );
+    }, timeout: const Timeout(Duration(seconds: 90)));
+  }
+
+  for (final String aggregate in <String>[
+    'mistakes',
+    'summaries',
+    'completions',
+    'teachingExposure',
+  ]) {
+    test(
+      'sentence_hunt_sql_${aggregate}_4096_to_4097_rejects_write_free',
+      () async {
+        final Map<String, Object?> evidence =
+            await _qualifySentenceHuntSqlOverflow(aggregate);
+        expect(evidence['controlCommittedBelowCap'], isTrue);
+        expect(evidence['loadedTypedIdentitiesBeforeOverflow'], 4096);
+        expect(
+          evidence['sqlRowsBeforeOverflow'],
+          aggregate == 'summaries' ? 16384 : 4096,
+        );
+        expect(evidence['typedCapacityRejected'], isTrue);
+        expect(
+          evidence['normalizedSnapshotUnchangedAfterIndependentReopen'],
+          isTrue,
+        );
+      },
+      timeout: const Timeout(Duration(seconds: 90)),
+    );
+  }
 
   test(
     'sentence_hunt_valid_synthetic_aggregate_identities_enforce_4096_cap',
@@ -707,6 +766,1691 @@ void main() {
   });
 }
 
+const List<String> _sqlOverflowTables = <String>[
+  'learning_scopes',
+  'learning_content_bindings',
+  'learning_runs',
+  'learning_attempts',
+  'learning_attempt_values',
+  'learning_attempt_evidence',
+  'learning_command_receipts',
+  'learning_mistakes',
+  'learning_summaries',
+  'learning_completions',
+  'learning_exposure',
+  'learning_best_scores',
+  'supported_sync_outbox',
+];
+
+final class _SqlScopedSnapshot {
+  const _SqlScopedSnapshot({
+    required this.rowCounts,
+    required this.normalizedRows,
+    required this.header,
+  });
+
+  final Map<String, int> rowCounts;
+  final String normalizedRows;
+  final Map<String, Object?> header;
+}
+
+Future<_SqlScopedSnapshot> _captureSqlScopedSnapshot(
+  LearningDatabase database,
+  int scopeId,
+) async {
+  final Map<String, List<Map<String, Object?>>> rowsByTable =
+      <String, List<Map<String, Object?>>>{};
+  for (final String table in _sqlOverflowTables) {
+    final String sql = table == 'learning_scopes'
+        ? 'SELECT * FROM learning_scopes WHERE id = ? ORDER BY rowid'
+        : 'SELECT * FROM $table WHERE scope_id = ? ORDER BY rowid';
+    final List<QueryRow> rows = await database
+        .customSelect(
+          sql,
+          variables: <Variable<Object>>[Variable<int>(scopeId)],
+        )
+        .get();
+    rowsByTable[table] = <Map<String, Object?>>[
+      for (final QueryRow row in rows) Map<String, Object?>.from(row.data),
+    ];
+  }
+  final List<Map<String, Object?>> scopeRows = rowsByTable['learning_scopes']!;
+  if (scopeRows.length != 1) {
+    throw StateError('Expected exactly one scoped SQLite header row.');
+  }
+  return _SqlScopedSnapshot(
+    rowCounts: <String, int>{
+      for (final String table in _sqlOverflowTables)
+        table: rowsByTable[table]!.length,
+    },
+    normalizedRows: jsonEncode(rowsByTable),
+    header: scopeRows.single,
+  );
+}
+
+Future<Map<String, Object?>> _qualifyCourseSqlOverflow(String aggregate) async {
+  if (aggregate == 'activities') {
+    return _qualifyCourseActivitySqlOverflow();
+  }
+
+  final Directory directory = await Directory.systemTemp.createTemp(
+    'sqlite-course-$aggregate-overflow-',
+  );
+  final File file = File('${directory.path}/learning.sqlite');
+  final LearningDatabaseHandle primary = _fileHandle(file);
+  final LearningDatabaseHandle independent = _fileHandle(file);
+  try {
+    final _CourseOverflowFixture controlFixture = await _seedCourseOverflow(
+      primary,
+      aggregate: aggregate,
+      count: 4095,
+      label: 'control',
+    );
+    await primary.reopen();
+    final SqliteCourseLearningRepository controlRepository =
+        _courseOverflowRepository(primary, controlFixture);
+    CourseLearningState controlState = await controlRepository.load();
+    CourseLearningStateValidator.validate(
+      controlState,
+      controlFixture.registry,
+    );
+    expect(_courseAggregateCount(controlState, aggregate), 4095);
+    final _SqlScopedSnapshot controlSeedSnapshot =
+        await _captureSqlScopedSnapshot(
+          await primary.open(),
+          controlFixture.scopeId,
+        );
+    expect(
+      controlSeedSnapshot.rowCounts[_courseSqlTableFor(aggregate)],
+      _expectedCourseSqlRows(aggregate, 4095),
+    );
+    final LearningCommand controlCommand = _courseOverflowCommand(
+      controlRepository,
+      controlFixture,
+      controlState,
+    );
+    final LearningCommit controlCommit = await controlRepository.submit(
+      controlCommand,
+    );
+    controlState = controlCommit.state;
+    CourseLearningStateValidator.validate(
+      controlState,
+      controlFixture.registry,
+    );
+    expect(_courseAggregateCount(controlState, aggregate), 4096);
+    await primary.reopen();
+    controlState = await controlRepository.load();
+    CourseLearningStateValidator.validate(
+      controlState,
+      controlFixture.registry,
+    );
+    expect(_courseAggregateCount(controlState, aggregate), 4096);
+    final _SqlScopedSnapshot controlSnapshot = await _captureSqlScopedSnapshot(
+      await primary.open(),
+      controlFixture.scopeId,
+    );
+    final int collectionRows =
+        controlSnapshot.rowCounts[_courseSqlTableFor(aggregate)]!;
+    expect(collectionRows, _expectedCourseSqlRows(aggregate, 4096));
+
+    final _CourseOverflowFixture overflowFixture = await _seedCourseOverflow(
+      primary,
+      aggregate: aggregate,
+      count: 4096,
+      label: 'overflow',
+    );
+    await primary.reopen();
+    final SqliteCourseLearningRepository overflowRepository =
+        _courseOverflowRepository(primary, overflowFixture);
+    final CourseLearningState loaded = await overflowRepository.load();
+    CourseLearningStateValidator.validate(loaded, overflowFixture.registry);
+    expect(_courseAggregateCount(loaded, aggregate), 4096);
+    final _SqlScopedSnapshot before = await _captureSqlScopedSnapshot(
+      await primary.open(),
+      overflowFixture.scopeId,
+    );
+    expect(
+      before.rowCounts[_courseSqlTableFor(aggregate)],
+      _expectedCourseSqlRows(aggregate, 4096),
+    );
+    final LearningCommand overflowCommand = _courseOverflowCommand(
+      overflowRepository,
+      overflowFixture,
+      loaded,
+    );
+    late final LearningInvalidCommandException typedError;
+    try {
+      await overflowRepository.submit(overflowCommand);
+      fail('A valid distinct 4097th $aggregate identity must be rejected.');
+    } on LearningInvalidCommandException catch (error) {
+      typedError = error;
+    }
+    if (aggregate == 'activities') {
+      expect(typedError.cause, isA<FormatException>());
+    } else {
+      expect(typedError.cause == null, isTrue);
+    }
+
+    await primary.close();
+    await independent.reopen();
+    final SqliteCourseLearningRepository reopenedRepository =
+        _courseOverflowRepository(independent, overflowFixture);
+    final CourseLearningState reopened = await reopenedRepository.load();
+    CourseLearningStateValidator.validate(reopened, overflowFixture.registry);
+    final _SqlScopedSnapshot after = await _captureSqlScopedSnapshot(
+      await independent.open(),
+      overflowFixture.scopeId,
+    );
+    final bool unchanged = before.normalizedRows == after.normalizedRows;
+    expect(unchanged, isTrue);
+    expect(_courseAggregateCount(reopened, aggregate), 4096);
+    expect(
+      after.rowCounts[_courseSqlTableFor(aggregate)],
+      _expectedCourseSqlRows(aggregate, 4096),
+    );
+
+    final Map<String, Object?> evidence = <String, Object?>{
+      'family': 'course',
+      'collection': aggregate,
+      'controlSeedTypedIdentities': 4095,
+      'controlSeedSqlRows':
+          controlSeedSnapshot.rowCounts[_courseSqlTableFor(aggregate)],
+      'controlCommittedBelowCap': true,
+      'controlLoadedTypedIdentitiesAfterCommit': _courseAggregateCount(
+        controlState,
+        aggregate,
+      ),
+      'controlSqlRowsAfterCommit': collectionRows,
+      'controlCommand': <String, Object?>{
+        'action': controlCommand.action.runtimeType.toString(),
+        'activityId': controlCommand.activityId,
+        'expectedScopeRevision': controlCommand.expectedScopeRevision,
+        'token': controlCommand.token,
+      },
+      'controlSeedHeader': <String, Object?>{
+        'revision': controlSeedSnapshot.header['revision'],
+        'commitOrdinal': controlSeedSnapshot.header['commit_ordinal'],
+      },
+      'controlHeaderAfterCommit': <String, Object?>{
+        'revision': controlSnapshot.header['revision'],
+        'commitOrdinal': controlSnapshot.header['commit_ordinal'],
+      },
+      'loadedTypedIdentitiesBeforeOverflow': _courseAggregateCount(
+        loaded,
+        aggregate,
+      ),
+      'sqlRowsBeforeOverflow': before.rowCounts[_courseSqlTableFor(aggregate)],
+      'overflowIdentity': _courseOverflowIdentity(aggregate, overflowFixture),
+      'overflowCommand': <String, Object?>{
+        'action': overflowCommand.action.runtimeType.toString(),
+        'activityId': overflowCommand.activityId,
+        'expectedScopeRevision': overflowCommand.expectedScopeRevision,
+        'token': overflowCommand.token,
+      },
+      'typedError': typedError.runtimeType.toString(),
+      'typedErrorCause': typedError.cause?.runtimeType.toString(),
+      'typedCapacityRejected': true,
+      'normalizedRowCountsBefore': before.rowCounts,
+      'normalizedRowCountsAfterIndependentReopen': after.rowCounts,
+      'headerBefore': <String, Object?>{
+        'revision': before.header['revision'],
+        'commitOrdinal': before.header['commit_ordinal'],
+      },
+      'headerAfter': <String, Object?>{
+        'revision': after.header['revision'],
+        'commitOrdinal': after.header['commit_ordinal'],
+      },
+      'normalizedSnapshotBytes': utf8.encode(before.normalizedRows).length,
+      'normalizedSnapshotUnchangedAfterIndependentReopen': unchanged,
+    };
+    // ignore: avoid_print
+    print('TASK9 SQL OVERFLOW ${jsonEncode(evidence)}');
+    return evidence;
+  } finally {
+    await primary.close();
+    await independent.close();
+    await directory.delete(recursive: true);
+  }
+}
+
+Future<Map<String, Object?>> _qualifyCourseActivitySqlOverflow() async {
+  final Directory directory = await Directory.systemTemp.createTemp(
+    'sqlite-course-activities-overflow-',
+  );
+  final File file = File('${directory.path}/learning.sqlite');
+  final LearningDatabaseHandle primary = _fileHandle(file);
+  final LearningDatabaseHandle independent = _fileHandle(file);
+  try {
+    final LearningScope scope = _courseOverflowScope('activities');
+    final _SyntheticCourseRegistry registry =
+        _SyntheticCourseRegistry(<LearningActivityDefinition>[
+          for (int index = 0; index < 4097; index++)
+            LearningActivityDefinition(
+              id: _courseActivityIdentity(index),
+              kind: LearningActivityKind.legacyLesson,
+              contentRevision: 1,
+              items: const <LearningSourceItem>[],
+            ),
+        ]);
+    final LearningTransitionEngine transitions = LearningTransitionEngine(
+      registry,
+    );
+    final int scopeId = await _seedCourseActivitySlots(
+      primary,
+      scope: scope,
+      transitions: transitions,
+      count: 4095,
+    );
+    final _CourseOverflowFixture fixture = _CourseOverflowFixture(
+      scope: scope,
+      scopeId: scopeId,
+      registry: registry,
+      transitions: transitions,
+      aggregate: 'activities',
+      activeActivityId: _courseActivityIdentity(4095),
+      capCount: 4095,
+    );
+    await primary.reopen();
+    final SqliteCourseLearningRepository repository = _courseOverflowRepository(
+      primary,
+      fixture,
+    );
+    final CourseLearningState beforeControl = await repository.load();
+    CourseLearningStateValidator.validate(beforeControl, registry);
+    expect(beforeControl.activities, hasLength(4095));
+    final _SqlScopedSnapshot seedSnapshot = await _captureSqlScopedSnapshot(
+      await primary.open(),
+      scopeId,
+    );
+    expect(seedSnapshot.rowCounts['learning_runs'], 4095);
+    final LearningCommand controlCommand = _courseOverflowCommand(
+      repository,
+      fixture,
+      beforeControl,
+    );
+    final LearningCommit controlCommit = await repository.submit(
+      controlCommand,
+    );
+    expect(controlCommit.state.activities, hasLength(4096));
+    await primary.reopen();
+    final CourseLearningState loaded = await repository.load();
+    CourseLearningStateValidator.validate(loaded, registry);
+    expect(loaded.activities, hasLength(4096));
+    final _SqlScopedSnapshot before = await _captureSqlScopedSnapshot(
+      await primary.open(),
+      scopeId,
+    );
+    expect(before.rowCounts['learning_runs'], 4096);
+
+    final _CourseOverflowFixture overflowFixture = _CourseOverflowFixture(
+      scope: scope,
+      scopeId: scopeId,
+      registry: registry,
+      transitions: transitions,
+      aggregate: 'activities',
+      activeActivityId: _courseActivityIdentity(4096),
+      capCount: 4096,
+    );
+    final LearningCommand overflowCommand = _courseOverflowCommand(
+      repository,
+      overflowFixture,
+      loaded,
+    );
+    late final LearningInvalidCommandException typedError;
+    try {
+      await repository.submit(overflowCommand);
+      fail('A valid distinct 4097th activity identity must be rejected.');
+    } on LearningInvalidCommandException catch (error) {
+      typedError = error;
+    }
+    expect(typedError.cause, isA<FormatException>());
+
+    await primary.close();
+    await independent.reopen();
+    final SqliteCourseLearningRepository reopenedRepository =
+        _courseOverflowRepository(independent, fixture);
+    final CourseLearningState reopened = await reopenedRepository.load();
+    CourseLearningStateValidator.validate(reopened, registry);
+    final _SqlScopedSnapshot after = await _captureSqlScopedSnapshot(
+      await independent.open(),
+      scopeId,
+    );
+    final bool unchanged = before.normalizedRows == after.normalizedRows;
+    expect(unchanged, isTrue);
+    expect(reopened.activities, hasLength(4096));
+    expect(after.rowCounts['learning_runs'], 4096);
+
+    final Map<String, Object?> evidence = <String, Object?>{
+      'family': 'course',
+      'collection': 'activities',
+      'seededTypedIdentities': 4095,
+      'seededSqlRunRows': 4095,
+      'controlCommittedBelowCap': true,
+      'controlLoadedTypedIdentitiesAfterCommit': 4096,
+      'controlSqlRunRowsAfterCommit': 4096,
+      'loadedTypedIdentitiesBeforeOverflow': loaded.activities.length,
+      'sqlRowsBeforeOverflow': before.rowCounts['learning_runs'],
+      'overflowIdentity': _courseActivityIdentity(4096),
+      'controlCommand': <String, Object?>{
+        'action': controlCommand.action.runtimeType.toString(),
+        'activityId': controlCommand.activityId,
+        'expectedScopeRevision': controlCommand.expectedScopeRevision,
+        'token': controlCommand.token,
+      },
+      'overflowCommand': <String, Object?>{
+        'action': overflowCommand.action.runtimeType.toString(),
+        'activityId': overflowCommand.activityId,
+        'expectedScopeRevision': overflowCommand.expectedScopeRevision,
+        'token': overflowCommand.token,
+      },
+      'typedError': typedError.runtimeType.toString(),
+      'typedErrorCause': typedError.cause.runtimeType.toString(),
+      'typedCapacityRejected': true,
+      'seedHeader': <String, Object?>{
+        'revision': seedSnapshot.header['revision'],
+        'commitOrdinal': seedSnapshot.header['commit_ordinal'],
+      },
+      'controlHeaderAfterCommit': <String, Object?>{
+        'revision': before.header['revision'],
+        'commitOrdinal': before.header['commit_ordinal'],
+      },
+      'normalizedRowCountsBefore': before.rowCounts,
+      'normalizedRowCountsAfterIndependentReopen': after.rowCounts,
+      'headerBefore': <String, Object?>{
+        'revision': before.header['revision'],
+        'commitOrdinal': before.header['commit_ordinal'],
+      },
+      'headerAfter': <String, Object?>{
+        'revision': after.header['revision'],
+        'commitOrdinal': after.header['commit_ordinal'],
+      },
+      'normalizedSnapshotBytes': utf8.encode(before.normalizedRows).length,
+      'normalizedSnapshotUnchangedAfterIndependentReopen': unchanged,
+    };
+    // ignore: avoid_print
+    print('TASK9 SQL OVERFLOW ${jsonEncode(evidence)}');
+    return evidence;
+  } finally {
+    await primary.close();
+    await independent.close();
+    await directory.delete(recursive: true);
+  }
+}
+
+final class _CourseOverflowFixture {
+  const _CourseOverflowFixture({
+    required this.scope,
+    required this.scopeId,
+    required this.registry,
+    required this.transitions,
+    required this.aggregate,
+    required this.activeActivityId,
+    required this.capCount,
+  });
+
+  final LearningScope scope;
+  final int scopeId;
+  final _SyntheticCourseRegistry registry;
+  final LearningTransitionEngine transitions;
+  final String aggregate;
+  final String activeActivityId;
+  final int capCount;
+}
+
+LearningScope _courseOverflowScope(String suffix) => LearningScope(
+  courseId: 'en-fr',
+  owner: LearningOwner.account('task9-course-sql-$suffix'),
+);
+
+String _courseActivityIdentity(int index) =>
+    'lesson:task9-synthetic-activity-$index';
+
+String _courseToken(int ordinal, {String prefix = 's'}) =>
+    '$prefix${ordinal.toString().padLeft(21, '0')}';
+
+Future<int> _seedCourseActivitySlots(
+  LearningDatabaseHandle handle, {
+  required LearningScope scope,
+  required LearningTransitionEngine transitions,
+  required int count,
+}) async {
+  final LearningDatabase database = await handle.open();
+  final CourseLearningSqlAdapter adapter = CourseLearningSqlAdapter(
+    scope: scope,
+    transitions: transitions,
+    historyLimit: 2000,
+  );
+  final int scopeId = await database.ensureScope(adapter.scope);
+  await database.transaction(() async {
+    for (int index = 0; index < count; index++) {
+      final int revision = index;
+      // Starts target distinct empty legacy lessons. Omitting unrelated prior
+      // slots from this seed-only projection keeps per-slot validation bounded;
+      // the SQL rows still receive monotonically CAS-committed authentic start
+      // commands and are validated together by the typed repository after load.
+      final CourseLearningState before = CourseLearningState(
+        scope: scope,
+        revision: revision,
+        commitOrdinal: revision,
+        history: const <AttemptBatch>[],
+        activities: const <String, ActivitySlot>{},
+        mistakes: const <MistakeKey, LearningMistake>{},
+        summaries: const <SummaryKey, SkillCount>{},
+        completions: const <LearningCompletion>[],
+        bestScores: const <String, int>{},
+        pending: const <SupportedCloudEvent>[],
+      );
+      final LearningCommand command = transitions.prepare(
+        state: before,
+        authGeneration: 0,
+        activityId: _courseActivityIdentity(index),
+        action: StartLearningRun(options: RunOptions()),
+        token: _courseToken(index + 1),
+        submittedAt: DateTime.utc(
+          2026,
+          10,
+          19,
+          1,
+        ).add(Duration(microseconds: index)),
+        random: Random(index),
+      );
+      final CourseLearningState after = adapter
+          .evaluate(
+            before: before,
+            command: command,
+            nextRevision: revision + 1,
+            nextCommitOrdinal: revision + 1,
+            committedAt: DateTime.utc(
+              2026,
+              10,
+              19,
+              1,
+            ).add(Duration(microseconds: index)),
+          )
+          .state;
+      await adapter.persist(database, scopeId, before, command, after);
+      final int updatedRows = await database.compareAndSwapLearningScope(
+        scopeId: scopeId,
+        expectedRevision: revision,
+        expectedCommitOrdinal: revision,
+        nextRevision: revision + 1,
+        nextCommitOrdinal: revision + 1,
+      );
+      expect(updatedRows, 1);
+    }
+  });
+  return scopeId;
+}
+
+Future<_CourseOverflowFixture> _seedCourseOverflow(
+  LearningDatabaseHandle handle, {
+  required String aggregate,
+  required int count,
+  required String label,
+}) async {
+  final LearningScope scope = _courseOverflowScope('$aggregate-$label');
+  final String activityId = _courseActiveActivityId(aggregate, count);
+  final _SyntheticCourseRegistry registry = _courseOverflowRegistry(
+    aggregate,
+    activeActivityId: activityId,
+  );
+  final LearningTransitionEngine transitions = LearningTransitionEngine(
+    registry,
+  );
+  final LearningDatabase database = await handle.open();
+  final CourseLearningSqlAdapter adapter = CourseLearningSqlAdapter(
+    scope: scope,
+    transitions: transitions,
+    historyLimit: 2000,
+  );
+  final int scopeId = await database.ensureScope(adapter.scope);
+  final CourseLearningState before = CourseLearningState.empty(scope);
+  if (aggregate == 'completions') {
+    await database.transaction(() async {
+      CourseLearningState state = before;
+      final LearningCommand startCommand = transitions.prepare(
+        state: state,
+        authGeneration: 0,
+        activityId: activityId,
+        action: StartLearningRun(options: RunOptions()),
+        token: _courseToken(1),
+        submittedAt: DateTime.utc(2026, 10, 19, 1),
+        random: Random(17),
+      );
+      CourseLearningState after = adapter
+          .evaluate(
+            before: state,
+            command: startCommand,
+            nextRevision: 1,
+            nextCommitOrdinal: 1,
+            committedAt: startCommand.submittedAt,
+          )
+          .state;
+      await _persistCourseSeedTransition(
+        database,
+        adapter,
+        scopeId,
+        state,
+        startCommand,
+        after,
+      );
+      state = after;
+
+      final LearningSourceItem item = registry.require(activityId).items.single;
+      final LearningCommand answerCommand = transitions.prepare(
+        state: state,
+        authGeneration: 0,
+        activityId: activityId,
+        action: ChooseSound(
+          selectedSound: item.expectedChoice!,
+          audioSource: authoredAudioSource(item)!,
+        ),
+        token: _courseToken(2),
+        submittedAt: DateTime.utc(2026, 10, 19, 1, 0, 0, 1),
+        random: Random(18),
+      );
+      after = adapter
+          .evaluate(
+            before: state,
+            command: answerCommand,
+            nextRevision: 2,
+            nextCommitOrdinal: 2,
+            committedAt: answerCommand.submittedAt,
+          )
+          .state;
+      await _persistCourseSeedTransition(
+        database,
+        adapter,
+        scopeId,
+        state,
+        answerCommand,
+        after,
+      );
+      state = after;
+
+      final LearningCommand advanceCommand = transitions.prepare(
+        state: state,
+        authGeneration: 0,
+        activityId: activityId,
+        action: const AdvanceLesson(),
+        token: _courseToken(3),
+        submittedAt: DateTime.utc(2026, 10, 19, 1, 0, 0, 2),
+        random: Random(19),
+      );
+      after = adapter
+          .evaluate(
+            before: state,
+            command: advanceCommand,
+            nextRevision: 3,
+            nextCommitOrdinal: 3,
+            committedAt: advanceCommand.submittedAt,
+          )
+          .state;
+      final CourseLearningState capped = _withCourseAggregate(
+        after,
+        aggregate: aggregate,
+        count: count,
+        activeActivityId: activityId,
+        registry: registry,
+      );
+      CourseLearningStateValidator.validate(capped, registry);
+      await _persistCourseSeedTransition(
+        database,
+        adapter,
+        scopeId,
+        state,
+        advanceCommand,
+        capped,
+      );
+    });
+    return _CourseOverflowFixture(
+      scope: scope,
+      scopeId: scopeId,
+      registry: registry,
+      transitions: transitions,
+      aggregate: aggregate,
+      activeActivityId: activityId,
+      capCount: count,
+    );
+  }
+  if (aggregate == 'bestScores') {
+    await database.transaction(() async {
+      final LearningCommand startCommand = transitions.prepare(
+        state: before,
+        authGeneration: 0,
+        activityId: activityId,
+        action: StartLearningRun(options: RunOptions()),
+        token: _courseToken(1),
+        submittedAt: DateTime.utc(2026, 10, 19, 1),
+        random: Random(17),
+      );
+      final CourseLearningState state = adapter
+          .evaluate(
+            before: before,
+            command: startCommand,
+            nextRevision: 1,
+            nextCommitOrdinal: 1,
+            committedAt: startCommand.submittedAt,
+          )
+          .state;
+      await _persistCourseSeedTransition(
+        database,
+        adapter,
+        scopeId,
+        before,
+        startCommand,
+        state,
+      );
+      final LearningCommand resumeCommand = transitions.prepare(
+        state: state,
+        authGeneration: 0,
+        activityId: activityId,
+        action: CheckpointArcade(elapsedSeconds: 0, paused: false),
+        token: _courseToken(2),
+        submittedAt: DateTime.utc(2026, 10, 19, 1, 0, 0, 1),
+        random: Random(18),
+      );
+      final CourseLearningState resumed = adapter
+          .evaluate(
+            before: state,
+            command: resumeCommand,
+            nextRevision: 2,
+            nextCommitOrdinal: 2,
+            committedAt: resumeCommand.submittedAt,
+          )
+          .state;
+      final CourseLearningState capped = _withCourseAggregate(
+        resumed,
+        aggregate: aggregate,
+        count: count,
+        activeActivityId: activityId,
+        registry: registry,
+      );
+      CourseLearningStateValidator.validate(capped, registry);
+      await _persistCourseSeedTransition(
+        database,
+        adapter,
+        scopeId,
+        state,
+        resumeCommand,
+        capped,
+      );
+    });
+    return _CourseOverflowFixture(
+      scope: scope,
+      scopeId: scopeId,
+      registry: registry,
+      transitions: transitions,
+      aggregate: aggregate,
+      activeActivityId: activityId,
+      capCount: count,
+    );
+  }
+
+  final LearningCommand startCommand = transitions.prepare(
+    state: before,
+    authGeneration: 0,
+    activityId: activityId,
+    action: StartLearningRun(options: RunOptions()),
+    token: _courseToken(1),
+    submittedAt: DateTime.utc(2026, 10, 19, 1),
+    random: Random(17),
+  );
+  final CourseLearningState started = adapter
+      .evaluate(
+        before: before,
+        command: startCommand,
+        nextRevision: 1,
+        nextCommitOrdinal: 1,
+        committedAt: DateTime.utc(2026, 10, 19, 1),
+      )
+      .state;
+  final CourseLearningState after = _withCourseAggregate(
+    started,
+    aggregate: aggregate,
+    count: count,
+    activeActivityId: activityId,
+    registry: registry,
+  );
+  CourseLearningStateValidator.validate(after, registry);
+  await database.transaction(() async {
+    await _persistCourseSeedTransition(
+      database,
+      adapter,
+      scopeId,
+      before,
+      startCommand,
+      after,
+    );
+  });
+  return _CourseOverflowFixture(
+    scope: scope,
+    scopeId: scopeId,
+    registry: registry,
+    transitions: transitions,
+    aggregate: aggregate,
+    activeActivityId: activityId,
+    capCount: count,
+  );
+}
+
+Future<void> _persistCourseSeedTransition(
+  LearningDatabase database,
+  CourseLearningSqlAdapter adapter,
+  int scopeId,
+  CourseLearningState before,
+  LearningCommand command,
+  CourseLearningState after,
+) async {
+  await adapter.persist(database, scopeId, before, command, after);
+  final int changedRows = await database.compareAndSwapLearningScope(
+    scopeId: scopeId,
+    expectedRevision: before.revision,
+    expectedCommitOrdinal: before.commitOrdinal,
+    nextRevision: after.revision,
+    nextCommitOrdinal: after.commitOrdinal,
+  );
+  expect(changedRows, 1);
+}
+
+String _courseActiveActivityId(String aggregate, int count) =>
+    switch (aggregate) {
+      'completions' => _legacyCourseActivityId(count),
+      'bestScores' => _syntheticWordGameId(count),
+      'activities' => _courseActivityIdentity(count),
+      _ => 'lesson:task9-course-sql-active-$aggregate-$count',
+    };
+
+_SyntheticCourseRegistry _courseOverflowRegistry(
+  String aggregate, {
+  required String activeActivityId,
+}) {
+  if (aggregate == 'activities') {
+    return _SyntheticCourseRegistry(<LearningActivityDefinition>[
+      for (int index = 0; index < 4097; index++)
+        LearningActivityDefinition(
+          id: _courseActivityIdentity(index),
+          kind: LearningActivityKind.legacyLesson,
+          contentRevision: 1,
+          items: const <LearningSourceItem>[],
+        ),
+    ]);
+  }
+  if (aggregate == 'mistakes') {
+    final LearningActivityDefinition active = _courseLegacyDefinition(
+      activityId: activeActivityId,
+      item: _courseOverflowItem(
+        'task9-course-active-item',
+        _syntheticSound(4096),
+      ),
+    );
+    return _SyntheticCourseRegistry(<LearningActivityDefinition>[
+      _syntheticCourseRegistry(4097).activities.single,
+      active,
+    ]);
+  }
+  if (aggregate == 'summaries') {
+    final LearningActivityDefinition active = _courseLegacyDefinition(
+      activityId: activeActivityId,
+      item: _courseOverflowItem(
+        'task9-course-summary-active-item',
+        _syntheticSound(32),
+      ),
+    );
+    return _SyntheticCourseRegistry(<LearningActivityDefinition>[
+      _syntheticCourseRegistry(33).activities.single,
+      active,
+    ]);
+  }
+  if (aggregate == 'completions') {
+    return _SyntheticCourseRegistry(<LearningActivityDefinition>[
+      for (int index = 0; index < 4097; index++) _legacyCourseDefinition(index),
+    ]);
+  }
+  if (aggregate == 'bestScores') {
+    final List<LearningSourceItem> gameItems = _wordGameItems();
+    return _SyntheticCourseRegistry(<LearningActivityDefinition>[
+      for (int index = 0; index < 4097; index++)
+        _syntheticWordGameDefinition(
+          index,
+          items: _syntheticWordGameId(index) == activeActivityId
+              ? gameItems
+              : const <LearningSourceItem>[],
+        ),
+    ]);
+  }
+  if (aggregate == 'exposure') {
+    final List<LearningSourceItem> items = _syntheticDiscoveryItems(4097);
+    return _SyntheticCourseRegistry(<LearningActivityDefinition>[
+      LearningActivityDefinition(
+        id: activeActivityId,
+        kind: LearningActivityKind.discovery,
+        contentRevision: 1,
+        items: items,
+      ),
+    ]);
+  }
+  throw ArgumentError.value(aggregate, 'aggregate');
+}
+
+LearningActivityDefinition _courseLegacyDefinition({
+  required String activityId,
+  required LearningSourceItem item,
+}) => LearningActivityDefinition(
+  id: activityId,
+  kind: LearningActivityKind.legacyLesson,
+  contentRevision: 1,
+  items: <LearningSourceItem>[item],
+);
+
+LearningSourceItem _courseOverflowItem(String itemId, String sound) =>
+    LearningSourceItem(
+      id: itemId,
+      sessionAlias: null,
+      audioText: 'tout',
+      choices: const <String>['u', 'y'],
+      expectedChoice: 'u',
+      targetSounds: <String>[sound],
+      contentState: AttemptContentState.existingCurated,
+    );
+
+List<LearningSourceItem> _wordGameItems() => <LearningSourceItem>[
+  for (final word in WordMatchEngine(random: Random(13)).pool)
+    LearningSourceItem(
+      id: word.text,
+      sessionAlias: null,
+      audioText: null,
+      choices: const <String>[],
+      expectedChoice: null,
+      targetSounds: const <String>['u', 'y'],
+      contentState: AttemptContentState.existingCurated,
+    ),
+];
+
+CourseLearningState _withCourseAggregate(
+  CourseLearningState state, {
+  required String aggregate,
+  required int count,
+  required String activeActivityId,
+  required _SyntheticCourseRegistry registry,
+}) {
+  Map<MistakeKey, LearningMistake> mistakes = state.mistakes;
+  Map<SummaryKey, SkillCount> summaries = state.summaries;
+  List<LearningCompletion> completions = state.completions;
+  Map<String, int> bestScores = state.bestScores;
+  Map<String, ActivitySlot> activities = state.activities;
+  switch (aggregate) {
+    case 'mistakes':
+      mistakes = <MistakeKey, LearningMistake>{
+        for (int index = 0; index < count; index++)
+          _courseMistake(
+            index: index,
+            timestamp: DateTime.utc(2026, 10, 19),
+          ).key: _courseMistake(
+            index: index,
+            timestamp: DateTime.utc(2026, 10, 19),
+          ).value,
+      };
+      break;
+    case 'summaries':
+      summaries = Map<SummaryKey, SkillCount>.fromEntries(
+        _courseSummaryIdentities(32).entries.take(count),
+      );
+      break;
+    case 'completions':
+      completions = <LearningCompletion>[
+        for (int index = 0; index < count; index++)
+          _legacyCourseCompletion(index, DateTime.utc(2026, 10, 19)),
+      ];
+      break;
+    case 'bestScores':
+      bestScores = <String, int>{
+        for (int index = 0; index < count; index++)
+          _syntheticWordGameId(index): 0,
+      };
+      break;
+    case 'exposure':
+      final LearningActivityDefinition definition = registry.require(
+        activeActivityId,
+      );
+      final List<LearningSourceItem> items = definition.items;
+      final int firstIndex = items.length - count;
+      final ActivitySlot slot = state.activities[activeActivityId]!;
+      activities = <String, ActivitySlot>{
+        ...state.activities,
+        activeActivityId: ActivitySlot(
+          activityId: slot.activityId,
+          kind: slot.kind,
+          contentRevision: slot.contentRevision,
+          cursor: slot.cursor,
+          options: slot.options,
+          snapshot: slot.snapshot,
+          exposures: <ItemContextKey, ItemExposure>{
+            for (int index = firstIndex; index < items.length; index++)
+              ItemContextKey(
+                itemId: items[index].id,
+                targetSound: items[index].targetSounds.single,
+              ): ItemExposure(
+                presentations: 0,
+                assistance: const <AssistanceFlag>{},
+              ),
+          },
+          latestReceipt: slot.latestReceipt,
+        ),
+      };
+      break;
+  }
+  return _copyCourseState(
+    state,
+    activities: activities,
+    mistakes: mistakes,
+    summaries: summaries,
+    completions: completions,
+    bestScores: bestScores,
+  );
+}
+
+CourseLearningState _copyCourseState(
+  CourseLearningState state, {
+  Map<String, ActivitySlot>? activities,
+  Map<MistakeKey, LearningMistake>? mistakes,
+  Map<SummaryKey, SkillCount>? summaries,
+  List<LearningCompletion>? completions,
+  Map<String, int>? bestScores,
+}) => CourseLearningState(
+  schemaVersion: state.schemaVersion,
+  scope: state.scope,
+  revision: state.revision,
+  commitOrdinal: state.commitOrdinal,
+  history: state.history,
+  activities: activities ?? state.activities,
+  mistakes: mistakes ?? state.mistakes,
+  summaries: summaries ?? state.summaries,
+  completions: completions ?? state.completions,
+  bestScores: bestScores ?? state.bestScores,
+  pending: state.pending,
+);
+
+int _courseAggregateCount(CourseLearningState state, String aggregate) =>
+    switch (aggregate) {
+      'activities' => state.activities.length,
+      'mistakes' => state.mistakes.length,
+      'summaries' => state.summaries.length,
+      'completions' => state.completions.length,
+      'bestScores' => state.bestScores.length,
+      'exposure' => state.activities.values.fold<int>(
+        0,
+        (int total, ActivitySlot slot) => total + slot.exposures.length,
+      ),
+      _ => throw ArgumentError.value(aggregate, 'aggregate'),
+    };
+
+String _courseSqlTableFor(String aggregate) => switch (aggregate) {
+  'activities' => 'learning_runs',
+  'mistakes' => 'learning_mistakes',
+  'summaries' => 'learning_summaries',
+  'completions' => 'learning_completions',
+  'bestScores' => 'learning_best_scores',
+  'exposure' => 'learning_exposure',
+  _ => throw ArgumentError.value(aggregate, 'aggregate'),
+};
+
+int _expectedCourseSqlRows(String aggregate, int typedIdentities) =>
+    switch (aggregate) {
+      'activities' ||
+      'mistakes' ||
+      'summaries' ||
+      'completions' ||
+      'bestScores' ||
+      'exposure' => typedIdentities,
+      _ => throw ArgumentError.value(aggregate, 'aggregate'),
+    };
+
+int _expectedSentenceSqlRows(String aggregate, int typedIdentities) =>
+    switch (aggregate) {
+      // Sentence summaries persist one row for each of four typed buckets.
+      'summaries' => typedIdentities * 4,
+      'mistakes' || 'completions' || 'teachingExposure' => typedIdentities,
+      _ => throw ArgumentError.value(aggregate, 'aggregate'),
+    };
+
+String _courseOverflowIdentity(
+  String aggregate,
+  _CourseOverflowFixture fixture,
+) => switch (aggregate) {
+  'activities' => fixture.activeActivityId,
+  'mistakes' => '${fixture.activeActivityId}/task9-course-active-item',
+  'summaries' => _syntheticSound(32),
+  'completions' => fixture.activeActivityId,
+  'bestScores' => fixture.activeActivityId,
+  'exposure' => 'task9-synthetic-discovery-item-0',
+  _ => throw ArgumentError.value(aggregate, 'aggregate'),
+};
+
+LearningCommand _courseOverflowCommand(
+  SqliteCourseLearningRepository repository,
+  _CourseOverflowFixture fixture,
+  CourseLearningState state,
+) {
+  final String activityId = fixture.activeActivityId;
+  final LearningAction action = switch (fixture.aggregate) {
+    'activities' => StartLearningRun(options: RunOptions()),
+    'mistakes' || 'summaries' => _wrongCourseAnswer(
+      fixture.registry.require(activityId).items.single,
+    ),
+    'completions' => const FinishLearningActivity(),
+    'bestScores' => LinkWordTiles(
+      indices: _wordGameScoringChain(state, activityId),
+    ),
+    'exposure' => ObserveAssistance(
+      items: <ItemContextKey>{
+        ItemContextKey(
+          itemId: 'task9-synthetic-discovery-item-0',
+          targetSound: _syntheticSound(0),
+        ),
+      },
+      flags: const <AssistanceFlag>{AssistanceFlag.explanationVisible},
+    ),
+    _ => throw ArgumentError.value(fixture.aggregate, 'aggregate'),
+  };
+  return repository.prepare(
+    state: state,
+    activityId: activityId,
+    action: action,
+  );
+}
+
+LearningAction _wrongCourseAnswer(LearningSourceItem item) => ChooseSound(
+  selectedSound: item.choices.firstWhere(
+    (String choice) => choice != item.expectedChoice,
+  ),
+  audioSource: authoredAudioSource(item)!,
+);
+
+List<int> _wordGameScoringChain(CourseLearningState state, String activityId) {
+  final WordGameCheckpoint checkpoint =
+      state.activities[activityId]!.snapshot as WordGameCheckpoint;
+  final List<int> chain = WordMatchEngine.fromState(
+    checkpoint.board,
+    random: Random(19),
+  ).findChain();
+  if (chain.length < 3) {
+    throw StateError('Synthetic word-game board has no scoring chain.');
+  }
+  return chain;
+}
+
+SqliteCourseLearningRepository _courseOverflowRepository(
+  LearningDatabaseHandle handle,
+  _CourseOverflowFixture fixture,
+) {
+  var tokenCounter = 0;
+  return SqliteCourseLearningRepository(
+    database: handle,
+    scope: fixture.scope,
+    authGeneration: 0,
+    currentAuth: () => LearningAuthScope(
+      owner: fixture.scope.owner,
+      generation: 0,
+      ready: true,
+    ),
+    backendOwner: () => fixture.scope.owner,
+    transitions: fixture.transitions,
+    clock: () => DateTime.utc(2026, 10, 19, 12),
+    newToken: () => _courseToken(++tokenCounter, prefix: 'r'),
+    random: Random(23),
+  );
+}
+
+Future<Map<String, Object?>> _qualifySentenceHuntSqlOverflow(
+  String aggregate,
+) async {
+  final Directory directory = await Directory.systemTemp.createTemp(
+    'sqlite-sentence-$aggregate-overflow-',
+  );
+  final File file = File('${directory.path}/learning.sqlite');
+  final LearningDatabaseHandle primary = _fileHandle(file);
+  final LearningDatabaseHandle independent = _fileHandle(file);
+  try {
+    final _SyntheticSentenceAggregateFixture fixture =
+        _syntheticSentenceAggregateFixture();
+    final _SentenceOverflowFixture controlFixture = await _seedSentenceOverflow(
+      primary,
+      catalogue: fixture.catalogue,
+      aggregate: aggregate,
+      count: 4095,
+      label: 'control',
+    );
+    await primary.reopen();
+    final SqliteSentenceHuntLearningRepository controlRepository =
+        _sentenceOverflowRepository(primary, controlFixture);
+    final SentenceHuntLearningState controlBefore = await controlRepository
+        .load();
+    SentenceHuntLearningStateValidator.validate(
+      controlBefore,
+      controlFixture.catalogue,
+    );
+    expect(_sentenceAggregateCount(controlBefore, aggregate), 4095);
+    final _SqlScopedSnapshot controlSeedSnapshot =
+        await _captureSqlScopedSnapshot(
+          await primary.open(),
+          controlFixture.scopeId,
+        );
+    expect(
+      controlSeedSnapshot.rowCounts[_sentenceSqlTableFor(aggregate)],
+      _expectedSentenceSqlRows(aggregate, 4095),
+    );
+    final SentenceHuntAction controlAction = _sentenceOverflowAction(
+      controlBefore,
+      controlFixture,
+    );
+    final SentenceHuntLearningCommand controlCommand = controlRepository
+        .prepare(
+          state: controlBefore,
+          sectionId: controlFixture.sectionId,
+          action: controlAction,
+        );
+    await controlRepository.submit(controlCommand);
+    await primary.reopen();
+    final SentenceHuntLearningState controlAfter = await controlRepository
+        .load();
+    SentenceHuntLearningStateValidator.validate(
+      controlAfter,
+      controlFixture.catalogue,
+    );
+    expect(_sentenceAggregateCount(controlAfter, aggregate), 4096);
+    final _SqlScopedSnapshot controlSnapshot = await _captureSqlScopedSnapshot(
+      await primary.open(),
+      controlFixture.scopeId,
+    );
+    expect(
+      controlSnapshot.rowCounts[_sentenceSqlTableFor(aggregate)],
+      _expectedSentenceSqlRows(aggregate, 4096),
+    );
+
+    final _SentenceOverflowFixture overflowFixture =
+        await _seedSentenceOverflow(
+          primary,
+          catalogue: fixture.catalogue,
+          aggregate: aggregate,
+          count: 4096,
+          label: 'overflow',
+        );
+    await primary.reopen();
+    final SqliteSentenceHuntLearningRepository overflowRepository =
+        _sentenceOverflowRepository(primary, overflowFixture);
+    final SentenceHuntLearningState loaded = await overflowRepository.load();
+    SentenceHuntLearningStateValidator.validate(
+      loaded,
+      overflowFixture.catalogue,
+    );
+    expect(_sentenceAggregateCount(loaded, aggregate), 4096);
+    final _SqlScopedSnapshot before = await _captureSqlScopedSnapshot(
+      await primary.open(),
+      overflowFixture.scopeId,
+    );
+    expect(
+      before.rowCounts[_sentenceSqlTableFor(aggregate)],
+      _expectedSentenceSqlRows(aggregate, 4096),
+    );
+    final SentenceHuntAction overflowAction = _sentenceOverflowAction(
+      loaded,
+      overflowFixture,
+    );
+    final SentenceHuntLearningCommand overflowCommand = _sentenceCommand(
+      overflowFixture.catalogue,
+      overflowFixture.scope,
+      loaded,
+      overflowFixture.sectionId,
+      overflowAction,
+    );
+    late final LearningInvalidCommandException typedError;
+    try {
+      await overflowRepository.submit(overflowCommand);
+      fail('A valid distinct 4097th $aggregate identity must be rejected.');
+    } on LearningInvalidCommandException catch (error) {
+      typedError = error;
+    }
+    expect(typedError.cause, isA<SentenceHuntCapacityException>());
+    final SentenceHuntCapacityException capacity =
+        typedError.cause! as SentenceHuntCapacityException;
+    expect(capacity.aggregate, aggregate);
+    expect(capacity.limit, 4096);
+
+    await primary.close();
+    await independent.reopen();
+    final SqliteSentenceHuntLearningRepository reopenedRepository =
+        _sentenceOverflowRepository(independent, overflowFixture);
+    final SentenceHuntLearningState reopened = await reopenedRepository.load();
+    SentenceHuntLearningStateValidator.validate(
+      reopened,
+      overflowFixture.catalogue,
+    );
+    final _SqlScopedSnapshot after = await _captureSqlScopedSnapshot(
+      await independent.open(),
+      overflowFixture.scopeId,
+    );
+    final bool unchanged = before.normalizedRows == after.normalizedRows;
+    expect(unchanged, isTrue);
+    expect(_sentenceAggregateCount(reopened, aggregate), 4096);
+    expect(
+      after.rowCounts[_sentenceSqlTableFor(aggregate)],
+      _expectedSentenceSqlRows(aggregate, 4096),
+    );
+
+    final Map<String, Object?> evidence = <String, Object?>{
+      'family': 'sentence-hunt',
+      'collection': aggregate,
+      'controlSeedTypedIdentities': 4095,
+      'controlSeedSqlRows':
+          controlSeedSnapshot.rowCounts[_sentenceSqlTableFor(aggregate)],
+      'controlCommittedBelowCap': true,
+      'controlLoadedTypedIdentitiesAfterCommit': _sentenceAggregateCount(
+        controlAfter,
+        aggregate,
+      ),
+      'controlSqlRowsAfterCommit':
+          controlSnapshot.rowCounts[_sentenceSqlTableFor(aggregate)],
+      'controlCommand': <String, Object?>{
+        'action': controlCommand.action.runtimeType.toString(),
+        'sectionId': controlCommand.sectionId,
+        'expectedScopeRevision': controlCommand.expectedScopeRevision,
+        'expectedCursor': <String, int>{
+          'generation': controlCommand.expected.generation,
+          'sequence': controlCommand.expected.sequence,
+          'revision': controlCommand.expected.revision,
+        },
+        'token': controlCommand.token,
+      },
+      'controlSeedHeader': <String, Object?>{
+        'revision': controlSeedSnapshot.header['revision'],
+        'commitOrdinal': controlSeedSnapshot.header['commit_ordinal'],
+      },
+      'controlHeaderAfterCommit': <String, Object?>{
+        'revision': controlSnapshot.header['revision'],
+        'commitOrdinal': controlSnapshot.header['commit_ordinal'],
+      },
+      'loadedTypedIdentitiesBeforeOverflow': _sentenceAggregateCount(
+        loaded,
+        aggregate,
+      ),
+      'sqlRowsBeforeOverflow':
+          before.rowCounts[_sentenceSqlTableFor(aggregate)],
+      'overflowIdentity': _sentenceOverflowIdentity(aggregate, overflowFixture),
+      'overflowCommand': <String, Object?>{
+        'action': overflowCommand.action.runtimeType.toString(),
+        'sectionId': overflowCommand.sectionId,
+        'expectedScopeRevision': overflowCommand.expectedScopeRevision,
+        'expectedCursor': <String, int>{
+          'generation': overflowCommand.expected.generation,
+          'sequence': overflowCommand.expected.sequence,
+          'revision': overflowCommand.expected.revision,
+        },
+        'token': overflowCommand.token,
+      },
+      'typedError': typedError.runtimeType.toString(),
+      'typedErrorCause': capacity.runtimeType.toString(),
+      'capacityAggregate': capacity.aggregate,
+      'capacityLimit': capacity.limit,
+      'typedCapacityRejected': true,
+      'normalizedRowCountsBefore': before.rowCounts,
+      'normalizedRowCountsAfterIndependentReopen': after.rowCounts,
+      'headerBefore': <String, Object?>{
+        'revision': before.header['revision'],
+        'commitOrdinal': before.header['commit_ordinal'],
+      },
+      'headerAfter': <String, Object?>{
+        'revision': after.header['revision'],
+        'commitOrdinal': after.header['commit_ordinal'],
+      },
+      'normalizedSnapshotBytes': utf8.encode(before.normalizedRows).length,
+      'normalizedSnapshotUnchangedAfterIndependentReopen': unchanged,
+    };
+    // ignore: avoid_print
+    print('TASK9 SQL OVERFLOW ${jsonEncode(evidence)}');
+    return evidence;
+  } finally {
+    await primary.close();
+    await independent.close();
+    await directory.delete(recursive: true);
+  }
+}
+
+final class _SentenceOverflowFixture {
+  const _SentenceOverflowFixture({
+    required this.scope,
+    required this.scopeId,
+    required this.catalogue,
+    required this.transitions,
+    required this.aggregate,
+    required this.count,
+    required this.sectionId,
+  });
+
+  final SentenceHuntProfileScope scope;
+  final int scopeId;
+  final SentenceHuntCatalogue catalogue;
+  final SentenceHuntTransitionEngine transitions;
+  final String aggregate;
+  final int count;
+  final String sectionId;
+}
+
+SentenceHuntProfileScope _sentenceOverflowScope(
+  String aggregate,
+  String label,
+) => SentenceHuntProfileScope(
+  courseId: 'en-fr',
+  owner: LearningOwner.account('task9-sentence-sql-$aggregate-$label'),
+);
+
+Future<_SentenceOverflowFixture> _seedSentenceOverflow(
+  LearningDatabaseHandle handle, {
+  required SentenceHuntCatalogue catalogue,
+  required String aggregate,
+  required int count,
+  required String label,
+}) async {
+  final String sectionId = catalogue.sections.first.id;
+  final SentenceHuntProfileScope scope = _sentenceOverflowScope(
+    aggregate,
+    label,
+  );
+  final SentenceHuntTransitionEngine transitions = SentenceHuntTransitionEngine(
+    catalogue: catalogue,
+  );
+  final SentenceHuntLearningSqlAdapter adapter = SentenceHuntLearningSqlAdapter(
+    scope: scope,
+    transitions: transitions,
+    historyLimit: 2000,
+  );
+  final LearningDatabase database = await handle.open();
+  final int scopeId = await database.ensureScope(adapter.scope);
+  var state = SentenceHuntLearningState.empty(scope);
+
+  await database.transaction(() async {
+    final SentenceHuntLearningCommand startCommand = _prepareSentenceSqlSeed(
+      transitions,
+      state,
+      sectionId,
+      StartSentenceHuntRun(
+        sessionId: 'task9-sql-$aggregate-$label-start',
+        policy: catalogue.section(sectionId).policy,
+        mode: SentenceHuntRunMode.practice,
+      ),
+    );
+    SentenceHuntLearningState started = _evaluateSentenceCommand(
+      transitions,
+      state,
+      startCommand,
+    );
+    if (aggregate == 'mistakes' || aggregate == 'summaries') {
+      started = _sentenceStateAtSingleAggregateLimit(
+        started,
+        _SyntheticSentenceAggregateFixture(catalogue, sectionId),
+        aggregate,
+        identityCount: count,
+      );
+      await _persistSentenceSeedTransition(
+        database,
+        adapter,
+        scopeId,
+        state,
+        startCommand,
+        started,
+      );
+      state = started;
+    } else {
+      await _persistSentenceSeedTransition(
+        database,
+        adapter,
+        scopeId,
+        state,
+        startCommand,
+        started,
+      );
+      state = started;
+      final SentenceHuntSection section = catalogue.section(sectionId);
+      for (int index = 0; index < section.items.length; index++) {
+        final LessonSectionSession session = _sentenceSession(state, section);
+        final SentenceHuntItem item = catalogue.item(
+          sectionId,
+          session.currentItemId!,
+        );
+        final SentenceHuntCommandAndState answer = _sentenceSeedTransition(
+          transitions,
+          state,
+          sectionId,
+          AnswerSentenceHuntItem(
+            _sentenceAnswer(item, state, session, correct: true),
+          ),
+        );
+        SentenceHuntLearningState answerAfter = answer.state;
+        if (aggregate == 'teachingExposure' &&
+            index == section.items.length - 1) {
+          answerAfter = _sentenceStateAtSingleAggregateLimit(
+            answerAfter,
+            _SyntheticSentenceAggregateFixture(catalogue, sectionId),
+            aggregate,
+            identityCount: count,
+          );
+        }
+        await _persistSentenceSeedTransition(
+          database,
+          adapter,
+          scopeId,
+          state,
+          answer.command,
+          answerAfter,
+        );
+        state = answerAfter;
+        if (index < section.items.length - 1) {
+          final SentenceHuntCommandAndState advance = _sentenceSeedTransition(
+            transitions,
+            state,
+            sectionId,
+            const AdvanceSentenceHuntItem(),
+          );
+          await _persistSentenceSeedTransition(
+            database,
+            adapter,
+            scopeId,
+            state,
+            advance.command,
+            advance.state,
+          );
+          state = advance.state;
+        }
+      }
+      if (aggregate == 'completions') {
+        final SentenceHuntCommandAndState debrief = _sentenceSeedTransition(
+          transitions,
+          state,
+          sectionId,
+          const AdvanceSentenceHuntItem(),
+        );
+        final SentenceHuntLearningState capped =
+            _sentenceStateAtSingleAggregateLimit(
+              debrief.state,
+              _SyntheticSentenceAggregateFixture(catalogue, sectionId),
+              aggregate,
+              identityCount: count,
+            );
+        await _persistSentenceSeedTransition(
+          database,
+          adapter,
+          scopeId,
+          state,
+          debrief.command,
+          capped,
+        );
+        state = capped;
+      }
+    }
+    SentenceHuntLearningStateValidator.validate(state, catalogue);
+  });
+
+  return _SentenceOverflowFixture(
+    scope: scope,
+    scopeId: scopeId,
+    catalogue: catalogue,
+    transitions: transitions,
+    aggregate: aggregate,
+    count: count,
+    sectionId: sectionId,
+  );
+}
+
+final class SentenceHuntCommandAndState {
+  const SentenceHuntCommandAndState(this.command, this.state);
+
+  final SentenceHuntLearningCommand command;
+  final SentenceHuntLearningState state;
+}
+
+SentenceHuntCommandAndState _sentenceSeedTransition(
+  SentenceHuntTransitionEngine transitions,
+  SentenceHuntLearningState before,
+  String sectionId,
+  SentenceHuntAction action,
+) {
+  final SentenceHuntLearningCommand command = _prepareSentenceSqlSeed(
+    transitions,
+    before,
+    sectionId,
+    action,
+  );
+  return SentenceHuntCommandAndState(
+    command,
+    _evaluateSentenceCommand(transitions, before, command),
+  );
+}
+
+SentenceHuntLearningCommand _prepareSentenceSqlSeed(
+  SentenceHuntTransitionEngine transitions,
+  SentenceHuntLearningState state,
+  String sectionId,
+  SentenceHuntAction action,
+) => transitions.prepare(
+  state: state,
+  sectionId: sectionId,
+  action: action,
+  authGeneration: 0,
+  token: _sentenceToken(state.commitOrdinal + 1),
+  submittedAt: _sentenceTime(state.commitOrdinal + 1),
+);
+
+SentenceHuntLearningState _evaluateSentenceCommand(
+  SentenceHuntTransitionEngine transitions,
+  SentenceHuntLearningState state,
+  SentenceHuntLearningCommand command,
+) => transitions
+    .evaluate(state: state, command: command, committedAt: command.submittedAt)
+    .nextState;
+
+Future<void> _persistSentenceSeedTransition(
+  LearningDatabase database,
+  SentenceHuntLearningSqlAdapter adapter,
+  int scopeId,
+  SentenceHuntLearningState before,
+  SentenceHuntLearningCommand command,
+  SentenceHuntLearningState after,
+) async {
+  await adapter.persist(database, scopeId, before, command, after);
+  final int changedRows = await database.compareAndSwapLearningScope(
+    scopeId: scopeId,
+    expectedRevision: before.revision,
+    expectedCommitOrdinal: before.commitOrdinal,
+    nextRevision: after.revision,
+    nextCommitOrdinal: after.commitOrdinal,
+  );
+  expect(changedRows, 1);
+}
+
+SentenceHuntLearningState _copySentenceState(
+  SentenceHuntLearningState state, {
+  Map<SentenceHuntMistakeKey, SentenceHuntMistake>? mistakes,
+  Map<SentenceHuntSummaryKey, SentenceHuntSummary>? summaries,
+  List<SentenceHuntCompletion>? completions,
+  Set<SentenceHuntExposureKey>? teachingExposure,
+}) => SentenceHuntLearningState(
+  scope: state.scope,
+  revision: state.revision,
+  commitOrdinal: state.commitOrdinal,
+  slots: state.slots,
+  attempts: state.attempts,
+  receipts: state.receipts,
+  mistakes: mistakes ?? state.mistakes,
+  summaries: summaries ?? state.summaries,
+  completions: completions ?? state.completions,
+  teachingExposure: teachingExposure ?? state.teachingExposure,
+);
+
+int _sentenceAggregateCount(
+  SentenceHuntLearningState state,
+  String aggregate,
+) => switch (aggregate) {
+  'mistakes' => state.mistakes.length,
+  'summaries' => state.summaries.length,
+  'completions' => state.completions.length,
+  'teachingExposure' => state.teachingExposure.length,
+  _ => throw ArgumentError.value(aggregate, 'aggregate'),
+};
+
+String _sentenceSqlTableFor(String aggregate) => switch (aggregate) {
+  'mistakes' => 'learning_mistakes',
+  'summaries' => 'learning_summaries',
+  'completions' => 'learning_completions',
+  'teachingExposure' => 'learning_exposure',
+  _ => throw ArgumentError.value(aggregate, 'aggregate'),
+};
+
+String _sentenceOverflowIdentity(
+  String aggregate,
+  _SentenceOverflowFixture fixture,
+) => switch (aggregate) {
+  'mistakes' || 'summaries' =>
+    '${fixture.sectionId}/${fixture.catalogue.sections.first.items.first.identity.itemId}/4097',
+  'completions' => '${fixture.sectionId}/4097/1/80',
+  'teachingExposure' => '${fixture.sectionId}/4097',
+  _ => throw ArgumentError.value(aggregate, 'aggregate'),
+};
+
+SentenceHuntAction _sentenceOverflowAction(
+  SentenceHuntLearningState state,
+  _SentenceOverflowFixture fixture,
+) => switch (fixture.aggregate) {
+  'mistakes' || 'summaries' => _wrongAnswerAction(
+    fixture.catalogue,
+    state,
+    fixture.sectionId,
+  ),
+  'completions' => const FinishSentenceHuntRun(),
+  'teachingExposure' => const AdvanceSentenceHuntItem(),
+  _ => throw ArgumentError.value(fixture.aggregate, 'aggregate'),
+};
+
+SqliteSentenceHuntLearningRepository _sentenceOverflowRepository(
+  LearningDatabaseHandle handle,
+  _SentenceOverflowFixture fixture,
+) {
+  var tokenCounter = 0;
+  return SqliteSentenceHuntLearningRepository(
+    database: handle,
+    scope: fixture.scope,
+    authGeneration: 0,
+    currentAuth: () => LearningAuthScope(
+      owner: fixture.scope.owner,
+      generation: 0,
+      ready: true,
+    ),
+    backendOwner: () => fixture.scope.owner,
+    transitions: fixture.transitions,
+    clock: () => DateTime.utc(2026, 10, 19, 12),
+    newToken: () => _sentenceToken(++tokenCounter + 900000),
+  );
+}
+
 MapEntry<MistakeKey, LearningMistake> _courseMistake({
   required int index,
   required DateTime timestamp,
@@ -786,13 +2530,15 @@ LearningCompletion _legacyCourseCompletion(int index, DateTime committedAt) =>
       committedAt: committedAt,
     );
 
-LearningActivityDefinition _syntheticWordGameDefinition(int index) =>
-    LearningActivityDefinition(
-      id: _syntheticWordGameId(index),
-      kind: LearningActivityKind.wordGame,
-      contentRevision: 1,
-      items: const <LearningSourceItem>[],
-    );
+LearningActivityDefinition _syntheticWordGameDefinition(
+  int index, {
+  List<LearningSourceItem> items = const <LearningSourceItem>[],
+}) => LearningActivityDefinition(
+  id: _syntheticWordGameId(index),
+  kind: LearningActivityKind.wordGame,
+  contentRevision: 1,
+  items: items,
+);
 
 String _syntheticWordGameId(int index) => 'arcade:task9-synthetic-game-$index';
 
@@ -1151,8 +2897,9 @@ SentenceHuntAction _wrongAnswerAction(
 SentenceHuntLearningState _sentenceStateAtSingleAggregateLimit(
   SentenceHuntLearningState state,
   _SyntheticSentenceAggregateFixture fixture,
-  String aggregate,
-) {
+  String aggregate, {
+  int identityCount = 4096,
+}) {
   final Map<SentenceHuntMistakeKey, SentenceHuntMistake> mistakes =
       Map<SentenceHuntMistakeKey, SentenceHuntMistake>.of(state.mistakes);
   final Map<SentenceHuntSummaryKey, SentenceHuntSummary> summaries =
@@ -1164,7 +2911,7 @@ SentenceHuntLearningState _sentenceStateAtSingleAggregateLimit(
   );
   final DateTime timestamp = DateTime.utc(2026, 10, 19);
 
-  for (int revision = 1; revision <= 4096; revision++) {
+  for (int revision = 1; revision <= identityCount; revision++) {
     final SentenceHuntContentIdentity content = fixture.historicalIdentity(
       revision,
     );
@@ -1224,13 +2971,8 @@ SentenceHuntLearningState _sentenceStateAtSingleAggregateLimit(
     }
   }
 
-  return SentenceHuntLearningState(
-    scope: state.scope,
-    revision: state.revision,
-    commitOrdinal: state.commitOrdinal,
-    slots: state.slots,
-    attempts: state.attempts,
-    receipts: state.receipts,
+  return _copySentenceState(
+    state,
     mistakes: mistakes,
     summaries: summaries,
     completions: completions,
