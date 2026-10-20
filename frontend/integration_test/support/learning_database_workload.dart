@@ -34,6 +34,7 @@ import 'package:linguist/src/core/course/sentence_hunt_learning_store.dart'
 import 'package:linguist/src/core/course/sentence_hunt_learning_transition.dart';
 import 'package:linguist/src/core/course/storage/comparison_learning_sql_repository.dart';
 import 'package:linguist/src/core/course/storage/comparison_learning_command_codec.dart';
+import 'package:linguist/src/core/course/storage/comparison_learning_sql_adapter.dart';
 import 'package:linguist/src/core/course/storage/course_learning_sql_adapter.dart';
 import 'package:linguist/src/core/course/storage/course_learning_sql_repository.dart';
 import 'package:linguist/src/core/course/storage/learning_database.dart'
@@ -63,12 +64,11 @@ learningOverflowQualificationStatusByFamily = <String, String>{
       'course fixture took 249,343 ms, so that route was not safely bounded '
       'for this unit.',
   'comparison':
-      'OPEN — the public comparison catalogue requires exactly 10 '
-      'exercises, so a valid 4,097th pair identity cannot be constructed '
-      'without changing production content or validation. Its constructor '
-      'is private and the public validator rejects non-10 catalogues. SQL '
-      'overflow atomicity is not demonstrated; the controller must resolve '
-      'this acceptance conflict.',
+      'UNREACHABLE / NOT RUN — generic 4,096→4,097 comparison identity '
+      'overflow is not reachable with the exact 10-exercise catalogue; no '
+      'SQL atomicity claim is made for that boundary. Separate reachable-bound '
+      'coverage uses 10 mistake identities, 10 typed summary identities '
+      '(30 SQL bucket rows), 100 completion thresholds, and one slot.',
   'sentence-hunt':
       'OPEN — SQL-backed 4,096/4,097 atomicity is not qualified. Synthetic '
       'validator and SQL-adapter evaluation tests exercise valid aggregate '
@@ -1955,6 +1955,347 @@ bool _hasCompleteSqlBatches(List<Map<String, Object?>> rows) {
 
 bool _sameStringIds(Set<String> left, Set<String> right) =>
     left.length == right.length && left.containsAll(right);
+
+/// Qualifies reachable comparison aggregate identities using a bounded
+/// file-backed SQL fixture. The 100 threshold histories are evaluated purely;
+/// only the final legal transition is persisted during fixture setup.
+Future<Map<String, Object?>> qualifyComparisonReachableBounds(
+  LearningDatabaseHandle handle, {
+  required String runId,
+}) async {
+  const int historyLimit = 20;
+  final _WorkloadHarness harness = _WorkloadHarness(
+    runId,
+    historyLimit: historyLimit,
+  );
+  final ComparisonLearningSqlAdapter adapter = ComparisonLearningSqlAdapter(
+    scope: harness.comparisonDomainScope,
+    transitions: harness.comparisonTransitions,
+    historyLimit: historyLimit,
+  );
+  var pureTransitionCommands = 0;
+
+  ({ComparisonLearningCommand command, ComparisonLearningState state})
+  prepareAndEvaluate(ComparisonLearningState before, ComparisonAction action) {
+    final DateTime submittedAt = harness.now();
+    final ComparisonLearningCommand command = harness.comparisonTransitions
+        .prepare(
+          state: before,
+          activityId: harness.catalogue.activityId,
+          action: action,
+          authGeneration: harness.authGeneration,
+          token: harness.nextToken(),
+          submittedAt: submittedAt,
+        );
+    final ComparisonLearningState next = adapter
+        .evaluate(
+          before: before,
+          command: command,
+          nextRevision: before.revision + 1,
+          nextCommitOrdinal: before.commitOrdinal + 1,
+          committedAt: submittedAt,
+        )
+        .state;
+    pureTransitionCommands++;
+    return (command: command, state: next);
+  }
+
+  ComparisonLearningState state = ComparisonLearningState.empty(
+    harness.comparisonDomainScope,
+  );
+  for (int threshold = 1; threshold <= 100; threshold++) {
+    state = prepareAndEvaluate(
+      state,
+      StartComparisonRun(
+        sessionId: 'task9-$runId-threshold-$threshold',
+        policy: LessonPolicy(completionThresholdPercent: threshold),
+      ),
+    ).state;
+    for (int index = 0; index < harness.catalogue.exercises.length; index++) {
+      final LessonSectionSession session = _comparisonSession(
+        state,
+        harness.catalogue,
+      );
+      final ComparisonExercise exercise = harness.catalogue.exercise(
+        session.currentItemId!,
+      );
+      state = prepareAndEvaluate(
+        state,
+        AnswerComparisonPair(
+          _comparisonAnswer(
+            harness,
+            exercise,
+            runGeneration: state.slot!.cursor.generation,
+            round: session.round,
+            correct: true,
+          ),
+        ),
+      ).state;
+      state = prepareAndEvaluate(state, const AdvanceComparisonPair()).state;
+    }
+    state = prepareAndEvaluate(
+      state,
+      const FinishComparisonRun(recordCompletion: true),
+    ).state;
+  }
+
+  state = prepareAndEvaluate(
+    state,
+    StartComparisonRun(
+      sessionId: 'task9-$runId-reachable-mistakes',
+      policy: LessonPolicy(),
+    ),
+  ).state;
+  ComparisonLearningState? fixtureBefore;
+  ComparisonLearningCommand? fixtureCommand;
+  ComparisonLearningState? fixtureAfter;
+  for (int index = 0; index < harness.catalogue.exercises.length; index++) {
+    final LessonSectionSession session = _comparisonSession(
+      state,
+      harness.catalogue,
+    );
+    final ComparisonExercise exercise = harness.catalogue.exercise(
+      session.currentItemId!,
+    );
+    if (index == harness.catalogue.exercises.length - 1) {
+      fixtureBefore = state;
+      final ({ComparisonLearningCommand command, ComparisonLearningState state})
+      finalAnswer = prepareAndEvaluate(
+        state,
+        AnswerComparisonPair(
+          _comparisonAnswer(
+            harness,
+            exercise,
+            runGeneration: state.slot!.cursor.generation,
+            round: session.round,
+            correct: false,
+          ),
+        ),
+      );
+      fixtureCommand = finalAnswer.command;
+      fixtureAfter = finalAnswer.state;
+      state = fixtureAfter;
+    } else {
+      state = prepareAndEvaluate(
+        state,
+        AnswerComparisonPair(
+          _comparisonAnswer(
+            harness,
+            exercise,
+            runGeneration: state.slot!.cursor.generation,
+            round: session.round,
+            correct: false,
+          ),
+        ),
+      ).state;
+      state = prepareAndEvaluate(state, const AdvanceComparisonPair()).state;
+    }
+  }
+
+  final ComparisonLearningState before = fixtureBefore!;
+  final ComparisonLearningCommand command = fixtureCommand!;
+  final ComparisonLearningState after = fixtureAfter!;
+  final int scopeId;
+  final LearningDatabase database = await handle.open();
+  await database.ensureScope(harness.comparisonStorageScope);
+  scopeId = await _scopeId(database, harness.comparisonStorageScope);
+  await database.transaction(() async {
+    if (await database.acquireLearningScopeWriteLock(scopeId) != 1) {
+      throw StateError('Could not lock comparison fixture scope.');
+    }
+    final int seededHeaderRows = await database.customUpdate(
+      'UPDATE learning_scopes SET revision = ?, commit_ordinal = ? '
+      'WHERE id = ? AND revision = 0 AND commit_ordinal = 0',
+      variables: <Variable<Object>>[
+        Variable<int>(before.revision),
+        Variable<int>(before.commitOrdinal),
+        Variable<int>(scopeId),
+      ],
+      updates: <TableInfo>{database.learningScopes},
+    );
+    if (seededHeaderRows != 1) {
+      throw StateError('Could not stage the legal comparison predecessor.');
+    }
+    await adapter.persist(database, scopeId, before, command, after);
+    final int casRows = await database.compareAndSwapLearningScope(
+      scopeId: scopeId,
+      expectedRevision: before.revision,
+      expectedCommitOrdinal: before.commitOrdinal,
+      nextRevision: after.revision,
+      nextCommitOrdinal: after.commitOrdinal,
+    );
+    if (casRows != 1) {
+      throw StateError('Comparison fixture scope CAS did not commit.');
+    }
+  });
+
+  await handle.reopen();
+  final SqliteComparisonLearningRepository repository = harness
+      .comparisonRepository(handle);
+  final ComparisonLearningState reopened = await repository.load();
+  final LearningDatabase reopenedDatabase = await handle.open();
+  final Map<String, int> rowCounts = await _readRowCounts(
+    reopenedDatabase,
+    harness.comparisonStorageScope,
+    family: 'comparison',
+  );
+  final Map<String, List<String>> sqlAggregates = await _aggregateSqlRows(
+    reopenedDatabase,
+    harness.comparisonStorageScope,
+  );
+  final bool aggregateSqlMatchesTypedState = learningAggregateProjectionMatches(
+    sqlAggregates,
+    _typedAggregateRows('comparison', reopened),
+  );
+  final List<int> completionThresholds = <int>[
+    for (final ComparisonCompletion completion in reopened.completions)
+      completion.thresholdPercent,
+  ]..sort();
+  final ComparisonCommit normalCommand = await harness.commitComparison(
+    repository,
+    reopened,
+    StartComparisonRun(
+      sessionId: 'task9-$runId-reopened-command',
+      policy: LessonPolicy(),
+    ),
+  );
+  final ComparisonLearningState afterNormalCommand = await repository.load();
+  final bool actualSqlRepositoryCommandCommitted =
+      !normalCommand.duplicate &&
+      afterNormalCommand.commitOrdinal == reopened.commitOrdinal + 1 &&
+      afterNormalCommand.slot!.latestReceipt.commitOrdinal ==
+          afterNormalCommand.commitOrdinal;
+
+  final ComparisonPairMistakeKey extraMistakeKey = ComparisonPairMistakeKey(
+    scope: afterNormalCommand.scope,
+    activityId: harness.catalogue.activityId,
+    pairId: 'fr07b-pair-11',
+    contentRevision: harness.catalogue.contentRevision,
+  );
+  final DateTime extraMistakeAt = harness.now();
+  final ComparisonPairMistake extraMistake = ComparisonPairMistake(
+    scope: afterNormalCommand.scope,
+    key: extraMistakeKey,
+    firstWrongAt: extraMistakeAt,
+    latestWrongAt: extraMistakeAt,
+    failureCount: 1,
+  );
+  final ComparisonLearningState withExtraMistake = ComparisonLearningState(
+    scope: afterNormalCommand.scope,
+    revision: afterNormalCommand.revision,
+    commitOrdinal: afterNormalCommand.commitOrdinal,
+    slot: afterNormalCommand.slot,
+    attempts: afterNormalCommand.attempts,
+    receipts: afterNormalCommand.receipts,
+    mistakes: <ComparisonPairMistakeKey, ComparisonPairMistake>{
+      ...afterNormalCommand.mistakes,
+      extraMistakeKey: extraMistake,
+    },
+    summaries: afterNormalCommand.summaries,
+    completions: afterNormalCommand.completions,
+  );
+  bool rejectsInvalidState(ComparisonLearningState invalidState) {
+    try {
+      repository.prepare(
+        state: invalidState,
+        activityId: harness.catalogue.activityId,
+        action: StartComparisonRun(
+          sessionId: 'task9-$runId-invalid-extra',
+          policy: LessonPolicy(),
+        ),
+      );
+    } on LearningInvalidCommandException {
+      return true;
+    }
+    return false;
+  }
+
+  final ComparisonSummaryKey extraSummaryKey = ComparisonSummaryKey(
+    scope: afterNormalCommand.scope,
+    activityId: harness.catalogue.activityId,
+    pairId: 'fr07b-pair-11',
+    contentRevision: harness.catalogue.contentRevision,
+  );
+  final ComparisonPairSummary extraSummary = ComparisonPairSummary(
+    key: extraSummaryKey,
+    firstInRun: ComparisonCount(correct: 0, total: 0),
+    repeatInRun: ComparisonCount(correct: 0, total: 0),
+    afterDebrief: ComparisonCount(correct: 0, total: 0),
+  );
+  final ComparisonLearningState withExtraSummary = ComparisonLearningState(
+    scope: afterNormalCommand.scope,
+    revision: afterNormalCommand.revision,
+    commitOrdinal: afterNormalCommand.commitOrdinal,
+    slot: afterNormalCommand.slot,
+    attempts: afterNormalCommand.attempts,
+    receipts: afterNormalCommand.receipts,
+    mistakes: afterNormalCommand.mistakes,
+    summaries: <ComparisonSummaryKey, ComparisonPairSummary>{
+      ...afterNormalCommand.summaries,
+      extraSummaryKey: extraSummary,
+    },
+    completions: afterNormalCommand.completions,
+  );
+  final LearningDatabase beforeRejectDatabase = await handle.open();
+  final String snapshotBeforeRejection = await _scopeSnapshot(
+    beforeRejectDatabase,
+    harness.comparisonStorageScope,
+  );
+  final Map<String, int> countsBeforeRejection = await _readRowCounts(
+    beforeRejectDatabase,
+    harness.comparisonStorageScope,
+    family: 'comparison',
+  );
+  final bool extraMistakeRejected = rejectsInvalidState(withExtraMistake);
+  final bool extraSummaryRejected = rejectsInvalidState(withExtraSummary);
+  await handle.reopen();
+  final ComparisonLearningState postRejectionReopen = await repository.load();
+  final String snapshotAfterReopen = await _scopeSnapshot(
+    await handle.open(),
+    harness.comparisonStorageScope,
+  );
+  final Map<String, int> countsAfterRejection = await _readRowCounts(
+    await handle.open(),
+    harness.comparisonStorageScope,
+    family: 'comparison',
+  );
+
+  final Map<String, Object?> evidence = <String, Object?>{
+    'pureTransitionCommands': pureTransitionCommands,
+    'fixturePredecessorCommitOrdinal': before.commitOrdinal,
+    'commitOrdinalAtPersistedBoundary': reopened.commitOrdinal,
+    'latestReceiptOrdinalAtBoundary':
+        reopened.slot!.latestReceipt.commitOrdinal,
+    'currentRunGeneration': reopened.slot!.cursor.generation,
+    'typedMistakeIdentities': reopened.mistakes.length,
+    'typedSummaryIdentities': reopened.summaries.length,
+    'sqlSummaryBucketRows': rowCounts['summaries'],
+    'typedCompletionIdentities': reopened.completions.length,
+    'completionThresholds': completionThresholds,
+    'currentSlots': reopened.slot == null ? 0 : 1,
+    'sqlMistakeRows': rowCounts['mistakes'],
+    'sqlCompletionRows': rowCounts['completions'],
+    'sqlRunRows': rowCounts['runs'],
+    'aggregateSqlMatchesTypedState': aggregateSqlMatchesTypedState,
+    'actualSqlRepositoryCommandCommitted': actualSqlRepositoryCommandCommitted,
+    'actualSqlRepositoryCommandCommitOrdinal': afterNormalCommand.commitOrdinal,
+    'actualSqlRepositoryCommandGeneration':
+        afterNormalCommand.slot!.cursor.generation,
+    'scopeRevisionBeforeRejectedOperation': afterNormalCommand.revision,
+    'scopeCommitOrdinalBeforeRejectedOperation':
+        afterNormalCommand.commitOrdinal,
+    'extraMistakeRejected': extraMistakeRejected,
+    'extraSummaryRejected': extraSummaryRejected,
+    'normalizedSnapshotUnchangedAfterReopen':
+        snapshotBeforeRejection == snapshotAfterReopen &&
+        postRejectionReopen.commitOrdinal == afterNormalCommand.commitOrdinal,
+    'normalizedRowCountsAtPersistedBoundary': rowCounts,
+    'normalizedRowCountsBeforeRejectedOperation': countsBeforeRejection,
+    'normalizedRowCountsAfterReopen': countsAfterRejection,
+  };
+  print('TASK9 COMPARISON REACHABLE BOUNDS ${jsonEncode(evidence)}');
+  return evidence;
+}
 
 /// Injects a family-specific failure after an answer's normalized row has
 /// started to persist, verifies the complete file snapshot is unchanged after

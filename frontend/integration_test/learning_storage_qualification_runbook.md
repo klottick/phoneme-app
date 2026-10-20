@@ -1,9 +1,12 @@
 # SQLite learning storage qualification runbook
 
 This is a test-only entrypoint; it is not a production route. Use the pinned
-Flutter SDK in `../.flutter-version`. The Task 1 smoke and Task 9 retention
-procedures below use a fresh browser profile; no existing browser profile or
-learning database is cleared or reused. Keep the chosen profile after the run.
+Flutter SDK in `../.flutter-version` (3.47.7). For the recovered Task 9
+worktree, prefix Flutter commands with the task-local SDK path
+`/home/klottick/develop/flutter-3.47.7-sqlite/bin`; do not alter global PATH or
+the original SDK. The Task 1 smoke and Task 9 retention procedures below use a
+fresh browser profile; no existing browser profile or learning database is
+cleared or reused. Keep the chosen profile after the run.
 
 ## Start the local app server
 
@@ -11,7 +14,7 @@ In one terminal, from the repository root:
 
 ```sh
 cd frontend
-PATH="/tmp/opencode/flutter-sdk-task1-3.47.7/bin:$PATH" flutter run \
+PATH="/home/klottick/develop/flutter-3.47.7-sqlite/bin:$PATH" flutter run \
   -d web-server \
   -t integration_test/learning_database_qualification_app.dart \
   --web-hostname 127.0.0.1 \
@@ -28,7 +31,8 @@ loopback connections, then run from `frontend`:
 
 ```sh
 CHROME_BIN=/absolute/path/to/chrome
-CHROME_EXECUTABLE="$CHROME_BIN" flutter drive \
+PATH="/home/klottick/develop/flutter-3.47.7-sqlite/bin:$PATH" \
+  CHROME_EXECUTABLE="$CHROME_BIN" flutter drive \
   --driver=test_driver/integration_test.dart \
   --driver-port=4444 \
   --chrome-binary="$CHROME_BIN" \
@@ -81,20 +85,59 @@ report.
 
 ## Task 9 native and web SQLite retention/restart qualification
 
-Use a fresh, unique run ID. The qualification owner is isolated as
-`sqlite-qualification-<run-id>` in course `en-fr`; no cloud transport or user
-credentials are used. The app uses the production SQL repositories. Record the
-backend, run ID, counts, summaries, latest receipt, logical SQLite page bytes,
-and durations shown after **Verify retention**. Page bytes are not a capacity or
-quota guarantee.
+### Current evidence and open gates (2026-10-20)
 
-### Native app and same-install restart
+- A local actual-Chrome 156/sharedIndexedDb **course-only subset** was observed:
+  two-tab stale-command conflict, exact frozen-command lost-ack replay with one
+  attempt, and same-profile browser restart. This is not comparison or
+  sentence-hunt evidence, not the 2,000-row three-family retention workload, and
+  not deployed-origin qualification.
+- Full-retention and full-cap qualification remain **OPEN**. The comparison
+  4,096→4,097 identity boundary is **UNREACHABLE / NOT RUN**, not a pass, under
+  the unchanged exact-10-exercise catalogue. The reachable comparison bounds
+  are 10 mistake identities, 10 typed summary identities (30 SQL bucket rows),
+  100 completion-threshold identities, and one slot. The focused file-SQL test
+  below covers those reachable bounds; it is fixture construction, not a
+  100-SQL-run or 2,000-command workload. Course and sentence-hunt SQL overflow
+  qualification remains OPEN pending their own tests.
+- Android/iOS runs were explicitly deferred by the user; native qualification
+  remains OPEN and is not waived. The platform procedures below are retained for
+  later authorized work and are not permission to run them now.
+
+### Comparison reachable aggregate bounds — focused file-SQL test
+
+From `frontend`, with the task-local SDK path above:
+
+```sh
+PATH="/home/klottick/develop/flutter-3.47.7-sqlite/bin:$PATH" \
+  flutter test --no-pub --concurrency=1 \
+  test/unit/learning_sql_recovery_test.dart \
+  --plain-name \
+  'comparison_reachable_aggregate_bounds_roundtrip_and_reject_extras_write_free'
+```
+
+This test legally evaluates thresholds 1–100 in memory with the comparison SQL
+adapter, then persists the final validator-accepted fixture in one setup
+transaction using the real adapter and scope CAS. It reopens and loads through
+the typed repository, submits one normal repository command, and checks
+write-free public-repository rejection of an extra mistake and summary identity
+against complete normalized snapshots. It does not exercise generic
+4,096→4,097 overflow or qualify full retention.
+
+Use a fresh, unique run ID for later platform procedures. The qualification
+owner is isolated as `sqlite-qualification-<run-id>` in course `en-fr`; no cloud
+transport or user credentials are used. The app uses the production SQL
+repositories. Record the backend, run ID, counts, summaries, latest receipt,
+logical SQLite page bytes, and durations shown after **Verify retention**. Page
+bytes are not a capacity or quota guarantee.
+
+### Native app and same-install restart — OPEN; Android/iOS user-deferred
 
 From `frontend`, build and run the app on an available Android device or iOS
 Simulator/device:
 
 ```sh
-PATH="/tmp/opencode/flutter-sdk-task1-3.47.7/bin:$PATH" flutter run \
+PATH="/home/klottick/develop/flutter-3.47.7-sqlite/bin:$PATH" flutter run \
   -d <device-id> \
   -t integration_test/learning_database_qualification_app.dart \
   --dart-define=learningRunId=<unique-run-id>
@@ -124,12 +167,13 @@ On physical iOS, close and reopen the same installed app through the app
 switcher. Never uninstall or clear app data between seeding and verification.
 A Linux file-backed test is not Android/iOS evidence.
 
-### Web integration and same-profile tabs/restart
+### Web integration and same-profile tabs/restart — full-retention OPEN
 
 Attempt the task's exact integration command from `frontend`:
 
 ```sh
-flutter drive --driver=test_driver/integration_test.dart \
+PATH="/home/klottick/develop/flutter-3.47.7-sqlite/bin:$PATH" \
+  flutter drive --driver=test_driver/integration_test.dart \
   --target=integration_test/learning_database_web_test.dart -d chrome
 ```
 
@@ -144,7 +188,7 @@ For manual same-profile qualification, run the qualification app on loopback:
 
 ```sh
 cd frontend
-PATH="/tmp/opencode/flutter-sdk-task1-3.47.7/bin:$PATH" flutter run \
+PATH="/home/klottick/develop/flutter-3.47.7-sqlite/bin:$PATH" flutter run \
   -d web-server \
   -t integration_test/learning_database_qualification_app.dart \
   --web-hostname 127.0.0.1 --web-port 7357

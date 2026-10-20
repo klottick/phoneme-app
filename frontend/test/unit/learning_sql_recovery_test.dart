@@ -211,17 +211,92 @@ void main() {
     },
   );
 
-  test('retention_report_separates_validator_and_sql_overflow_evidence', () {
-    const Map<String, String> overflow =
-        learningOverflowQualificationStatusByFamily;
-    expect(overflow['course'], contains('OPEN'));
-    expect(overflow['course'], contains('Validator-only'));
-    expect(overflow['course'], contains('SQL-backed'));
-    expect(overflow['comparison'], contains('OPEN'));
-    expect(overflow['comparison'], contains('exactly 10'));
-    expect(overflow['sentence-hunt'], contains('OPEN'));
-    expect(overflow['sentence-hunt'], contains('SQL-adapter evaluation'));
+  test('retention_report_marks_comparison_4096_boundary_unreachable', () async {
+    const String runId = 'comparison-overflow-report-test';
+    final Directory directory = await Directory.systemTemp.createTemp(
+      'sqlite-learning-overflow-report-',
+    );
+    final File file = File('${directory.path}/learning.sqlite');
+    final LearningDatabaseHandle handle = _fileHandle(file);
+    final LearningDatabaseHandle independentHandle = _fileHandle(file);
+    try {
+      await qualifyLearningRecovery(handle, independentHandle, runId: runId);
+      final LearningWorkloadReport report =
+          await verifyLearningAtRetentionLimits(
+            handle,
+            runId: '$runId-recovery',
+          );
+      final Map<String, String> overflow = Map<String, String>.from(
+        report.toJson()['overflowResultByFamily'] as Map,
+      );
+      expect(overflow['course'], contains('OPEN'));
+      expect(overflow['course'], contains('Validator-only'));
+      expect(overflow['course'], contains('SQL-backed'));
+      expect(overflow['comparison'], contains('UNREACHABLE / NOT RUN'));
+      expect(overflow['comparison'], contains('4,096→4,097'));
+      expect(overflow['comparison'], contains('exact 10'));
+      expect(overflow['comparison'], contains('10 mistake identities'));
+      expect(overflow['comparison'], contains('10 typed summary identities'));
+      expect(overflow['comparison'], contains('30 SQL bucket rows'));
+      expect(overflow['comparison'], contains('100 completion thresholds'));
+      expect(overflow['comparison'], contains('one slot'));
+      expect(overflow['comparison'], isNot(contains('PASS')));
+      expect(overflow['sentence-hunt'], contains('OPEN'));
+      expect(overflow['sentence-hunt'], contains('SQL-adapter evaluation'));
+    } finally {
+      await handle.close();
+      await independentHandle.close();
+      await directory.delete(recursive: true);
+    }
   });
+
+  test(
+    'comparison_reachable_aggregate_bounds_roundtrip_and_reject_extras_write_free',
+    () async {
+      final Directory directory = await Directory.systemTemp.createTemp(
+        'sqlite-comparison-reachable-bounds-',
+      );
+      final LearningDatabaseHandle handle = _fileHandle(
+        File('${directory.path}/learning.sqlite'),
+      );
+      try {
+        final Map<String, Object?> evidence =
+            await qualifyComparisonReachableBounds(
+              handle,
+              runId: 'reachable-comparison-bounds-test',
+            );
+        expect(evidence['pureTransitionCommands'], 2220);
+        expect(evidence['typedMistakeIdentities'], 10);
+        expect(evidence['typedSummaryIdentities'], 10);
+        expect(evidence['sqlSummaryBucketRows'], 30);
+        expect(evidence['typedCompletionIdentities'], 100);
+        expect(
+          evidence['completionThresholds'],
+          List<int>.generate(100, (int index) => index + 1),
+        );
+        expect(evidence['currentSlots'], 1);
+        expect(evidence['currentRunGeneration'], 101);
+        expect(evidence['commitOrdinalAtPersistedBoundary'], 2220);
+        expect(evidence['latestReceiptOrdinalAtBoundary'], 2220);
+        expect(evidence['sqlMistakeRows'], 10);
+        expect(evidence['sqlCompletionRows'], 100);
+        expect(evidence['sqlRunRows'], 1);
+        expect(evidence['aggregateSqlMatchesTypedState'], isTrue);
+        expect(evidence['actualSqlRepositoryCommandCommitted'], isTrue);
+        expect(evidence['actualSqlRepositoryCommandCommitOrdinal'], 2221);
+        expect(evidence['extraMistakeRejected'], isTrue);
+        expect(evidence['extraSummaryRejected'], isTrue);
+        expect(evidence['normalizedSnapshotUnchangedAfterReopen'], isTrue);
+        expect(
+          evidence['normalizedRowCountsBeforeRejectedOperation'],
+          evidence['normalizedRowCountsAfterReopen'],
+        );
+      } finally {
+        await handle.close();
+        await directory.delete(recursive: true);
+      }
+    },
+  );
 
   test(
     'sentence_hunt_valid_synthetic_aggregate_identities_enforce_4096_cap',
