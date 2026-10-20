@@ -111,6 +111,128 @@ void main() {
     }
   });
 
+  test('bounded_family_pruning_preserves_receipt_and_aggregate_values', () async {
+    final Directory directory = await Directory.systemTemp.createTemp(
+      'sqlite-learning-bounded-proof-',
+    );
+    final LearningDatabaseHandle handle = _fileHandle(
+      File('${directory.path}/learning.sqlite'),
+    );
+    try {
+      await seedLearningAtRetentionLimits(
+        handle,
+        runId: 'bounded-proof',
+        historyLimit: 20,
+      );
+      final LearningWorkloadReport report =
+          await verifyLearningAtRetentionLimits(
+            handle,
+            runId: 'bounded-proof',
+            historyLimit: 20,
+          );
+      for (final String family in <String>[
+        'course',
+        'comparison',
+        'sentence-hunt',
+      ]) {
+        final Map<String, Object?> evidence =
+            report.postCapPruneEvidenceByFamily[family]!;
+        expect(evidence['receiptIdentitiesBefore'], isNotEmpty);
+        expect(evidence['receiptIdentitiesAfter'], isNotEmpty);
+        expect(evidence['expectedNewCommandReceiptIdentities'], isNotEmpty);
+        expect(
+          evidence['receiptIdentitiesAfter'],
+          evidence['expectedRetainedReceiptIdentities'],
+          reason: '$family exact prepared-command receipt identities',
+        );
+        expect(
+          evidence['receiptCommitOrdinalDelta'],
+          (evidence['expectedNewCommandReceiptIdentities']! as List).length,
+        );
+        expect(evidence['receiptExpectedIdentityMatch'], isTrue);
+        expect(evidence['receiptOrdinalsConsecutive'], isTrue);
+        expect(
+          evidence['receiptPrunePreservedExpectedIdentities'],
+          isTrue,
+          reason: '$family receipt identity/ordinal pruning',
+        );
+        expect(evidence['currentRunLatestReceiptPersisted'], isTrue);
+        expect(evidence['aggregateSqlMatchesExpected'], isTrue);
+        expect(evidence['aggregateSqlMatchesTypedBefore'], isTrue);
+        expect(evidence['aggregateSqlMatchesTypedExpectedAfter'], isTrue);
+        expect(evidence['aggregateUnaffectedRowsPreserved'], isTrue);
+        expect(evidence['aggregatePreservedIdentityCount'], greaterThan(0));
+        expect(evidence['aggregateExpectedBeforeRows'], isNotEmpty);
+        expect(evidence['aggregateExpectedAfterRows'], isNotEmpty);
+        expect(evidence['aggregateNegativeControlsRejected'], isTrue);
+        final Map<String, Object?> projectionByTable =
+            evidence['aggregateProjectionByTable']! as Map<String, Object?>;
+        final Map<String, Object?> tableProof =
+            projectionByTable['tableValueProof']! as Map<String, Object?>;
+        expect(tableProof, isNotEmpty);
+        for (final MapEntry<String, Object?> table in tableProof.entries) {
+          final Map<String, Object?> proof =
+              table.value! as Map<String, Object?>;
+          expect(
+            proof['beforeMatchesTyped'],
+            isTrue,
+            reason: '$family ${table.key} BEFORE',
+          );
+          expect(
+            proof['afterMatchesTypedTransition'],
+            isTrue,
+            reason: '$family ${table.key} AFTER',
+          );
+          expect(
+            proof['beforeRowCount'],
+            greaterThan(0),
+            reason: '$family ${table.key} baseline',
+          );
+        }
+          // ignore: avoid_print
+          print(
+          'TASK9 AGGREGATE family=$family proof=${jsonEncode(<String, Object?>{'sqlBefore': evidence['aggregateSqlBefore'], 'typedBefore': evidence['aggregateExpectedBeforeRows'], 'sqlAfter': evidence['aggregateSqlAfter'], 'typedExpectedAfter': evidence['aggregateExpectedAfterRows'], 'tableProof': tableProof, 'unaffectedRowsPreserved': evidence['aggregateUnaffectedRowsPreserved'], 'preservedIdentityCount': evidence['aggregatePreservedIdentityCount'], 'negativeControlsRejected': evidence['aggregateNegativeControlsRejected']})}',
+        );
+        expect(evidence['aggregateBefore'], isNotEmpty);
+        expect(evidence['aggregateExpectedAfter'], isNotEmpty);
+        expect(
+          evidence['aggregateReloadedAfter'],
+          evidence['aggregateExpectedAfter'],
+        );
+        final Map<String, List<String>> sqlBefore =
+            evidence['aggregateSqlBefore']! as Map<String, List<String>>;
+        final Map<String, List<String>> sqlAfter =
+            evidence['aggregateSqlAfter']! as Map<String, List<String>>;
+        expect(sqlBefore['learning_summaries'], isNotEmpty);
+        expect(sqlAfter['learning_summaries'], isNotEmpty);
+        expect(sqlBefore['learning_mistakes'], isNotEmpty);
+        expect(sqlAfter['learning_mistakes'], isNotEmpty);
+        expect(sqlBefore['learning_completions'], isNotEmpty);
+        expect(sqlAfter['learning_completions'], isNotEmpty);
+        final Map<String, int> expected =
+            (evidence['aggregateSqlExpectedAfter'] ??
+                    evidence['aggregateExpectedAfter'])!
+                as Map<String, int>;
+        final Map<String, int> sqlValues =
+            evidence['aggregateSqlValuesAfter']! as Map<String, int>;
+        expect(sqlValues['summaryIdentities'], expected['summaryIdentities']);
+        expect(
+          sqlValues['summaryTotal'],
+          expected['summaryTotal'],
+          reason: '$family direct SQL summary total vs typed transition',
+        );
+        expect(
+          sqlValues['summaryCorrect'],
+          expected['summaryCorrect'],
+          reason: '$family direct SQL summary correct vs typed transition',
+        );
+      }
+    } finally {
+      await handle.close();
+      await directory.delete(recursive: true);
+    }
+  });
+
   test('all_families_reopen_at_limits_without_summary_drift', () async {
     final Directory directory = await Directory.systemTemp.createTemp(
       'sqlite-learning-retention-',

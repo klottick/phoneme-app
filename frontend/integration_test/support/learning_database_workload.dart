@@ -197,8 +197,12 @@ final class LearningRecoveryControlEvidence {
 Future<void> seedLearningAtRetentionLimits(
   LearningDatabaseHandle handle, {
   required String runId,
+  int historyLimit = _retainedRows,
 }) async {
-  final _WorkloadHarness harness = _WorkloadHarness(runId);
+  final _WorkloadHarness harness = _WorkloadHarness(
+    runId,
+    historyLimit: historyLimit,
+  );
   await _seedCourse(handle, harness);
   await _seedComparison(handle, harness);
   await _seedSentenceHunt(handle, harness);
@@ -214,8 +218,12 @@ Future<void> seedLearningAtRetentionLimits(
 Future<LearningWorkloadReport> verifyLearningAtRetentionLimits(
   LearningDatabaseHandle handle, {
   required String runId,
+  int historyLimit = _retainedRows,
 }) async {
-  final _WorkloadHarness harness = _WorkloadHarness(runId);
+  final _WorkloadHarness harness = _WorkloadHarness(
+    runId,
+    historyLimit: historyLimit,
+  );
   final Stopwatch openWatch = Stopwatch()..start();
   final LearningDatabase database = await handle.open();
   openWatch.stop();
@@ -351,11 +359,25 @@ Future<Map<String, Object?>> _exerciseCoursePostCapPrune(
     'learning_command_receipts',
     harness.courseStorageScope,
   );
+  final List<String> receiptIdsBefore = await _receiptIdentities(
+    database,
+    harness.courseStorageScope,
+  );
+  final Map<String, int> aggregateBefore = _courseSummaryValues(beforeState);
+  final Map<String, List<String>> aggregateSqlBefore = await _aggregateSqlRows(
+    database,
+    harness.courseStorageScope,
+  );
   final List<Map<String, Object?>> sqlBefore = await _attemptRows(
     database,
     harness.courseStorageScope,
   );
-  var state = await _startCourseWordGame(repository, beforeState);
+  final List<String> expectedNewCommandReceipts = <String>[];
+  var state = await _startCourseWordGame(
+    repository,
+    beforeState,
+    receiptTrace: expectedNewCommandReceipts,
+  );
   List<int>? chain;
   for (var restart = 0; restart < 100 && chain == null; restart++) {
     final WordGameCheckpoint checkpoint =
@@ -368,7 +390,13 @@ Future<Map<String, Object?>> _exerciseCoursePostCapPrune(
       chain = _targetPath(game, size);
       if (chain != null) break;
     }
-    if (chain == null) state = await _startCourseWordGame(repository, state);
+    if (chain == null) {
+      state = await _startCourseWordGame(
+        repository,
+        state,
+        receiptTrace: expectedNewCommandReceipts,
+      );
+    }
   }
   if (chain == null) {
     throw StateError('Could not prepare a valid post-cap course answer.');
@@ -378,6 +406,7 @@ Future<Map<String, Object?>> _exerciseCoursePostCapPrune(
     state,
     _courseGameActivityId,
     LinkWordTiles(indices: chain, elapsedSeconds: 0),
+    receiptTrace: expectedNewCommandReceipts,
   );
   final CourseLearningState afterState = await repository.load();
   final int attemptCountAfter = await _rowCount(
@@ -390,6 +419,31 @@ Future<Map<String, Object?>> _exerciseCoursePostCapPrune(
     'learning_command_receipts',
     harness.courseStorageScope,
   );
+  final List<String> receiptIdsAfter = await _receiptIdentities(
+    database,
+    harness.courseStorageScope,
+  );
+  final Map<String, List<String>> aggregateSqlAfter = await _aggregateSqlRows(
+    database,
+    harness.courseStorageScope,
+  );
+  final Map<String, List<String>> aggregateExpectedBeforeRows =
+      _typedAggregateRows('course', beforeState);
+  final Map<String, List<String>> aggregateExpectedAfterRows =
+      _typedAggregateRows('course', afterCommit);
+  final Map<String, Object?> aggregateProjectionProof =
+      _aggregateProjectionProof(
+        'course',
+        aggregateSqlBefore,
+        aggregateSqlAfter,
+        aggregateExpectedBeforeRows,
+        aggregateExpectedAfterRows,
+      );
+  final bool aggregateSqlMatchesExpected =
+      aggregateProjectionProof['matchesTypedBefore']! as bool &&
+      aggregateProjectionProof['matchesExpectedAfter']! as bool &&
+      aggregateProjectionProof['meaningfulNonemptyBaselines']! as bool &&
+      aggregateProjectionProof['unaffectedRowsPreserved']! as bool;
   final List<Map<String, Object?>> sqlAfter = await _attemptRows(
     database,
     harness.courseStorageScope,
@@ -430,10 +484,10 @@ Future<Map<String, Object?>> _exerciseCoursePostCapPrune(
   final List<String> evictedIds = beforeIds.difference(afterIds).toList()
     ..sort();
   final bool observed =
-      attemptCountBefore == _retainedRows &&
-      receiptCountBefore == _retainedRows &&
-      attemptCountAfter <= _retainedRows &&
-      receiptCountAfter == _retainedRows &&
+      attemptCountBefore == harness.historyLimit &&
+      receiptCountBefore == harness.historyLimit &&
+      attemptCountAfter <= harness.historyLimit &&
+      receiptCountAfter == harness.historyLimit &&
       evictedBatches.isNotEmpty &&
       newlyAddedIds.length == chain.length &&
       evictedIds.isNotEmpty &&
@@ -441,7 +495,8 @@ Future<Map<String, Object?>> _exerciseCoursePostCapPrune(
       sqlRetainedOnlyCompleteBatches &&
       afterIds.length == attemptCountAfter &&
       afterState.history.length == afterCommit.history.length &&
-      _sameStringIds(sqlAfterIds, afterIds);
+      _sameStringIds(sqlAfterIds, afterIds) &&
+      aggregateSqlMatchesExpected;
   if (!observed) {
     throw StateError('Post-cap course prune failed its identity invariants.');
   }
@@ -486,8 +541,47 @@ Future<Map<String, Object?>> _exerciseCoursePostCapPrune(
     'evictedAttemptIds': evictedIds,
     'survivingAttemptIds': afterIds.toList()..sort(),
     'receiptPruneObserved':
-        receiptCountBefore == _retainedRows &&
-        receiptCountAfter == _retainedRows,
+        receiptCountBefore == harness.historyLimit &&
+        receiptCountAfter == harness.historyLimit,
+    'receiptIdentitiesBefore': receiptIdsBefore,
+    'receiptIdentitiesAfter': receiptIdsAfter,
+    ..._expectedReceiptEvidence(
+      before: receiptIdsBefore,
+      after: receiptIdsAfter,
+      tracedNewCommands: expectedNewCommandReceipts,
+      ordinalDelta: afterState.commitOrdinal - beforeState.commitOrdinal,
+      limit: harness.historyLimit,
+    ),
+    'receiptPrunePreservedExpectedIdentities': _receiptPrunePreserved(
+      receiptIdsBefore,
+      receiptIdsAfter,
+      harness.historyLimit,
+      expectedNewReceipts: afterState.commitOrdinal - beforeState.commitOrdinal,
+    ),
+    'currentRunLatestReceiptPersisted': _receiptContainsLatest(
+      receiptIdsAfter,
+      _courseLatestReceipt(afterState),
+    ),
+    'aggregateBefore': aggregateBefore,
+    'aggregateExpectedAfter': _courseSummaryValues(afterCommit),
+    'aggregateReloadedAfter': _courseSummaryValues(afterState),
+    'aggregateSqlBefore': aggregateSqlBefore,
+    'aggregateSqlAfter': aggregateSqlAfter,
+    'aggregateSqlValuesAfter': _aggregateSqlValues(aggregateSqlAfter),
+    'aggregateSqlMatchesExpected': aggregateSqlMatchesExpected,
+    'aggregateSqlMatchesTypedBefore':
+        aggregateProjectionProof['matchesTypedBefore'],
+    'aggregateSqlMatchesTypedExpectedAfter': aggregateSqlMatchesExpected,
+    'aggregateUnaffectedRowsPreserved':
+        aggregateProjectionProof['unaffectedRowsPreserved'],
+    'aggregatePreservedIdentityCount':
+        aggregateProjectionProof['preservedIdentityCount'],
+    'aggregateExpectedBeforeRows': aggregateExpectedBeforeRows,
+    'aggregateExpectedAfterRows': aggregateExpectedAfterRows,
+    'aggregateNegativeControlsRejected': _aggregateNegativeControlsRejected(
+      aggregateExpectedAfterRows,
+    ),
+    'aggregateProjectionByTable': aggregateProjectionProof,
     'answerBatchSize': chain.length,
     'sqlAttemptRowsBefore': sqlBefore.length,
   };
@@ -511,10 +605,22 @@ Future<Map<String, Object?>> _exerciseComparisonPostCapPrune(
     'learning_command_receipts',
     harness.comparisonStorageScope,
   );
+  final List<String> receiptIdsBefore = await _receiptIdentities(
+    database,
+    harness.comparisonStorageScope,
+  );
+  final Map<String, int> aggregateBefore = _comparisonSummaryValues(
+    beforeState,
+  );
+  final Map<String, List<String>> aggregateSqlBefore = await _aggregateSqlRows(
+    database,
+    harness.comparisonStorageScope,
+  );
   final List<Map<String, Object?>> sqlBefore = await _attemptRows(
     database,
     harness.comparisonStorageScope,
   );
+  final List<String> expectedNewCommandReceipts = <String>[];
   var state = (await harness.commitComparison(
     repository,
     beforeState,
@@ -522,6 +628,7 @@ Future<Map<String, Object?>> _exerciseComparisonPostCapPrune(
       sessionId: 'task9-post-cap-${harness.runId}-comparison',
       policy: LessonPolicy(),
     ),
+    receiptTrace: expectedNewCommandReceipts,
   )).state;
   final LessonSectionSession session = _comparisonSession(
     state,
@@ -542,6 +649,7 @@ Future<Map<String, Object?>> _exerciseComparisonPostCapPrune(
         correct: true,
       ),
     ),
+    receiptTrace: expectedNewCommandReceipts,
   )).state;
   final ComparisonLearningState afterState = await repository.load();
   final int attemptCountAfter = await _rowCount(
@@ -554,6 +662,31 @@ Future<Map<String, Object?>> _exerciseComparisonPostCapPrune(
     'learning_command_receipts',
     harness.comparisonStorageScope,
   );
+  final List<String> receiptIdsAfter = await _receiptIdentities(
+    database,
+    harness.comparisonStorageScope,
+  );
+  final Map<String, List<String>> aggregateSqlAfter = await _aggregateSqlRows(
+    database,
+    harness.comparisonStorageScope,
+  );
+  final Map<String, List<String>> aggregateExpectedBeforeRows =
+      _typedAggregateRows('comparison', beforeState);
+  final Map<String, List<String>> aggregateExpectedAfterRows =
+      _typedAggregateRows('comparison', state);
+  final Map<String, Object?> aggregateProjectionProof =
+      _aggregateProjectionProof(
+        'comparison',
+        aggregateSqlBefore,
+        aggregateSqlAfter,
+        aggregateExpectedBeforeRows,
+        aggregateExpectedAfterRows,
+      );
+  final bool aggregateSqlMatchesExpected =
+      aggregateProjectionProof['matchesTypedBefore']! as bool &&
+      aggregateProjectionProof['matchesExpectedAfter']! as bool &&
+      aggregateProjectionProof['meaningfulNonemptyBaselines']! as bool &&
+      aggregateProjectionProof['unaffectedRowsPreserved']! as bool;
   final List<Map<String, Object?>> sqlAfter = await _attemptRows(
     database,
     harness.comparisonStorageScope,
@@ -598,14 +731,15 @@ Future<Map<String, Object?>> _exerciseComparisonPostCapPrune(
     expectedNewAttemptCount: 1,
   );
   final bool observed =
-      attemptCountBefore == _retainedRows &&
-      receiptCountBefore == _retainedRows &&
-      attemptCountAfter <= _retainedRows &&
-      receiptCountAfter == _retainedRows &&
+      attemptCountBefore == harness.historyLimit &&
+      receiptCountBefore == harness.historyLimit &&
+      attemptCountAfter <= harness.historyLimit &&
+      receiptCountAfter == harness.historyLimit &&
       (evidence['newAttemptIds']! as List).length == 1 &&
       (evidence['evictedAttemptIds']! as List).isNotEmpty &&
       afterState.attempts.length == attemptCountAfter &&
-      sqlMatchesReloadedState;
+      sqlMatchesReloadedState &&
+      aggregateSqlMatchesExpected;
   if (!observed) {
     throw StateError(
       'Post-cap comparison prune failed its identity invariants.',
@@ -620,6 +754,51 @@ Future<Map<String, Object?>> _exerciseComparisonPostCapPrune(
     'sqlAttemptKeysBefore': beforeSqlKeys.toList()..sort(),
     'sqlAttemptKeysAfter': afterSqlKeys.toList()..sort(),
     'receiptPruneObserved': true,
+    'receiptIdentitiesBefore': receiptIdsBefore,
+    'receiptIdentitiesAfter': receiptIdsAfter,
+    ..._expectedReceiptEvidence(
+      before: receiptIdsBefore,
+      after: receiptIdsAfter,
+      tracedNewCommands: expectedNewCommandReceipts,
+      ordinalDelta: afterState.commitOrdinal - beforeState.commitOrdinal,
+      limit: harness.historyLimit,
+    ),
+    'receiptPrunePreservedExpectedIdentities': _receiptPrunePreserved(
+      receiptIdsBefore,
+      receiptIdsAfter,
+      harness.historyLimit,
+      expectedNewReceipts: afterState.commitOrdinal - beforeState.commitOrdinal,
+    ),
+    'currentRunLatestReceiptPersisted': _receiptContainsLatest(
+      receiptIdsAfter,
+      afterState.receipts
+          .reduce(
+            (left, right) =>
+                left.commitOrdinal > right.commitOrdinal ? left : right,
+          )
+          .token,
+    ),
+    'aggregateBefore': aggregateBefore,
+    'aggregateExpectedAfter': _comparisonSummaryValues(state),
+    'aggregateReloadedAfter': _comparisonSummaryValues(afterState),
+    'aggregateSqlExpectedAfter': _comparisonPersistedSummaryValues(state),
+    'aggregateSqlBefore': aggregateSqlBefore,
+    'aggregateSqlAfter': aggregateSqlAfter,
+    'aggregateSqlValuesAfter': _aggregateSqlValues(aggregateSqlAfter),
+    'aggregateSqlMatchesExpected': aggregateSqlMatchesExpected,
+    'aggregateSqlMatchesTypedBefore':
+        aggregateProjectionProof['matchesTypedBefore'],
+    'aggregateSqlMatchesTypedExpectedAfter': aggregateSqlMatchesExpected,
+    'aggregateUnaffectedRowsPreserved':
+        aggregateProjectionProof['unaffectedRowsPreserved'],
+    'aggregatePreservedIdentityCount':
+        aggregateProjectionProof['preservedIdentityCount'],
+    'aggregateExpectedBeforeRows': aggregateExpectedBeforeRows,
+    'aggregateExpectedAfterRows': aggregateExpectedAfterRows,
+    'aggregateNegativeControlsRejected': _aggregateNegativeControlsRejected(
+      aggregateExpectedAfterRows,
+    ),
+    'aggregateProjectionByTable': aggregateProjectionProof,
     'sqlAttemptRowsBefore': sqlBefore.length,
   };
 }
@@ -642,11 +821,21 @@ Future<Map<String, Object?>> _exerciseSentencePostCapPrune(
     'learning_command_receipts',
     harness.sentenceStorageScope,
   );
+  final List<String> receiptIdsBefore = await _receiptIdentities(
+    database,
+    harness.sentenceStorageScope,
+  );
+  final Map<String, int> aggregateBefore = _sentenceSummaryValues(beforeState);
+  final Map<String, List<String>> aggregateSqlBefore = await _aggregateSqlRows(
+    database,
+    harness.sentenceStorageScope,
+  );
   final List<Map<String, Object?>> sqlBefore = await _attemptRows(
     database,
     harness.sentenceStorageScope,
   );
   final SentenceHuntSection section = harness.sentenceCatalogue.sections.first;
+  final List<String> expectedNewCommandReceipts = <String>[];
   var state = (await harness.commitSentence(
     repository,
     beforeState,
@@ -656,6 +845,7 @@ Future<Map<String, Object?>> _exerciseSentencePostCapPrune(
       policy: section.policy,
       mode: SentenceHuntRunMode.practice,
     ),
+    receiptTrace: expectedNewCommandReceipts,
   )).state;
   final LessonSectionSession session = _sentenceSession(state, section);
   final SentenceHuntItem item = harness.sentenceCatalogue.item(
@@ -675,6 +865,7 @@ Future<Map<String, Object?>> _exerciseSentencePostCapPrune(
         correct: true,
       ),
     ),
+    receiptTrace: expectedNewCommandReceipts,
   )).state;
   final SentenceHuntLearningState afterState = await repository.load();
   final int attemptCountAfter = await _rowCount(
@@ -687,6 +878,31 @@ Future<Map<String, Object?>> _exerciseSentencePostCapPrune(
     'learning_command_receipts',
     harness.sentenceStorageScope,
   );
+  final List<String> receiptIdsAfter = await _receiptIdentities(
+    database,
+    harness.sentenceStorageScope,
+  );
+  final Map<String, List<String>> aggregateSqlAfter = await _aggregateSqlRows(
+    database,
+    harness.sentenceStorageScope,
+  );
+  final Map<String, List<String>> aggregateExpectedBeforeRows =
+      _typedAggregateRows('sentence-hunt', beforeState);
+  final Map<String, List<String>> aggregateExpectedAfterRows =
+      _typedAggregateRows('sentence-hunt', state);
+  final Map<String, Object?> aggregateProjectionProof =
+      _aggregateProjectionProof(
+        'sentence-hunt',
+        aggregateSqlBefore,
+        aggregateSqlAfter,
+        aggregateExpectedBeforeRows,
+        aggregateExpectedAfterRows,
+      );
+  final bool aggregateSqlMatchesExpected =
+      aggregateProjectionProof['matchesTypedBefore']! as bool &&
+      aggregateProjectionProof['matchesExpectedAfter']! as bool &&
+      aggregateProjectionProof['meaningfulNonemptyBaselines']! as bool &&
+      aggregateProjectionProof['unaffectedRowsPreserved']! as bool;
   final List<Map<String, Object?>> sqlAfter = await _attemptRows(
     database,
     harness.sentenceStorageScope,
@@ -731,14 +947,15 @@ Future<Map<String, Object?>> _exerciseSentencePostCapPrune(
     expectedNewAttemptCount: 1,
   );
   final bool observed =
-      attemptCountBefore == _retainedRows &&
-      receiptCountBefore == _retainedRows &&
-      attemptCountAfter <= _retainedRows &&
-      receiptCountAfter == _retainedRows &&
+      attemptCountBefore == harness.historyLimit &&
+      receiptCountBefore == harness.historyLimit &&
+      attemptCountAfter <= harness.historyLimit &&
+      receiptCountAfter == harness.historyLimit &&
       (evidence['newAttemptIds']! as List).length == 1 &&
       (evidence['evictedAttemptIds']! as List).isNotEmpty &&
       afterState.attempts.length == attemptCountAfter &&
-      sqlMatchesReloadedState;
+      sqlMatchesReloadedState &&
+      aggregateSqlMatchesExpected;
   if (!observed) {
     throw StateError(
       'Post-cap sentence-hunt prune failed its identity invariants.',
@@ -753,6 +970,46 @@ Future<Map<String, Object?>> _exerciseSentencePostCapPrune(
     'sqlAttemptKeysBefore': beforeSqlKeys.toList()..sort(),
     'sqlAttemptKeysAfter': afterSqlKeys.toList()..sort(),
     'receiptPruneObserved': true,
+    'receiptIdentitiesBefore': receiptIdsBefore,
+    'receiptIdentitiesAfter': receiptIdsAfter,
+    ..._expectedReceiptEvidence(
+      before: receiptIdsBefore,
+      after: receiptIdsAfter,
+      tracedNewCommands: expectedNewCommandReceipts,
+      ordinalDelta: afterState.commitOrdinal - beforeState.commitOrdinal,
+      limit: harness.historyLimit,
+    ),
+    'receiptPrunePreservedExpectedIdentities': _receiptPrunePreserved(
+      receiptIdsBefore,
+      receiptIdsAfter,
+      harness.historyLimit,
+      expectedNewReceipts: afterState.commitOrdinal - beforeState.commitOrdinal,
+    ),
+    'currentRunLatestReceiptPersisted': _receiptContainsLatest(
+      receiptIdsAfter,
+      _sentenceLatestReceipt(afterState),
+    ),
+    'aggregateBefore': aggregateBefore,
+    'aggregateExpectedAfter': _sentenceSummaryValues(state),
+    'aggregateReloadedAfter': _sentenceSummaryValues(afterState),
+    'aggregateSqlExpectedAfter': _sentencePersistedSummaryValues(state),
+    'aggregateSqlBefore': aggregateSqlBefore,
+    'aggregateSqlAfter': aggregateSqlAfter,
+    'aggregateSqlValuesAfter': _aggregateSqlValues(aggregateSqlAfter),
+    'aggregateSqlMatchesExpected': aggregateSqlMatchesExpected,
+    'aggregateSqlMatchesTypedBefore':
+        aggregateProjectionProof['matchesTypedBefore'],
+    'aggregateSqlMatchesTypedExpectedAfter': aggregateSqlMatchesExpected,
+    'aggregateUnaffectedRowsPreserved':
+        aggregateProjectionProof['unaffectedRowsPreserved'],
+    'aggregatePreservedIdentityCount':
+        aggregateProjectionProof['preservedIdentityCount'],
+    'aggregateExpectedBeforeRows': aggregateExpectedBeforeRows,
+    'aggregateExpectedAfterRows': aggregateExpectedAfterRows,
+    'aggregateNegativeControlsRejected': _aggregateNegativeControlsRejected(
+      aggregateExpectedAfterRows,
+    ),
+    'aggregateProjectionByTable': aggregateProjectionProof,
     'sqlAttemptRowsBefore': sqlBefore.length,
   };
 }
@@ -813,6 +1070,808 @@ Future<List<Map<String, Object?>>> _attemptRows(
       },
   ];
 }
+
+Future<List<String>> _receiptIdentities(
+  LearningDatabase database,
+  LearningStorageScope scope,
+) async {
+  final List<QueryRow> rows = await database
+      .customSelect(
+        'SELECT token, canonical_payload, commit_ordinal FROM learning_command_receipts '
+        'WHERE scope_id = ? ORDER BY commit_ordinal, token',
+        variables: <Variable<Object>>[
+          Variable<int>(await _scopeId(database, scope)),
+        ],
+      )
+      .get();
+  return <String>[
+    for (final QueryRow row in rows)
+      jsonEncode(<Object?>[
+        row.read<String>('token'),
+        row.read<String>('canonical_payload'),
+        row.read<int>('commit_ordinal'),
+      ]),
+  ];
+}
+
+Future<Map<String, List<String>>> _aggregateSqlRows(
+  LearningDatabase database,
+  LearningStorageScope scope,
+) async {
+  final int scopeId = await _scopeId(database, scope);
+  final Map<String, List<String>> result = <String, List<String>>{};
+  for (final String table in <String>[
+    'learning_summaries',
+    'learning_mistakes',
+    'learning_completions',
+    'learning_exposure',
+    'learning_best_scores',
+  ]) {
+    final List<QueryRow> rows = await database
+        .customSelect(
+          'SELECT * FROM $table WHERE scope_id = ? ORDER BY rowid',
+          variables: <Variable<Object>>[Variable<int>(scopeId)],
+        )
+        .get();
+    result[table] = <String>[
+      for (final QueryRow row in rows)
+        jsonEncode(_sortedAggregateRow(row.data)..remove('scope_id')),
+    ];
+  }
+  return result;
+}
+
+Map<String, Object?> _sortedAggregateRow(Map<String, Object?> row) =>
+    Map<String, Object?>.fromEntries(
+      row.entries.toList()..sort(
+        (MapEntry<String, Object?> a, MapEntry<String, Object?> b) =>
+            a.key.compareTo(b.key),
+      ),
+    );
+
+String _aggregateRowJson(Map<String, Object?> row) =>
+    jsonEncode(_sortedAggregateRow(row));
+
+/// Exact order-independent comparison used by the pruning proof and its
+/// negative controls. Rows are canonical JSON maps with technical scope IDs
+/// omitted; semantic keys and every persisted value remain in the projection.
+bool learningAggregateProjectionMatches(
+  Map<String, List<String>> actual,
+  Map<String, List<String>> expected,
+) {
+  if (actual.keys.toSet().difference(expected.keys.toSet()).isNotEmpty ||
+      expected.keys.toSet().difference(actual.keys.toSet()).isNotEmpty) {
+    return false;
+  }
+  return expected.entries.every(
+    (MapEntry<String, List<String>> entry) =>
+        actual[entry.key]!.length == entry.value.length &&
+        actual[entry.key]!.toSet().length == actual[entry.key]!.length &&
+        _sameStringIds(actual[entry.key]!.toSet(), entry.value.toSet()),
+  );
+}
+
+Map<String, List<String>> _typedAggregateRows(String family, Object state) {
+  final Map<String, List<Map<String, Object?>>> rows =
+      <String, List<Map<String, Object?>>>{
+        'learning_summaries': <Map<String, Object?>>[],
+        'learning_mistakes': <Map<String, Object?>>[],
+        'learning_completions': <Map<String, Object?>>[],
+        'learning_exposure': <Map<String, Object?>>[],
+        'learning_best_scores': <Map<String, Object?>>[],
+      };
+  switch (family) {
+    case 'course':
+      final CourseLearningState typed = state as CourseLearningState;
+      for (final MapEntry<SummaryKey, SkillCount> entry
+          in typed.summaries.entries) {
+        rows['learning_summaries']!.add(<String, Object?>{
+          'family': 'course',
+          'activity_id': null,
+          'sound': entry.key.sound,
+          'skill': entry.key.skill.name,
+          'origin': entry.key.origin.name,
+          'presentation': entry.key.presentation.name,
+          'assistance_mask': _assistanceMask(entry.key.assistance),
+          'pair_id': null,
+          'section_id': null,
+          'item_id': null,
+          'sentence_id': null,
+          'audio_ref_id': null,
+          'annotation_hash': null,
+          'annotation_revision': null,
+          'content_revision': null,
+          'bucket': 'all',
+          'correct': entry.value.correct,
+          'total': entry.value.total,
+        });
+      }
+      for (final LearningMistake mistake in typed.mistakes.values) {
+        final MistakeKey key = mistake.key;
+        rows['learning_mistakes']!.add(<String, Object?>{
+          'family': 'course',
+          'activity_id': key.activityId,
+          'item_id': key.itemId,
+          'target_sound': key.targetSound,
+          'skill': key.skill.name,
+          'pair_id': null,
+          'section_id': null,
+          'sentence_id': null,
+          'audio_ref_id': null,
+          'annotation_hash': null,
+          'annotation_revision': null,
+          'content_revision': key.contentRevision,
+          'first_wrong_attempt_id': mistake.firstWrongId,
+          'latest_wrong_attempt_id': mistake.latestWrongId,
+          'first_wrong_at_us': _utcMicros(mistake.firstWrongAt),
+          'latest_wrong_at_us': _utcMicros(mistake.latestWrongAt),
+          'failure_count': mistake.failureCount,
+          'last_run_generation': mistake.lastRunGeneration,
+        });
+      }
+      for (final LearningCompletion completion in typed.completions) {
+        rows['learning_completions']!.add(<String, Object?>{
+          'activity_id': 'lesson:${completion.lessonId}',
+          'content_revision': completion.contentRevision,
+          'policy_kind':
+              completion.policyKind == CompletionPolicyKind.discoveryThreshold
+              ? 'discoveryThreshold'
+              : 'legacyOnePass',
+          'policy_revision': completion.policyRevision,
+          'threshold_percent': completion.thresholdPercent ?? -1,
+          'committed_at_us': _utcMicros(completion.committedAt),
+        });
+      }
+      for (final ActivitySlot slot in typed.activities.values) {
+        for (final MapEntry<ItemContextKey, ItemExposure> entry
+            in slot.exposures.entries) {
+          rows['learning_exposure']!.add(<String, Object?>{
+            'family': 'course',
+            'activity_id': slot.activityId,
+            'item_id': entry.key.itemId,
+            'target_sound': entry.key.targetSound,
+            'section_id': null,
+            'content_revision': null,
+            'presentations': entry.value.presentations,
+            'assistance_mask': _assistanceMask(entry.value.assistance),
+          });
+        }
+      }
+      for (final MapEntry<String, int> score in typed.bestScores.entries) {
+        rows['learning_best_scores']!.add(<String, Object?>{
+          'activity_id': score.key,
+          'score': score.value,
+        });
+      }
+    case 'comparison':
+      final ComparisonLearningState typed = state as ComparisonLearningState;
+      for (final ComparisonPairSummary summary in typed.summaries.values) {
+        for (final (String, ComparisonCount) bucket
+            in <(String, ComparisonCount)>[
+              ('firstInRun', summary.firstInRun),
+              ('repeatInRun', summary.repeatInRun),
+              ('afterDebrief', summary.afterDebrief),
+            ]) {
+          rows['learning_summaries']!.add(<String, Object?>{
+            'family': 'comparison',
+            'activity_id': summary.key.activityId,
+            'sound': null,
+            'skill': null,
+            'origin': null,
+            'presentation': null,
+            'assistance_mask': null,
+            'pair_id': summary.key.pairId,
+            'section_id': null,
+            'item_id': null,
+            'sentence_id': null,
+            'audio_ref_id': null,
+            'annotation_hash': null,
+            'annotation_revision': null,
+            'content_revision': summary.key.contentRevision,
+            'bucket': bucket.$1,
+            'correct': bucket.$2.correct,
+            'total': bucket.$2.total,
+          });
+        }
+      }
+      for (final ComparisonPairMistake mistake in typed.mistakes.values) {
+        rows['learning_mistakes']!.add(<String, Object?>{
+          'family': 'comparison',
+          'activity_id': mistake.key.activityId,
+          'item_id': null,
+          'target_sound': null,
+          'skill': null,
+          'pair_id': mistake.key.pairId,
+          'section_id': null,
+          'sentence_id': null,
+          'audio_ref_id': null,
+          'annotation_hash': null,
+          'annotation_revision': null,
+          'content_revision': mistake.key.contentRevision,
+          'first_wrong_attempt_id': null,
+          'latest_wrong_attempt_id': null,
+          'first_wrong_at_us': _utcMicros(mistake.firstWrongAt),
+          'latest_wrong_at_us': _utcMicros(mistake.latestWrongAt),
+          'failure_count': mistake.failureCount,
+          'last_run_generation': null,
+        });
+      }
+      for (final ComparisonCompletion completion in typed.completions) {
+        rows['learning_completions']!.add(<String, Object?>{
+          'activity_id': completion.activityId,
+          'content_revision': completion.contentRevision,
+          'policy_kind': 'discoveryThreshold',
+          'policy_revision': completion.policyRevision,
+          'threshold_percent': completion.thresholdPercent,
+          'committed_at_us': _utcMicros(completion.committedAt),
+        });
+      }
+    case 'sentence-hunt':
+      final SentenceHuntLearningState typed =
+          state as SentenceHuntLearningState;
+      for (final SentenceHuntSummary summary in typed.summaries.values) {
+        final SentenceHuntContentIdentity content = summary.content;
+        for (final (String, SentenceHuntCounts) bucket
+            in <(String, SentenceHuntCounts)>[
+              ('firstInRun', summary.firstInRun),
+              ('repeatInRun', summary.repeatInRun),
+              ('firstTeachingExposed', summary.firstTeachingExposed),
+              ('repeatTeachingExposed', summary.repeatTeachingExposed),
+            ]) {
+          rows['learning_summaries']!.add(<String, Object?>{
+            'family': 'sentence-hunt',
+            'activity_id': null,
+            'sound': null,
+            'skill': null,
+            'origin': null,
+            'presentation': null,
+            'assistance_mask': null,
+            'pair_id': null,
+            'section_id': content.sectionId,
+            'item_id': content.itemId,
+            'sentence_id': content.sentenceId,
+            'audio_ref_id': content.audioRefId,
+            'annotation_hash': content.annotationHash,
+            'annotation_revision': content.annotationRevision,
+            'content_revision': content.contentRevision,
+            'bucket': bucket.$1,
+            'correct': bucket.$2.correct,
+            'total': bucket.$2.total,
+          });
+        }
+      }
+      for (final SentenceHuntMistake mistake in typed.mistakes.values) {
+        final SentenceHuntContentIdentity content = mistake.content;
+        rows['learning_mistakes']!.add(<String, Object?>{
+          'family': 'sentence-hunt',
+          'activity_id': null,
+          'item_id': content.itemId,
+          'target_sound': null,
+          'skill': null,
+          'pair_id': null,
+          'section_id': content.sectionId,
+          'sentence_id': content.sentenceId,
+          'audio_ref_id': content.audioRefId,
+          'annotation_hash': content.annotationHash,
+          'annotation_revision': content.annotationRevision,
+          'content_revision': content.contentRevision,
+          'first_wrong_attempt_id': null,
+          'latest_wrong_attempt_id': null,
+          'first_wrong_at_us': _utcMicros(mistake.firstWrongAt),
+          'latest_wrong_at_us': _utcMicros(mistake.latestWrongAt),
+          'failure_count': mistake.failureCount,
+          'last_run_generation': null,
+        });
+      }
+      for (final SentenceHuntCompletion completion in typed.completions) {
+        rows['learning_completions']!.add(<String, Object?>{
+          'activity_id': completion.sectionId,
+          'content_revision': completion.contentRevision,
+          'policy_kind': 'discoveryThreshold',
+          'policy_revision': completion.policyRevision,
+          'threshold_percent': completion.thresholdPercent,
+          'committed_at_us': _utcMicros(completion.committedAt),
+        });
+      }
+      for (final SentenceHuntExposureKey exposure in typed.teachingExposure) {
+        rows['learning_exposure']!.add(<String, Object?>{
+          'family': 'sentence-hunt',
+          'activity_id': null,
+          'item_id': null,
+          'target_sound': null,
+          'section_id': exposure.sectionId,
+          'content_revision': exposure.contentRevision,
+          'presentations': null,
+          'assistance_mask': null,
+        });
+      }
+    default:
+      throw ArgumentError.value(family, 'family');
+  }
+  return <String, List<String>>{
+    for (final MapEntry<String, List<Map<String, Object?>>> table
+        in rows.entries)
+      table.key: <String>[
+        for (final Map<String, Object?> row in table.value)
+          _aggregateRowJson(row),
+      ],
+  };
+}
+
+int _utcMicros(DateTime value) => value.toUtc().microsecondsSinceEpoch;
+
+int _assistanceMask(Set<AssistanceFlag> flags) => flags.fold<int>(
+  0,
+  (int mask, AssistanceFlag flag) => mask | (1 << flag.index),
+);
+
+Set<String> _aggregateApplicableTables(String family) => switch (family) {
+  'course' => <String>{
+    'learning_summaries',
+    'learning_mistakes',
+    'learning_completions',
+    'learning_exposure',
+    'learning_best_scores',
+  },
+  'comparison' => <String>{
+    'learning_summaries',
+    'learning_mistakes',
+    'learning_completions',
+  },
+  'sentence-hunt' => <String>{
+    'learning_summaries',
+    'learning_mistakes',
+    'learning_completions',
+    'learning_exposure',
+  },
+  _ => throw ArgumentError.value(family, 'family'),
+};
+
+Map<String, Object?> _aggregateProjectionProof(
+  String family,
+  Map<String, List<String>> actualBefore,
+  Map<String, List<String>> actualAfter,
+  Map<String, List<String>> expectedBefore,
+  Map<String, List<String>> expectedAfter,
+) {
+  final Set<String> tables = _aggregateApplicableTables(family);
+  final Map<String, List<String>> before = <String, List<String>>{
+    for (final String table in tables) table: actualBefore[table]!,
+  };
+  final Map<String, List<String>> after = <String, List<String>>{
+    for (final String table in tables) table: actualAfter[table]!,
+  };
+  final Map<String, List<String>> typedBefore = <String, List<String>>{
+    for (final String table in tables) table: expectedBefore[table]!,
+  };
+  final Map<String, List<String>> typedAfter = <String, List<String>>{
+    for (final String table in tables) table: expectedAfter[table]!,
+  };
+  final bool beforeMatches = learningAggregateProjectionMatches(
+    before,
+    typedBefore,
+  );
+  final bool afterMatches = learningAggregateProjectionMatches(
+    after,
+    typedAfter,
+  );
+  final Map<String, int> preservedByTable = <String, int>{};
+  for (final String table in tables) {
+    final Map<String, String> oldExpected = _rowsByAggregateIdentity(
+      expectedBefore[table]!,
+    );
+    final Map<String, String> newExpected = _rowsByAggregateIdentity(
+      expectedAfter[table]!,
+    );
+    final Set<String> unchanged = <String>{
+      for (final String identity in oldExpected.keys)
+        if (oldExpected[identity] == newExpected[identity]) identity,
+    };
+    final Map<String, String> oldActual = _rowsByAggregateIdentity(
+      actualBefore[table]!,
+    );
+    final Map<String, String> newActual = _rowsByAggregateIdentity(
+      actualAfter[table]!,
+    );
+    preservedByTable[table] = unchanged
+        .where(
+          (String identity) =>
+              oldActual[identity] == oldExpected[identity] &&
+              newActual[identity] == newExpected[identity] &&
+              oldActual[identity] == newActual[identity],
+        )
+        .length;
+  }
+  final int preservedCount = preservedByTable.values.fold<int>(
+    0,
+    (a, b) => a + b,
+  );
+  final bool meaningfulBaselines = tables.every(
+    (String table) =>
+        expectedBefore[table]!.isNotEmpty && expectedAfter[table]!.isNotEmpty,
+  );
+  return <String, Object?>{
+    'family': family,
+    'applicableTables': tables.toList()..sort(),
+    'matchesTypedBefore': beforeMatches,
+    'matchesExpectedAfter': afterMatches,
+    'meaningfulNonemptyBaselines': meaningfulBaselines,
+    'preservedIdentityCountByTable': preservedByTable,
+    'preservedIdentityCount': preservedCount,
+    'unaffectedRowsPreserved':
+        preservedCount > 0 &&
+        preservedByTable.values.any((int count) => count > 0),
+    'tableValueProof': <String, Object?>{
+      for (final String table in tables)
+        table: <String, Object?>{
+          'beforeMatchesTyped': learningAggregateProjectionMatches(
+            <String, List<String>>{table: actualBefore[table]!},
+            <String, List<String>>{table: expectedBefore[table]!},
+          ),
+          'afterMatchesTypedTransition': learningAggregateProjectionMatches(
+            <String, List<String>>{table: actualAfter[table]!},
+            <String, List<String>>{table: expectedAfter[table]!},
+          ),
+          'beforeRowCount': actualBefore[table]!.length,
+          'expectedAfterRowCount': expectedAfter[table]!.length,
+          'unaffectedRowsPreserved': preservedByTable[table],
+        },
+    },
+  };
+}
+
+Map<String, String> _rowsByAggregateIdentity(List<String> encodedRows) {
+  final Map<String, String> result = <String, String>{};
+  for (final String encoded in encodedRows) {
+    final Map<String, Object?> row = Map<String, Object?>.from(
+      jsonDecode(encoded) as Map,
+    );
+    final String table = switch (row['family']) {
+      'course' when row.containsKey('bucket') => 'learning_summaries',
+      'comparison' when row.containsKey('bucket') => 'learning_summaries',
+      'sentence-hunt' when row.containsKey('bucket') => 'learning_summaries',
+      'course' when row.containsKey('first_wrong_at_us') => 'learning_mistakes',
+      'comparison' when row.containsKey('first_wrong_at_us') =>
+        'learning_mistakes',
+      'sentence-hunt' when row.containsKey('first_wrong_at_us') =>
+        'learning_mistakes',
+      'course'
+          when row.containsKey('presentations') ||
+              row.containsKey('section_id') =>
+        'learning_exposure',
+      'sentence-hunt'
+          when row.containsKey('content_revision') &&
+              row.containsKey('presentations') =>
+        'learning_exposure',
+      _ when row.containsKey('committed_at_us') => 'learning_completions',
+      _ when row.containsKey('score') => 'learning_best_scores',
+      _ => throw StateError('Cannot infer aggregate table for row: $row'),
+    };
+    final String identity = jsonEncode(switch (table) {
+      'learning_summaries' => <Object?>[
+        for (final String key in <String>[
+          'family',
+          'activity_id',
+          'sound',
+          'skill',
+          'origin',
+          'presentation',
+          'assistance_mask',
+          'pair_id',
+          'section_id',
+          'item_id',
+          'sentence_id',
+          'audio_ref_id',
+          'annotation_hash',
+          'annotation_revision',
+          'content_revision',
+          'bucket',
+        ])
+          row[key],
+      ],
+      'learning_mistakes' => <Object?>[
+        for (final String key in <String>[
+          'family',
+          'activity_id',
+          'item_id',
+          'target_sound',
+          'skill',
+          'pair_id',
+          'section_id',
+          'sentence_id',
+          'audio_ref_id',
+          'annotation_hash',
+          'annotation_revision',
+          'content_revision',
+        ])
+          row[key],
+      ],
+      'learning_completions' => <Object?>[
+        for (final String key in <String>[
+          'activity_id',
+          'content_revision',
+          'policy_kind',
+          'policy_revision',
+          'threshold_percent',
+        ])
+          row[key],
+      ],
+      'learning_exposure' => <Object?>[
+        for (final String key in <String>[
+          'family',
+          'activity_id',
+          'item_id',
+          'target_sound',
+          'section_id',
+          'content_revision',
+        ])
+          row[key],
+      ],
+      'learning_best_scores' => <Object?>[row['activity_id']],
+      _ => throw StateError('Unknown aggregate table $table'),
+    });
+    if (result.containsKey(identity)) {
+      throw StateError('Duplicate aggregate identity in $table.');
+    }
+    result[identity] = encoded;
+  }
+  return result;
+}
+
+bool _aggregateNegativeControlsRejected(Map<String, List<String>> expected) {
+  final Map<String, List<Map<String, Object?>>> controls =
+      <String, List<Map<String, Object?>>>{
+        'learning_summaries': <Map<String, Object?>>[
+          <String, Object?>{
+            'family': 'course',
+            'sound': 'a',
+            'skill': 'listening',
+            'origin': 'practice',
+            'presentation': 'firstInRun',
+            'assistance_mask': 0,
+            'bucket': 'all',
+            'correct': 5,
+            'total': 8,
+          },
+          <String, Object?>{
+            'family': 'course',
+            'sound': 'b',
+            'skill': 'listening',
+            'origin': 'practice',
+            'presentation': 'firstInRun',
+            'assistance_mask': 0,
+            'bucket': 'all',
+            'correct': 2,
+            'total': 3,
+          },
+        ],
+        'learning_mistakes': <Map<String, Object?>>[
+          <String, Object?>{
+            'family': 'course',
+            'activity_id': 'lesson:a',
+            'item_id': 'x',
+            'content_revision': 1,
+            'first_wrong_attempt_id': 'first',
+            'latest_wrong_attempt_id': 'latest',
+            'first_wrong_at_us': 100,
+            'latest_wrong_at_us': 200,
+            'failure_count': 2,
+            'last_run_generation': 1,
+          },
+        ],
+        'learning_completions': <Map<String, Object?>>[
+          <String, Object?>{
+            'activity_id': 'lesson:a',
+            'content_revision': 1,
+            'policy_kind': 'discoveryThreshold',
+            'policy_revision': 1,
+            'threshold_percent': 80,
+            'committed_at_us': 300,
+          },
+        ],
+        'learning_exposure': <Map<String, Object?>>[
+          <String, Object?>{
+            'family': 'course',
+            'activity_id': 'arcade:a',
+            'item_id': 'x',
+            'target_sound': 'u',
+            'presentations': 1,
+            'assistance_mask': 1,
+          },
+        ],
+        'learning_best_scores': <Map<String, Object?>>[
+          <String, Object?>{'activity_id': 'arcade:a', 'score': 100},
+          <String, Object?>{'activity_id': 'arcade:b', 'score': 80},
+        ],
+      };
+  final Map<String, List<String>> encoded = <String, List<String>>{
+    for (final MapEntry<String, List<Map<String, Object?>>> entry
+        in controls.entries)
+      entry.key: <String>[
+        for (final Map<String, Object?> row in entry.value)
+          _aggregateRowJson(row),
+      ],
+  };
+  final bool summaryIdentityAlterationIsCaught = () {
+    final List<String> changed = List<String>.of(
+      encoded['learning_summaries']!,
+    );
+    final Map<String, Object?> first = Map<String, Object?>.from(
+      jsonDecode(changed[0]) as Map,
+    )..['sound'] = 'b';
+    final Map<String, Object?> second = Map<String, Object?>.from(
+      jsonDecode(changed[1]) as Map,
+    )..['sound'] = 'a';
+    changed[0] = _aggregateRowJson(first);
+    changed[1] = _aggregateRowJson(second);
+    final Map<String, List<String>> altered = <String, List<String>>{
+      ...encoded,
+      'learning_summaries': changed,
+    };
+    final Map<String, int> typedSummaryTotals = _aggregateSqlValues(encoded);
+    return !learningAggregateProjectionMatches(
+          <String, List<String>>{'learning_summaries': changed},
+          <String, List<String>>{
+            'learning_summaries': encoded['learning_summaries']!,
+          },
+        ) &&
+        _summarySqlMatches(altered, typedSummaryTotals);
+  }();
+  bool alteredValueRejected(String table, String field) {
+    final List<String> changed = List<String>.of(encoded[table]!);
+    final Map<String, Object?> row = Map<String, Object?>.from(
+      jsonDecode(changed.last) as Map,
+    );
+    row[field] = (row[field]! as int) + 1;
+    changed[changed.length - 1] = _aggregateRowJson(row);
+    final Map<String, List<String>> altered = <String, List<String>>{
+      ...encoded,
+      table: changed,
+    };
+    return !learningAggregateProjectionMatches(
+          <String, List<String>>{table: changed},
+          <String, List<String>>{table: encoded[table]!},
+        ) &&
+        _summarySqlMatches(altered, _aggregateSqlValues(encoded));
+  }
+
+  return summaryIdentityAlterationIsCaught &&
+      alteredValueRejected('learning_mistakes', 'latest_wrong_at_us') &&
+      alteredValueRejected('learning_completions', 'committed_at_us') &&
+      alteredValueRejected('learning_exposure', 'assistance_mask') &&
+      alteredValueRejected('learning_best_scores', 'score') &&
+      expected.isNotEmpty;
+}
+
+Map<String, int> _aggregateSqlValues(Map<String, List<String>> rows) {
+  final List<Map<String, Object?>> summaries = <Map<String, Object?>>[
+    for (final String encoded in rows['learning_summaries']!)
+      Map<String, Object?>.from(jsonDecode(encoded) as Map),
+  ];
+  return <String, int>{
+    'summaryIdentities': summaries.length,
+    'summaryTotal': summaries.fold<int>(
+      0,
+      (int total, Map<String, Object?> row) => total + (row['total']! as int),
+    ),
+    'summaryCorrect': summaries.fold<int>(
+      0,
+      (int total, Map<String, Object?> row) => total + (row['correct']! as int),
+    ),
+    'mistakeFailures':
+        <Map<String, Object?>>[
+          for (final String encoded in rows['learning_mistakes']!)
+            Map<String, Object?>.from(jsonDecode(encoded) as Map),
+        ].fold<int>(
+          0,
+          (int total, Map<String, Object?> row) =>
+              total + (row['failure_count']! as int),
+        ),
+    'completions': rows['learning_completions']!.length,
+    'exposureRows': rows['learning_exposure']!.length,
+    'bestScoreMax':
+        <Map<String, Object?>>[
+          for (final String encoded in rows['learning_best_scores']!)
+            Map<String, Object?>.from(jsonDecode(encoded) as Map),
+        ].fold<int>(
+          0,
+          (int maximum, Map<String, Object?> row) =>
+              maximum > (row['score']! as int) ? maximum : row['score']! as int,
+        ),
+  };
+}
+
+bool _summarySqlMatches(
+  Map<String, List<String>> rows,
+  Map<String, int> expected,
+) {
+  final Map<String, int> actual = _aggregateSqlValues(rows);
+  return actual['summaryIdentities'] == expected['summaryIdentities'] &&
+      actual['summaryTotal'] == expected['summaryTotal'] &&
+      actual['summaryCorrect'] == expected['summaryCorrect'];
+}
+
+bool _receiptPrunePreserved(
+  List<String> before,
+  List<String> after,
+  int limit, {
+  required int expectedNewReceipts,
+}) {
+  final Set<String> beforeSet = before.toSet();
+  final List<String> added = after
+      .where((String row) => !beforeSet.contains(row))
+      .toList();
+  if (added.length != expectedNewReceipts ||
+      before.length != limit ||
+      after.length != limit) {
+    return false;
+  }
+  final List<String> expected = <String>[...before, ...added]
+    ..sort((String left, String right) {
+      final int leftOrdinal = (jsonDecode(left) as List<Object?>)[2]! as int;
+      final int rightOrdinal = (jsonDecode(right) as List<Object?>)[2]! as int;
+      return leftOrdinal.compareTo(rightOrdinal);
+    });
+  final int latestOldOrdinal = before
+      .map((String row) => (jsonDecode(row) as List<Object?>)[2]! as int)
+      .reduce((int left, int right) => left > right ? left : right);
+  final List<int> newOrdinals =
+      added
+          .map((String row) => (jsonDecode(row) as List<Object?>)[2]! as int)
+          .toList()
+        ..sort();
+  return _sameStringIds(
+        after.toSet(),
+        expected.skip(expected.length - limit).toSet(),
+      ) &&
+      newOrdinals.first == latestOldOrdinal + 1 &&
+      newOrdinals.last == latestOldOrdinal + expectedNewReceipts;
+}
+
+Map<String, Object?> _expectedReceiptEvidence({
+  required List<String> before,
+  required List<String> after,
+  required List<String> tracedNewCommands,
+  required int ordinalDelta,
+  required int limit,
+}) {
+  final List<String> expected = <String>[...before, ...tracedNewCommands]
+    ..sort((String left, String right) {
+      final int leftOrdinal = (jsonDecode(left) as List<Object?>)[2]! as int;
+      final int rightOrdinal = (jsonDecode(right) as List<Object?>)[2]! as int;
+      return leftOrdinal.compareTo(rightOrdinal);
+    });
+  final List<String> retained = expected.length <= limit
+      ? expected
+      : expected.sublist(expected.length - limit);
+  final List<int> ordinals = <int>[
+    for (final String row in retained)
+      (jsonDecode(row) as List<Object?>)[2]! as int,
+  ];
+  final bool consecutive =
+      ordinals.length < 2 ||
+      List<int>.generate(
+        ordinals.length - 1,
+        (int index) => index,
+      ).every((int index) => ordinals[index + 1] == ordinals[index] + 1);
+  return <String, Object?>{
+    'expectedNewCommandReceiptIdentities': tracedNewCommands,
+    'expectedRetainedReceiptIdentities': retained,
+    'receiptCommitOrdinalDelta': ordinalDelta,
+    'receiptNewCommandCount': tracedNewCommands.length,
+    'receiptOrdinalsConsecutive': consecutive,
+    'receiptExpectedIdentityMatch':
+        jsonEncode(after) == jsonEncode(retained) &&
+        tracedNewCommands.length == ordinalDelta &&
+        consecutive,
+  };
+}
+
+bool _receiptContainsLatest(List<String> identities, String latestToken) =>
+    identities.any(
+      (String identity) =>
+          (jsonDecode(identity) as List<Object?>).first == latestToken,
+    );
 
 Set<String> _attemptRowKeys(List<Map<String, Object?>> rows) => <String>{
   for (final Map<String, Object?> row in rows)
@@ -1282,7 +2341,7 @@ Future<LearningRecoveryControlEvidence> qualifyLearningRecoveryControls(
     adapter: CourseLearningSqlAdapter(
       scope: ackHarness.courseDomainScope,
       transitions: ackHarness.transitions,
-      historyLimit: _retainedRows,
+      historyLimit: harness.historyLimit,
     ),
     authGeneration: ackHarness.authGeneration,
     currentAuth: () => ackHarness.auth,
@@ -1665,6 +2724,58 @@ Map<String, int> _comparisonSummaryValues(ComparisonLearningState state) {
   };
 }
 
+Map<String, int> _comparisonPersistedSummaryValues(
+  ComparisonLearningState state,
+) {
+  final Iterable<ComparisonPairSummary> summaries = state.summaries.values;
+  return <String, int>{
+    'summaryIdentities': state.summaries.length * 3,
+    'summaryTotal': summaries.fold<int>(
+      0,
+      (int total, ComparisonPairSummary value) =>
+          total +
+          value.firstInRun.total +
+          value.repeatInRun.total +
+          value.afterDebrief.total,
+    ),
+    'summaryCorrect': summaries.fold<int>(
+      0,
+      (int total, ComparisonPairSummary value) =>
+          total +
+          value.firstInRun.correct +
+          value.repeatInRun.correct +
+          value.afterDebrief.correct,
+    ),
+  };
+}
+
+Map<String, int> _sentencePersistedSummaryValues(
+  SentenceHuntLearningState state,
+) {
+  final Iterable<SentenceHuntSummary> summaries = state.summaries.values;
+  return <String, int>{
+    'summaryIdentities': state.summaries.length * 4,
+    'summaryTotal': summaries.fold<int>(
+      0,
+      (int total, SentenceHuntSummary value) =>
+          total +
+          value.firstInRun.total +
+          value.repeatInRun.total +
+          value.firstTeachingExposed.total +
+          value.repeatTeachingExposed.total,
+    ),
+    'summaryCorrect': summaries.fold<int>(
+      0,
+      (int total, SentenceHuntSummary value) =>
+          total +
+          value.firstInRun.correct +
+          value.repeatInRun.correct +
+          value.firstTeachingExposed.correct +
+          value.repeatTeachingExposed.correct,
+    ),
+  };
+}
+
 Map<String, int> _sentenceSummaryValues(SentenceHuntLearningState state) {
   final Iterable<SentenceHuntSummary> summaries = state.summaries.values;
   return <String, int>{
@@ -1767,8 +2878,8 @@ Future<void> _seedCourse(
   state = await _startCourseWordGame(repository, state);
   var nextAttemptProgress = 250;
   var boardRestarts = 0;
-  while (retainedAttempts < _retainedRows) {
-    final int remaining = _retainedRows - retainedAttempts;
+  while (retainedAttempts < harness.historyLimit) {
+    final int remaining = harness.historyLimit - retainedAttempts;
     final ActivitySlot slot = state.activities[_courseGameActivityId]!;
     final WordGameCheckpoint checkpoint = slot.snapshot as WordGameCheckpoint;
     final WordMatchEngine game = WordMatchEngine.fromState(
@@ -1800,7 +2911,7 @@ Future<void> _seedCourse(
     }
     if (retainedAttempts >= nextAttemptProgress) {
       print(
-        'TASK9 WORKLOAD course attempts=$retainedAttempts/$_retainedRows '
+        'TASK9 WORKLOAD course attempts=$retainedAttempts/${harness.historyLimit} '
         'elapsedMs=${writeWatch.elapsedMilliseconds}',
       );
       nextAttemptProgress += 250;
@@ -1815,7 +2926,7 @@ Future<void> _seedCourse(
     scope,
   );
   var receipts = currentReceiptRows;
-  while (receipts < _retainedRows) {
+  while (receipts < harness.historyLimit) {
     state = await _submitCourse(
       repository,
       state,
@@ -1825,7 +2936,7 @@ Future<void> _seedCourse(
     receipts++;
     if (receipts % 250 == 0) {
       print(
-        'TASK9 WORKLOAD course receipts=$receipts/$_retainedRows '
+        'TASK9 WORKLOAD course receipts=$receipts/${harness.historyLimit} '
         'elapsedMs=${writeWatch.elapsedMilliseconds}',
       );
     }
@@ -1884,10 +2995,24 @@ Future<CourseLearningState> _submitCourse(
   SqliteCourseLearningRepository repository,
   CourseLearningState state,
   String activityId,
-  LearningAction action,
-) async => (await repository.submit(
-  repository.prepare(state: state, activityId: activityId, action: action),
-)).state;
+  LearningAction action, {
+  List<String>? receiptTrace,
+}) async {
+  final LearningCommand command = repository.prepare(
+    state: state,
+    activityId: activityId,
+    action: action,
+  );
+  final LearningCommit commit = await repository.submit(command);
+  receiptTrace?.add(
+    jsonEncode(<Object?>[
+      command.token,
+      CourseLearningCommandCodec.canonicalCommand(command),
+      commit.state.commitOrdinal,
+    ]),
+  );
+  return commit.state;
+}
 
 int _courseAttemptCount(CourseLearningState state) => state.history.fold<int>(
   0,
@@ -1896,19 +3021,22 @@ int _courseAttemptCount(CourseLearningState state) => state.history.fold<int>(
 
 Future<CourseLearningState> _startCourseWordGame(
   SqliteCourseLearningRepository repository,
-  CourseLearningState state,
-) async {
+  CourseLearningState state, {
+  List<String>? receiptTrace,
+}) async {
   final CourseLearningState started = await _submitCourse(
     repository,
     state,
     _courseGameActivityId,
     StartLearningRun(options: RunOptions()),
+    receiptTrace: receiptTrace,
   );
   return _submitCourse(
     repository,
     started,
     _courseGameActivityId,
     CheckpointArcade(elapsedSeconds: 0, paused: false),
+    receiptTrace: receiptTrace,
   );
 }
 
@@ -1927,7 +3055,7 @@ Future<void> _seedComparison(
   loadWatch.stop();
   var attempts = 0;
   var nextAttemptProgress = 250;
-  while (attempts < _retainedRows) {
+  while (attempts < harness.historyLimit) {
     state = (await harness.commitComparison(
       repository,
       state,
@@ -1953,14 +3081,14 @@ Future<void> _seedComparison(
             exercise,
             runGeneration: state.slot!.cursor.generation,
             round: session.round,
-            correct: attempts != _retainedRows - 1,
+            correct: attempts != harness.historyLimit - 1,
           ),
         ),
       )).state;
       attempts++;
       if (attempts >= nextAttemptProgress) {
         print(
-          'TASK9 WORKLOAD comparison attempts=$attempts/$_retainedRows '
+          'TASK9 WORKLOAD comparison attempts=$attempts/${harness.historyLimit} '
           'elapsedMs=${writeWatch.elapsedMilliseconds}',
         );
         nextAttemptProgress += 250;
@@ -2052,7 +3180,7 @@ Future<void> _seedSentenceHunt(
   var attempts = 0;
   var nextAttemptProgress = 250;
   var run = 0;
-  while (attempts < _retainedRows) {
+  while (attempts < harness.historyLimit) {
     final SentenceHuntSection section = harness
         .sentenceCatalogue
         .sections[run % harness.sentenceCatalogue.sections.length];
@@ -2072,7 +3200,7 @@ Future<void> _seedSentenceHunt(
         section.id,
         session.currentItemId!,
       );
-      final bool correct = attempts != _retainedRows - 1;
+      final bool correct = attempts != harness.historyLimit - 1;
       state = (await harness.commitSentence(
         repository,
         state,
@@ -2090,7 +3218,7 @@ Future<void> _seedSentenceHunt(
       attempts++;
       if (attempts >= nextAttemptProgress) {
         print(
-          'TASK9 WORKLOAD sentence-hunt attempts=$attempts/$_retainedRows '
+          'TASK9 WORKLOAD sentence-hunt attempts=$attempts/${harness.historyLimit} '
           'elapsedMs=${writeWatch.elapsedMilliseconds}',
         );
         nextAttemptProgress += 250;
@@ -2487,36 +3615,39 @@ Future<int> _scopeCommitOrdinal(
         .read<int>('commit_ordinal');
 
 final class _WorkloadHarness {
-  _WorkloadHarness(this.runId, {String? tokenNamespace})
-    : tokenNamespace = tokenNamespace ?? runId,
-      owner = LearningOwner.account('sqlite-qualification-$runId'),
-      courseDomainScope = LearningScope(
-        courseId: 'en-fr',
-        owner: LearningOwner.account('sqlite-qualification-$runId'),
-      ),
-      comparisonDomainScope = ComparisonProfileScope(
-        courseId: 'en-fr',
-        owner: LearningOwner.account('sqlite-qualification-$runId'),
-      ),
-      sentenceDomainScope = SentenceHuntProfileScope(
-        courseId: 'en-fr',
-        owner: LearningOwner.account('sqlite-qualification-$runId'),
-      ),
-      courseStorageScope = LearningStorageScope(
-        owner: LearningOwner.account('sqlite-qualification-$runId'),
-        courseId: 'en-fr',
-        family: LearningFamily.course,
-      ),
-      comparisonStorageScope = LearningStorageScope(
-        owner: LearningOwner.account('sqlite-qualification-$runId'),
-        courseId: 'en-fr',
-        family: LearningFamily.comparison,
-      ),
-      sentenceStorageScope = LearningStorageScope(
-        owner: LearningOwner.account('sqlite-qualification-$runId'),
-        courseId: 'en-fr',
-        family: LearningFamily.sentenceHunt,
-      ) {
+  _WorkloadHarness(
+    this.runId, {
+    String? tokenNamespace,
+    this.historyLimit = _retainedRows,
+  }) : tokenNamespace = tokenNamespace ?? runId,
+       owner = LearningOwner.account('sqlite-qualification-$runId'),
+       courseDomainScope = LearningScope(
+         courseId: 'en-fr',
+         owner: LearningOwner.account('sqlite-qualification-$runId'),
+       ),
+       comparisonDomainScope = ComparisonProfileScope(
+         courseId: 'en-fr',
+         owner: LearningOwner.account('sqlite-qualification-$runId'),
+       ),
+       sentenceDomainScope = SentenceHuntProfileScope(
+         courseId: 'en-fr',
+         owner: LearningOwner.account('sqlite-qualification-$runId'),
+       ),
+       courseStorageScope = LearningStorageScope(
+         owner: LearningOwner.account('sqlite-qualification-$runId'),
+         courseId: 'en-fr',
+         family: LearningFamily.course,
+       ),
+       comparisonStorageScope = LearningStorageScope(
+         owner: LearningOwner.account('sqlite-qualification-$runId'),
+         courseId: 'en-fr',
+         family: LearningFamily.comparison,
+       ),
+       sentenceStorageScope = LearningStorageScope(
+         owner: LearningOwner.account('sqlite-qualification-$runId'),
+         courseId: 'en-fr',
+         family: LearningFamily.sentenceHunt,
+       ) {
     registry = LearningRegistry.french();
     transitions = LearningTransitionEngine(registry);
     catalogue = loadFrenchComparisonCatalogue();
@@ -2530,6 +3661,7 @@ final class _WorkloadHarness {
   }
 
   final String runId;
+  final int historyLimit;
   final String tokenNamespace;
   final LearningOwner owner;
   final int authGeneration = learningQualificationAuthGeneration;
@@ -2577,6 +3709,7 @@ final class _WorkloadHarness {
     clock: now,
     newToken: nextToken,
     random: random,
+    historyLimit: historyLimit,
   );
 
   SqliteComparisonLearningRepository comparisonRepository(
@@ -2590,6 +3723,7 @@ final class _WorkloadHarness {
     transitions: comparisonTransitions,
     clock: now,
     newToken: nextToken,
+    historyLimit: historyLimit,
   );
 
   SqliteSentenceHuntLearningRepository sentenceHuntRepository(
@@ -2603,26 +3737,51 @@ final class _WorkloadHarness {
     transitions: sentenceTransitions,
     clock: now,
     newToken: nextToken,
+    historyLimit: historyLimit,
   );
 
   Future<ComparisonCommit> commitComparison(
     SqliteComparisonLearningRepository repository,
     ComparisonLearningState state,
-    ComparisonAction action,
-  ) => repository.submit(
-    repository.prepare(
+    ComparisonAction action, {
+    List<String>? receiptTrace,
+  }) async {
+    final ComparisonLearningCommand command = repository.prepare(
       state: state,
       activityId: catalogue.activityId,
       action: action,
-    ),
-  );
+    );
+    final ComparisonCommit commit = await repository.submit(command);
+    receiptTrace?.add(
+      jsonEncode(<Object?>[
+        command.token,
+        ComparisonLearningCommandCodec.canonicalCommand(command),
+        commit.state.commitOrdinal,
+      ]),
+    );
+    return commit;
+  }
 
   Future<SentenceHuntCommit> commitSentence(
     SqliteSentenceHuntLearningRepository repository,
     SentenceHuntLearningState state,
     String sectionId,
-    SentenceHuntAction action,
-  ) => repository.submit(
-    repository.prepare(state: state, sectionId: sectionId, action: action),
-  );
+    SentenceHuntAction action, {
+    List<String>? receiptTrace,
+  }) async {
+    final SentenceHuntLearningCommand command = repository.prepare(
+      state: state,
+      sectionId: sectionId,
+      action: action,
+    );
+    final SentenceHuntCommit commit = await repository.submit(command);
+    receiptTrace?.add(
+      jsonEncode(<Object?>[
+        command.token,
+        SentenceHuntCommandCodec.canonicalCommand(command),
+        commit.state.commitOrdinal,
+      ]),
+    );
+    return commit;
+  }
 }
