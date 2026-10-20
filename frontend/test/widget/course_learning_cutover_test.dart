@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' show Tristate;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -106,21 +108,70 @@ void main() {
       await tester.pumpAndSettle();
     }
 
+    int semanticLabelCount(SemanticsNode node, String label) {
+      int count = node.label == label ? 1 : 0;
+      node.visitChildren((SemanticsNode child) {
+        count += semanticLabelCount(child, label);
+        return true;
+      });
+      return count;
+    }
+
+    SemanticsOwner semanticsOwner() =>
+        tester.binding.renderViews.first.owner!.semanticsOwner!;
+
     await tapControl('learning-storage-prepare-command-a');
     final SelectableText frozenCommand = tester.widget<SelectableText>(
       find.byKey(const ValueKey<String>('learning-storage-frozen-command')),
     );
     final Map<String, dynamic> payloadA =
         jsonDecode(frozenCommand.data!) as Map<String, dynamic>;
+    final Finder frozenCommandFinder = find.byKey(
+      const ValueKey<String>('learning-storage-frozen-command'),
+    );
+    final SemanticsNode frozenCommandSemantics = tester.getSemantics(
+      frozenCommandFinder,
+    );
+    expect(frozenCommandSemantics.label, frozenCommand.data);
+    expect(
+      semanticLabelCount(
+        semanticsOwner().rootSemanticsNode!,
+        frozenCommand.data!,
+      ),
+      1,
+    );
+    expect(
+      frozenCommandSemantics
+          .getSemanticsData()
+          .flagsCollection
+          .isFocused,
+      Tristate.isFalse,
+    );
+    expect(
+      frozenCommandSemantics
+          .getSemanticsData()
+          .hasAction(SemanticsAction.longPress),
+      isTrue,
+    );
+    semanticsOwner().performAction(
+      frozenCommandSemantics.id,
+      SemanticsAction.longPress,
+    );
+    await tester.pumpAndSettle();
     expect(
       tester
-          .getSemantics(
-            find.byKey(
-              const ValueKey<String>('learning-storage-frozen-command'),
-            ),
-          )
-          .label,
-      frozenCommand.data,
+          .getSemantics(frozenCommandFinder)
+          .getSemanticsData()
+          .flagsCollection
+          .isFocused,
+      Tristate.isTrue,
+    );
+    expect(
+      tester
+          .getSemantics(frozenCommandFinder)
+          .getSemanticsData()
+          .hasAction(SemanticsAction.setSelection),
+      isTrue,
     );
     await tapControl('learning-storage-prepare-command-b');
     final SelectableText frozenCommandB = tester.widget<SelectableText>(
@@ -155,6 +206,35 @@ void main() {
           )
           .label,
       submittedResult.data,
+    );
+    expect(
+      semanticLabelCount(
+        semanticsOwner().rootSemanticsNode!,
+        submittedResult.data!,
+      ),
+      1,
+    );
+    final Finder resultFinder = find.byKey(
+      const ValueKey<String>('learning-storage-result'),
+    );
+    final SemanticsNode resultSemantics = tester.getSemantics(resultFinder);
+    expect(
+      resultSemantics
+          .getSemanticsData()
+          .hasAction(SemanticsAction.longPress),
+      isTrue,
+    );
+    semanticsOwner().performAction(
+      resultSemantics.id,
+      SemanticsAction.longPress,
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .getSemantics(resultFinder)
+          .getSemanticsData()
+          .hasAction(SemanticsAction.setSelection),
+      isTrue,
     );
     await tapControl('learning-storage-submit-command-b');
     expect(find.textContaining('conflict'), findsOneWidget);

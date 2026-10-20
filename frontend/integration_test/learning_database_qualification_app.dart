@@ -340,7 +340,6 @@ class _Task9QualificationAppState
             const Text('Frozen canonical command (copy exactly between tabs):'),
             Semantics(
               label: _frozenCommand,
-              excludeSemantics: true,
               child: SelectableText(
                 _frozenCommand,
                 key: const ValueKey<String>('learning-storage-frozen-command'),
@@ -370,7 +369,6 @@ class _Task9QualificationAppState
             const Text('Result, row counts and SQL cursors:'),
             Semantics(
               label: _result,
-              excludeSemantics: true,
               child: SelectableText(
                 _result,
                 key: const ValueKey<String>('learning-storage-result'),
