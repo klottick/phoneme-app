@@ -17,11 +17,9 @@ import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/course/course_learning_command.dart';
 import 'package:linguist/src/core/course/course_learning_registry.dart';
-import 'package:linguist/src/core/course/course_learning_persistence.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/course_learning_sync.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
-import 'package:linguist/src/core/course/course_learning_store.dart';
 import 'package:linguist/src/core/course/course_learning_transition.dart';
 import 'package:linguist/src/core/course/storage/comparison_learning_sql_repository.dart';
 import 'package:linguist/src/core/course/storage/course_learning_sql_repository.dart';
@@ -41,79 +39,39 @@ class _AuthNotifier extends AuthController {
   void emit(AppAuthState value) => state = value;
 }
 
-class _MemoryPersistence implements LearningPersistence {
-  final Map<String, String> values = {};
-  final Map<String, int> readsByKey = {};
-  bool holdNextWrite = false;
-  bool failNextWrite = false;
-  Completer<void>? writeEntered;
-  Completer<bool>? writeGate;
-  @override
-  Future<String?> read(String key) async {
-    readsByKey.update(key, (count) => count + 1, ifAbsent: () => 1);
-    return values[key];
-  }
-
-  @override
-  Future<void> write(String key, String value) async {
-    if (holdNextWrite) {
-      holdNextWrite = false;
-      writeEntered!.complete();
-      if (!await writeGate!.future) throw StateError('held write rejected');
-    }
-    if (failNextWrite) {
-      failNextWrite = false;
-      throw StateError('write rejected');
-    }
-    values[key] = value;
-  }
-
-  @override
-  Future<void> restore(String key, String? lastCommitted) async {
-    if (lastCommitted == null) {
-      values.remove(key);
-    } else {
-      values[key] = lastCommitted;
-    }
-  }
-
-  @override
-  Future<void> reload() async {}
-}
-
 User _user(String id) => User.fromJson({
-      'id': id,
-      'aud': 'authenticated',
-      'app_metadata': <String, dynamic>{},
-      'user_metadata': <String, dynamic>{},
-      'created_at': '2026-01-01T00:00:00Z',
-    })!;
+  'id': id,
+  'aud': 'authenticated',
+  'app_metadata': <String, dynamic>{},
+  'user_metadata': <String, dynamic>{},
+  'created_at': '2026-01-01T00:00:00Z',
+})!;
 
 SupabaseClient _backendClient() => SupabaseClient(
   'https://learning.example.invalid',
   'public-test-key',
-        httpClient: MockClient((request) async {
-      final email = (jsonDecode(request.body) as Map)['email'] as String;
-      final id = email.split('@').first;
+  httpClient: MockClient((request) async {
+    final email = (jsonDecode(request.body) as Map)['email'] as String;
+    final id = email.split('@').first;
     final token =
         '${base64Url.encode(utf8.encode('{"alg":"HS256"}'))}.'
         '${base64Url.encode(utf8.encode(jsonEncode({'sub': id, 'exp': DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600})))}.signature';
-      return http.Response(
-          jsonEncode({
-            'access_token': token,
-            'refresh_token': 'test-refresh',
-            'token_type': 'bearer',
-            'expires_in': 3600,
-            'user': {
-              'id': id,
-              'aud': 'authenticated',
-              'app_metadata': <String, dynamic>{},
-              'user_metadata': <String, dynamic>{},
-              'created_at': '2026-01-01T00:00:00Z',
-            },
-          }),
-          200,
-          request: request,
+    return http.Response(
+      jsonEncode({
+        'access_token': token,
+        'refresh_token': 'test-refresh',
+        'token_type': 'bearer',
+        'expires_in': 3600,
+        'user': {
+          'id': id,
+          'aud': 'authenticated',
+          'app_metadata': <String, dynamic>{},
+          'user_metadata': <String, dynamic>{},
+          'created_at': '2026-01-01T00:00:00Z',
+        },
+      }),
+      200,
+      request: request,
       headers: {'content-type': 'application/json'},
     );
   }),
@@ -241,28 +199,28 @@ void main() {
         container.dispose();
         await database.close();
       });
-    final tracker = container.read(learningAuthScopeProvider.notifier);
-    final initial = tracker.current;
-    expect(initial.ready, isFalse);
-    auth.emit(AppAuthState(user: _user('A')));
-    await Future<void>.delayed(Duration.zero);
-    final originalStore = container.read(courseLearningStoreProvider);
-    final firstEpoch = tracker.current.generation;
-    auth.emit(AppAuthState(user: _user('B')));
-    await Future<void>.delayed(Duration.zero);
-    auth.emit(AppAuthState(user: _user('A')));
-    await Future<void>.delayed(Duration.zero);
-    final returnedStore = container.read(courseLearningStoreProvider);
-    expect(tracker.current.owner.userId, 'A');
-    expect(tracker.current.generation, firstEpoch + 2);
-    expect(identical(returnedStore, originalStore), isFalse);
-    final returnedEpoch = tracker.current.generation;
-    auth.emit(AppAuthState(user: _user('A'), isLoading: true));
-    await Future<void>.delayed(Duration.zero);
-    auth.emit(AppAuthState(user: _user('A'), error: 'temporary auth error'));
-    await Future<void>.delayed(Duration.zero);
-    expect(tracker.current.generation, returnedEpoch);
-    expect(tracker.current.ready, isFalse);
+      final tracker = container.read(learningAuthScopeProvider.notifier);
+      final initial = tracker.current;
+      expect(initial.ready, isFalse);
+      auth.emit(AppAuthState(user: _user('A')));
+      await Future<void>.delayed(Duration.zero);
+      final originalStore = container.read(courseLearningStoreProvider);
+      final firstEpoch = tracker.current.generation;
+      auth.emit(AppAuthState(user: _user('B')));
+      await Future<void>.delayed(Duration.zero);
+      auth.emit(AppAuthState(user: _user('A')));
+      await Future<void>.delayed(Duration.zero);
+      final returnedStore = container.read(courseLearningStoreProvider);
+      expect(tracker.current.owner.userId, 'A');
+      expect(tracker.current.generation, firstEpoch + 2);
+      expect(identical(returnedStore, originalStore), isFalse);
+      final returnedEpoch = tracker.current.generation;
+      auth.emit(AppAuthState(user: _user('A'), isLoading: true));
+      await Future<void>.delayed(Duration.zero);
+      auth.emit(AppAuthState(user: _user('A'), error: 'temporary auth error'));
+      await Future<void>.delayed(Duration.zero);
+      expect(tracker.current.generation, returnedEpoch);
+      expect(tracker.current.ready, isFalse);
     },
   );
 
@@ -270,9 +228,9 @@ void main() {
     final database = await _newFileDatabase();
     final container = ProviderContainer(
       overrides: [
-      authControllerProvider.overrideWith((ref) => _AuthNotifier()),
+        authControllerProvider.overrideWith((ref) => _AuthNotifier()),
         learningDatabaseHandleProvider.overrideWithValue(database.handle),
-      learningCloudTransportProvider.overrideWithValue(null),
+        learningCloudTransportProvider.overrideWithValue(null),
       ],
     );
     addTearDown(() async {
@@ -294,55 +252,56 @@ void main() {
 
   test(
     'throwing observer cannot fail an already committed repository write',
-      () async {
-    final owner = LearningOwner.account('callback-owner');
-    final scope = LearningScope(courseId: 'en-fr', owner: owner);
-    final persistence = _MemoryPersistence();
-    final store = CourseLearningRepository(
+    () async {
+      final owner = LearningOwner.account('callback-owner');
+      final scope = LearningScope(courseId: 'en-fr', owner: owner);
+      final database = await _newFileDatabase();
+      addTearDown(database.close);
+      final store = SqliteCourseLearningRepository(
+        database: database.handle,
         scope: scope,
         authGeneration: 0,
         currentAuth: () =>
             LearningAuthScope(owner: owner, generation: 0, ready: true),
         backendOwner: () => owner,
-        persistence: persistence,
         transitions: LearningTransitionEngine(LearningRegistry.french()),
         clock: () => DateTime.utc(2026),
         newToken: () => 'AAAAAAAAAAAAAAAAAAAAAA',
         random: Random(1),
         onCommitted: () => throw StateError('observer failed'),
       );
-    final state = await store.load();
-    final command = store.prepare(
+      final state = await store.load();
+      final command = store.prepare(
         state: state,
         activityId: 'lesson:en-fr-u-y',
         action: StartLearningRun(options: RunOptions()),
       );
 
-    final committed = await store.submit(command);
+      final committed = await store.submit(command);
 
-    expect(committed.state.activities, contains('lesson:en-fr-u-y'));
-    expect((await store.load()).activities, contains('lesson:en-fr-u-y'));
+      expect(committed.state.activities, contains('lesson:en-fr-u-y'));
+      expect((await store.load()).activities, contains('lesson:en-fr-u-y'));
     },
   );
 
   test(
     'old provider commit after owner rebuild stays on captured scope',
-      () async {
-    final client = _backendClient();
-    courseBackend = client;
-    await _signIn(client, 'old-owner');
-    addTearDown(() async {
-      courseBackend = null;
-      await client.dispose();
-    });
+    () async {
+      final client = _backendClient();
+      courseBackend = client;
+      await _signIn(client, 'old-owner');
+      addTearDown(() async {
+        courseBackend = null;
+        await client.dispose();
+      });
       final barrier = _ProviderSqlCommitBarrier();
       final database = await _newFileDatabase(barrier: barrier);
-    final auth = _AuthNotifier();
+      final auth = _AuthNotifier();
       final container = ProviderContainer(
         overrides: [
-      authControllerProvider.overrideWith((ref) => auth),
+          authControllerProvider.overrideWith((ref) => auth),
           learningDatabaseHandleProvider.overrideWithValue(database.handle),
-      learningCloudTransportProvider.overrideWithValue(null),
+          learningCloudTransportProvider.overrideWithValue(null),
         ],
       );
       addTearDown(() async {
@@ -350,33 +309,33 @@ void main() {
         barrier.releaseCommit();
         await database.close();
       });
-    container.read(learningAuthScopeProvider);
-    auth.emit(AppAuthState(user: _user('old-owner')));
-    await Future<void>.delayed(Duration.zero);
-    final oldStore = container.read(courseLearningStoreProvider);
-    final oldState = await oldStore.load();
-    final command = oldStore.prepare(
+      container.read(learningAuthScopeProvider);
+      auth.emit(AppAuthState(user: _user('old-owner')));
+      await Future<void>.delayed(Duration.zero);
+      final oldStore = container.read(courseLearningStoreProvider);
+      final oldState = await oldStore.load();
+      final command = oldStore.prepare(
         state: oldState,
         activityId: 'lesson:en-fr-u-y',
         action: StartLearningRun(options: RunOptions()),
       );
-    var stateNotifications = 0;
-    final stateSubscription = container.listen(
+      var stateNotifications = 0;
+      final stateSubscription = container.listen(
         courseLearningStateProvider,
         (_, __) => stateNotifications++,
         fireImmediately: true,
       );
-    addTearDown(stateSubscription.close);
-    await container.read(courseLearningStateProvider.future);
+      addTearDown(stateSubscription.close);
+      await container.read(courseLearningStateProvider.future);
 
       barrier.holdNextCommit();
-    final oldCommit = oldStore.submit(command);
+      final oldCommit = oldStore.submit(command);
       await barrier.commitEntered;
-    await _signIn(client, 'new-owner');
-    auth.emit(AppAuthState(user: _user('new-owner')));
-    await Future<void>.delayed(Duration.zero);
-    final newStore = container.read(courseLearningStoreProvider);
-    expect(newStore.scope.owner.userId, 'new-owner');
+      await _signIn(client, 'new-owner');
+      auth.emit(AppAuthState(user: _user('new-owner')));
+      await Future<void>.delayed(Duration.zero);
+      final newStore = container.read(courseLearningStoreProvider);
+      expect(newStore.scope.owner.userId, 'new-owner');
       barrier.releaseCommit();
       await expectLater(
         oldCommit,
@@ -384,8 +343,8 @@ void main() {
         reason:
             'the real commit is durable in its captured scope but not ACKed',
       );
-    final newState = await container.read(courseLearningStateProvider.future);
-    expect(newState.activities, isEmpty);
+      final newState = await container.read(courseLearningStateProvider.future);
+      expect(newState.activities, isEmpty);
       final db = await database.handle.open();
       expect(await _revision(db, 'old-owner'), 1);
       expect(await _revision(db, 'new-owner'), 0);
@@ -399,41 +358,41 @@ void main() {
 
   test(
     'live commit refreshes state provider but failed write does not',
-      () async {
-    final client = _backendClient();
-    courseBackend = client;
-    await _signIn(client, 'live-owner');
-    addTearDown(() async {
-      courseBackend = null;
-      await client.dispose();
-    });
+    () async {
+      final client = _backendClient();
+      courseBackend = client;
+      await _signIn(client, 'live-owner');
+      addTearDown(() async {
+        courseBackend = null;
+        await client.dispose();
+      });
       final database = await _newFileDatabase();
-    final auth = _AuthNotifier();
+      final auth = _AuthNotifier();
       final container = ProviderContainer(
         overrides: [
-      authControllerProvider.overrideWith((ref) => auth),
+          authControllerProvider.overrideWith((ref) => auth),
           learningDatabaseHandleProvider.overrideWithValue(database.handle),
-      learningCloudTransportProvider.overrideWithValue(null),
+          learningCloudTransportProvider.overrideWithValue(null),
         ],
       );
       addTearDown(() async {
         container.dispose();
         await database.close();
       });
-    container.read(learningAuthScopeProvider);
-    auth.emit(AppAuthState(user: _user('live-owner')));
-    await Future<void>.delayed(Duration.zero);
-    final store = container.read(courseLearningStoreProvider);
-    var notifications = 0;
-    final subscription = container.listen(
+      container.read(learningAuthScopeProvider);
+      auth.emit(AppAuthState(user: _user('live-owner')));
+      await Future<void>.delayed(Duration.zero);
+      final store = container.read(courseLearningStoreProvider);
+      var notifications = 0;
+      final subscription = container.listen(
         courseLearningStateProvider,
         (_, __) => notifications++,
         fireImmediately: true,
       );
-    addTearDown(subscription.close);
-    final initial = await container.read(courseLearningStateProvider.future);
-    final initialNotifications = notifications;
-    final command = store.prepare(
+      addTearDown(subscription.close);
+      final initial = await container.read(courseLearningStateProvider.future);
+      final initialNotifications = notifications;
+      final command = store.prepare(
         state: initial,
         activityId: 'lesson:en-fr-u-y',
         action: StartLearningRun(options: RunOptions()),
@@ -441,21 +400,21 @@ void main() {
       final db = await database.handle.open();
       await db.customStatement('PRAGMA query_only = ON');
 
-    await expectLater(store.submit(command), throwsA(isA<Exception>()));
+      await expectLater(store.submit(command), throwsA(isA<Exception>()));
       await db.customStatement('PRAGMA query_only = OFF');
-    expect(notifications, initialNotifications);
+      expect(notifications, initialNotifications);
 
-    final retry = store.prepare(
+      final retry = store.prepare(
         state: await store.load(),
         activityId: 'lesson:en-fr-u-y',
         action: StartLearningRun(options: RunOptions()),
       );
-    await store.submit(retry);
+      await store.submit(retry);
       final refreshed = await container.read(
         courseLearningStateProvider.future,
       );
-    expect(refreshed.activities, contains('lesson:en-fr-u-y'));
-    expect(notifications, greaterThan(initialNotifications));
+      expect(refreshed.activities, contains('lesson:en-fr-u-y'));
+      expect(notifications, greaterThan(initialNotifications));
     },
   );
 

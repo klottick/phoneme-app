@@ -3,7 +3,7 @@ import 'dart:math';
 import 'course_attempt.dart';
 import 'course_learning_checkpoint.dart';
 import 'course_learning_command.dart';
-import 'course_learning_codec.dart';
+import 'course_learning_command_codec.dart';
 import 'course_learning_error.dart';
 import 'course_learning_game_transition.dart';
 import 'course_learning_lesson_transition.dart';
@@ -25,11 +25,11 @@ class LearningTransition {
     required Map<SummaryKey, SkillCount> summaries,
     required List<LearningCompletion> completions,
     required Map<String, int> bestScores,
-  })  : attempts = List.unmodifiable(attempts),
-        mistakes = Map.unmodifiable(mistakes),
-        summaries = Map.unmodifiable(summaries),
-        completions = List.unmodifiable(completions),
-        bestScores = Map.unmodifiable(bestScores);
+  }) : attempts = List.unmodifiable(attempts),
+       mistakes = Map.unmodifiable(mistakes),
+       summaries = Map.unmodifiable(summaries),
+       completions = List.unmodifiable(completions),
+       bestScores = Map.unmodifiable(bestScores);
 
   final ActivitySlot slot;
   final List<CourseAttempt> attempts;
@@ -102,8 +102,9 @@ class LearningTransitionEngine {
         throw const LearningInvalidCommandException();
       }
       final slotBefore = state.activities[command.activityId];
-      final replayRandom =
-          isGame ? ReplayLearningRandom(command.draws) : _NoRandom();
+      final replayRandom = isGame
+          ? ReplayLearningRandom(command.draws)
+          : _NoRandom();
       final mutationForCheck = _applyAction(
         definition: definition,
         slot: slotBefore,
@@ -116,7 +117,8 @@ class LearningTransitionEngine {
         scope: state.scope,
         authGeneration: command.authGeneration,
         activityId: command.activityId,
-        expected: slotBefore?.cursor ??
+        expected:
+            slotBefore?.cursor ??
             SlotCursor(generation: 0, sequence: 0, revision: 0),
         expectedScopeRevision: command.expectedScopeRevision,
         token: command.token,
@@ -126,12 +128,13 @@ class LearningTransitionEngine {
         candidate: mutationForCheck.snapshot,
         feedback: mutationForCheck.feedback,
       );
-      const codec = LearningDocumentCodec();
-      if (codec.canonicalCommand(replay) != codec.canonicalCommand(command)) {
+      if (CourseLearningCommandCodec.legacyCanonicalCommand(replay) !=
+          CourseLearningCommandCodec.legacyCanonicalCommand(command)) {
         throw const LearningInvalidCommandException();
       }
       final beforeSlot = state.activities[command.activityId];
-      final predecessor = beforeSlot?.cursor ??
+      final predecessor =
+          beforeSlot?.cursor ??
           SlotCursor(generation: 0, sequence: 0, revision: 0);
       final start = command.action is StartLearningRun;
       final cursor = start
@@ -167,7 +170,9 @@ class LearningTransitionEngine {
         exposures: exposures,
         latestReceipt: CommandReceipt(
           token: command.token,
-          canonicalCommand: codec.canonicalCommand(command),
+          canonicalCommand: CourseLearningCommandCodec.legacyCanonicalCommand(
+            command,
+          ),
           before: predecessor,
           after: cursor,
           commitOrdinal: commitOrdinal,
@@ -206,9 +211,11 @@ class LearningTransitionEngine {
           index: i,
           priorSameItemInBatch: mutation.gameEvidence
               .take(i)
-              .where((prior) =>
-                  prior.item.id == evidence.item.id &&
-                  prior.target == evidence.target)
+              .where(
+                (prior) =>
+                    prior.item.id == evidence.item.id &&
+                    prior.target == evidence.target,
+              )
               .length,
         );
         attempts.add(attempt);
@@ -271,24 +278,27 @@ class LearningTransitionEngine {
       final sessionId = token;
       final ActivitySnapshot snapshot = switch (definition.kind) {
         LearningActivityKind.discovery => DiscoveryCheckpoint(
-            session: LessonSectionSession(
-              itemIds:
-                  definition.items.map((item) => item.sessionAlias!).toList(),
-              sessionId: sessionId,
-              contentRevision: definition.contentRevision,
-              policy: options.policy,
-            ),
+          session: LessonSectionSession(
+            itemIds: definition.items
+                .map((item) => item.sessionAlias!)
+                .toList(),
+            sessionId: sessionId,
+            contentRevision: definition.contentRevision,
+            policy: options.policy,
           ),
+        ),
         LearningActivityKind.legacyLesson => const LegacyLessonCheckpoint(
-            wordIndex: 0, selectedSound: null, finished: false),
+          wordIndex: 0,
+          selectedSound: null,
+          finished: false,
+        ),
         LearningActivityKind.drill => DrillCheckpoint(
-            pairIds: definition.items.map((item) => item.id).toList(),
-            index: 0,
-            correct: 0,
-            ended: false,
-          ),
-        LearningActivityKind.soundGame ||
-        LearningActivityKind.wordGame =>
+          pairIds: definition.items.map((item) => item.id).toList(),
+          index: 0,
+          correct: 0,
+          ended: false,
+        ),
+        LearningActivityKind.soundGame || LearningActivityKind.wordGame =>
           throw const LearningInvalidCommandException(),
       };
       return _Mutation(snapshot: snapshot);
@@ -334,7 +344,9 @@ class LearningTransitionEngine {
           action: action,
         );
         return _Mutation(
-            snapshot: changed.snapshot, feedback: changed.feedback);
+          snapshot: changed.snapshot,
+          feedback: changed.feedback,
+        );
       }
       if (action is ObserveAssistance) {
         _validateAssistance(definition, action);
@@ -418,15 +430,18 @@ class LearningTransitionEngine {
     required LearningSourceItem? item,
     required List<GameAnswerEvidence> gameEvidence,
   }) {
-    final out =
-        Map<ItemContextKey, ItemExposure>.of(slot?.exposures ?? const {});
+    final out = Map<ItemContextKey, ItemExposure>.of(
+      slot?.exposures ?? const {},
+    );
     if (action is StartLearningRun) {
       out.clear();
       if (definition.kind == LearningActivityKind.legacyLesson) {
         for (final item in definition.items) {
           for (final target in item.targetSounds) {
-            out[ItemContextKey(itemId: item.id, targetSound: target)] =
-                ItemExposure(
+            out[ItemContextKey(
+              itemId: item.id,
+              targetSound: target,
+            )] = ItemExposure(
               presentations: 0,
               assistance: const {AssistanceFlag.explanationVisible},
             );
@@ -438,7 +453,8 @@ class LearningTransitionEngine {
     }
     if (action is ObserveAssistance) {
       for (final context in action.items) {
-        final old = out[context] ??
+        final old =
+            out[context] ??
             ItemExposure(presentations: 0, assistance: const {});
         out[context] = ItemExposure(
           presentations: old.presentations,
@@ -450,10 +466,13 @@ class LearningTransitionEngine {
         ? (slot!.snapshot as DiscoveryCheckpoint).session.unresolvedItemIds
         : const <String>[];
     for (final alias in aliases) {
-      final source =
-          definition.items.firstWhere((item) => item.sessionAlias == alias);
+      final source = definition.items.firstWhere(
+        (item) => item.sessionAlias == alias,
+      );
       final context = ItemContextKey(
-          itemId: source.id, targetSound: source.targetSounds.single);
+        itemId: source.id,
+        targetSound: source.targetSounds.single,
+      );
       final old =
           out[context] ?? ItemExposure(presentations: 0, assistance: const {});
       out[context] = ItemExposure(
@@ -472,7 +491,8 @@ class LearningTransitionEngine {
       }
       for (final target in item.targetSounds) {
         final context = ItemContextKey(itemId: item.id, targetSound: target);
-        final old = out[context] ??
+        final old =
+            out[context] ??
             ItemExposure(presentations: 0, assistance: const {});
         out[context] = ItemExposure(
           presentations: old.presentations + 1,
@@ -485,8 +505,11 @@ class LearningTransitionEngine {
         (slot!.snapshot as WordGameCheckpoint).board.moves < 4) {
       for (final evidence in gameEvidence) {
         final context = ItemContextKey(
-            itemId: evidence.item.id, targetSound: evidence.target);
-        final old = out[context] ??
+          itemId: evidence.item.id,
+          targetSound: evidence.target,
+        );
+        final old =
+            out[context] ??
             ItemExposure(presentations: 0, assistance: const {});
         out[context] = ItemExposure(
           presentations: old.presentations,
@@ -495,10 +518,13 @@ class LearningTransitionEngine {
       }
     }
     _recordVisibleWordHints(out, definition, snapshot);
-    for (final evidence
-        in gameEvidence.where((evidence) => !evidence.correct)) {
+    for (final evidence in gameEvidence.where(
+      (evidence) => !evidence.correct,
+    )) {
       final context = ItemContextKey(
-          itemId: evidence.item.id, targetSound: evidence.target);
+        itemId: evidence.item.id,
+        targetSound: evidence.target,
+      );
       final old =
           out[context] ?? ItemExposure(presentations: 0, assistance: const {});
       out[context] = ItemExposure(
@@ -508,7 +534,9 @@ class LearningTransitionEngine {
     }
     for (final evidence in gameEvidence) {
       final context = ItemContextKey(
-          itemId: evidence.item.id, targetSound: evidence.target);
+        itemId: evidence.item.id,
+        targetSound: evidence.target,
+      );
       final old =
           out[context] ?? ItemExposure(presentations: 0, assistance: const {});
       out[context] = ItemExposure(
@@ -538,14 +566,12 @@ class LearningTransitionEngine {
         itemId: wordId,
         targetSound: snapshot.board.target,
       );
-      final previous = exposures[context] ??
+      final previous =
+          exposures[context] ??
           ItemExposure(presentations: 0, assistance: const {});
       exposures[context] = ItemExposure(
         presentations: previous.presentations,
-        assistance: {
-          ...previous.assistance,
-          AssistanceFlag.graphemeHint,
-        },
+        assistance: {...previous.assistance, AssistanceFlag.graphemeHint},
       );
     }
   }
@@ -566,7 +592,8 @@ class LearningTransitionEngine {
         .map((sound) => ItemContextKey(itemId: item.id, targetSound: sound))
         .toList();
     final exposures = slot.exposures;
-    final priorCount = contexts
+    final priorCount =
+        contexts
             .map((key) => exposures[key]?.presentations ?? 0)
             .reduce((a, b) => a < b ? a : b) -
         1;
@@ -622,7 +649,9 @@ class LearningTransitionEngine {
   }
 
   void _updateMistakes(
-      Map<MistakeKey, LearningMistake> mistakes, CourseAttempt attempt) {
+    Map<MistakeKey, LearningMistake> mistakes,
+    CourseAttempt attempt,
+  ) {
     for (final sound in attempt.targetSounds) {
       final key = MistakeKey(
         activityId: attempt.activityId,
@@ -666,14 +695,16 @@ class LearningTransitionEngine {
     final lessonId = definition.id.substring('lesson:'.length);
     final thresholdPercent =
         policyKind == CompletionPolicyKind.discoveryThreshold
-            ? slot.options.policy.completionThresholdPercent
-            : null;
-    final duplicate = state.completions.any((completion) =>
-        completion.lessonId == lessonId &&
-        completion.contentRevision == definition.contentRevision &&
-        completion.policyKind == policyKind &&
-        completion.policyRevision == 1 &&
-        completion.thresholdPercent == thresholdPercent);
+        ? slot.options.policy.completionThresholdPercent
+        : null;
+    final duplicate = state.completions.any(
+      (completion) =>
+          completion.lessonId == lessonId &&
+          completion.contentRevision == definition.contentRevision &&
+          completion.policyKind == policyKind &&
+          completion.policyRevision == 1 &&
+          completion.thresholdPercent == thresholdPercent,
+    );
     if (duplicate) return state.completions;
     return [
       ...state.completions,
@@ -689,26 +720,28 @@ class LearningTransitionEngine {
   }
 
   void _validateAssistance(
-      LearningActivityDefinition definition, ObserveAssistance action) {
+    LearningActivityDefinition definition,
+    ObserveAssistance action,
+  ) {
     final permitted = switch (definition.kind) {
       LearningActivityKind.discovery => const {
-          AssistanceFlag.explanationVisible,
-          AssistanceFlag.graphemeHint,
-        },
+        AssistanceFlag.explanationVisible,
+        AssistanceFlag.graphemeHint,
+      },
       LearningActivityKind.legacyLesson => const {
-          AssistanceFlag.explanationVisible,
-          AssistanceFlag.graphemeHint,
-          AssistanceFlag.answerRevealed,
-        },
+        AssistanceFlag.explanationVisible,
+        AssistanceFlag.graphemeHint,
+        AssistanceFlag.answerRevealed,
+      },
       LearningActivityKind.wordGame => const {
-          AssistanceFlag.explanationVisible,
-          AssistanceFlag.graphemeHint,
-          AssistanceFlag.answerRevealed,
-        },
+        AssistanceFlag.explanationVisible,
+        AssistanceFlag.graphemeHint,
+        AssistanceFlag.answerRevealed,
+      },
       LearningActivityKind.soundGame => const {
-          AssistanceFlag.explanationVisible,
-          AssistanceFlag.answerRevealed,
-        },
+        AssistanceFlag.explanationVisible,
+        AssistanceFlag.answerRevealed,
+      },
       _ => const <AssistanceFlag>{},
     };
     if (action.items.isEmpty ||
@@ -726,20 +759,27 @@ class LearningTransitionEngine {
   }
 
   void _validateActiveSlot(
-      LearningActivityDefinition definition, ActivitySlot slot) {
+    LearningActivityDefinition definition,
+    ActivitySlot slot,
+  ) {
     for (final context in slot.exposures.keys) {
-      final sources =
-          definition.items.where((item) => item.id == context.itemId);
+      final sources = definition.items.where(
+        (item) => item.id == context.itemId,
+      );
       if (sources.length != 1 ||
           !_validContextTarget(
-              definition, sources.single, context.targetSound)) {
+            definition,
+            sources.single,
+            context.targetSound,
+          )) {
         throw const LearningInvalidCommandException();
       }
     }
     switch (slot.snapshot) {
       case DiscoveryCheckpoint(:final session):
-        final aliases =
-            definition.items.map((item) => item.sessionAlias!).toList();
+        final aliases = definition.items
+            .map((item) => item.sessionAlias!)
+            .toList();
         try {
           final validated = LessonSectionSession.fromJson(
             session.toJson(),
@@ -756,16 +796,17 @@ class LearningTransitionEngine {
           throw LearningInvalidCommandException(error);
         }
       case LegacyLessonCheckpoint(
-          :final wordIndex,
-          :final selectedSound,
-          :final finished
-        ):
+        :final wordIndex,
+        :final selectedSound,
+        :final finished,
+      ):
         if (wordIndex < 0 ||
             wordIndex > definition.items.length ||
             (selectedSound != null &&
                 (wordIndex >= definition.items.length ||
-                    !definition.items[wordIndex].choices
-                        .contains(selectedSound))) ||
+                    !definition.items[wordIndex].choices.contains(
+                      selectedSound,
+                    ))) ||
             (finished &&
                 (wordIndex != definition.items.length ||
                     selectedSound != null))) {
@@ -773,7 +814,9 @@ class LearningTransitionEngine {
         }
       case DrillCheckpoint(:final pairIds, :final index, :final correct):
         if (!_sameOrder(
-                pairIds, definition.items.map((item) => item.id).toList()) ||
+              pairIds,
+              definition.items.map((item) => item.id).toList(),
+            ) ||
             pairIds.isEmpty ||
             index < 0 ||
             index > _maxSafeInteger ||
@@ -794,7 +837,9 @@ class LearningTransitionEngine {
   }
 
   void _requireAuthoredAudioSource(
-      LearningSourceItem item, AttemptAudioSource source) {
+    LearningSourceItem item,
+    AttemptAudioSource source,
+  ) {
     if (source != authoredAudioSource(item)) {
       throw const LearningInvalidCommandException();
     }
@@ -812,11 +857,13 @@ class LearningTransitionEngine {
       definition.kind == LearningActivityKind.soundGame ||
       definition.kind == LearningActivityKind.wordGame;
 
-  bool _validContextTarget(LearningActivityDefinition definition,
-          LearningSourceItem item, String target) =>
-      definition.kind == LearningActivityKind.wordGame
-          ? WordMatchEngine.targets.contains(target)
-          : item.targetSounds.contains(target);
+  bool _validContextTarget(
+    LearningActivityDefinition definition,
+    LearningSourceItem item,
+    String target,
+  ) => definition.kind == LearningActivityKind.wordGame
+      ? WordMatchEngine.targets.contains(target)
+      : item.targetSounds.contains(target);
 
   CourseAttempt _gameAttempt({
     required CourseLearningState state,
@@ -830,9 +877,12 @@ class LearningTransitionEngine {
     required int index,
     required int priorSameItemInBatch,
   }) {
-    final context =
-        ItemContextKey(itemId: evidence.item.id, targetSound: evidence.target);
-    final prior = state.activities[definition.id]?.exposures[context] ??
+    final context = ItemContextKey(
+      itemId: evidence.item.id,
+      targetSound: evidence.target,
+    );
+    final prior =
+        state.activities[definition.id]?.exposures[context] ??
         ItemExposure(presentations: 0, assistance: const {});
     final assistance = <AssistanceFlag>{...prior.assistance};
     if (definition.kind == LearningActivityKind.wordGame &&

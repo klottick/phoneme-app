@@ -1,20 +1,15 @@
 // The literal curriculum checkpoints remain useful parser fixtures, but the
 // replaced local progress store intentionally does not import them. The tests
 // below preserve the content/session parsing oracle and assert byte-preserving
-// no-import behavior through the current preferences repository.
+// no-import behavior through the file-backed SQL repository.
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:linguist/src/core/course/course_attempt.dart';
-import 'package:linguist/src/core/course/course_learning_persistence.dart';
-import 'package:linguist/src/core/course/course_learning_registry.dart';
-import 'package:linguist/src/core/course/course_learning_store.dart';
-import 'package:linguist/src/core/course/course_learning_transition.dart';
 import 'package:linguist/src/core/course/lesson_section.dart';
 import 'package:linguist/src/core/course/lesson_section_session.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../support/course_learning_widget_store.dart';
 
 const List<String> _legacyItemIds = [
   'tout',
@@ -29,10 +24,13 @@ const List<String> _legacyItemIds = [
   'mur',
 ];
 
-Map<String, dynamic> _fixture() => jsonDecode(
-      File('test/fixtures/course_curriculum_legacy_sessions.json')
-          .readAsStringSync(),
-    ) as Map<String, dynamic>;
+Map<String, dynamic> _fixture() =>
+    jsonDecode(
+          File(
+            'test/fixtures/course_curriculum_legacy_sessions.json',
+          ).readAsStringSync(),
+        )
+        as Map<String, dynamic>;
 
 String _prefsKey() =>
     (_fixture()['seed'] as Map<String, dynamic>)['preferencesKey'] as String;
@@ -40,8 +38,9 @@ String _prefsKey() =>
 String _seedDocument(String name) {
   final fixture = _fixture();
   final seed = fixture['seed'] as Map<String, dynamic>;
-  final checkpoint = (fixture['checkpoints'] as Map<String, dynamic>)[name]
-      as Map<String, dynamic>;
+  final checkpoint =
+      (fixture['checkpoints'] as Map<String, dynamic>)[name]
+          as Map<String, dynamic>;
   return jsonEncode({
     'lessons': seed['lessons'],
     'evidence': (seed['evidence'] as Map<String, dynamic>)[name],
@@ -61,16 +60,19 @@ String _seedDocument(String name) {
 
 void main() {
   group('literal checkpoint parsing oracle (old IDs, version 1)', () {
-    test(
-        'all five checkpoints restore through the current parser with '
+    test('all five checkpoints restore through the current parser with '
         'exact expected state', () {
       final Map<String, dynamic> fixture = _fixture();
       final Map<String, dynamic> checkpoints =
           fixture['checkpoints'] as Map<String, dynamic>;
-      final List<String> itemIds =
-          frenchUySection.items.map((item) => item.id).toList();
-      expect(itemIds, _legacyItemIds,
-          reason: 'the pre-migration section uses the old word IDs');
+      final List<String> itemIds = frenchUySection.items
+          .map((item) => item.id)
+          .toList();
+      expect(
+        itemIds,
+        _legacyItemIds,
+        reason: 'the pre-migration section uses the old word IDs',
+      );
 
       const Map<String, Map<String, Object?>> expected = {
         'fresh': {
@@ -145,13 +147,17 @@ void main() {
         expect(session.sessionId, 'legacy-${entry.key}');
         expect(session.contentRevision, 1);
         expect(session.itemIds, _legacyItemIds);
-        expect(session.phase == LessonSectionPhase.debrief,
-            exp['phase'] == 'debrief');
+        expect(
+          session.phase == LessonSectionPhase.debrief,
+          exp['phase'] == 'debrief',
+        );
         expect(session.position, exp['position']);
         expect(session.round, exp['round']);
         expect(session.attemptCount, exp['attemptCount']);
-        expect(session.queue,
-            exp['queue'] == 'tu' ? const ['tu'] : _legacyItemIds);
+        expect(
+          session.queue,
+          exp['queue'] == 'tu' ? const ['tu'] : _legacyItemIds,
+        );
         expect(
           session.toJson()['submittedThisRound'],
           exp['submitted'] == 'none'
@@ -165,61 +171,60 @@ void main() {
         } else if (exp['latest'] == 'only-tout-true') {
           expect(session.latestAnswers, const {'tout': true});
         } else {
-          expect(
-            session.latestAnswers,
-            {
-              for (final id in _legacyItemIds) id: id != 'tu',
-            },
-          );
+          expect(session.latestAnswers, {
+            for (final id in _legacyItemIds) id: id != 'tu',
+          });
         }
         expect(session.policy.completionThresholdPercent, exp['threshold']);
       }
     });
   });
-  test('all literal old checkpoints remain byte-for-byte and are not imported',
-      () async {
-    for (final name in [
-      'fresh',
-      'answered',
-      'debrief',
-      'review',
-      'custom-policy'
-    ]) {
-      final raw = _seedDocument(name);
-      SharedPreferences.setMockInitialValues({
-        _prefsKey(): raw,
-        'auth.token': 'keep-auth',
-        'profile.name': 'keep-profile',
-        'streak.days': 7,
-      });
-      final prefs = await SharedPreferences.getInstance();
-      final scope =
-          LearningScope(courseId: 'en-fr', owner: LearningOwner.guest());
-      final auth =
-          LearningAuthScope(owner: scope.owner, generation: 0, ready: true);
-      final store = CourseLearningRepository(
-        scope: scope,
-        authGeneration: 0,
-        currentAuth: () => auth,
-        backendOwner: () => LearningOwner.guest(),
-        persistence: PreferencesLearningPersistence(),
-        transitions: LearningTransitionEngine(LearningRegistry.french()),
-        clock: () => DateTime.utc(2026, 10, 15),
-        newToken: () => 'AAAAAAAAAAAAAAAAAAAAAA',
-        random: Random(1),
-      );
+  test(
+    'all literal old checkpoints remain byte-for-byte and are not imported',
+    () async {
+      for (final name in [
+        'fresh',
+        'answered',
+        'debrief',
+        'review',
+        'custom-policy',
+      ]) {
+        final raw = _seedDocument(name);
+        SharedPreferences.setMockInitialValues({
+          _prefsKey(): raw,
+          'auth.token': 'keep-auth',
+          'profile.name': 'keep-profile',
+          'streak.days': 7,
+        });
+        final prefs = await SharedPreferences.getInstance();
+        final harness = CourseLearningSqlTestHarness();
+        final store = harness.store;
 
-      final state = await store.load();
-      expect(state.history, isEmpty, reason: '$name must not import attempts');
-      expect(state.completions, isEmpty,
-          reason: '$name must not import completion');
-      expect(state.summaries, isEmpty,
-          reason: '$name must not import aggregates');
-      expect(prefs.getString(_prefsKey()), raw,
-          reason: '$name legacy bytes must remain untouched');
-      expect(prefs.getString('auth.token'), 'keep-auth');
-      expect(prefs.getString('profile.name'), 'keep-profile');
-      expect(prefs.getInt('streak.days'), 7);
-    }
-  });
+        final state = await store.load();
+        expect(
+          state.history,
+          isEmpty,
+          reason: '$name must not import attempts',
+        );
+        expect(
+          state.completions,
+          isEmpty,
+          reason: '$name must not import completion',
+        );
+        expect(
+          state.summaries,
+          isEmpty,
+          reason: '$name must not import aggregates',
+        );
+        expect(
+          prefs.getString(_prefsKey()),
+          raw,
+          reason: '$name legacy bytes must remain untouched',
+        );
+        expect(prefs.getString('auth.token'), 'keep-auth');
+        expect(prefs.getString('profile.name'), 'keep-profile');
+        expect(prefs.getInt('streak.days'), 7);
+      }
+    },
+  );
 }

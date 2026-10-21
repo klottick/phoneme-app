@@ -1,10 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart' show addTearDown;
 import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
-import 'package:linguist/src/core/course/course_learning_persistence.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/french_sentence_package.dart';
 import 'package:linguist/src/core/course/lesson_policy.dart';
@@ -14,7 +15,11 @@ import 'package:linguist/src/core/course/sentence_hunt_learning_providers.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_store.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_transition.dart';
+import 'package:linguist/src/core/course/storage/learning_database.dart'
+    show LearningDatabaseHandle;
+import 'package:linguist/src/core/course/storage/sentence_hunt_learning_sql_repository.dart';
 import 'package:linguist/src/features/course/exercises/sentence_hunt_controller.dart';
+import 'sqlite_learning_test_harness.dart' show openFileLearningTestDatabase;
 import 'sentence_hunt_fixtures.dart';
 
 final class ControlledSentenceHuntPlayback {
@@ -38,22 +43,25 @@ final class ControlledSentenceHuntPlayback {
     String? referenceId,
     CourseAudioSource source = CourseAudioSource.reviewedRecording,
   }) {
-    _result.complete(CourseAudioResult.completed(
-      referenceId: referenceId ?? this.referenceId,
-      source: source,
-    ));
+    _result.complete(
+      CourseAudioResult.completed(
+        referenceId: referenceId ?? this.referenceId,
+        source: source,
+      ),
+    );
   }
 
-  void cancel() => _result.complete(
-        CourseAudioResult.cancelled(referenceId: referenceId),
-      );
+  void cancel() =>
+      _result.complete(CourseAudioResult.cancelled(referenceId: referenceId));
 
-  void fail() => _result.complete(CourseAudioResult.failed(
-        referenceId: referenceId,
-        failure: const CourseAudioFailure(
-          reason: CourseAudioFailureReason.unsupportedPlayback,
-        ),
-      ));
+  void fail() => _result.complete(
+    CourseAudioResult.failed(
+      referenceId: referenceId,
+      failure: const CourseAudioFailure(
+        reason: CourseAudioFailureReason.unsupportedPlayback,
+      ),
+    ),
+  );
 }
 
 final class ControlledSentenceHuntAudio implements CourseReferenceAudio {
@@ -71,11 +79,11 @@ final class ControlledSentenceHuntAudio implements CourseReferenceAudio {
   }) {
     final ControlledSentenceHuntPlayback request =
         ControlledSentenceHuntPlayback(
-      referenceId: referenceId,
-      use: use,
-      variant: variant,
-      allowPracticeTts: allowPracticeTts,
-    );
+          referenceId: referenceId,
+          use: use,
+          variant: variant,
+          allowPracticeTts: allowPracticeTts,
+        );
     requests.add(request);
     return request.future;
   }
@@ -95,88 +103,23 @@ final class ControlledSentenceHuntAudio implements CourseReferenceAudio {
   Future<void> dispose() async {}
 }
 
-final class SentenceHuntMemoryPersistence implements LearningPersistence {
-  final Map<String, String> cache = <String, String>{};
-  final Map<String, String> durable = <String, String>{};
-  int reads = 0;
-  int writes = 0;
-  Completer<void>? _writeGate;
-  Completer<void>? _writeEntered;
-  Object? _writeFailure;
-
-  void holdNextWrite({Object? failure}) {
-    _writeGate = Completer<void>();
-    _writeEntered = Completer<void>();
-    _writeFailure = failure;
-  }
-
-  Future<void> get writeEntered =>
-      _writeEntered?.future ?? Future<void>.value();
-
-  void releaseWrite() {
-    final Completer<void>? gate = _writeGate;
-    if (gate != null && !gate.isCompleted) gate.complete();
-  }
-
-  @override
-  Future<String?> read(String key) async {
-    reads++;
-    return cache[key];
-  }
-
-  @override
-  Future<void> write(String key, String value) async {
-    writes++;
-    cache[key] = value;
-    final Completer<void>? gate = _writeGate;
-    if (gate != null) {
-      _writeEntered?.complete();
-      _writeEntered = null;
-      await gate.future;
-      if (identical(_writeGate, gate)) _writeGate = null;
-      final Object? failure = _writeFailure;
-      _writeFailure = null;
-      if (failure != null) throw failure;
-    }
-    durable[key] = value;
-  }
-
-  @override
-  Future<void> restore(String key, String? lastCommitted) async {
-    if (lastCommitted == null) {
-      cache.remove(key);
-      durable.remove(key);
-    } else {
-      cache[key] = lastCommitted;
-      durable[key] = lastCommitted;
-    }
-  }
-
-  @override
-  Future<void> reload() async {
-    cache
-      ..clear()
-      ..addAll(durable);
-  }
-}
-
 /// Instrumentation wraps the actual repository and transition coordinator;
 /// it records call identity without replacing transactional behavior.
 final class RecordingSentenceHuntStore implements SentenceHuntLearningStore {
   RecordingSentenceHuntStore({
     required this.catalogue,
-    required this.persistence,
+    required this.database,
     LearningOwner? owner,
   }) : scope = SentenceHuntProfileScope(
-          courseId: 'en-fr',
-          owner: owner ?? LearningOwner.guest(),
-        ) {
-    _repository = SentenceHuntLearningRepository(
+         courseId: 'en-fr',
+         owner: owner ?? LearningOwner.guest(),
+       ) {
+    _repository = SqliteSentenceHuntLearningRepository(
+      database: database,
       scope: scope,
       authGeneration: 0,
       currentAuth: () => _auth,
       backendOwner: () => _backendOwner,
-      persistence: persistence,
       transitions: SentenceHuntTransitionEngine(catalogue: catalogue),
       clock: () => DateTime.utc(2026, 10, 18, 12, 0, _clockTick++),
       newToken: () => (++_token).toRadixString(36).padLeft(22, '0'),
@@ -184,17 +127,83 @@ final class RecordingSentenceHuntStore implements SentenceHuntLearningStore {
   }
 
   final SentenceHuntCatalogue catalogue;
-  final SentenceHuntMemoryPersistence persistence;
+  final LearningDatabaseHandle database;
   @override
   final SentenceHuntProfileScope scope;
-  late final SentenceHuntLearningRepository _repository;
+  late final SqliteSentenceHuntLearningRepository _repository;
   LearningOwner _backendOwner = LearningOwner.guest();
   LearningAuthScope _auth = LearningAuthScope(
-      owner: LearningOwner.guest(), generation: 0, ready: true);
+    owner: LearningOwner.guest(),
+    generation: 0,
+    ready: true,
+  );
   int _token = 0;
   int _clockTick = 0;
+  int reads = 0;
+  int writes = 0;
+  Completer<void>? _writeGate;
+  Completer<void>? _writeEntered;
+  bool _failNextWrite = false;
+  static const String _failureTrigger = 'task10_sentence_hunt_test_failure';
   final List<SentenceHuntCommand> prepared = <SentenceHuntCommand>[];
   final List<SentenceHuntCommand> submitted = <SentenceHuntCommand>[];
+
+  void holdNextSqlWrite({bool fail = false}) {
+    _writeGate = Completer<void>();
+    _writeEntered = Completer<void>();
+    _failNextWrite = fail;
+  }
+
+  Future<void> get writeEntered =>
+      _writeEntered?.future ?? Future<void>.value();
+
+  void releaseSqlWrite() {
+    final Completer<void>? gate = _writeGate;
+    if (gate != null && !gate.isCompleted) gate.complete();
+  }
+
+  Future<Map<String, int>> rowCounts() async {
+    final db = await database.open();
+    final names = <String>[
+      'learning_scopes',
+      'learning_runs',
+      'learning_attempts',
+      'learning_command_receipts',
+      'learning_summaries',
+    ];
+    final counts = <String, int>{};
+    for (final String table in names) {
+      final row = await db
+          .customSelect('SELECT COUNT(*) AS row_count FROM $table')
+          .getSingle();
+      counts[table] = row.read<int>('row_count');
+    }
+    return counts;
+  }
+
+  Future<void> _waitAtWriteGate() async {
+    final Completer<void>? gate = _writeGate;
+    if (gate == null) return;
+    if (_failNextWrite) {
+      final db = await database.open();
+      await db.customStatement('''
+        CREATE TRIGGER $_failureTrigger
+        BEFORE INSERT ON learning_runs
+        BEGIN SELECT RAISE(ABORT, 'task10 injected sentence-hunt failure'); END
+      ''');
+    }
+    _writeEntered?.complete();
+    _writeEntered = null;
+    await gate.future;
+    if (identical(_writeGate, gate)) _writeGate = null;
+  }
+
+  Future<void> _removeFailureTrigger() async {
+    if (!_failNextWrite) return;
+    _failNextWrite = false;
+    final db = await database.open();
+    await db.customStatement('DROP TRIGGER IF EXISTS $_failureTrigger');
+  }
 
   void updateAuth({
     LearningOwner? owner,
@@ -213,10 +222,16 @@ final class RecordingSentenceHuntStore implements SentenceHuntLearningStore {
   }
 
   @override
-  Future<SentenceHuntState> load() => _repository.load();
+  Future<SentenceHuntState> load() {
+    reads++;
+    return _repository.load();
+  }
 
   @override
-  Future<SentenceHuntState> retryLoad() => _repository.retryLoad();
+  Future<SentenceHuntState> retryLoad() {
+    reads++;
+    return _repository.retryLoad();
+  }
 
   @override
   SentenceHuntCommand prepare({
@@ -235,8 +250,20 @@ final class RecordingSentenceHuntStore implements SentenceHuntLearningStore {
 
   @override
   Future<SentenceHuntCommit> submit(SentenceHuntCommand command) {
+    writes++;
     submitted.add(command);
-    return _repository.submit(command);
+    return _submitThroughSql(command);
+  }
+
+  Future<SentenceHuntCommit> _submitThroughSql(
+    SentenceHuntCommand command,
+  ) async {
+    try {
+      await _waitAtWriteGate();
+      return await _repository.submit(command);
+    } finally {
+      await _removeFailureTrigger();
+    }
   }
 }
 
@@ -244,37 +271,48 @@ final class SentenceHuntTestRig {
   SentenceHuntTestRig({
     bool reviewed = true,
     this.sectionId = 'en-fr-sentence-hunt-vowels',
-  })  : catalogue = syntheticSentenceCatalogue(reviewed: reviewed),
-        persistence = SentenceHuntMemoryPersistence(),
-        audio = ControlledSentenceHuntAudio() {
+  }) : catalogue = syntheticSentenceCatalogue(reviewed: reviewed),
+       audio = ControlledSentenceHuntAudio() {
+    directory = Directory.systemTemp.createTempSync('sentence-hunt-test-');
+    database = LearningDatabaseHandle(
+      open: () => openFileLearningTestDatabase(
+        File('${directory.path}/learning.sqlite'),
+      ),
+    );
     store = RecordingSentenceHuntStore(
       catalogue: catalogue,
-      persistence: persistence,
+      database: database,
     );
+    addTearDown(dispose);
   }
 
   final String sectionId;
   final SentenceHuntCatalogue catalogue;
-  final SentenceHuntMemoryPersistence persistence;
   final ControlledSentenceHuntAudio audio;
+  late final Directory directory;
+  late final LearningDatabaseHandle database;
   late final RecordingSentenceHuntStore store;
+
+  Future<void> dispose() async {
+    await database.close();
+    if (directory.existsSync()) await directory.delete(recursive: true);
+  }
 
   SentenceHuntController controller({
     SentenceHuntEntryMode entryMode = SentenceHuntEntryMode.practice,
     LessonPolicy? policy,
     bool Function()? isCurrent,
     VoidCallback? onStateChanged,
-  }) =>
-      SentenceHuntController(
-        sectionId: sectionId,
-        catalogue: catalogue,
-        store: store,
-        audio: audio,
-        entryMode: entryMode,
-        policy: policy,
-        isCurrent: isCurrent ?? () => true,
-        onStateChanged: onStateChanged ?? () {},
-      );
+  }) => SentenceHuntController(
+    sectionId: sectionId,
+    catalogue: catalogue,
+    store: store,
+    audio: audio,
+    entryMode: entryMode,
+    policy: policy,
+    isCurrent: isCurrent ?? () => true,
+    onStateChanged: onStateChanged ?? () {},
+  );
 
   ProviderContainer providerContainer({
     SentenceHuntCatalogue? providedCatalogue,
@@ -282,28 +320,24 @@ final class SentenceHuntTestRig {
     Future<SentenceHuntLearningStore> Function()? acquireStore,
     ControlledSentenceHuntAudio? providedAudio,
     LearningAuthTracker? authTracker,
-  }) =>
-      ProviderContainer(
-        overrides: <Override>[
-          learningAuthScopeProvider.overrideWith(
-            (ref) =>
-                authTracker ??
-                LearningAuthTracker(
-                  owner: LearningOwner.guest(),
-                  ready: true,
-                ),
-          ),
-          sentenceHuntCatalogueProvider.overrideWith(
-            (ref) async => acquireCatalogue == null
-                ? providedCatalogue ?? catalogue
-                : await acquireCatalogue(),
-          ),
-          sentenceHuntLearningStoreProvider.overrideWith(
-            (ref) async => acquireStore == null ? store : await acquireStore(),
-          ),
-          courseReferenceAudioProvider.overrideWith(
-            (ref) => providedAudio ?? audio,
-          ),
-        ],
-      );
+  }) => ProviderContainer(
+    overrides: <Override>[
+      learningAuthScopeProvider.overrideWith(
+        (ref) =>
+            authTracker ??
+            LearningAuthTracker(owner: LearningOwner.guest(), ready: true),
+      ),
+      sentenceHuntCatalogueProvider.overrideWith(
+        (ref) async => acquireCatalogue == null
+            ? providedCatalogue ?? catalogue
+            : await acquireCatalogue(),
+      ),
+      sentenceHuntLearningStoreProvider.overrideWith(
+        (ref) async => acquireStore == null ? store : await acquireStore(),
+      ),
+      courseReferenceAudioProvider.overrideWith(
+        (ref) => providedAudio ?? audio,
+      ),
+    ],
+  );
 }

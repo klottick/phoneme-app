@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,12 +7,9 @@ import 'package:linguist/src/core/course/course_audio.dart';
 import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_learning_command.dart';
 import 'package:linguist/src/core/course/course_learning_checkpoint.dart';
-import 'package:linguist/src/core/course/course_learning_persistence.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
-import 'package:linguist/src/core/course/course_learning_registry.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/course_learning_store.dart';
-import 'package:linguist/src/core/course/course_learning_transition.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/providers/app_providers.dart';
 import 'package:linguist/src/core/services/streak_service.dart';
@@ -53,69 +49,79 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   testWidgets(
-      'legacy answer retry submits the identical command and credits once',
-      (tester) async {
-    final store = CourseLearningWidgetStore();
-    store.failingActions.add(ChooseSound);
-    final audio = _Audio();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        courseLearningStoreProvider.overrideWithValue(store),
-        courseAudioProvider.overrideWithValue(audio),
-      ],
-      child: const MaterialApp(
-        home: CourseLessonScreen(lessonId: 'en-fr-vowels'),
-      ),
-    ));
-    await _settle(tester);
-    await tester.tap(find.text('Listen to French word'));
-    await _settle(tester);
-    await tester.tap(find.text('/i/'));
-    await _settle(tester);
-    expect(find.textContaining('could not be saved'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('Next word'), 200);
-    expect(find.text('Next word'), findsOneWidget);
-    expect(
+    'legacy answer retry submits the identical command and credits once',
+    (tester) async {
+      final store = CourseLearningWidgetStore();
+      store.failingActions.add(ChooseSound);
+      final audio = _Audio();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            courseLearningStoreProvider.overrideWithValue(store),
+            courseAudioProvider.overrideWithValue(audio),
+          ],
+          child: const MaterialApp(
+            home: CourseLessonScreen(lessonId: 'en-fr-vowels'),
+          ),
+        ),
+      );
+      await _settle(tester);
+      await tester.tap(find.text('Listen to French word'));
+      await _settle(tester);
+      await tester.tap(find.text('/i/'));
+      await _settle(tester);
+      expect(find.textContaining('could not be saved'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('Next word'), 200);
+      expect(find.text('Next word'), findsOneWidget);
+      expect(
         tester
-            .widget<FilledButton>(find.ancestor(
-              of: find.text('Next word'),
-              matching: find.byType(FilledButton),
-            ))
+            .widget<FilledButton>(
+              find.ancestor(
+                of: find.text('Next word'),
+                matching: find.byType(FilledButton),
+              ),
+            )
             .onPressed,
-        isNull);
-    final failed = store.submitted.last;
-    expect(failed.action, isA<ChooseSound>());
+        isNull,
+      );
+      final failed = store.submitted.last;
+      expect(failed.action, isA<ChooseSound>());
 
-    store.failingActions.clear();
-    await tester.tap(find.text('Retry saving'));
-    await _settle(tester);
-    expect(store.submitted.last, same(failed));
-    expect(store.committedState.history, hasLength(1));
-    expect(store.committedState.history.single.attempts, hasLength(1));
-  });
+      store.failingActions.clear();
+      await tester.tap(find.text('Retry saving'));
+      await _settle(tester);
+      expect(store.submitted.last, same(failed));
+      expect(store.committedState.history, hasLength(1));
+      expect(store.committedState.history.single.attempts, hasLength(1));
+    },
+  );
 
-  testWidgets('lesson reference cannot replace a failed answer command',
-      (tester) async {
+  testWidgets('lesson reference cannot replace a failed answer command', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(const Size(800, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final store = CourseLearningWidgetStore();
     store.failingActions.add(ChooseSound);
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        courseLearningStoreProvider.overrideWithValue(store),
-        courseAudioProvider.overrideWithValue(_Audio()),
-      ],
-      child: const MaterialApp(
-        home: CourseLessonScreen(lessonId: 'en-fr-vowels'),
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(store),
+          courseAudioProvider.overrideWithValue(_Audio()),
+        ],
+        child: const MaterialApp(
+          home: CourseLessonScreen(lessonId: 'en-fr-vowels'),
+        ),
       ),
-    ));
+    );
     await _settle(tester);
     await tester.tap(find.text('Listen to French word'));
     await _settle(tester);
     await tester.tap(find.text('/i/'));
     await _settle(tester);
-    final failed =
-        store.submitted.singleWhere((command) => command.action is ChooseSound);
+    final failed = store.submitted.singleWhere(
+      (command) => command.action is ChooseSound,
+    );
     expect(failed.action, isA<ChooseSound>());
     expect(find.textContaining('could not be saved'), findsOneWidget);
 
@@ -123,14 +129,19 @@ void main() {
     await tester.tap(find.text('Word reference'));
     await _settle(tester);
 
-    expect(find.text('lit /li/'), findsNothing,
-        reason: 'answers must not be exposed before assistance is committed');
     expect(
-        store.submitted.where((command) => command.action is ObserveAssistance),
-        isEmpty,
-        reason: 'reference observation must not replace the failed answer');
-    expect(store.submitted.where((command) => command.action is ChooseSound),
-        [same(failed)]);
+      find.text('lit /li/'),
+      findsNothing,
+      reason: 'answers must not be exposed before assistance is committed',
+    );
+    expect(
+      store.submitted.where((command) => command.action is ObserveAssistance),
+      isEmpty,
+      reason: 'reference observation must not replace the failed answer',
+    );
+    expect(store.submitted.where((command) => command.action is ChooseSound), [
+      same(failed),
+    ]);
     expect(store.committedState.history, isEmpty);
 
     store.failingActions.clear();
@@ -142,69 +153,82 @@ void main() {
   });
 
   testWidgets(
-      'competing lesson answer requires explicit committed-state reload',
-      (tester) async {
-    final store = CourseLearningWidgetStore();
-    final audio = _Audio();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        courseLearningStoreProvider.overrideWithValue(store),
-        courseAudioProvider.overrideWithValue(audio),
-      ],
-      child: const MaterialApp(
-        home: CourseLessonScreen(lessonId: 'en-fr-vowels'),
-      ),
-    ));
-    await _settle(tester);
+    'competing lesson answer requires explicit committed-state reload',
+    (tester) async {
+      final store = CourseLearningWidgetStore();
+      final audio = _Audio();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            courseLearningStoreProvider.overrideWithValue(store),
+            courseAudioProvider.overrideWithValue(audio),
+          ],
+          child: const MaterialApp(
+            home: CourseLessonScreen(lessonId: 'en-fr-vowels'),
+          ),
+        ),
+      );
+      await _settle(tester);
 
-    final committed = store.committedState;
-    final competing = store.prepare(
-      state: committed,
-      activityId: 'lesson:en-fr-vowels',
-      action: ChooseSound(
-        selectedSound: 'i',
-        audioSource: AttemptAudioSource.pendingRecording,
-      ),
-    );
-    await store.submit(competing);
+      final committed = store.committedState;
+      final competing = store.prepare(
+        state: committed,
+        activityId: 'lesson:en-fr-vowels',
+        action: ChooseSound(
+          selectedSound: 'i',
+          audioSource: AttemptAudioSource.pendingRecording,
+        ),
+      );
+      await store.submit(competing);
 
-    await tester.tap(find.text('Listen to French word'));
-    await _settle(tester);
-    await tester.tap(find.text('/i/'));
-    await _settle(tester);
-    expect(find.text('Retry saving'), findsNothing);
-    expect(find.text('Reload saved progress'), findsOneWidget);
-    expect(store.committedState.history, hasLength(1));
+      await tester.tap(find.text('Listen to French word'));
+      await _settle(tester);
+      await tester.tap(find.text('/i/'));
+      await _settle(tester);
+      expect(find.text('Retry saving'), findsNothing);
+      expect(find.text('Reload saved progress'), findsOneWidget);
+      expect(store.committedState.history, hasLength(1));
 
-    await tester.tap(find.text('Reload saved progress'));
-    await _settle(tester);
-    expect(store.retryLoadCalls, 0,
-        reason: 'a slot conflict reloads current state, not quarantine repair');
-    expect(store.loadCalls, 2);
-    expect(store.committedState.history.single.attempts, hasLength(1));
-    expect(
+      await tester.tap(find.text('Reload saved progress'));
+      await _settle(tester);
+      expect(
+        store.retryLoadCalls,
+        0,
+        reason: 'a slot conflict reloads current state, not quarantine repair',
+      );
+      expect(store.loadCalls, 2);
+      expect(store.committedState.history.single.attempts, hasLength(1));
+      expect(
         (store.committedState.activities['lesson:en-fr-vowels']!.snapshot
                 as LegacyLessonCheckpoint)
             .selectedSound,
-        'i');
-    await tester.scrollUntilVisible(find.text('Next word'), 200);
-    expect(find.text('Next word'), findsOneWidget,
-        reason: 'the competing committed answer is shown after reload');
-  });
+        'i',
+      );
+      await tester.scrollUntilVisible(find.text('Next word'), 200);
+      expect(
+        find.text('Next word'),
+        findsOneWidget,
+        reason: 'the competing committed answer is shown after reload',
+      );
+    },
+  );
 
-  testWidgets('invalid lesson command is not reported as an offline save',
-      (tester) async {
+  testWidgets('invalid lesson command is not reported as an offline save', (
+    tester,
+  ) async {
     final store = CourseLearningWidgetStore()
       ..actionFailures[ChooseSound] = const LearningInvalidCommandException();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        courseLearningStoreProvider.overrideWithValue(store),
-        courseAudioProvider.overrideWithValue(_Audio()),
-      ],
-      child: const MaterialApp(
-        home: CourseLessonScreen(lessonId: 'en-fr-vowels'),
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(store),
+          courseAudioProvider.overrideWithValue(_Audio()),
+        ],
+        child: const MaterialApp(
+          home: CourseLessonScreen(lessonId: 'en-fr-vowels'),
+        ),
       ),
-    ));
+    );
     await _settle(tester);
     await tester.tap(find.text('Listen to French word'));
     await _settle(tester);
@@ -217,18 +241,21 @@ void main() {
     expect(store.committedState.history, isEmpty);
   });
 
-  testWidgets('unavailable drill answer requires retry loading',
-      (tester) async {
+  testWidgets('unavailable drill answer requires retry loading', (
+    tester,
+  ) async {
     final store = CourseLearningWidgetStore()
       ..actionFailures[ChooseDrillWord] = const LearningUnavailableException();
     final audio = _Audio();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        courseLearningStoreProvider.overrideWithValue(store),
-        courseAudioProvider.overrideWithValue(audio),
-      ],
-      child: const MaterialApp(home: DrillScreen()),
-    ));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(store),
+          courseAudioProvider.overrideWithValue(audio),
+        ],
+        child: const MaterialApp(home: DrillScreen()),
+      ),
+    );
     await _settle(tester);
     await tester.tap(find.byIcon(Icons.play_arrow));
     await _settle(tester);
@@ -241,26 +268,34 @@ void main() {
     await _settle(tester);
     expect(store.retryLoadCalls, 1);
     expect(store.committedState.history, isEmpty);
-    expect(store.committedState.activities['drill:minimal-pairs']!.snapshot,
-        isA<DrillCheckpoint>());
+    expect(
+      store.committedState.activities['drill:minimal-pairs']!.snapshot,
+      isA<DrillCheckpoint>(),
+    );
     expect(find.text('Item 1'), findsOneWidget);
-    expect(audio.spoken, hasLength(1),
-        reason: 'recovery must not restore the failed answer hearing');
+    expect(
+      audio.spoken,
+      hasLength(1),
+      reason: 'recovery must not restore the failed answer hearing',
+    );
   });
 
-  testWidgets('invalid drill command requires reload, not save retry',
-      (tester) async {
+  testWidgets('invalid drill command requires reload, not save retry', (
+    tester,
+  ) async {
     final store = CourseLearningWidgetStore()
       ..actionFailures[ChooseDrillWord] =
           const LearningInvalidCommandException();
     final audio = _Audio();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        courseLearningStoreProvider.overrideWithValue(store),
-        courseAudioProvider.overrideWithValue(audio),
-      ],
-      child: const MaterialApp(home: DrillScreen()),
-    ));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(store),
+          courseAudioProvider.overrideWithValue(audio),
+        ],
+        child: const MaterialApp(home: DrillScreen()),
+      ),
+    );
     await _settle(tester);
     await tester.tap(find.byIcon(Icons.play_arrow));
     await _settle(tester);
@@ -276,17 +311,20 @@ void main() {
     expect(find.text('Item 1'), findsOneWidget);
   });
 
-  testWidgets('competing drill answer requires explicit saved-state reload',
-      (tester) async {
+  testWidgets('competing drill answer requires explicit saved-state reload', (
+    tester,
+  ) async {
     final store = CourseLearningWidgetStore();
     final audio = _Audio();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        courseLearningStoreProvider.overrideWithValue(store),
-        courseAudioProvider.overrideWithValue(audio),
-      ],
-      child: const MaterialApp(home: DrillScreen()),
-    ));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(store),
+          courseAudioProvider.overrideWithValue(audio),
+        ],
+        child: const MaterialApp(home: DrillScreen()),
+      ),
+    );
     await _settle(tester);
     final competing = store.prepare(
       state: store.committedState,
@@ -310,22 +348,28 @@ void main() {
     expect(store.retryLoadCalls, 0);
     expect(store.loadCalls, 2);
     expect(find.text('Item 2'), findsOneWidget);
-    expect(store.committedState.history, hasLength(1),
-        reason: 'the stale answer must not receive a second credit');
+    expect(
+      store.committedState.history,
+      hasLength(1),
+      reason: 'the stale answer must not receive a second credit',
+    );
   });
 
-  testWidgets('drill answer retry credits only after one committed retry',
-      (tester) async {
+  testWidgets('drill answer retry credits only after one committed retry', (
+    tester,
+  ) async {
     final store = CourseLearningWidgetStore();
     store.failingActions.add(ChooseDrillWord);
     final audio = _Audio();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        courseLearningStoreProvider.overrideWithValue(store),
-        courseAudioProvider.overrideWithValue(audio),
-      ],
-      child: const MaterialApp(home: DrillScreen()),
-    ));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(store),
+          courseAudioProvider.overrideWithValue(audio),
+        ],
+        child: const MaterialApp(home: DrillScreen()),
+      ),
+    );
     await _settle(tester);
     await tester.tap(find.byIcon(Icons.play_arrow));
     await _settle(tester);
@@ -347,70 +391,87 @@ void main() {
     expect(find.text('Item 2'), findsOneWidget);
   });
 
-  testWidgets('failed drill answer blocks replay and reanswer until retry',
-      (tester) async {
+  testWidgets('failed drill answer blocks replay and reanswer until retry', (
+    tester,
+  ) async {
     final store = CourseLearningWidgetStore();
     store.failingActions.add(ChooseDrillWord);
     final audio = _Audio();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        courseLearningStoreProvider.overrideWithValue(store),
-        courseAudioProvider.overrideWithValue(audio),
-      ],
-      child: const MaterialApp(home: DrillScreen()),
-    ));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(store),
+          courseAudioProvider.overrideWithValue(audio),
+        ],
+        child: const MaterialApp(home: DrillScreen()),
+      ),
+    );
     await _settle(tester);
     await tester.tap(find.byIcon(Icons.play_arrow));
     await _settle(tester);
     final choice = audio.spoken.single == 'tu' ? 'tu' : 'roue';
     await tester.tap(find.text(choice));
     await _settle(tester);
-    final failed = store.submitted
-        .singleWhere((command) => command.action is ChooseDrillWord);
+    final failed = store.submitted.singleWhere(
+      (command) => command.action is ChooseDrillWord,
+    );
     expect(failed.action, isA<ChooseDrillWord>());
 
-    final play = tester.widget<IconButton>(find.ancestor(
-      of: find.byTooltip('Play audio'),
-      matching: find.byType(IconButton),
-    ));
-    expect(play.onPressed, isNull,
-        reason: 'a pending answer cannot be replaced by playback/re-answer');
-    await tester.tap(find.ancestor(
-      of: find.byTooltip('Play audio'),
-      matching: find.byType(IconButton),
-    ));
+    final play = tester.widget<IconButton>(
+      find.ancestor(
+        of: find.byTooltip('Play audio'),
+        matching: find.byType(IconButton),
+      ),
+    );
+    expect(
+      play.onPressed,
+      isNull,
+      reason: 'a pending answer cannot be replaced by playback/re-answer',
+    );
+    await tester.tap(
+      find.ancestor(
+        of: find.byTooltip('Play audio'),
+        matching: find.byType(IconButton),
+      ),
+    );
     await _settle(tester);
     await tester.tap(find.text(audio.spoken.last == 'tu' ? 'tu' : 'roue'));
     await _settle(tester);
-    expect(store.prepared.where((command) => command.action is ChooseDrillWord),
-        hasLength(1));
     expect(
-        store.submitted.where((command) => command.action is ChooseDrillWord),
-        [same(failed)]);
+      store.prepared.where((command) => command.action is ChooseDrillWord),
+      hasLength(1),
+    );
+    expect(
+      store.submitted.where((command) => command.action is ChooseDrillWord),
+      [same(failed)],
+    );
     expect(store.committedState.history, isEmpty);
   });
 
-  testWidgets('End Session cannot replace a failed drill answer',
-      (tester) async {
+  testWidgets('End Session cannot replace a failed drill answer', (
+    tester,
+  ) async {
     final store = CourseLearningWidgetStore();
     store.failingActions.add(ChooseDrillWord);
     final audio = _Audio();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        courseLearningStoreProvider.overrideWithValue(store),
-        courseAudioProvider.overrideWithValue(audio),
-      ],
-      child: MaterialApp(
-        home: Builder(
-          builder: (context) => TextButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => const DrillScreen()),
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(store),
+          courseAudioProvider.overrideWithValue(audio),
+        ],
+        child: MaterialApp(
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const DrillScreen()),
+              ),
+              child: const Text('Open drill'),
             ),
-            child: const Text('Open drill'),
           ),
         ),
       ),
-    ));
+    );
     await tester.tap(find.text('Open drill'));
     await tester.pumpAndSettle();
     await _settle(tester);
@@ -418,14 +479,17 @@ void main() {
     await _settle(tester);
     await tester.tap(find.text(audio.spoken.single == 'tu' ? 'tu' : 'roue'));
     await _settle(tester);
-    final failed = store.submitted
-        .singleWhere((command) => command.action is ChooseDrillWord);
+    final failed = store.submitted.singleWhere(
+      (command) => command.action is ChooseDrillWord,
+    );
 
     await tester.tap(find.text('End Session'));
     await _settle(tester);
     expect(find.text('Minimal Pair Drill'), findsOneWidget);
-    expect(store.submitted.where((command) => command.action is EndDrill),
-        isEmpty);
+    expect(
+      store.submitted.where((command) => command.action is EndDrill),
+      isEmpty,
+    );
     expect(store.submitted, [
       ...store.submitted.where((command) => command.action is StartLearningRun),
       same(failed),
@@ -433,18 +497,22 @@ void main() {
     expect(store.committedState.history, isEmpty);
   });
 
-  testWidgets('reopen resumes both activities without restoring hearing',
-      (tester) async {
+  testWidgets('reopen resumes both activities without restoring hearing', (
+    tester,
+  ) async {
     final lessonStore = CourseLearningWidgetStore();
     final lessonAudio = _Audio();
-    Future<void> pumpLesson() async => tester.pumpWidget(ProviderScope(
-          overrides: [
-            courseLearningStoreProvider.overrideWithValue(lessonStore),
-            courseAudioProvider.overrideWithValue(lessonAudio),
-          ],
-          child: const MaterialApp(
-              home: CourseLessonScreen(lessonId: 'en-fr-vowels')),
-        ));
+    Future<void> pumpLesson() async => tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(lessonStore),
+          courseAudioProvider.overrideWithValue(lessonAudio),
+        ],
+        child: const MaterialApp(
+          home: CourseLessonScreen(lessonId: 'en-fr-vowels'),
+        ),
+      ),
+    );
     await pumpLesson();
     await _settle(tester);
     await tester.tap(find.text('Listen to French word'));
@@ -460,23 +528,28 @@ void main() {
     expect(find.text('Listen 2 of 4'), findsOneWidget);
     expect(lessonAudio.spoken, ['lit']);
     expect(
-        tester
-            .widget<OutlinedButton>(find.ancestor(
+      tester
+          .widget<OutlinedButton>(
+            find.ancestor(
               of: find.text('/o/'),
               matching: find.byType(OutlinedButton),
-            ))
-            .onPressed,
-        isNull);
+            ),
+          )
+          .onPressed,
+      isNull,
+    );
 
     final drillStore = CourseLearningWidgetStore();
     final drillAudio = _Audio();
-    Future<void> pumpDrill() async => tester.pumpWidget(ProviderScope(
-          overrides: [
-            courseLearningStoreProvider.overrideWithValue(drillStore),
-            courseAudioProvider.overrideWithValue(drillAudio),
-          ],
-          child: const MaterialApp(home: DrillScreen()),
-        ));
+    Future<void> pumpDrill() async => tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(drillStore),
+          courseAudioProvider.overrideWithValue(drillAudio),
+        ],
+        child: const MaterialApp(home: DrillScreen()),
+      ),
+    );
     await tester.pumpWidget(const SizedBox());
     await pumpDrill();
     await _settle(tester);
@@ -490,17 +563,21 @@ void main() {
     expect(find.text('Item 2'), findsOneWidget);
     expect(drillAudio.spoken, ['tu']);
     expect(
-        tester
-            .widget<FilledButton>(find.ancestor(
+      tester
+          .widget<FilledButton>(
+            find.ancestor(
               of: find.text('rue'),
               matching: find.byType(FilledButton),
-            ))
-            .onPressed,
-        isNull);
+            ),
+          )
+          .onPressed,
+      isNull,
+    );
   });
 
-  testWidgets('A to B to A does not publish a delayed old drill commit',
-      (tester) async {
+  testWidgets('A to B to A does not publish a delayed old drill commit', (
+    tester,
+  ) async {
     final oldA = CourseLearningWidgetStore();
     final storeB = CourseLearningWidgetStore();
     final newA = CourseLearningWidgetStore();
@@ -512,27 +589,34 @@ void main() {
       ref.watch(_storeEpoch);
       return activeStore;
     });
-    final container = ProviderContainer(overrides: [
-      selectedStore.overrideWith((ref) {
-        ref.watch(_storeEpoch);
-        return activeStore;
-      }),
-      courseLearningStoreProvider
-          .overrideWith((ref) => ref.watch(selectedStore)),
-      courseAudioProvider.overrideWithValue(audio),
-    ]);
+    final container = ProviderContainer(
+      overrides: [
+        selectedStore.overrideWith((ref) {
+          ref.watch(_storeEpoch);
+          return activeStore;
+        }),
+        courseLearningStoreProvider.overrideWith(
+          (ref) => ref.watch(selectedStore),
+        ),
+        courseAudioProvider.overrideWithValue(audio),
+      ],
+    );
     addTearDown(container.dispose);
-    await tester.pumpWidget(UncontrolledProviderScope(
-      container: container,
-      child: const MaterialApp(home: DrillScreen()),
-    ));
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: DrillScreen()),
+      ),
+    );
     await _settle(tester);
     await tester.tap(find.byIcon(Icons.play_arrow));
     await _settle(tester);
     await tester.tap(find.text('tu'));
     await tester.pump();
-    expect(oldA.submitted.where((command) => command.action is ChooseDrillWord),
-        hasLength(1));
+    expect(
+      oldA.submitted.where((command) => command.action is ChooseDrillWord),
+      hasLength(1),
+    );
 
     activeStore = storeB;
     container.read(_storeEpoch.notifier).state++;
@@ -550,8 +634,9 @@ void main() {
     expect(newA.committedState.history, isEmpty);
   });
 
-  testWidgets('new drill owner answers while old answer is held and settling',
-      (tester) async {
+  testWidgets('new drill owner answers while old answer is held and settling', (
+    tester,
+  ) async {
     final oldStore = CourseLearningWidgetStore();
     final newStore = CourseLearningWidgetStore();
     final oldGate = Completer<void>();
@@ -564,56 +649,66 @@ void main() {
       ref.watch(_storeEpoch);
       return activeStore;
     });
-    final container = ProviderContainer(overrides: [
-      selectedStore.overrideWith((ref) {
-        ref.watch(_storeEpoch);
-        return activeStore;
-      }),
-      courseLearningStoreProvider
-          .overrideWith((ref) => ref.watch(selectedStore)),
-      courseAudioProvider.overrideWithValue(audio),
-    ]);
+    final container = ProviderContainer(
+      overrides: [
+        selectedStore.overrideWith((ref) {
+          ref.watch(_storeEpoch);
+          return activeStore;
+        }),
+        courseLearningStoreProvider.overrideWith(
+          (ref) => ref.watch(selectedStore),
+        ),
+        courseAudioProvider.overrideWithValue(audio),
+      ],
+    );
     addTearDown(container.dispose);
-    await tester.pumpWidget(UncontrolledProviderScope(
-      container: container,
-      child: const MaterialApp(home: DrillScreen()),
-    ));
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: DrillScreen()),
+      ),
+    );
     await _settle(tester);
     await tester.tap(find.byIcon(Icons.play_arrow));
     await _settle(tester);
     await tester.tap(find.text(audio.spoken.single == 'tu' ? 'tu' : 'roue'));
     await tester.pump();
     expect(
-        oldStore.submitted
-            .where((command) => command.action is ChooseDrillWord),
-        hasLength(1));
+      oldStore.submitted.where((command) => command.action is ChooseDrillWord),
+      hasLength(1),
+    );
 
     activeStore = newStore;
     container.read(_storeEpoch.notifier).state++;
     await _settle(tester);
-    final newOwnerPlay = tester.widget<IconButton>(find.ancestor(
-      of: find.byTooltip('Play audio'),
-      matching: find.byType(IconButton),
-    ));
-    expect(newOwnerPlay.onPressed, isNotNull,
-        reason:
-            'the replacement owner must not inherit the old transition guard');
+    final newOwnerPlay = tester.widget<IconButton>(
+      find.ancestor(
+        of: find.byTooltip('Play audio'),
+        matching: find.byType(IconButton),
+      ),
+    );
+    expect(
+      newOwnerPlay.onPressed,
+      isNotNull,
+      reason: 'the replacement owner must not inherit the old transition guard',
+    );
 
     await tester.tap(find.byIcon(Icons.play_arrow));
     await _settle(tester);
     await tester.tap(find.text(audio.spoken.last == 'tu' ? 'tu' : 'roue'));
     await tester.pump();
-    final newAnswer = newStore.submitted
-        .singleWhere((command) => command.action is ChooseDrillWord);
+    final newAnswer = newStore.submitted.singleWhere(
+      (command) => command.action is ChooseDrillWord,
+    );
 
     oldGate.complete();
     await _settle(tester);
     expect(
-        newStore.submitted
-            .where((command) => command.action is ChooseDrillWord),
-        [same(newAnswer)],
-        reason:
-            'settling the old operation cannot replace the new pending answer');
+      newStore.submitted.where((command) => command.action is ChooseDrillWord),
+      [same(newAnswer)],
+      reason:
+          'settling the old operation cannot replace the new pending answer',
+    );
     expect(newStore.committedState.history, isEmpty);
 
     newGate.complete();
@@ -623,20 +718,25 @@ void main() {
     expect(find.text('Item 2'), findsOneWidget);
   });
 
-  testWidgets('held old-owner drill finish cannot pop or report on new owner',
-      (tester) async {
+  testWidgets('held old-owner drill finish cannot pop or report on new owner', (
+    tester,
+  ) async {
     final oldStore = CourseLearningWidgetStore();
     final initial = await oldStore.load();
-    final start = await oldStore.submit(oldStore.prepare(
-      state: initial,
-      activityId: 'drill:minimal-pairs',
-      action: StartLearningRun(options: RunOptions()),
-    ));
-    await oldStore.submit(oldStore.prepare(
-      state: start.state,
-      activityId: 'drill:minimal-pairs',
-      action: const EndDrill(),
-    ));
+    final start = await oldStore.submit(
+      oldStore.prepare(
+        state: initial,
+        activityId: 'drill:minimal-pairs',
+        action: StartLearningRun(options: RunOptions()),
+      ),
+    );
+    await oldStore.submit(
+      oldStore.prepare(
+        state: start.state,
+        activityId: 'drill:minimal-pairs',
+        action: const EndDrill(),
+      ),
+    );
     final newStore = CourseLearningWidgetStore();
     final streak = _HeldStreakService();
     var activeStore = oldStore;
@@ -644,33 +744,40 @@ void main() {
       ref.watch(_storeEpoch);
       return activeStore;
     });
-    final container = ProviderContainer(overrides: [
-      selectedStore.overrideWith((ref) {
-        ref.watch(_storeEpoch);
-        return activeStore;
-      }),
-      courseLearningStoreProvider
-          .overrideWith((ref) => ref.watch(selectedStore)),
-      streakServiceProvider.overrideWithValue(streak),
-    ]);
+    final container = ProviderContainer(
+      overrides: [
+        selectedStore.overrideWith((ref) {
+          ref.watch(_storeEpoch);
+          return activeStore;
+        }),
+        courseLearningStoreProvider.overrideWith(
+          (ref) => ref.watch(selectedStore),
+        ),
+        streakServiceProvider.overrideWithValue(streak),
+      ],
+    );
     addTearDown(container.dispose);
-    await tester.pumpWidget(UncontrolledProviderScope(
-      container: container,
-      child: MaterialApp(
-        home: Builder(
-          builder: (context) => Scaffold(
-            body: Center(
-              child: TextButton(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => const DrillScreen()),
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const DrillScreen(),
+                    ),
+                  ),
+                  child: const Text('Open drill'),
                 ),
-                child: const Text('Open drill'),
               ),
             ),
           ),
         ),
       ),
-    ));
+    );
     await tester.tap(find.text('Open drill'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('End Session'));
@@ -685,42 +792,36 @@ void main() {
 
     streak.release.complete();
     await tester.pumpAndSettle();
-    expect(find.text('Item 1'), findsOneWidget,
-        reason: 'the old owner completion must not pop the replacement route');
+    expect(
+      find.text('Item 1'),
+      findsOneWidget,
+      reason: 'the old owner completion must not pop the replacement route',
+    );
     expect(find.text('Open drill'), findsNothing);
-    expect(find.textContaining('Session complete!'), findsNothing,
-        reason: 'the old result must not be shown with the new owner counters');
+    expect(
+      find.textContaining('Session complete!'),
+      findsNothing,
+      reason: 'the old result must not be shown with the new owner counters',
+    );
     expect(newStore.committedState.history, isEmpty);
   });
 
-  testWidgets('typed repository persists an answer through mocked preferences',
-      (tester) async {
-    final guest = LearningOwner.guest();
-    final scope = LearningScope(courseId: 'en-fr', owner: guest);
-    final auth = LearningAuthScope(owner: guest, generation: 0, ready: true);
-    var token = 0;
-    final store = CourseLearningRepository(
-      scope: scope,
-      authGeneration: 0,
-      currentAuth: () => auth,
-      backendOwner: () => guest,
-      persistence: PreferencesLearningPersistence(
-        preferences: SharedPreferences.getInstance,
+  testWidgets('typed repository persists an answer through SQLite', (
+    tester,
+  ) async {
+    final harness = CourseLearningSqlTestHarness();
+    final store = harness.store;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(store),
+          courseAudioProvider.overrideWithValue(_Audio()),
+        ],
+        child: const MaterialApp(
+          home: CourseLessonScreen(lessonId: 'en-fr-vowels'),
+        ),
       ),
-      transitions: LearningTransitionEngine(LearningRegistry.french()),
-      cloud: null,
-      clock: () => DateTime.utc(2026, 10, 15),
-      newToken: () => (++token).toString().padLeft(22, '0'),
-      random: Random(1),
     );
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        courseLearningStoreProvider.overrideWithValue(store),
-        courseAudioProvider.overrideWithValue(_Audio()),
-      ],
-      child:
-          const MaterialApp(home: CourseLessonScreen(lessonId: 'en-fr-vowels')),
-    ));
     await _settle(tester);
     await tester.tap(find.text('Listen to French word'));
     await _settle(tester);
@@ -728,103 +829,131 @@ void main() {
     await _settle(tester);
     final committed = await store.load();
     expect(committed.history.single.attempts.single.correct, isTrue);
-    expect(committed.activities['lesson:en-fr-vowels']!.snapshot,
-        isA<LegacyLessonCheckpoint>());
-  });
-
-  testWidgets('corrupt legacy and drill snapshots stay unavailable until retry',
-      (tester) async {
-    final lessonStore = CourseLearningWidgetStore()
-      ..loadHandler = (call) async {
-        if (call == 1) throw const LearningCorruptException();
-        return CourseLearningWidgetStore().committedState;
-      };
-    await tester.pumpWidget(ProviderScope(
-      overrides: [courseLearningStoreProvider.overrideWithValue(lessonStore)],
-      child:
-          const MaterialApp(home: CourseLessonScreen(lessonId: 'en-fr-vowels')),
-    ));
-    await _settle(tester);
-    expect(find.textContaining('unavailable'), findsOneWidget);
-    expect(lessonStore.prepareCalls, 0);
-    expect(lessonStore.submitted, isEmpty);
-    await tester.tap(find.text('Retry loading'));
-    await _settle(tester);
-    expect(lessonStore.retryLoadCalls, 1);
-    expect(lessonStore.submitted.single.action, isA<StartLearningRun>());
-
-    await tester.pumpWidget(const SizedBox());
-    final drillStore = CourseLearningWidgetStore()
-      ..loadHandler = (call) async {
-        if (call == 1) throw const LearningCorruptException();
-        return CourseLearningWidgetStore().committedState;
-      };
-    await tester.pumpWidget(ProviderScope(
-      overrides: [courseLearningStoreProvider.overrideWithValue(drillStore)],
-      child: const MaterialApp(home: DrillScreen()),
-    ));
-    await _settle(tester);
-    expect(find.textContaining('unavailable'), findsOneWidget);
-    expect(drillStore.prepareCalls, 0);
-    expect(drillStore.submitted, isEmpty);
-    await tester.tap(find.text('Retry loading'));
-    await _settle(tester);
-    expect(drillStore.retryLoadCalls, 1);
-    expect(drillStore.submitted.single.action, isA<StartLearningRun>());
+    expect(
+      committed.activities['lesson:en-fr-vowels']!.snapshot,
+      isA<LegacyLessonCheckpoint>(),
+    );
   });
 
   testWidgets(
-      'opening lesson reference persists answerRevealed for all contexts',
-      (tester) async {
-    final store = CourseLearningWidgetStore();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        courseLearningStoreProvider.overrideWithValue(store),
-        courseAudioProvider.overrideWithValue(_Audio()),
-      ],
-      child:
-          const MaterialApp(home: CourseLessonScreen(lessonId: 'en-fr-vowels')),
-    ));
-    await _settle(tester);
-    await tester.tap(find.text('Word reference'));
-    await _settle(tester);
-    final slot = store.committedState.activities['lesson:en-fr-vowels']!;
-    expect(slot.exposures, isNotEmpty);
-    expect(
-        slot.exposures.values.every((exposure) =>
-            exposure.assistance.contains(AssistanceFlag.answerRevealed)),
-        isTrue);
-    await tester.tap(find.text('Word reference'));
-    await _settle(tester);
-    expect(
-        store.committedState.activities['lesson:en-fr-vowels']!.exposures.values
-            .every((exposure) =>
-                exposure.assistance.contains(AssistanceFlag.answerRevealed)),
-        isTrue);
-  });
+    'corrupt legacy and drill snapshots stay unavailable until retry',
+    (tester) async {
+      final lessonStore = CourseLearningWidgetStore()
+        ..loadHandler = (call) async {
+          if (call == 1) throw const LearningCorruptException();
+          return CourseLearningWidgetStore().committedState;
+        };
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            courseLearningStoreProvider.overrideWithValue(lessonStore),
+          ],
+          child: const MaterialApp(
+            home: CourseLessonScreen(lessonId: 'en-fr-vowels'),
+          ),
+        ),
+      );
+      await _settle(tester);
+      expect(find.textContaining('unavailable'), findsOneWidget);
+      expect(lessonStore.prepareCalls, 0);
+      expect(lessonStore.submitted, isEmpty);
+      await tester.tap(find.text('Retry loading'));
+      await _settle(tester);
+      expect(lessonStore.retryLoadCalls, 1);
+      expect(lessonStore.submitted.single.action, isA<StartLearningRun>());
 
-  testWidgets('legacy review finishes without recording completion',
-      (tester) async {
+      await tester.pumpWidget(const SizedBox());
+      final drillStore = CourseLearningWidgetStore()
+        ..loadHandler = (call) async {
+          if (call == 1) throw const LearningCorruptException();
+          return CourseLearningWidgetStore().committedState;
+        };
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            courseLearningStoreProvider.overrideWithValue(drillStore),
+          ],
+          child: const MaterialApp(home: DrillScreen()),
+        ),
+      );
+      await _settle(tester);
+      expect(find.textContaining('unavailable'), findsOneWidget);
+      expect(drillStore.prepareCalls, 0);
+      expect(drillStore.submitted, isEmpty);
+      await tester.tap(find.text('Retry loading'));
+      await _settle(tester);
+      expect(drillStore.retryLoadCalls, 1);
+      expect(drillStore.submitted.single.action, isA<StartLearningRun>());
+    },
+  );
+
+  testWidgets(
+    'opening lesson reference persists answerRevealed for all contexts',
+    (tester) async {
+      final store = CourseLearningWidgetStore();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            courseLearningStoreProvider.overrideWithValue(store),
+            courseAudioProvider.overrideWithValue(_Audio()),
+          ],
+          child: const MaterialApp(
+            home: CourseLessonScreen(lessonId: 'en-fr-vowels'),
+          ),
+        ),
+      );
+      await _settle(tester);
+      await tester.tap(find.text('Word reference'));
+      await _settle(tester);
+      final slot = store.committedState.activities['lesson:en-fr-vowels']!;
+      expect(slot.exposures, isNotEmpty);
+      expect(
+        slot.exposures.values.every(
+          (exposure) =>
+              exposure.assistance.contains(AssistanceFlag.answerRevealed),
+        ),
+        isTrue,
+      );
+      await tester.tap(find.text('Word reference'));
+      await _settle(tester);
+      expect(
+        store.committedState.activities['lesson:en-fr-vowels']!.exposures.values
+            .every(
+              (exposure) =>
+                  exposure.assistance.contains(AssistanceFlag.answerRevealed),
+            ),
+        isTrue,
+      );
+    },
+  );
+
+  testWidgets('legacy review finishes without recording completion', (
+    tester,
+  ) async {
     final store = CourseLearningWidgetStore();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        courseLearningStoreProvider.overrideWithValue(store),
-        courseAudioProvider.overrideWithValue(_Audio()),
-      ],
-      child: MaterialApp(
-        home: Builder(
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(store),
+          courseAudioProvider.overrideWithValue(_Audio()),
+        ],
+        child: MaterialApp(
+          home: Builder(
             builder: (context) => TextButton(
-                  onPressed: () =>
-                      Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) => const CourseLessonScreen(
-                      lessonId: 'en-fr-vowels',
-                      review: true,
-                    ),
-                  )),
-                  child: const Text('Open review'),
-                )),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const CourseLessonScreen(
+                    lessonId: 'en-fr-vowels',
+                    review: true,
+                  ),
+                ),
+              ),
+              child: const Text('Open review'),
+            ),
+          ),
+        ),
       ),
-    ));
+    );
     await tester.tap(find.text('Open review'));
     await tester.pumpAndSettle();
     for (var index = 0; index < 4; index++) {
@@ -835,14 +964,18 @@ void main() {
       await tester.tap(find.text('/$sound/'));
       await _settle(tester);
       await tester.scrollUntilVisible(
-          find.text(index == 3 ? 'Finish' : 'Next word'), 200);
+        find.text(index == 3 ? 'Finish' : 'Next word'),
+        200,
+      );
       await tester.tap(find.text(index == 3 ? 'Finish' : 'Next word'));
       await _settle(tester);
     }
     await tester.pumpAndSettle();
     expect(find.text('Open review'), findsOneWidget);
-    expect(store.committedState.history.expand((batch) => batch.attempts),
-        hasLength(4));
+    expect(
+      store.committedState.history.expand((batch) => batch.attempts),
+      hasLength(4),
+    );
     expect(store.committedState.completions, isEmpty);
   });
 }
