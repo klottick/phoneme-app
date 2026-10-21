@@ -41,6 +41,50 @@ lesson** or **Play for a minute**. Install a French voice in your device's speec
 settings for listening activities. Failed audio never counts as a wrong answer.
 Recording/self-comparison requires microphone permission and native device support.
 
+### Persistent localhost demo (Linux/systemd)
+
+From the **primary repo checkout**, with a clean tracked working tree and the
+approved Flutter SDK (currently 3.47.7):
+
+```bash
+python3 scripts/local_demo.py update --flutter /absolute/path/to/flutter
+python3 scripts/local_demo.py install
+```
+
+Open **http://127.0.0.1:8088**. No account, Supabase, root access, Docker, or
+public hosting is needed. This is a local pre-alpha demo, not release acceptance.
+The listener binds only to IPv4 loopback, not the LAN. Choose this exact URL each
+time: browser progress belongs to its origin/profile and is not cloud-synced.
+
+Builds and the generated `phoneme-demo.service` stay in the repo's ignored
+`build/local-demo/` directory. `install` enables a **user** service by linking that
+unit into systemd's per-user configuration; no system-wide unit is installed.
+The service runs independently of this terminal, agents, or temporary worktrees,
+starts with your user service manager (normally at login), and restarts after
+failure. It cannot serve while the computer is asleep/off. The helper does not
+enable lingering or alter login/boot policy.
+
+```bash
+python3 scripts/local_demo.py status
+python3 scripts/local_demo.py logs
+python3 scripts/local_demo.py stop
+python3 scripts/local_demo.py start
+# Explicitly rebuild/update after reviewing and merging source changes:
+python3 scripts/local_demo.py update --flutter /absolute/path/to/flutter
+```
+
+Updates build into a fresh release directory, check the main app/SQLite worker
+assets, then atomically switch `build/local-demo/current`. Failed builds leave
+the current release untouched; prior releases are retained. `/demo-build.json`
+identifies the source commit. Refresh the browser after a successful update.
+There are no automatic pulls, dependency upgrades, rebuilds, or data resets.
+Do not remove the repo or `build/local-demo/` while this service is in use.
+
+To stop automatic startup, run `systemctl --user disable --now phoneme-demo.service`.
+If you move the repo or change the Python executable, stop/disable the old service
+and inspect/remove its old generated unit and registration link before reinstalling
+from the new location. The helper refuses to overwrite another service definition.
+
 ## Optional Supabase backup
 
 Apply `backend/supabase/migrations/202609180001_language_pair_courses.sql` using
