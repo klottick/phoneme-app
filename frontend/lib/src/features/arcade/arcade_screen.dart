@@ -867,7 +867,14 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
                             _started = false;
                             _showSummary = true;
                           });
-                          if (context.mounted) Navigator.of(context).pop();
+                          if (context.mounted) {
+                            final router = GoRouter.of(context);
+                            if (router.canPop()) {
+                              router.pop();
+                            } else {
+                              router.go('/arcade');
+                            }
+                          }
                         });
                   },
             child: const Text('Finish')),

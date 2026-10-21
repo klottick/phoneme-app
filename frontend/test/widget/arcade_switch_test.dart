@@ -495,4 +495,161 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
+
+
+  for (final silent in [false, true]) {
+    testWidgets(
+      'Finish from root ${silent ? "Word Match" : "Sound Match"} returns to arcade',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(800, 1200));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final store = CourseLearningWidgetStore();
+        final gamePath = silent ? '/arcade/word' : '/arcade/sound';
+        final router = GoRouter(
+          initialLocation: gamePath,
+          routes: [
+            GoRoute(
+              path: '/arcade',
+              builder: (_, __) => const Text('Arcade home'),
+            ),
+            GoRoute(
+              path: '/arcade/sound',
+              builder: (_, __) => const ArcadeScreen(silent: false),
+            ),
+            GoRoute(
+              path: '/arcade/word',
+              builder: (_, __) => const ArcadeScreen(silent: true),
+            ),
+          ],
+        );
+        addTearDown(router.dispose);
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [courseLearningStoreProvider.overrideWithValue(store)],
+            child: MaterialApp.router(routerConfig: router),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Start 60-second round'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Pause'));
+        await tester.pumpAndSettle();
+        expect(find.text('Paused'), findsOneWidget);
+        await tester.tap(find.text('Finish'));
+        await tester.pumpAndSettle();
+        expect(router.routeInformationProvider.value.uri.path, '/arcade');
+        expect(find.text('Arcade home'), findsOneWidget);
+        expect(
+          store.committedState.activities,
+          contains(silent ? 'arcade:word' : 'arcade:sound'),
+        );
+      },
+    );
+
+    testWidgets('Finish from pushed ${silent ? "Word" : "Sound"} returns to previous route', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final store = CourseLearningWidgetStore();
+      final gamePath = silent ? '/arcade/word' : '/arcade/sound';
+      final router = GoRouter(initialLocation: '/arcade', routes: [
+        GoRoute(path: '/arcade', builder: (_, __) => const ArcadeLobby()),
+        GoRoute(path: '/arcade/sound', builder: (_, __) => const ArcadeScreen(silent: false)),
+        GoRoute(path: '/arcade/word', builder: (_, __) => const ArcadeScreen(silent: true)),
+      ]);
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [courseLearningStoreProvider.overrideWithValue(store)],
+        child: MaterialApp.router(routerConfig: router),
+      ));
+      await tester.pumpAndSettle();
+      router.push(gamePath);
+      await tester.pumpAndSettle();
+      expect(find.byType(ArcadeScreen), findsOneWidget);
+      await tester.tap(find.text('Start 60-second round'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Pause'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Finish'));
+      await tester.pumpAndSettle();
+      expect(router.routeInformationProvider.value.uri.path, '/arcade');
+      expect(find.text('One minute. One more combo.'), findsOneWidget);
+    });
+
+    testWidgets('Finish after saved/reloaded ${silent ? "Word" : "Sound"} board', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final store = CourseLearningWidgetStore();
+      final gamePath = silent ? '/arcade/word' : '/arcade/sound';
+      GoRouter makeRouter() => GoRouter(initialLocation: gamePath, routes: [
+        GoRoute(path: '/arcade', builder: (_, __) => const Text('Arcade home')),
+        GoRoute(path: '/arcade/sound', builder: (_, __) => const ArcadeScreen(silent: false)),
+        GoRoute(path: '/arcade/word', builder: (_, __) => const ArcadeScreen(silent: true)),
+      ]);
+      var router = makeRouter();
+      await tester.pumpWidget(ProviderScope(
+        overrides: [courseLearningStoreProvider.overrideWithValue(store)],
+        child: MaterialApp.router(routerConfig: router),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Start 60-second round'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Pause'));
+      await tester.pumpAndSettle();
+      expect(store.committedState.activities, contains(silent ? 'arcade:word' : 'arcade:sound'));
+      await tester.pumpWidget(const SizedBox());
+      router.dispose();
+      router = makeRouter();
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [courseLearningStoreProvider.overrideWithValue(store)],
+        child: MaterialApp.router(routerConfig: router),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('Resume saved board'), findsOneWidget);
+      await tester.tap(find.text('Resume saved board'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Pause'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Finish'));
+      await tester.pumpAndSettle();
+      expect(router.routeInformationProvider.value.uri.path, '/arcade');
+      expect(find.text('Arcade home'), findsOneWidget);
+    });
+
+    testWidgets('failed Finish checkpoint retries identical ${silent ? "Word" : "Sound"} command without exiting', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final store = CourseLearningWidgetStore();
+      final gamePath = silent ? '/arcade/word' : '/arcade/sound';
+      final router = GoRouter(initialLocation: gamePath, routes: [
+        GoRoute(path: '/arcade', builder: (_, __) => const Text('Arcade home')),
+        GoRoute(path: '/arcade/sound', builder: (_, __) => const ArcadeScreen(silent: false)),
+        GoRoute(path: '/arcade/word', builder: (_, __) => const ArcadeScreen(silent: true)),
+      ]);
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [courseLearningStoreProvider.overrideWithValue(store)],
+        child: MaterialApp.router(routerConfig: router),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Start 60-second round'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Pause'));
+      await tester.pumpAndSettle();
+      store.failingActions.add(CheckpointArcade);
+      final before = store.submitted.length;
+      await tester.tap(find.text('Finish'));
+      await tester.pumpAndSettle();
+      expect(router.routeInformationProvider.value.uri.path, gamePath);
+      expect(find.text('Retry save'), findsOneWidget);
+      final failed = store.submitted[before];
+      expect(failed.action, isA<CheckpointArcade>());
+      store.failingActions.remove(CheckpointArcade);
+      await tester.tap(find.text('Retry save'));
+      await tester.pumpAndSettle();
+      expect(store.submitted.where((command) => command.token == failed.token), hasLength(2));
+      expect(router.routeInformationProvider.value.uri.path, '/arcade');
+      expect(find.text('Arcade home'), findsOneWidget);
+    });
+  }
 }
