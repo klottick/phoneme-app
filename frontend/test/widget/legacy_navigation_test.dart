@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:linguist/src/app.dart';
 import 'package:linguist/src/core/course/comparison_learning_state.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
+import 'package:linguist/src/core/models/review_item.dart';
 import 'package:linguist/src/core/providers/app_providers.dart';
 import 'package:linguist/src/core/repositories/progress_repository.dart';
 import 'package:linguist/src/routing/app_router.dart';
@@ -73,6 +76,9 @@ void main() {
     container.read(appRouterProvider).push('/analytics');
     await tester.pumpAndSettle();
     expect(find.text('Overview'), findsOneWidget);
+    expect(find.text('Recent Performance'), findsOneWidget);
+    expect(find.text('Attempts'), findsOneWidget);
+    expect(find.text('Accuracy'), findsOneWidget);
     expect(find.textContaining('unavailable'), findsNothing);
   });
 
@@ -90,6 +96,64 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('No due items. Great consistency.'), findsOneWidget);
     expect(find.textContaining('unavailable'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('configured review transitions from loading to due items', (
+    tester,
+  ) async {
+    final dueItems = Completer<List<ReviewItem>>();
+    final (container, _) = await mountApp(
+      tester,
+      additionalOverrides: [
+        legacyBackendAvailableProvider.overrideWithValue(true),
+        dueReviewItemsProvider.overrideWith((ref) => dueItems.future),
+      ],
+    );
+    container.read(appRouterProvider).push('/review');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    dueItems.complete([
+      ReviewItem(
+        queueId: 'queue-1',
+        phonemeId: 'phoneme-1',
+        ipaSymbol: '/y/',
+        descriptor: 'lune',
+        languageCode: 'fr',
+        dueAt: DateTime.utc(2026, 10, 21),
+      ),
+    ]);
+    await tester.pumpAndSettle();
+    expect(find.text('/y/ (fr)'), findsOneWidget);
+    expect(find.text('lune'), findsOneWidget);
+    expect(find.text('No due items. Great consistency.'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('configured review renders a managed provider error', (
+    tester,
+  ) async {
+    final dueItems = Completer<List<ReviewItem>>();
+    final (container, _) = await mountApp(
+      tester,
+      additionalOverrides: [
+        legacyBackendAvailableProvider.overrideWithValue(true),
+        dueReviewItemsProvider.overrideWith((ref) => dueItems.future),
+      ],
+    );
+    container.read(appRouterProvider).push('/review');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    dueItems.completeError(StateError('controlled review failure'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Failed to load reviews: Bad state: controlled review failure'),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 
