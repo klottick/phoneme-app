@@ -877,6 +877,10 @@ void main() {
         );
         await tester.runAsync(() => entered.future);
         final frozen = h.store.submitted.single;
+        expect(
+          (frozen.action as StartComparisonRun).sessionId,
+          matches(RegExp(r'^comparison-\d+-\d+$')),
+        );
         if (failFirstWrite) {
           h.persistence.failAfterHeldWrite = StateError(
             'first Start write failed',
