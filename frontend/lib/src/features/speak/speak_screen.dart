@@ -67,6 +67,9 @@ class _SpeakScreenState extends ConsumerState<SpeakScreen> {
                     FloatingActionButton.large(
                       heroTag: 'record',
                       onPressed: _toggleRecording,
+                      tooltip: _isRecording
+                          ? 'Stop recording your pronunciation'
+                          : 'Record your pronunciation',
                       backgroundColor: _isRecording ? Colors.red : null,
                       child: Icon(_isRecording ? Icons.stop : Icons.mic),
                     ),
@@ -90,11 +93,15 @@ class _SpeakScreenState extends ConsumerState<SpeakScreen> {
                         icon: Icon(_isPlaying ? Icons.stop : Icons.play_arrow),
                         iconSize: 32,
                         onPressed: _togglePlayback,
+                        tooltip: _isPlaying
+                            ? 'Stop playback of your recording'
+                            : 'Play your recording',
                       ),
                       const SizedBox(width: 16),
                       IconButton.filled(
                         icon: const Icon(Icons.refresh),
                         iconSize: 32,
+                        tooltip: 'Record again',
                         onPressed: () {
                           setState(() {
                             _hasRecording = false;

@@ -117,7 +117,7 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
                               onPressed: _isRecording
                                   ? null
                                   : () => _playPhoneme(current.ipaSymbol),
-                              tooltip: 'Listen',
+                              tooltip: _isRecording ? 'Recording phoneme' : 'Play phoneme',
                             ),
                             const SizedBox(width: 16),
                             if (_wordMode) ...[
@@ -129,7 +129,7 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
                                 onPressed: _isRecording
                                     ? null
                                     : () => _playWord(_sampleWord),
-                                tooltip: 'Listen Word',
+                                tooltip: _isRecording ? 'Recording phoneme' : 'Play sample word',
                               ),
                             ],
                             const SizedBox(width: 16),
@@ -169,7 +169,9 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
                       onPressed: recordingAvailable ? _toggleRecording : null,
                       tooltip: !recordingAvailable
                           ? 'Recording is not available in this browser'
-                          : 'Record phoneme',
+                          : _isRecording
+                              ? 'Stop recording'
+                              : 'Record phoneme',
                       backgroundColor: _isRecording ? Colors.red : null,
                       child: Icon(_isRecording ? Icons.stop : Icons.mic),
                     ),
@@ -182,7 +184,9 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
                             : _toggleWordRecording,
                         tooltip: !recordingAvailable
                             ? 'Recording is not available in this browser'
-                            : 'Record word',
+                            : _isRecording
+                                ? 'Word recording unavailable while another recording is in progress'
+                                : 'Record word',
                         backgroundColor:
                             _isRecording && _wordMode ? Colors.red : null,
                         child: Icon(

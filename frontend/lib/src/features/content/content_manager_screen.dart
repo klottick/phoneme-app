@@ -138,6 +138,7 @@ class _ContentManagerScreenState extends ConsumerState<ContentManagerScreen> {
                       : null,
                   trailing: IconButton(
                     icon: const Icon(Icons.delete),
+                    tooltip: 'Delete ${phoneme.name}',
                     onPressed: () => _deletePhoneme(phoneme.id),
                   ),
                 );
@@ -145,6 +146,7 @@ class _ContentManagerScreenState extends ConsumerState<ContentManagerScreen> {
             ),
       floatingActionButton: FloatingActionButton(
         onPressed: _showAddDialog,
+        tooltip: 'Add custom phoneme',
         child: const Icon(Icons.add),
       ),
     );

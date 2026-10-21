@@ -60,7 +60,9 @@ class _AudioCompareScreenState extends ConsumerState<AudioCompareScreen> {
             FilledButton.icon(
               onPressed: _isPlaying ? null : _playReference,
               icon: Icon(_isPlaying ? Icons.stop : Icons.play_arrow),
-              label: Text(_isPlaying ? 'Playing...' : 'Play Reference'),
+              label: Text(
+                _isPlaying ? 'Reference audio is playing' : 'Play Reference',
+              ),
             ),
           ],
         ),
@@ -86,7 +88,11 @@ class _AudioCompareScreenState extends ConsumerState<AudioCompareScreen> {
                 onPressed: _isPlayingUser ? null : _playUserRecording,
                 icon: Icon(_isPlayingUser ? Icons.stop : Icons.play_arrow),
                 label:
-                    Text(_isPlayingUser ? 'Playing...' : 'Play Your Recording'),
+                    Text(
+                      _isPlayingUser
+                          ? 'Your recording is playing'
+                          : 'Play Your Recording',
+                    ),
               ),
               const SizedBox(height: 8),
               TextButton.icon(
@@ -97,6 +103,9 @@ class _AudioCompareScreenState extends ConsumerState<AudioCompareScreen> {
             ] else ...[
               FloatingActionButton.large(
                 onPressed: _isRecording ? _stopRecording : _startRecording,
+                tooltip: _isRecording
+                    ? 'Stop recording your pronunciation'
+                    : 'Record your pronunciation',
                 backgroundColor: _isRecording ? Colors.red : null,
                 child: Icon(_isRecording ? Icons.stop : Icons.mic),
               ),
