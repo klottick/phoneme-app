@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/app_providers.dart';
@@ -22,6 +23,24 @@ class _PhonemeIdentifyScreenState extends ConsumerState<PhonemeIdentifyScreen> {
   bool _isPlaying = false;
   String? _lastResult;
   bool _answered = false;
+  List<String> _optionCatalogue = const [];
+  final Map<int, List<String>> _optionsByPrompt = {};
+
+  List<String> _optionsFor(int prompt, List<String> catalogue, String correct) {
+    if (!listEquals(_optionCatalogue, catalogue)) {
+      _optionCatalogue = List.of(catalogue);
+      _optionsByPrompt.clear();
+    }
+    return _optionsByPrompt.putIfAbsent(prompt, () {
+      final choices =
+          catalogue.toSet().where((symbol) => symbol != correct).toList()
+            ..shuffle(Random());
+      final options = <String>[correct, ...choices.take(3)];
+      options.shuffle(Random());
+      return options;
+    });
+  }
+
   String _getSampleWord(String phoneme) {
     final words = frenchWords
         .where((w) => w.contains(phoneme))
@@ -60,16 +79,11 @@ class _PhonemeIdentifyScreenState extends ConsumerState<PhonemeIdentifyScreen> {
           }
 
           final current = items[_index % items.length];
-          final allPhonemes = items.map((p) => p.ipaSymbol).toList()
-            ..shuffle(Random());
-          final options = (allPhonemes.take(4).toList()..add(current.ipaSymbol))
-              .toSet()
-              .take(4)
-              .toList()
-            ..shuffle(Random());
-
-          final displayOptions =
-              options.length >= 4 ? options : allPhonemes.take(4).toList();
+          final displayOptions = _optionsFor(
+            _index,
+            items.map((p) => p.ipaSymbol).toList(),
+            current.ipaSymbol,
+          );
 
           return Padding(
             padding: const EdgeInsets.all(16),
@@ -92,7 +106,8 @@ class _PhonemeIdentifyScreenState extends ConsumerState<PhonemeIdentifyScreen> {
                           children: [
                             IconButton.filled(
                               icon: Icon(
-                                  _isPlaying ? Icons.stop : Icons.volume_up),
+                                _isPlaying ? Icons.stop : Icons.volume_up,
+                              ),
                               iconSize: 48,
                               onPressed: _isPlaying
                                   ? null
@@ -101,12 +116,14 @@ class _PhonemeIdentifyScreenState extends ConsumerState<PhonemeIdentifyScreen> {
                             const SizedBox(width: 16),
                             IconButton.filled(
                               icon: Icon(
-                                  _isPlaying ? Icons.stop : Icons.volume_down),
+                                _isPlaying ? Icons.stop : Icons.volume_down,
+                              ),
                               iconSize: 48,
                               onPressed: _isPlaying
                                   ? null
                                   : () => _playWord(
-                                      _getSampleWord(current.ipaSymbol)),
+                                      _getSampleWord(current.ipaSymbol),
+                                    ),
                             ),
                           ],
                         ),
@@ -149,9 +166,7 @@ class _PhonemeIdentifyScreenState extends ConsumerState<PhonemeIdentifyScreen> {
                         onPressed: _answered
                             ? null
                             : () => _handleAnswer(phoneme, current.ipaSymbol),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: bgColor,
-                        ),
+                        style: FilledButton.styleFrom(backgroundColor: bgColor),
                         child: Text(
                           phoneme,
                           style: const TextStyle(fontSize: 24),
