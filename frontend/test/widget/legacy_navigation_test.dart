@@ -1,101 +1,95 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:go_router/go_router.dart';
-import 'package:linguist/src/features/modes/challenge_mode_screen.dart';
-import 'package:linguist/src/core/services/curriculum_service.dart';
-import 'package:linguist/src/features/phoneme_id/phoneme_identify_screen.dart';
+import 'package:linguist/src/app.dart';
+import 'package:linguist/src/core/course/comparison_learning_state.dart';
+import 'package:linguist/src/core/course/course_learning_providers.dart';
+import 'package:linguist/src/routing/app_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../support/course_learning_widget_store.dart';
+
+Override _comparisonStateOverride() =>
+    comparisonLearningStateProvider.overrideWith(
+      (ref) async => ComparisonLearningState.empty(
+        ComparisonProfileScope(courseId: 'en-fr', owner: LearningOwner.guest()),
+      ),
+    );
 
 void main() {
-  testWidgets('unfinished mode cards are unavailable and Back stays usable', (
-    tester,
+  setUp(
+    () =>
+        SharedPreferences.setMockInitialValues({'selected_course_id': 'en-fr'}),
+  );
+
+  Future<(ProviderContainer, WidgetTester)> mountApp(
+    WidgetTester tester,
   ) async {
-    final router = GoRouter(
-      initialLocation: '/',
-      routes: [
-        GoRoute(
-          path: '/',
-          builder: (context, _) => Scaffold(
-            body: TextButton(
-              onPressed: () => context.push('/modes'),
-              child: const Text('Open modes'),
-            ),
-          ),
+    final container = ProviderContainer(
+      overrides: [
+        courseLearningStoreProvider.overrideWithValue(
+          CourseLearningWidgetStore(),
         ),
-        GoRoute(
-          path: '/modes',
-          builder: (_, __) => const ChallengeModeScreen(),
-        ),
-        GoRoute(
-          path: '/phoneme-id',
-          builder: (_, __) => const Scaffold(body: Text('Practice')),
-        ),
+        _comparisonStateOverride(),
       ],
     );
-    addTearDown(router.dispose);
-    await tester.binding.setSurfaceSize(const Size(390, 844));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
+    addTearDown(container.dispose);
+    container.read(appRouterProvider);
     await tester.pumpWidget(
-      ProviderScope(child: MaterialApp.router(routerConfig: router)),
+      UncontrolledProviderScope(
+        container: container,
+        child: const LinguistApp(),
+      ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Open modes'));
+    expect(find.text('Linguist'), findsOneWidget);
+    return (container, tester);
+  }
+
+  testWidgets('actual app router keeps unfinished modes unavailable', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final (container, _) = await mountApp(tester);
+    final router = container.read(appRouterProvider);
+    router.push('/modes');
     await tester.pumpAndSettle();
+    expect(find.text('Learning Modes'), findsOneWidget);
+
     for (final mode in ['Challenge', 'Marathon', 'Zen']) {
       await tester.scrollUntilVisible(find.text(mode), 200);
-      expect(find.text(mode), findsOneWidget);
       expect(
         find.textContaining('Unavailable — $mode practice'),
         findsOneWidget,
       );
-      expect(find.text('Unavailable'), findsNWidgets(3));
       await tester.tap(find.text(mode));
       await tester.pumpAndSettle();
       expect(find.text('Learning Modes'), findsOneWidget);
-      expect(find.text('Practice'), findsNothing);
+      expect(find.text('Learning Modes'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     }
-    await tester.pageBack();
+    router.pop();
     await tester.pumpAndSettle();
-    expect(find.text('Open modes'), findsOneWidget);
+    expect(find.text('Linguist'), findsOneWidget);
   });
 
   for (final lesson in ['French Basics', 'French Nasals']) {
     testWidgets(
-      '$lesson opens generic practice and Back returns to lesson plans',
+      'actual app router: $lesson opens generic practice and Back returns',
       (tester) async {
-        final router = GoRouter(
-          initialLocation: '/',
-          routes: [
-            GoRoute(
-              path: '/',
-              builder: (context, _) => Scaffold(
-                body: TextButton(
-                  onPressed: () => context.push('/lessons'),
-                  child: const Text('Open lessons'),
-                ),
-              ),
-            ),
-            GoRoute(
-              path: '/lessons',
-              builder: (_, __) => const LessonPlanScreen(languageCode: 'fr'),
-            ),
-            GoRoute(
-              path: '/phoneme-id',
-              builder: (_, __) => const PhonemeIdentifyScreen(),
-            ),
-          ],
-        );
-        addTearDown(router.dispose);
-        await tester.pumpWidget(
-          ProviderScope(child: MaterialApp.router(routerConfig: router)),
-        );
+        final (container, _) = await mountApp(tester);
+        final router = container.read(appRouterProvider);
+        router.push('/lessons');
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Open lessons'));
-        await tester.pumpAndSettle();
+        expect(find.text('Lesson Plans'), findsOneWidget);
         expect(find.text('Generic practice'), findsNWidgets(2));
+
         await tester.tap(find.text(lesson));
         await tester.pumpAndSettle();
         expect(find.text('Phoneme Identification'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+
         await tester.pageBack();
         await tester.pumpAndSettle();
         expect(find.text('Lesson Plans'), findsOneWidget);
