@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,12 +5,12 @@ import 'daily_goals_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class LearningInsights {
-  final int totalSessions;
-  final int totalMinutes;
-  final double averageAccuracy;
-  final int longestSession;
-  final String mostPracticedPhoneme;
-  final String hardestPhoneme;
+  final int? totalSessions;
+  final int? totalMinutes;
+  final double? averageAccuracy;
+  final int? longestSession;
+  final String? mostPracticedPhoneme;
+  final String? hardestPhoneme;
   final Map<String, int> weakAreas;
   final List<DailyStats> weeklyStats;
 
@@ -49,31 +48,16 @@ class InsightsService {
   static const String _key = 'learning_insights';
 
   Future<LearningInsights> getInsights() async {
-    final prefs = await SharedPreferences.getInstance();
-    return LearningInsights(
-      totalSessions: prefs.getInt('$_key.sessions') ?? 0,
-      totalMinutes: prefs.getInt('$_key.minutes') ?? 0,
-      averageAccuracy: prefs.getDouble('$_key.accuracy') ?? 0.7,
-      longestSession: prefs.getInt('$_key.longest_session') ?? 0,
-      mostPracticedPhoneme: 'æ',
-      hardestPhoneme: 'r',
-      weakAreas: {'θ': 3, 'ð': 3, 'ŋ': 2},
-      weeklyStats: _generateWeeklyStats(),
+    return const LearningInsights(
+      totalSessions: null,
+      totalMinutes: null,
+      averageAccuracy: null,
+      longestSession: null,
+      mostPracticedPhoneme: null,
+      hardestPhoneme: null,
+      weakAreas: {},
+      weeklyStats: [],
     );
-  }
-
-  List<DailyStats> _generateWeeklyStats() {
-    final now = DateTime.now();
-    return List.generate(7, (i) {
-      final date = now.subtract(Duration(days: 6 - i));
-      return DailyStats(
-        date: date,
-        sessions: i % 3 + 1,
-        minutes: (i * 5 + 10) % 30,
-        correct: (i + 1) * 3,
-        total: (i + 1) * 5,
-      );
-    });
   }
 
   Future<void> recordSession({
@@ -82,7 +66,7 @@ class InsightsService {
     required int total,
   }) async {
     final prefs = await SharedPreferences.getInstance();
-    
+
     final sessions = (prefs.getInt('$_key.sessions') ?? 0) + 1;
     final minutes = (prefs.getInt('$_key.minutes') ?? 0) + durationMinutes;
     final accuracy = (correct / total);
@@ -92,7 +76,7 @@ class InsightsService {
     await prefs.setInt('$_key.sessions', sessions);
     await prefs.setInt('$_key.minutes', minutes);
     await prefs.setDouble('$_key.accuracy', newAvg);
-    
+
     if (durationMinutes > (prefs.getInt('$_key.longest_session') ?? 0)) {
       await prefs.setInt('$_key.longest_session', durationMinutes);
     }
@@ -155,25 +139,36 @@ class _StatsOverview extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Overview', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            const Text(
+              'Overview',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _StatItem(
-                  icon: Icons.repeat,
-                  value: '${insights.totalSessions}',
-                  label: 'Sessions',
+                Expanded(
+                  child: _StatItem(
+                    icon: Icons.repeat,
+                    value: insights.totalSessions?.toString() ?? 'Not measured',
+                    label: 'Sessions',
+                  ),
                 ),
-                _StatItem(
-                  icon: Icons.timer,
-                  value: '${insights.totalMinutes}',
-                  label: 'Minutes',
+                Expanded(
+                  child: _StatItem(
+                    icon: Icons.timer,
+                    value: insights.totalMinutes?.toString() ?? 'Not measured',
+                    label: 'Minutes',
+                  ),
                 ),
-                _StatItem(
-                  icon: Icons.check_circle,
-                  value: '${(insights.averageAccuracy * 100).round()}%',
-                  label: 'Accuracy',
+                Expanded(
+                  child: _StatItem(
+                    icon: Icons.check_circle,
+                    value: insights.averageAccuracy == null
+                        ? 'Not measured'
+                        : '${(insights.averageAccuracy! * 100).round()}%',
+                    label: 'Accuracy',
+                  ),
                 ),
               ],
             ),
@@ -189,7 +184,11 @@ class _StatItem extends StatelessWidget {
   final String value;
   final String label;
 
-  const _StatItem({required this.icon, required this.value, required this.label});
+  const _StatItem({
+    required this.icon,
+    required this.value,
+    required this.label,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -197,7 +196,13 @@ class _StatItem extends StatelessWidget {
       children: [
         Icon(icon, size: 28, color: Colors.teal),
         const SizedBox(height: 4),
-        Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            value,
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+        ),
         Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
       ],
     );
@@ -211,13 +216,34 @@ class _WeeklyChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (insights.weeklyStats.isEmpty) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'This Week',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              ),
+              SizedBox(height: 8),
+              Text('Activity is not measured in this view.'),
+            ],
+          ),
+        ),
+      );
+    }
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('This Week', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            const Text(
+              'This Week',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
             const SizedBox(height: 16),
             SizedBox(
               height: 120,
@@ -242,7 +268,10 @@ class _WeeklyChart extends StatelessWidget {
                               padding: const EdgeInsets.only(bottom: 4),
                               child: Text(
                                 '${(stat.accuracy * 100).round()}%',
-                                style: const TextStyle(fontSize: 8, color: Colors.white),
+                                style: const TextStyle(
+                                  fontSize: 8,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
                           ),
@@ -250,7 +279,8 @@ class _WeeklyChart extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        ['M', 'T', 'W', 'T', 'F', 'S', 'S'][stat.date.weekday - 1],
+                        ['M', 'T', 'W', 'T', 'F', 'S', 'S'][stat.date.weekday -
+                            1],
                         style: const TextStyle(fontSize: 10),
                       ),
                     ],
@@ -280,15 +310,22 @@ class _WeakAreas extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Areas to Improve', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            const Text(
+              'Areas to Improve',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: insights.weakAreas.entries.map((e) => Chip(
-                label: Text('${e.key}: ${e.value} errors'),
-                backgroundColor: Colors.orange[50],
-              )).toList(),
+              children: insights.weakAreas.entries
+                  .map(
+                    (e) => Chip(
+                      label: Text('${e.key}: ${e.value} errors'),
+                      backgroundColor: Colors.orange[50],
+                    ),
+                  )
+                  .toList(),
             ),
           ],
         ),
@@ -331,8 +368,13 @@ class QuickPracticeWidget extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      goals.isComplete ? 'Daily Goal Complete!' : 'Quick Practice',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      goals.isComplete
+                          ? 'Daily Goal Complete!'
+                          : 'Quick Practice',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
                     ),
                     Text(
                       goals.isComplete
