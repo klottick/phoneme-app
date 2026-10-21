@@ -43,7 +43,8 @@ Recording/self-comparison requires microphone permission and native device suppo
 
 ### Persistent localhost demo (Linux/systemd)
 
-From the **primary repo checkout**, with a clean tracked working tree and the
+From the **primary repo checkout**, with a clean tracked working tree, no untracked
+frontend source/assets, and the
 approved Flutter SDK (currently 3.47.7):
 
 ```bash
@@ -78,6 +79,7 @@ assets, then atomically switch `build/local-demo/current`. Failed builds leave
 the current release untouched; prior releases are retained. `/demo-build.json`
 identifies the source commit. Refresh the browser after a successful update.
 There are no automatic pulls, dependency upgrades, rebuilds, or data resets.
+Existing unmanaged or dangling `current` links are refused, not served/replaced.
 Do not remove the repo or `build/local-demo/` while this service is in use.
 
 To stop automatic startup, run `systemctl --user disable --now phoneme-demo.service`.

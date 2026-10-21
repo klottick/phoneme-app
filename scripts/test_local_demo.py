@@ -149,6 +149,40 @@ with open(os.environ['FAKE_CALL_LOG'], 'a') as f:
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(marker.read_text(), "preserve me")
 
+    def test_unmanaged_or_dangling_current_is_neither_served_nor_replaced(self):
+        for dangling in (False, True):
+            with self.subTest(dangling=dangling):
+                current = self.root / "build/local-demo/current"
+                current.parent.mkdir(parents=True, exist_ok=True)
+                target = Path(self.temp.name) / ("missing" if dangling else "user-files")
+                if not dangling:
+                    target.mkdir()
+                    for artifact in ARTIFACTS:
+                        (target / artifact).write_text("not managed")
+                current.symlink_to(target, target_is_directory=True)
+                try:
+                    for command in (("install",), ("update", "--flutter", str(self.bin / "flutter"))):
+                        result = self.command(*command)
+                        self.assertNotEqual(result.returncode, 0, result.stdout)
+                        self.assertEqual(current.readlink(), target)
+                    self.assertFalse(self.call_log())
+                finally:
+                    current.unlink(missing_ok=True)
+                    self.calls.unlink(missing_ok=True)
+
+    def test_untracked_frontend_source_prevents_publication(self):
+        current = self.update()
+        previous = current.readlink()
+        (self.root / "frontend/untracked.dart").write_text("untracked source")
+        result = self.command("update", "--flutter", str(self.bin / "flutter"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("untracked", result.stderr.lower())
+        self.assertEqual(current.readlink(), previous)
+
+    def test_unrelated_untracked_capture_does_not_block_update(self):
+        (self.root / "capture.png").write_bytes(b"local evidence")
+        self.update()
+
     def test_lifecycle_commands_use_user_manager_only(self):
         for command in ("start", "stop", "status", "logs"):
             result = self.command(command)

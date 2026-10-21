@@ -29,16 +29,31 @@ def validate_build(directory):
         raise ValueError("Incomplete demo build: " + ", ".join(missing))
 
 
+def validate_current():
+    current = DEMO / "current"
+    releases = DEMO / "releases"
+    if releases.is_symlink():
+        raise ValueError(f"Refusing a symlinked release directory: {releases}")
+    if current.is_symlink():
+        target = current.resolve(strict=True)
+        if not target.is_dir() or target.parent != releases.resolve():
+            raise ValueError(f"Refusing an unmanaged current symlink: {current}")
+    elif current.exists():
+        raise ValueError(f"Refusing to replace a non-symlink: {current}")
+
+
 def update(flutter):
     current = DEMO / "current"
-    if current.exists() and not current.is_symlink():
-        raise ValueError(f"Refusing to replace a non-symlink: {current}")
+    validate_current()
     flutter = shutil.which(flutter)
     if not flutter:
         raise ValueError("Flutter not found. Supply --flutter /absolute/path/to/flutter")
     revision = run("git", "rev-parse", "HEAD", capture=True).stdout.strip()
     if run("git", "diff", "HEAD", "--name-only", capture=True).stdout.strip():
         raise ValueError("Commit tracked changes before publishing a stable demo build")
+    if run("git", "ls-files", "--others", "--exclude-standard", "--", "frontend",
+           capture=True).stdout.strip():
+        raise ValueError("Commit or remove untracked frontend files before publishing a stable demo build")
     release = DEMO / "releases" / (revision[:12] + "-" + uuid.uuid4().hex[:12])
     release.mkdir(parents=True)
     run(flutter, "pub", "get", "--enforce-lockfile", cwd=ROOT / "frontend")
@@ -50,6 +65,7 @@ def update(flutter):
     # Publish only after the entire build succeeds. Previous releases are retained.
     pending = DEMO / (".current-" + uuid.uuid4().hex)
     pending.symlink_to(release.relative_to(DEMO), target_is_directory=True)
+    validate_current()
     os.replace(pending, current)
     print(f"Published {revision} at {URL}\nBuild: {release}")
 
@@ -61,6 +77,7 @@ def quote(value):
 
 
 def install():
+    validate_current()
     if not (DEMO / "current").is_dir():
         raise ValueError("Build first: python3 scripts/local_demo.py update --flutter /path/to/flutter")
     validate_build(DEMO / "current")
