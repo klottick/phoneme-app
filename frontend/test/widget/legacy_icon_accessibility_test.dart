@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
+import 'dart:ui' show Tristate;
 import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -190,5 +192,81 @@ void main() {
     expect(remove.tooltip, 'Delete near-open front');
     expect(remove.hasAction(SemanticsAction.tap), isTrue);
     semantics.dispose();
+  });
+
+  testWidgets('keyboard activates custom add and keyboard Cancel dismisses', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const ProviderScope(child: MaterialApp(home: ContentManagerScreen())),
+    );
+    await tester.pumpAndSettle();
+
+    var addFocused = false;
+    for (var i = 0; i < 12 && !addFocused; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      addFocused = _semanticsForTooltip(
+        tester,
+        'Add custom phoneme',
+      ).flagsCollection.isFocused == Tristate.isTrue;
+    }
+    expect(addFocused, isTrue, reason: 'Tab traversal focuses Add');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('Add Custom Phoneme'), findsOneWidget);
+
+    var cancelFocused = false;
+    for (var i = 0; i < 8 && !cancelFocused; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      cancelFocused = tester
+          .getSemantics(find.text('Cancel'))
+          .getSemanticsData()
+          .flagsCollection.isFocused == Tristate.isTrue;
+    }
+    expect(cancelFocused, isTrue, reason: 'Tab traversal focuses Cancel');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('Add Custom Phoneme'), findsNothing);
+  });
+
+  testWidgets('keyboard activates contextual delete for seeded phoneme', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      'custom_phonemes': jsonEncode([
+        {
+          'id': 'custom-a',
+          'ipaSymbol': 'æ',
+          'name': 'near-open front',
+          'description': null,
+          'audioUrl': null,
+          'createdAt': DateTime.utc(2026).toIso8601String(),
+        },
+      ]),
+    });
+    await tester.pumpWidget(
+      const ProviderScope(child: MaterialApp(home: ContentManagerScreen())),
+    );
+    await tester.pumpAndSettle();
+
+    var deleteFocused = false;
+    for (var i = 0; i < 12 && !deleteFocused; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      deleteFocused = _semanticsForTooltip(
+        tester,
+        'Delete near-open front',
+      ).flagsCollection.isFocused == Tristate.isTrue;
+    }
+    expect(deleteFocused, isTrue, reason: 'Tab traversal focuses named Delete');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('near-open front'), findsNothing);
+    expect(
+      find.text('No custom phonemes added yet.\nTap + to add your first one.'),
+      findsOneWidget,
+    );
   });
 }
