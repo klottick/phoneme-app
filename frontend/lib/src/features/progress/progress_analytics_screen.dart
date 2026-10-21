@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/services/spaced_repetition_service.dart';
 import '../../core/providers/app_providers.dart';
@@ -9,6 +10,30 @@ class ProgressAnalyticsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    if (!ref.watch(legacyBackendAvailableProvider)) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Progress Analytics')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'This legacy view is unavailable without a configured backend.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: () => context.go('/home'),
+                  child: const Text('Back to home'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     ref.watch(srsProvider);
     final analytics = ref.read(srsProvider.notifier).getAnalytics();
 
