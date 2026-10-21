@@ -160,17 +160,6 @@ void main() {
         ),
       )).state;
 
-      final distinctStale = ComparisonLearningCommand(
-        scope: answerCommand.scope,
-        authGeneration: answerCommand.authGeneration,
-        activityId: answerCommand.activityId,
-        expected: answerCommand.expected,
-        expectedScopeRevision: answerCommand.expectedScopeRevision,
-        token: 'BBBBBBBBBBBBBBBBBBBBBB',
-        submittedAt: answerCommand.submittedAt,
-        action: answerCommand.action,
-      );
-
       await harness.database.reopen();
       final afterProcessRestart = await repository.load();
       final beforeDuplicate = await _captureComparisonSqlRows(harness, owner);
@@ -225,6 +214,16 @@ void main() {
         ),
       );
       expect(restart.state.slot!.cursor.generation, 2);
+      final distinctStale = ComparisonLearningCommand(
+        scope: answerCommand.scope,
+        authGeneration: answerCommand.authGeneration,
+        activityId: answerCommand.activityId,
+        expected: answerCommand.expected,
+        expectedScopeRevision: restart.state.revision,
+        token: 'BBBBBBBBBBBBBBBBBBBBBB',
+        submittedAt: answerCommand.submittedAt,
+        action: answerCommand.action,
+      );
       final beforeRestartDuplicate = await _captureComparisonSqlRows(
         harness,
         owner,
@@ -242,12 +241,27 @@ void main() {
         restart.state.slot!.cursor,
       );
       expect(replayAfterRunRestart.state.slot!.cursor.generation, 2);
+      expect(
+        replayAfterRunRestart.state.slot!.checkpoint.sessionId,
+        'receipt-restart-run-2',
+      );
       expect(notifications, notificationsAfterRestart);
       expect(
         await _captureComparisonSqlRows(harness, owner),
         beforeRestartDuplicate,
       );
 
+      expect(auth.ready, isTrue);
+      expect(auth.owner, owner);
+      expect(auth.generation, distinctStale.authGeneration);
+      expect(distinctStale.expectedScopeRevision, restart.state.revision);
+      expect(distinctStale.expected.generation, 1);
+      expect(restart.state.slot!.cursor.generation, 2);
+      expect(distinctStale.expected, isNot(restart.state.slot!.cursor));
+      expect(
+        restart.state.receipts.map((receipt) => receipt.token),
+        isNot(contains(distinctStale.token)),
+      );
       await expectLater(
         repository.submit(distinctStale),
         throwsA(isA<LearningConflictException>()),
