@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,6 +18,7 @@ import 'comparison_section_debrief.dart';
 import 'exercises/listening_exercise_contract.dart';
 import 'exercises/sound_comparison.dart';
 import 'lesson_exercise_owner.dart';
+import 'comparison_session_id.dart';
 
 class ComparisonLessonScreen extends ConsumerStatefulWidget {
   const ComparisonLessonScreen({
@@ -295,8 +295,7 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
           store,
           loaded,
           StartComparisonRun(
-              sessionId:
-                  'comparison-${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(0x7fffffff)}',
+              sessionId: createComparisonSessionId(),
               policy: freshPolicy));
       return;
     }
