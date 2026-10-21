@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 
 class LessonPlan {
@@ -334,7 +335,7 @@ class _LessonCard extends StatelessWidget {
     return Card(
       color: isSelected ? Theme.of(context).colorScheme.primaryContainer : null,
       child: InkWell(
-        onTap: () => Navigator.pushNamed(context, '/phoneme-id'),
+        onTap: () => context.push('/phoneme-id'),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
@@ -387,7 +388,13 @@ class _LessonCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right),
+              const Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('Generic practice'),
+                  Icon(Icons.chevron_right),
+                ],
+              ),
             ],
           ),
         ),

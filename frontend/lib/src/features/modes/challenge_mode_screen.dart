@@ -43,7 +43,7 @@ class _ModeCard extends ConsumerWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       child: InkWell(
-        onTap: () => _startMode(context, ref),
+        onTap: null,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -75,7 +75,7 @@ class _ModeCard extends ConsumerWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      config.description,
+                      'Unavailable — ${config.displayName} practice is not implemented yet.',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             color: Colors.grey[600],
                           ),
@@ -83,28 +83,13 @@ class _ModeCard extends ConsumerWidget {
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right),
+              const Text('Unavailable'),
             ],
           ),
         ),
       ),
     );
   }
-
-  void _startMode(BuildContext context, WidgetRef ref) {
-    switch (config.mode) {
-      case LearningMode.challenge:
-        Navigator.pushNamed(context, '/phoneme-id');
-        break;
-      case LearningMode.marathon:
-        Navigator.pushNamed(context, '/phoneme-id');
-        break;
-      case LearningMode.zen:
-        Navigator.pushNamed(context, '/phoneme-id');
-        break;
-    }
-  }
-
   IconData _getModeIcon(LearningMode mode) {
     switch (mode) {
       case LearningMode.challenge:
