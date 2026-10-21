@@ -12,6 +12,11 @@ import '../services/phoneme_assessment_service.dart';
 import '../services/recording_service.dart' hide recordingServiceProvider;
 import '../course/french_course.dart';
 import '../course/course_learning_registry.dart';
+import '../course/backend.dart';
+
+final legacyBackendAvailableProvider = Provider<bool>(
+  (_) => courseBackend != null,
+);
 
 final supabaseClientProvider = Provider<SupabaseClient>((_) {
   return Supabase.instance.client;
