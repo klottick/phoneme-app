@@ -196,13 +196,15 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  _isRecording
-                      ? 'Recording...'
-                      : _hasRecording
-                          ? 'Recording saved!'
-                          : _wordMode
-                              ? 'Tap to say the word "$_sampleWord"'
-                              : 'Tap to say the phoneme',
+                  !recordingAvailable
+                      ? 'Recording is not available in this browser'
+                      : _isRecording
+                          ? 'Recording...'
+                          : _hasRecording
+                              ? 'Recording saved!'
+                              : _wordMode
+                                  ? 'Tap to say the word "$_sampleWord"'
+                                  : 'Tap to say the phoneme',
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
                 if (_hasRecording && !_isRecording) ...[

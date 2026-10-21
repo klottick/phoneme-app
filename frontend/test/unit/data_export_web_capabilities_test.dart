@@ -52,11 +52,11 @@ void main() {
   test(
     'invalid import is a managed failure and leaves stored data unchanged',
     () async {
-    SharedPreferences.setMockInitialValues({'srs_phonemes': 'existing'});
-    final service = DataExportService();
-    final notifier = DataExportNotifier(service);
-    expect(await notifier.import('{invalid'), isFalse);
-    expect(notifier.state, isFalse);
+      SharedPreferences.setMockInitialValues({'srs_phonemes': 'existing'});
+      final service = DataExportService();
+      final notifier = DataExportNotifier(service);
+      expect(await notifier.import('{invalid'), isFalse);
+      expect(notifier.state, isFalse);
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getString('srs_phonemes'), 'existing');
     },
@@ -147,6 +147,11 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      expect(
+        find.text('Recording is not available in this browser'),
+        findsOneWidget,
+      );
+      expect(find.text('Tap to say the phoneme'), findsNothing);
       final recordButton = tester
           .widgetList<FloatingActionButton>(find.byType(FloatingActionButton))
           .firstWhere(
@@ -165,4 +170,17 @@ void main() {
       expect(find.text('Recording...'), findsNothing);
     },
   );
+
+  testWidgets('supported recording retains its recording instruction', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [phonemeRecordingAvailableProvider.overrideWithValue(true)],
+        child: const MaterialApp(home: PhonemeTestScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Tap to say the phoneme'), findsOneWidget);
+  });
 }
