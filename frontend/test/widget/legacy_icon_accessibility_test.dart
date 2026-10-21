@@ -1,6 +1,8 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' show Tristate;
+
+import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +13,8 @@ import 'package:linguist/src/core/models/phoneme.dart';
 import 'package:linguist/src/core/providers/app_providers.dart';
 import 'package:linguist/src/core/services/recording_service.dart'
     hide recordingServiceProvider;
+import 'package:linguist/src/core/services/tts_service.dart';
+import 'package:linguist/src/core/services/audio_service.dart';
 import 'package:linguist/src/features/audio/audio_compare_screen.dart';
 import 'package:linguist/src/features/content/content_manager_screen.dart';
 import 'package:linguist/src/features/phoneme_id/phoneme_identify_screen.dart';
@@ -44,6 +48,26 @@ class _FakeRecordingService extends RecordingService {
     recording = false;
     return '/fake/recording.m4a';
   }
+}
+
+class _HeldTtsService extends TtsService {
+  final Completer<void> playback = Completer<void>();
+
+  @override
+  Future<void> speak(String text, {String? languageCode}) => playback.future;
+
+  @override
+  void dispose() {}
+}
+
+class _HeldAudioService extends AudioService {
+  final Completer<void> playback = Completer<void>();
+
+  @override
+  Future<void> play(String path) => playback.future;
+
+  @override
+  void dispose() {}
 }
 
 void main() {
@@ -206,10 +230,12 @@ void main() {
     for (var i = 0; i < 12 && !addFocused; i++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
-      addFocused = _semanticsForTooltip(
-        tester,
-        'Add custom phoneme',
-      ).flagsCollection.isFocused == Tristate.isTrue;
+      addFocused =
+          _semanticsForTooltip(
+            tester,
+            'Add custom phoneme',
+          ).flagsCollection.isFocused ==
+          Tristate.isTrue;
     }
     expect(addFocused, isTrue, reason: 'Tab traversal focuses Add');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -220,10 +246,13 @@ void main() {
     for (var i = 0; i < 8 && !cancelFocused; i++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
-      cancelFocused = tester
-          .getSemantics(find.text('Cancel'))
-          .getSemanticsData()
-          .flagsCollection.isFocused == Tristate.isTrue;
+      cancelFocused =
+          tester
+              .getSemantics(find.text('Cancel'))
+              .getSemanticsData()
+              .flagsCollection
+              .isFocused ==
+          Tristate.isTrue;
     }
     expect(cancelFocused, isTrue, reason: 'Tab traversal focuses Cancel');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -255,10 +284,12 @@ void main() {
     for (var i = 0; i < 12 && !deleteFocused; i++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
-      deleteFocused = _semanticsForTooltip(
-        tester,
-        'Delete near-open front',
-      ).flagsCollection.isFocused == Tristate.isTrue;
+      deleteFocused =
+          _semanticsForTooltip(
+            tester,
+            'Delete near-open front',
+          ).flagsCollection.isFocused ==
+          Tristate.isTrue;
     }
     expect(deleteFocused, isTrue, reason: 'Tab traversal focuses named Delete');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -269,4 +300,175 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('audio comparison playback states have truthful disabled names', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final semantics = tester.ensureSemantics();
+    final tts = _HeldTtsService();
+    final audio = _HeldAudioService();
+    final recorder = _FakeRecordingService();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          ttsServiceProvider.overrideWithValue(tts),
+          audioServiceProvider.overrideWithValue(audio),
+          recordingServiceProvider.overrideWithValue(recorder),
+        ],
+        child: const MaterialApp(home: AudioCompareScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Record your pronunciation'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Stop recording your pronunciation'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Play Reference'));
+    await tester.pump();
+    var reference = tester
+        .getSemantics(find.text('Reference audio is playing'))
+        .getSemanticsData();
+    expect(reference.label, 'Reference audio is playing');
+    expect(reference.hasAction(SemanticsAction.tap), isFalse);
+    tts.playback.complete();
+    await tester.pumpAndSettle();
+    reference = tester
+        .getSemantics(find.text('Play Reference'))
+        .getSemanticsData();
+    expect(reference.hasAction(SemanticsAction.tap), isTrue);
+
+    await tester.tap(find.text('Play Your Recording'));
+    await tester.pump();
+    final userRecording = tester
+        .getSemantics(find.text('Your recording is playing'))
+        .getSemanticsData();
+    expect(userRecording.label, 'Your recording is playing');
+    expect(userRecording.hasAction(SemanticsAction.tap), isFalse);
+    audio.playback.complete();
+    await tester.pumpAndSettle();
+    semantics.dispose();
+  });
+
+  testWidgets(
+    'ID playback names identify each disabled control during playback',
+    (tester) async {
+    final semantics = tester.ensureSemantics();
+      for (final (icon, currentLabel) in [
+        (Icons.volume_up, 'Phoneme playback is in progress'),
+        (Icons.volume_down, 'Sample-word playback is in progress'),
+      ]) {
+        await tester.pumpWidget(const SizedBox.shrink());
+        final tts = _HeldTtsService();
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              phonemesProvider.overrideWith((ref) async => _phonemes()),
+              ttsServiceProvider.overrideWithValue(tts),
+            ],
+            child: const MaterialApp(home: PhonemeIdentifyScreen()),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byIcon(icon));
+        await tester.pump();
+        for (final (tooltip, expectedLabel) in [
+        (
+          'Phoneme playback is in progress',
+          'Phoneme playback is in progress',
+        ),
+        (
+          'Sample-word playback is in progress',
+          'Sample-word playback is in progress',
+        ),
+        ]) {
+          final action = _semanticsForTooltip(tester, tooltip);
+          expect(action.tooltip, expectedLabel);
+          expect(action.hasAction(SemanticsAction.tap), isFalse);
+        }
+        expect(currentLabel, isNotEmpty);
+      tts.playback.complete();
+      await tester.pumpAndSettle();
+    }
+    semantics.dispose();
+    },
+  );
+
+  testWidgets(
+    'Phoneme Test names active phoneme and disabled word recording states',
+    (tester) async {
+      const pathProvider = MethodChannel('plugins.flutter.io/path_provider');
+      tester.view.physicalSize = const Size(1200, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(pathProvider, (_) async => '/tmp');
+      addTearDown(() => messenger.setMockMethodCallHandler(pathProvider, null));
+      final semantics = tester.ensureSemantics();
+      final recorder = _FakeRecordingService();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            phonemesProvider.overrideWith(
+              (ref) async => [
+                const Phoneme(
+                  id: 'record-test',
+                  languageCode: 'fr',
+                  ipaSymbol: '/t/',
+                  descriptor: 'voiceless dental stop',
+                  difficultyLevel: 1,
+                ),
+              ],
+            ),
+            recordingServiceProvider.overrideWithValue(recorder),
+          ],
+          child: const MaterialApp(
+            home: PhonemeTestScreen(initialWordMode: true),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Record word'));
+      await tester.pumpAndSettle();
+      expect(recorder.recording, isTrue);
+      expect(
+        _semanticsForTooltip(
+          tester,
+          'Word recording unavailable while another recording is in progress',
+        )
+            .hasAction(SemanticsAction.tap),
+        isFalse,
+      );
+      expect(
+        _semanticsForTooltip(tester, 'Stop recording')
+            .hasAction(SemanticsAction.tap),
+        isTrue,
+      );
+
+      await tester.tap(find.byTooltip('Stop recording'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Record phoneme'));
+      await tester.pumpAndSettle();
+      expect(recorder.recording, isTrue);
+      expect(
+        _semanticsForTooltip(
+          tester,
+          'Word recording unavailable while another recording is in progress',
+        ).hasAction(SemanticsAction.tap),
+        isFalse,
+      );
+      expect(
+        _semanticsForTooltip(tester, 'Stop recording')
+            .hasAction(SemanticsAction.tap),
+        isTrue,
+      );
+      semantics.dispose();
+    },
+  );
 }
