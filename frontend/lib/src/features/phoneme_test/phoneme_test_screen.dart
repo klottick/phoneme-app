@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
@@ -7,6 +9,8 @@ import 'package:path_provider/path_provider.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/course/french_course.dart';
 import '../../core/services/tts_service.dart';
+
+final phonemeRecordingAvailableProvider = Provider<bool>((ref) => !kIsWeb);
 
 class PhonemeTestScreen extends ConsumerStatefulWidget {
   const PhonemeTestScreen({super.key});
@@ -44,6 +48,7 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
   @override
   Widget build(BuildContext context) {
     final phonemes = ref.watch(phonemesProvider);
+    final recordingAvailable = ref.watch(phonemeRecordingAvailableProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -161,7 +166,10 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
                   children: [
                     FloatingActionButton.large(
                       heroTag: 'record',
-                      onPressed: _toggleRecording,
+                      onPressed: recordingAvailable ? _toggleRecording : null,
+                      tooltip: !recordingAvailable
+                          ? 'Recording is not available in this browser'
+                          : 'Record phoneme',
                       backgroundColor: _isRecording ? Colors.red : null,
                       child: Icon(_isRecording ? Icons.stop : Icons.mic),
                     ),
@@ -169,9 +177,12 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
                       const SizedBox(width: 16),
                       FloatingActionButton.large(
                         heroTag: 'record_word',
-                        onPressed: (_isRecording || !_wordMode)
+                        onPressed: (!recordingAvailable || _isRecording || !_wordMode)
                             ? null
                             : _toggleWordRecording,
+                        tooltip: !recordingAvailable
+                            ? 'Recording is not available in this browser'
+                            : 'Record word',
                         backgroundColor:
                             _isRecording && _wordMode ? Colors.red : null,
                         child: Icon(
@@ -281,6 +292,7 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
   }
 
   Future<void> _startRecording() async {
+    if (!ref.read(phonemeRecordingAvailableProvider)) return;
     final recorder = ref.read(recordingServiceProvider);
     final dir = await getApplicationDocumentsDirectory();
     _recordingPath =
@@ -314,6 +326,7 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
   }
 
   Future<void> _startWordRecording() async {
+    if (!ref.read(phonemeRecordingAvailableProvider)) return;
     final word = _getSampleWord(
       ref
           .read(phonemesProvider)

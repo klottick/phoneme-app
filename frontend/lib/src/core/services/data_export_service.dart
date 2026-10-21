@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
@@ -29,6 +31,13 @@ class ExportData {
 }
 
 class DataExportService {
+  DataExportService({bool? supportsNativeFileActions})
+      : _supportsNativeFileActions = supportsNativeFileActions;
+
+  final bool? _supportsNativeFileActions;
+
+  bool get supportsFileActions => _supportsNativeFileActions ?? !kIsWeb;
+
   static const String _version = '1.0.0';
 
   Future<String> exportToJson() async {
@@ -55,6 +64,9 @@ class DataExportService {
   }
 
   Future<File?> exportToFile() async {
+    if (!supportsFileActions) {
+      throw UnsupportedError('File export is not available in this browser.');
+    }
     final json = await exportToJson();
     final dir = await getApplicationDocumentsDirectory();
     final file = File('${dir.path}/linguist_export_${DateTime.now().millisecondsSinceEpoch}.json');
@@ -63,6 +75,9 @@ class DataExportService {
   }
 
   Future<void> shareExport() async {
+    if (!supportsFileActions) {
+      throw UnsupportedError('File export is not available in this browser.');
+    }
     final file = await exportToFile();
     if (file != null) {
       await Share.shareXFiles([XFile(file.path)], text: 'Linguist Progress Export');
@@ -109,15 +124,25 @@ class DataExportService {
   }
 }
 
+final nativeFileActionsAvailableProvider = Provider<bool>((ref) => !kIsWeb);
+final dataExportServiceProvider = Provider<DataExportService>((ref) => DataExportService());
+
 class DataExportNotifier extends StateNotifier<bool> {
-  DataExportNotifier() : super(false);
+  DataExportNotifier(this._service) : super(false);
 
-  final DataExportService _service = DataExportService();
+  final DataExportService _service;
 
-  Future<void> export() async {
+  Future<bool> export() async {
+    if (state) return false;
     state = true;
-    await _service.shareExport();
-    state = false;
+    try {
+      await _service.shareExport();
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      state = false;
+    }
   }
 
   Future<bool> import(String jsonString) async {
@@ -134,7 +159,7 @@ class DataExportNotifier extends StateNotifier<bool> {
 }
 
 final dataExportProvider = StateNotifierProvider<DataExportNotifier, bool>((ref) {
-  return DataExportNotifier();
+  return DataExportNotifier(ref.watch(dataExportServiceProvider));
 });
 
 class DataExportScreen extends ConsumerWidget {
@@ -143,6 +168,7 @@ class DataExportScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isExporting = ref.watch(dataExportProvider);
+    final fileActionsAvailable = ref.watch(nativeFileActionsAvailableProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Data Management')),
@@ -153,22 +179,28 @@ class DataExportScreen extends ConsumerWidget {
             child: ListTile(
               leading: const Icon(Icons.upload),
               title: const Text('Export Progress'),
-              subtitle: const Text('Save your learning data'),
+              subtitle: Text(fileActionsAvailable
+                  ? 'Save your learning data'
+                  : 'Export is not available in this browser.'),
               trailing: isExporting
                   ? const SizedBox(
                       width: 24,
                       height: 24,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(Icons.chevron_right),
-              onTap: () async {
-                await ref.read(dataExportProvider.notifier).export();
+                  : fileActionsAvailable
+                      ? const Icon(Icons.chevron_right)
+                      : const Icon(Icons.block),
+              onTap: fileActionsAvailable && !isExporting ? () async {
+                final success = await ref.read(dataExportProvider.notifier).export();
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Export shared!')),
+                    SnackBar(content: Text(success
+                        ? 'Export shared!'
+                        : 'Export failed. Please try again.')),
                   );
                 }
-              },
+              } : null,
             ),
           ),
           const SizedBox(height: 8),
