@@ -8,9 +8,10 @@ import 'package:linguist/src/features/phoneme_test/phoneme_test_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _ControlledExportService extends DataExportService {
-  _ControlledExportService({this.failFirst = false});
+  _ControlledExportService({this.failFirst = false, this.holdFirst = false});
 
   final bool failFirst;
+  final bool holdFirst;
   int calls = 0;
   final Completer<void> firstCall = Completer<void>();
   final Completer<void> finishFirst = Completer<void>();
@@ -18,10 +19,10 @@ class _ControlledExportService extends DataExportService {
   @override
   Future<void> shareExport() async {
     calls++;
-    if (calls == 1 && failFirst) {
+    if (calls == 1 && (failFirst || holdFirst)) {
       firstCall.complete();
       await finishFirst.future;
-      throw StateError('temporary export failure');
+      if (failFirst) throw StateError('temporary export failure');
     }
   }
 }
@@ -109,6 +110,39 @@ void main() {
     expect(service.calls, 1);
     service.finishFirst.complete();
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('duplicate callback tap does not report while export is pending', (
+    tester,
+  ) async {
+    final service = _ControlledExportService(holdFirst: true);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [dataExportServiceProvider.overrideWithValue(service)],
+        child: const MaterialApp(home: DataExportScreen()),
+      ),
+    );
+    final exportTile = tester.widget<ListTile>(
+      find.ancestor(
+        of: find.text('Export Progress'),
+        matching: find.byType(ListTile),
+      ),
+    );
+    exportTile.onTap!();
+    exportTile.onTap!();
+
+    await service.firstCall.future;
+    await tester.pump();
+    expect(service.calls, 1);
+    expect(find.text('Export failed. Please try again.'), findsNothing);
+    expect(find.text('Export shared!'), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    service.finishFirst.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Export shared!'), findsOneWidget);
+    expect(find.text('Export failed. Please try again.'), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 
   testWidgets(

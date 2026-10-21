@@ -192,6 +192,7 @@ class DataExportScreen extends ConsumerWidget {
                       ? const Icon(Icons.chevron_right)
                       : const Icon(Icons.block),
               onTap: fileActionsAvailable && !isExporting ? () async {
+                if (ref.read(dataExportProvider)) return;
                 final success = await ref.read(dataExportProvider.notifier).export();
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
