@@ -296,7 +296,7 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
           loaded,
           StartComparisonRun(
               sessionId:
-                  'comparison-${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 32)}',
+                  'comparison-${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(0x7fffffff)}',
               policy: freshPolicy));
       return;
     }
