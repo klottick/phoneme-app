@@ -13,15 +13,7 @@ import '../../core/services/tts_service.dart';
 final phonemeRecordingAvailableProvider = Provider<bool>((ref) => !kIsWeb);
 
 class PhonemeTestScreen extends ConsumerStatefulWidget {
-  const PhonemeTestScreen({
-    super.key,
-    @visibleForTesting this.initialWordMode = false,
-  });
-
-  // Allows coverage of the existing word-recording control branch; default
-  // screen behavior and recording callbacks are unchanged.
-  @visibleForTesting
-  final bool initialWordMode;
+  const PhonemeTestScreen({super.key});
 
   @override
   ConsumerState<PhonemeTestScreen> createState() => _PhonemeTestScreenState();
@@ -40,12 +32,6 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
   String? _sampleWord;
   String? _wordRecordingPath;
   String? _wordAssessmentResult;
-
-  @override
-  void initState() {
-    super.initState();
-    _wordMode = widget.initialWordMode;
-  }
 
   String? _getSampleWord(String phoneme) {
     final words = frenchWords

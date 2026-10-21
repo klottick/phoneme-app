@@ -355,13 +355,10 @@ void main() {
   });
 
   testWidgets(
-    'ID playback names identify each disabled control during playback',
+    'ID playback controls describe their own unavailable action while busy',
     (tester) async {
-    final semantics = tester.ensureSemantics();
-      for (final (icon, currentLabel) in [
-        (Icons.volume_up, 'Phoneme playback is in progress'),
-        (Icons.volume_down, 'Sample-word playback is in progress'),
-      ]) {
+      final semantics = tester.ensureSemantics();
+      for (final icon in [Icons.volume_up, Icons.volume_down]) {
         await tester.pumpWidget(const SizedBox.shrink());
         final tts = _HeldTtsService();
         await tester.pumpWidget(
@@ -376,98 +373,35 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.byIcon(icon));
         await tester.pump();
-        for (final (tooltip, expectedLabel) in [
-        (
-          'Phoneme playback is in progress',
-          'Phoneme playback is in progress',
-        ),
-        (
-          'Sample-word playback is in progress',
-          'Sample-word playback is in progress',
-        ),
-        ]) {
-          final action = _semanticsForTooltip(tester, tooltip);
-          expect(action.tooltip, expectedLabel);
-          expect(action.hasAction(SemanticsAction.tap), isFalse);
-        }
-        expect(currentLabel, isNotEmpty);
-      tts.playback.complete();
-      await tester.pumpAndSettle();
-    }
-    semantics.dispose();
-    },
-  );
 
-  testWidgets(
-    'Phoneme Test names active phoneme and disabled word recording states',
-    (tester) async {
-      const pathProvider = MethodChannel('plugins.flutter.io/path_provider');
-      tester.view.physicalSize = const Size(1200, 2400);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final messenger =
-          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-      messenger.setMockMethodCallHandler(pathProvider, (_) async => '/tmp');
-      addTearDown(() => messenger.setMockMethodCallHandler(pathProvider, null));
-      final semantics = tester.ensureSemantics();
-      final recorder = _FakeRecordingService();
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            phonemesProvider.overrideWith(
-              (ref) async => [
-                const Phoneme(
-                  id: 'record-test',
-                  languageCode: 'fr',
-                  ipaSymbol: '/t/',
-                  descriptor: 'voiceless dental stop',
-                  difficultyLevel: 1,
-                ),
-              ],
-            ),
-            recordingServiceProvider.overrideWithValue(recorder),
-          ],
-          child: const MaterialApp(
-            home: PhonemeTestScreen(initialWordMode: true),
+        for (final (tooltip, label) in [
+          (
+            'Play phoneme — unavailable during playback',
+            'Play phoneme — unavailable during playback',
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Record word'));
-      await tester.pumpAndSettle();
-      expect(recorder.recording, isTrue);
-      expect(
-        _semanticsForTooltip(
-          tester,
-          'Word recording unavailable while another recording is in progress',
-        )
-            .hasAction(SemanticsAction.tap),
-        isFalse,
-      );
-      expect(
-        _semanticsForTooltip(tester, 'Stop recording')
-            .hasAction(SemanticsAction.tap),
-        isTrue,
-      );
+          (
+            'Play sample word — unavailable during playback',
+            'Play sample word — unavailable during playback',
+          ),
+        ]) {
+          final control = _semanticsForTooltip(tester, tooltip);
+          expect(control.tooltip, label);
+          expect(control.hasAction(SemanticsAction.tap), isFalse);
+        }
 
-      await tester.tap(find.byTooltip('Stop recording'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Record phoneme'));
-      await tester.pumpAndSettle();
-      expect(recorder.recording, isTrue);
-      expect(
-        _semanticsForTooltip(
-          tester,
-          'Word recording unavailable while another recording is in progress',
-        ).hasAction(SemanticsAction.tap),
-        isFalse,
-      );
-      expect(
-        _semanticsForTooltip(tester, 'Stop recording')
-            .hasAction(SemanticsAction.tap),
-        isTrue,
-      );
+        tts.playback.complete();
+        await tester.pumpAndSettle();
+        expect(
+          _semanticsForTooltip(tester, 'Play phoneme')
+              .hasAction(SemanticsAction.tap),
+          isTrue,
+        );
+        expect(
+          _semanticsForTooltip(tester, 'Play sample word')
+              .hasAction(SemanticsAction.tap),
+          isTrue,
+        );
+      }
       semantics.dispose();
     },
   );

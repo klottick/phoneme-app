@@ -110,7 +110,7 @@ class _PhonemeIdentifyScreenState extends ConsumerState<PhonemeIdentifyScreen> {
                               ),
                               iconSize: 48,
                               tooltip: _isPlaying
-                                  ? 'Phoneme playback is in progress'
+                                  ? 'Play phoneme — unavailable during playback'
                                   : 'Play phoneme',
                               onPressed: _isPlaying
                                   ? null
@@ -123,7 +123,7 @@ class _PhonemeIdentifyScreenState extends ConsumerState<PhonemeIdentifyScreen> {
                               ),
                               iconSize: 48,
                               tooltip: _isPlaying
-                                  ? 'Sample-word playback is in progress'
+                                  ? 'Play sample word — unavailable during playback'
                                   : 'Play sample word',
                               onPressed: _isPlaying
                                   ? null
