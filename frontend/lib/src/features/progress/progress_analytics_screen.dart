@@ -56,17 +56,17 @@ class ProgressAnalyticsScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildOverviewCard(BuildContext context, Map<String, dynamic> analytics) {
+  Widget _buildOverviewCard(
+    BuildContext context,
+    Map<String, dynamic> analytics,
+  ) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Overview',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
+            Text('Overview', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -97,7 +97,10 @@ class ProgressAnalyticsScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildMasteryCard(BuildContext context, Map<String, dynamic> analytics) {
+  Widget _buildMasteryCard(
+    BuildContext context,
+    Map<String, dynamic> analytics,
+  ) {
     final total = (analytics['total'] as int?) ?? 1;
     final mastered = (analytics['mastered'] as int?) ?? 0;
     final learning = (analytics['learning'] as int?) ?? 0;
@@ -164,24 +167,34 @@ class ProgressAnalyticsScreen extends ConsumerWidget {
               children: [
                 Column(
                   children: [
-                    const Icon(Icons.local_fire_department,
-                        size: 48, color: Colors.orange),
+                    const Icon(
+                      Icons.local_fire_department,
+                      size: 48,
+                      color: Colors.orange,
+                    ),
                     Text(
                       '$currentStreak',
                       style: const TextStyle(
-                          fontSize: 32, fontWeight: FontWeight.bold),
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const Text('Current Streak'),
                   ],
                 ),
                 Column(
                   children: [
-                    const Icon(Icons.emoji_events,
-                        size: 48, color: Colors.amber),
+                    const Icon(
+                      Icons.emoji_events,
+                      size: 48,
+                      color: Colors.amber,
+                    ),
                     Text(
                       '$longestStreak',
                       style: const TextStyle(
-                          fontSize: 32, fontWeight: FontWeight.bold),
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const Text('Best Streak'),
                   ],
@@ -195,8 +208,6 @@ class ProgressAnalyticsScreen extends ConsumerWidget {
   }
 
   Widget _buildPerformanceCard(BuildContext context, WidgetRef ref) {
-    final progressRepo = ref.watch(progressRepositoryProvider);
-
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -207,48 +218,18 @@ class ProgressAnalyticsScreen extends ConsumerWidget {
               'Recent Performance',
               style: Theme.of(context).textTheme.titleLarge,
             ),
-            const SizedBox(height: 16),
-            FutureBuilder<Map<String, dynamic>>(
-              future: progressRepo.getStats(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final stats = snapshot.data!;
-                final accuracy = (stats['accuracy'] as double?) ?? 0.0;
-                final totalAttempts = (stats['totalAttempts'] as int?) ?? 0;
-
-                return Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _StatItem(
-                          label: 'Attempts',
-                          value: '$totalAttempts',
-                          icon: Icons.check_circle,
-                          color: Colors.blue,
-                        ),
-                        _StatItem(
-                          label: 'Accuracy',
-                          value: '${(accuracy * 100).toInt()}%',
-                          icon: Icons.analytics,
-                          color: Colors.green,
-                        ),
-                      ],
-                    ),
-                  ],
-                );
-              },
-            ),
+            const SizedBox(height: 8),
+            const Text('Performance totals are not measured in this view.'),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildRecommendationsCard(BuildContext context, Map<String, dynamic> analytics) {
+  Widget _buildRecommendationsCard(
+    BuildContext context,
+    Map<String, dynamic> analytics,
+  ) {
     final dueNow = (analytics['dueNow'] as int?) ?? 0;
     final learning = (analytics['learning'] as int?) ?? 0;
 
@@ -256,10 +237,12 @@ class ProgressAnalyticsScreen extends ConsumerWidget {
     IconData icon = Icons.play_arrow;
 
     if (dueNow > 10) {
-      recommendation = 'You have $dueNow phonemes due for review. Time to practice!';
+      recommendation =
+          'You have $dueNow phonemes due for review. Time to practice!';
       icon = Icons.priority_high;
     } else if (dueNow > 0) {
-      recommendation = '$dueNow phonemes ready for review. Keep your streak going!';
+      recommendation =
+          '$dueNow phonemes ready for review. Keep your streak going!';
       icon = Icons.local_fire_department;
     } else if (learning > 0) {
       recommendation = 'Great progress! $learning phonemes in progress.';

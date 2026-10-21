@@ -77,9 +77,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Overview'), findsOneWidget);
     expect(find.text('Recent Performance'), findsOneWidget);
-    expect(find.text('Attempts'), findsOneWidget);
-    expect(find.text('Accuracy'), findsOneWidget);
+    expect(
+      find.text('Performance totals are not measured in this view.'),
+      findsOneWidget,
+    );
+    expect(find.text('Attempts'), findsNothing);
+    expect(find.text('Accuracy'), findsNothing);
     expect(find.textContaining('unavailable'), findsNothing);
+  });
+
+  testWidgets('actual app router insights route shows unavailable metrics', (
+    tester,
+  ) async {
+    final (container, _) = await mountApp(tester);
+    container.read(appRouterProvider).push('/insights');
+    await tester.pumpAndSettle();
+    expect(find.text('Learning Insights'), findsOneWidget);
+    expect(find.text('Not measured'), findsWidgets);
+    expect(find.text('70%'), findsNothing);
+    expect(find.text('60%'), findsNothing);
+    expect(find.textContaining('errors'), findsNothing);
   });
 
   testWidgets('injected backend keeps legacy review data path available', (

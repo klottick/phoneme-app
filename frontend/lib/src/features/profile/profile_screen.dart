@@ -52,20 +52,16 @@ class ProfileScreen extends ConsumerWidget {
             future: Future.wait([
               ref.read(streakServiceProvider).getCurrentStreak(),
               ref.read(streakServiceProvider).getLongestStreak(),
-              _getTotalPracticeCount(ref),
             ]),
             builder: (context, snapshot) {
               if (!snapshot.hasData) {
                 return const Card(
-                  child: ListTile(
-                    title: Text('Loading stats...'),
-                  ),
+                  child: ListTile(title: Text('Loading stats...')),
                 );
               }
 
               final currentStreak = snapshot.data![0];
               final longestStreak = snapshot.data![1];
-              final totalPractice = snapshot.data![2];
 
               return Column(
                 children: [
@@ -90,7 +86,7 @@ class ProfileScreen extends ConsumerWidget {
                           _buildStatItem(
                             context,
                             '📚',
-                            '$totalPractice',
+                            'Not measured',
                             'Sessions',
                           ),
                         ],
@@ -109,8 +105,10 @@ class ProfileScreen extends ConsumerWidget {
                 title: const Text('Learning'),
                 subtitle: Text(
                   supportedLanguages
-                      .firstWhere((l) => l.code == languageCode,
-                          orElse: () => supportedLanguages.first)
+                      .firstWhere(
+                        (l) => l.code == languageCode,
+                        orElse: () => supportedLanguages.first,
+                      )
                       .label,
                 ),
               ),
@@ -118,7 +116,10 @@ class ProfileScreen extends ConsumerWidget {
             Card(
               child: ListTile(
                 leading: const Icon(Icons.logout, color: Colors.red),
-                title: const Text('Sign Out', style: TextStyle(color: Colors.red)),
+                title: const Text(
+                  'Sign Out',
+                  style: TextStyle(color: Colors.red),
+                ),
                 onTap: () async {
                   final confirm = await showDialog<bool>(
                     context: context,
@@ -151,29 +152,22 @@ class ProfileScreen extends ConsumerWidget {
   }
 
   Widget _buildStatItem(
-      BuildContext context, String emoji, String value, String label) {
+    BuildContext context,
+    String emoji,
+    String value,
+    String label,
+  ) {
     return Column(
       children: [
         Text(emoji, style: const TextStyle(fontSize: 24)),
         Text(
           value,
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
         ),
-        Text(
-          label,
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
+        Text(label, style: Theme.of(context).textTheme.bodySmall),
       ],
     );
-  }
-
-  Future<int> _getTotalPracticeCount(WidgetRef ref) async {
-    try {
-      return 0;
-    } catch (_) {
-      return 0;
-    }
   }
 }

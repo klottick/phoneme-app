@@ -20,8 +20,7 @@ class ProgressScreen extends ConsumerWidget {
               const Card(
                 child: ListTile(
                   title: Text('Daily Goal'),
-                  subtitle: Text('Complete 10 discrimination items'),
-                  trailing: Text('2 / 10'),
+                  subtitle: Text('Daily goal tracking is not available.'),
                 ),
               ),
               const SizedBox(height: 12),
@@ -30,14 +29,15 @@ class ProgressScreen extends ConsumerWidget {
                   child: ListTile(
                     title: Text(p.ipaSymbol),
                     subtitle: Text(p.descriptor),
-                    trailing: const Text('Mastery 0.00'),
+                    trailing: const Text('Mastery not measured'),
                   ),
                 ),
               ),
             ],
           );
         },
-        error: (error, _) => Center(child: Text('Failed to load progress: $error')),
+        error: (error, _) =>
+            Center(child: Text('Failed to load progress: $error')),
         loading: () => const Center(child: CircularProgressIndicator()),
       ),
     );
