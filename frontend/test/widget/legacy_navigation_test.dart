@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:linguist/src/app.dart';
 import 'package:linguist/src/core/course/comparison_learning_state.dart';
+import 'package:linguist/src/core/course/course_audio.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/models/review_item.dart';
 import 'package:linguist/src/core/providers/app_providers.dart';
@@ -18,6 +19,16 @@ import '../support/course_learning_widget_store.dart';
 class _FakeSupabaseClient implements SupabaseClient {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _TestCourseAudio implements CourseAudio {
+  final List<String> spoken = [];
+
+  @override
+  Future<void> speak(String word) async => spoken.add(word);
+
+  @override
+  Future<void> stop() async {}
 }
 
 Override _comparisonStateOverride() =>
@@ -98,6 +109,46 @@ void main() {
     expect(find.text('60%'), findsNothing);
     expect(find.textContaining('errors'), findsNothing);
   });
+
+  testWidgets(
+    'committed drill practice shows truthful sessions and genuine streak in profile',
+    (tester) async {
+      final store = CourseLearningWidgetStore();
+      final audio = _TestCourseAudio();
+      final (container, _) = await mountApp(
+        tester,
+        additionalOverrides: [
+          courseLearningStoreProvider.overrideWithValue(store),
+          courseAudioProvider.overrideWithValue(audio),
+        ],
+      );
+
+      final router = container.read(appRouterProvider);
+      router.push('/drill');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.play_arrow));
+      await tester.pumpAndSettle();
+      expect(audio.spoken, hasLength(1));
+      await tester.tap(find.text(audio.spoken.single));
+      await tester.pumpAndSettle();
+
+      expect(store.committedState.history, hasLength(1));
+      expect(store.committedState.history.single.attempts, hasLength(1));
+      await tester.tap(find.text('End Session'));
+      await tester.pumpAndSettle();
+      expect(await container.read(streakServiceProvider).getCurrentStreak(), 1);
+      expect(await container.read(streakServiceProvider).getLongestStreak(), 1);
+
+      router.go('/profile');
+      await tester.pumpAndSettle();
+      expect(find.text('Sessions'), findsOneWidget);
+      expect(find.text('Not measured'), findsOneWidget);
+      expect(find.text('1'), findsNWidgets(2));
+      expect(find.text('0'), findsNothing);
+      expect(find.text('Day Streak'), findsOneWidget);
+      expect(find.text('Best'), findsOneWidget);
+    },
+  );
 
   testWidgets('injected backend keeps legacy review data path available', (
     tester,
