@@ -73,9 +73,10 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
 
           final current = items[_index % items.length];
 
-          return Padding(
+          return SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 const SizedBox(height: 24),
                 Text(
@@ -107,8 +108,9 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
                               ?.copyWith(color: Colors.grey),
                         ),
                         const SizedBox(height: 24),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             IconButton.filled(
                               icon: Icon(
