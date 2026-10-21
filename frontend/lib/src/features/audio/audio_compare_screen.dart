@@ -22,9 +22,10 @@ class _AudioCompareScreenState extends ConsumerState<AudioCompareScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Audio Comparison')),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               'Compare your pronunciation with the reference',
@@ -36,7 +37,7 @@ class _AudioCompareScreenState extends ConsumerState<AudioCompareScreen> {
             _buildUserRecordingCard(context),
             const SizedBox(height: 24),
             _buildComparisonCard(context),
-            const Spacer(),
+            const SizedBox(height: 24),
             _buildInstructions(context),
           ],
         ),
