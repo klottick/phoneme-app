@@ -11,7 +11,6 @@ import 'package:http/testing.dart';
 import 'package:linguist/src/core/course/comparison_content.dart';
 import 'package:linguist/src/core/course/comparison_learning_command.dart';
 import 'package:linguist/src/core/course/comparison_learning_state.dart';
-import 'package:linguist/src/core/course/comparison_learning_store.dart';
 import 'package:linguist/src/core/course/comparison_learning_transition.dart';
 import 'package:linguist/src/core/course/storage/comparison_learning_sql_repository.dart';
 import 'package:linguist/src/core/course/storage/learning_database.dart'
@@ -19,7 +18,6 @@ import 'package:linguist/src/core/course/storage/learning_database.dart'
 import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_learning_command.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
-import 'package:linguist/src/core/course/course_learning_persistence.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/backend.dart';
@@ -37,50 +35,10 @@ final class _ProviderAuth extends AuthController {
 
 final class _OverridableCurrentTracker extends LearningAuthTracker {
   _OverridableCurrentTracker()
-      : super(owner: LearningOwner.guest(), ready: true);
+    : super(owner: LearningOwner.guest(), ready: true);
   LearningAuthScope? currentOverride;
   @override
   LearningAuthScope get current => currentOverride ?? super.current;
-}
-
-final class _ProviderPersistence implements LearningPersistence {
-  final Map<String, String> values = {};
-  final Map<String, int> reads = {};
-  Completer<void>? entered;
-  Completer<bool>? gate;
-  bool holdNext = false;
-  bool failNext = false;
-  @override
-  Future<String?> read(String key) async {
-    reads.update(key, (value) => value + 1, ifAbsent: () => 1);
-    return values[key];
-  }
-
-  @override
-  Future<void> write(String key, String value) async {
-    if (holdNext) {
-      holdNext = false;
-      entered!.complete();
-      if (!await gate!.future) throw StateError('held write rejected');
-    }
-    if (failNext) {
-      failNext = false;
-      throw StateError('write rejected');
-    }
-    values[key] = value;
-  }
-
-  @override
-  Future<void> restore(String key, String? lastCommitted) async {
-    if (lastCommitted == null) {
-      values.remove(key);
-    } else {
-      values[key] = lastCommitted;
-    }
-  }
-
-  @override
-  Future<void> reload() async {}
 }
 
 final class _Harness {
@@ -94,7 +52,7 @@ final class _Harness {
     if (_containerDisposed) return;
     _containerDisposed = true;
     container.dispose();
-}
+  }
 
   Future<void> close() async {
     disposeContainer();
@@ -109,9 +67,9 @@ Future<_Harness> _harness({List<Override> extraOverrides = const []}) async {
   final database = await _newProviderDatabase();
   final container = ProviderContainer(
     overrides: [
-    authControllerProvider.overrideWith((ref) => auth),
+      authControllerProvider.overrideWith((ref) => auth),
       learningDatabaseHandleProvider.overrideWithValue(database.handle),
-    ...extraOverrides,
+      ...extraOverrides,
     ],
   );
   container.read(learningAuthScopeProvider);
@@ -127,10 +85,10 @@ void main() {
     var catalogueCalls = 0;
     final h = await _harness(
       extraOverrides: [
-      comparisonCatalogueProvider.overrideWith((ref) {
-        catalogueCalls++;
-        return loadFrenchComparisonCatalogue();
-      }),
+        comparisonCatalogueProvider.overrideWith((ref) {
+          catalogueCalls++;
+          return loadFrenchComparisonCatalogue();
+        }),
       ],
     );
     addTearDown(h.close);
@@ -179,8 +137,8 @@ void main() {
     final store = h.container.read(comparisonLearningStoreProvider);
     final state = await store.load();
     final command = store.prepare(
-        state: state,
-        activityId: activity,
+      state: state,
+      activityId: activity,
       action: StartComparisonRun(sessionId: 'no-cloud', policy: LessonPolicy()),
     );
     expect((await store.submit(command)).state.slot, isNotNull);
@@ -193,15 +151,15 @@ void main() {
 
   test(
     'readiness changes preserve provider identity and fence prepare',
-      () async {
-    final h = await _harness();
+    () async {
+      final h = await _harness();
       addTearDown(h.close);
-    final store = h.container.read(comparisonLearningStoreProvider);
-    final generation = h.container.read(learningAuthScopeProvider).generation;
+      final store = h.container.read(comparisonLearningStoreProvider);
+      final generation = h.container.read(learningAuthScopeProvider).generation;
       final state = await store.load();
-    h.auth.emit(const AppAuthState(isLoading: true));
-    await Future<void>.delayed(Duration.zero);
-    expect(
+      h.auth.emit(const AppAuthState(isLoading: true));
+      await Future<void>.delayed(Duration.zero);
+      expect(
         h.container.read(learningAuthScopeProvider).generation,
         generation,
       );
@@ -211,9 +169,9 @@ void main() {
       );
       await expectLater(
         () => store.prepare(
-            state: state,
-            activityId: activity,
-            action: StartComparisonRun(
+          state: state,
+          activityId: activity,
+          action: StartComparisonRun(
             sessionId: 'blocked',
             policy: LessonPolicy(),
           ),
@@ -224,8 +182,8 @@ void main() {
         store.load(),
         throwsA(isA<LearningOwnerChangedException>()),
       );
-    h.auth.emit(const AppAuthState());
-    await Future<void>.delayed(Duration.zero);
+      h.auth.emit(const AppAuthState());
+      await Future<void>.delayed(Duration.zero);
       expect(
         identical(h.container.read(comparisonLearningStoreProvider), store),
         isTrue,
@@ -246,12 +204,12 @@ void main() {
 
   test(
     'comparison and v2 state providers refresh only their own family',
-      () async {
-    final h = await _harness();
+    () async {
+      final h = await _harness();
       addTearDown(h.close);
-    final comparison = h.container.read(comparisonLearningStoreProvider);
-    final v2 = h.container.read(courseLearningStoreProvider);
-    final comparisonSubscription = h.container.listen(
+      final comparison = h.container.read(comparisonLearningStoreProvider);
+      final v2 = h.container.read(courseLearningStoreProvider);
+      final comparisonSubscription = h.container.listen(
         comparisonLearningStateProvider,
         (_, __) {},
         fireImmediately: true,
@@ -261,10 +219,10 @@ void main() {
         (_, __) {},
         fireImmediately: true,
       );
-    addTearDown(comparisonSubscription.close);
-    addTearDown(v2Subscription.close);
-    await h.container.read(comparisonLearningStateProvider.future);
-    await h.container.read(courseLearningStateProvider.future);
+      addTearDown(comparisonSubscription.close);
+      addTearDown(v2Subscription.close);
+      await h.container.read(comparisonLearningStateProvider.future);
+      await h.container.read(courseLearningStateProvider.future);
       var comparisonNotifications = 0;
       var courseNotifications = 0;
       final comparisonListener = h.container.listen(
@@ -279,18 +237,18 @@ void main() {
       addTearDown(courseListener.close);
       final comparisonBefore = comparisonNotifications;
       final courseBefore = courseNotifications;
-    final cState = await comparison.load();
+      final cState = await comparison.load();
       await comparison.submit(
         comparison.prepare(
-        state: cState,
-        activityId: activity,
-        action: StartComparisonRun(
+          state: cState,
+          activityId: activity,
+          action: StartComparisonRun(
             sessionId: 'refresh-c',
             policy: LessonPolicy(),
           ),
         ),
       );
-    await h.container.read(comparisonLearningStateProvider.future);
+      await h.container.read(comparisonLearningStateProvider.future);
       final cNotificationsAfterCommit = comparisonNotifications;
       expect(cNotificationsAfterCommit, greaterThan(comparisonBefore));
       expect(
@@ -298,15 +256,15 @@ void main() {
         courseBefore,
         reason: 'comparison commits must not refresh course state',
       );
-    final vState = await v2.load();
+      final vState = await v2.load();
       await v2.submit(
         v2.prepare(
-        state: vState,
-        activityId: 'lesson:en-fr-u-y',
+          state: vState,
+          activityId: 'lesson:en-fr-u-y',
           action: StartLearningRun(options: RunOptions()),
         ),
       );
-    await h.container.read(courseLearningStateProvider.future);
+      await h.container.read(courseLearningStateProvider.future);
       expect(courseNotifications, greaterThan(courseBefore));
       expect(
         comparisonNotifications,
@@ -318,22 +276,22 @@ void main() {
 
   test(
     'duplicate and rejected comparison writes do not refresh state provider',
-      () async {
-    final h = await _harness();
+    () async {
+      final h = await _harness();
       addTearDown(h.close);
       final db = await h.database.handle.open();
-    final store = h.container.read(comparisonLearningStoreProvider);
-    var notifications = 0;
-    final sub = h.container.listen(
+      final store = h.container.read(comparisonLearningStoreProvider);
+      var notifications = 0;
+      final sub = h.container.listen(
         comparisonLearningStateProvider,
         (_, __) => notifications++,
         fireImmediately: true,
       );
-    addTearDown(sub.close);
-    await h.container.read(comparisonLearningStateProvider.future);
-    final beforeFailureNotifications = notifications;
-    final empty = await store.load();
-    final start = store.prepare(
+      addTearDown(sub.close);
+      await h.container.read(comparisonLearningStateProvider.future);
+      final beforeFailureNotifications = notifications;
+      final empty = await store.load();
+      final start = store.prepare(
         state: empty,
         activityId: activity,
         action: StartComparisonRun(
@@ -342,11 +300,11 @@ void main() {
         ),
       );
       h.database.barrier.failNextLearningWrite();
-    await expectLater(
+      await expectLater(
         store.submit(start),
         throwsA(isA<LearningSaveException>()),
       );
-    expect(notifications, beforeFailureNotifications);
+      expect(notifications, beforeFailureNotifications);
       expect(
         await _scopeRevision(
           db,
@@ -356,9 +314,9 @@ void main() {
         0,
         reason: 'a rejected SQL transaction must leave the scope unchanged',
       );
-    final retry = await store.submit(start);
-    expect(retry.duplicate, isFalse);
-    await h.container.read(comparisonLearningStateProvider.future);
+      final retry = await store.submit(start);
+      expect(retry.duplicate, isFalse);
+      await h.container.read(comparisonLearningStateProvider.future);
       expect(
         await _scopeRevision(
           db,
@@ -367,43 +325,43 @@ void main() {
         ),
         1,
       );
-    final afterCommitNotifications = notifications;
-    expect(afterCommitNotifications, greaterThan(beforeFailureNotifications));
-    await store.submit(start);
-    await Future<void>.delayed(Duration.zero);
-    expect(notifications, afterCommitNotifications);
+      final afterCommitNotifications = notifications;
+      expect(afterCommitNotifications, greaterThan(beforeFailureNotifications));
+      await store.submit(start);
+      await Future<void>.delayed(Duration.zero);
+      expect(notifications, afterCommitNotifications);
     },
   );
 
   test(
     'corrupt comparison state does not block valid v2 state, and reverse',
-      () async {
-    final h = await _harness();
+    () async {
+      final h = await _harness();
       addTearDown(h.close);
-    final comparison = h.container.read(comparisonLearningStoreProvider);
-    final v2 = h.container.read(courseLearningStoreProvider);
+      final comparison = h.container.read(comparisonLearningStoreProvider);
+      final v2 = h.container.read(courseLearningStoreProvider);
       final db = await h.database.handle.open();
-    final v2Empty = await v2.load();
+      final v2Empty = await v2.load();
       final comparisonEmpty = await comparison.load();
       expect(v2Empty.revision, 0);
       expect(comparisonEmpty.revision, 0);
       await _setSchemaVersion(db, family: 'comparison', version: 99);
-    h.container.invalidate(comparisonLearningStateProvider);
-    h.container.invalidate(courseLearningStateProvider);
+      h.container.invalidate(comparisonLearningStateProvider);
+      h.container.invalidate(courseLearningStateProvider);
       await expectLater(
         comparison.load(),
         throwsA(isA<LearningUnsupportedVersionException>()),
       );
-    expect(
+      expect(
         (await h.container.read(courseLearningStateProvider.future)).revision,
         0,
       );
       await _setSchemaVersion(db, family: 'comparison', version: 1);
-    final compEmpty = await comparison.load();
+      final compEmpty = await comparison.load();
       await comparison.submit(
         comparison.prepare(
-        state: compEmpty,
-        activityId: activity,
+          state: compEmpty,
+          activityId: activity,
           action: StartComparisonRun(
             sessionId: 'valid-c',
             policy: LessonPolicy(),
@@ -421,10 +379,10 @@ void main() {
 
   test(
     'committed comparison write cannot ACK after an auth epoch change',
-      () async {
+    () async {
       final client = _backendClient();
       await _signIn(client, 'B');
-    final h = await _harness();
+      final h = await _harness();
       addTearDown(() async {
         await h.close();
         await client.dispose();
@@ -439,10 +397,10 @@ void main() {
         (_, __) => notifications++,
         fireImmediately: true,
       );
-    addTearDown(sub.close);
-    await h.container.read(comparisonLearningStateProvider.future);
-    final state = await store.load();
-    final command = store.prepare(
+      addTearDown(sub.close);
+      await h.container.read(comparisonLearningStateProvider.future);
+      final state = await store.load();
+      final command = store.prepare(
         state: state,
         activityId: activity,
         action: StartComparisonRun(
@@ -451,11 +409,11 @@ void main() {
         ),
       );
       h.database.barrier.holdNextCommit();
-    final save = store.submit(command);
+      final save = store.submit(command);
       await h.database.barrier.commitEntered;
       courseBackend = client;
-    h.auth.emit(AppAuthState(user: _userFor('B')));
-    await Future<void>.delayed(Duration.zero);
+      h.auth.emit(AppAuthState(user: _userFor('B')));
+      await Future<void>.delayed(Duration.zero);
       h.database.barrier.releaseCommit();
       await expectLater(save, throwsA(isA<LearningOwnerChangedException>()));
       final currentState = await h.container.read(
@@ -474,7 +432,7 @@ void main() {
       );
       final afterReplacementLoad = notifications;
       store.onCommitted!.call();
-    await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
       expect(
         notifications,
         afterReplacementLoad,
@@ -505,9 +463,9 @@ void main() {
     await h.container.read(comparisonLearningStateProvider.future);
     final state = await store.load();
     final command = store.prepare(
-        state: state,
-        activityId: activity,
-        action: StartComparisonRun(
+      state: state,
+      activityId: activity,
+      action: StartComparisonRun(
         sessionId: 'tracker-guard',
         policy: LessonPolicy(),
       ),
@@ -586,9 +544,9 @@ void main() {
     final database = await _newProviderDatabase();
     final container = ProviderContainer(
       overrides: [
-      learningAuthScopeProvider.overrideWith((ref) => tracker),
+        learningAuthScopeProvider.overrideWith((ref) => tracker),
         learningDatabaseHandleProvider.overrideWithValue(database.handle),
-      learningCloudTransportProvider.overrideWithValue(null),
+        learningCloudTransportProvider.overrideWithValue(null),
       ],
     );
     addTearDown(() async {
@@ -617,7 +575,7 @@ void main() {
     expect(
       notifications,
       beforeStaleSnapshot,
-        reason:
+      reason:
           'only tracker.current differs; provider identity/aliveness do not',
     );
   });
@@ -646,9 +604,9 @@ void main() {
     await h.container.read(comparisonLearningStateProvider.future);
     final state = await store.load();
     final command = store.prepare(
-        state: state,
-        activityId: activity,
-        action: StartComparisonRun(
+      state: state,
+      activityId: activity,
+      action: StartComparisonRun(
         sessionId: 'backend-guard',
         policy: LessonPolicy(),
       ),
@@ -674,14 +632,14 @@ void main() {
   });
 
   test(
-      'disposed comparison provider suppresses callback before notifier access',
-      () async {
-    final h = await _harness();
+    'disposed comparison provider suppresses callback before notifier access',
+    () async {
+      final h = await _harness();
       addTearDown(h.close);
       final db = await h.database.handle.open();
-    final store = h.container.read(comparisonLearningStoreProvider);
-    final state = await store.load();
-    final command = store.prepare(
+      final store = h.container.read(comparisonLearningStoreProvider);
+      final state = await store.load();
+      final command = store.prepare(
         state: state,
         activityId: activity,
         action: StartComparisonRun(
@@ -690,11 +648,11 @@ void main() {
         ),
       );
       h.database.barrier.holdNextCommit();
-    final save = store.submit(command);
+      final save = store.submit(command);
       await h.database.barrier.commitEntered;
       h.disposeContainer();
       h.database.barrier.releaseCommit();
-    expect((await save).state.revision, 1);
+      expect((await save).state.revision, 1);
       expect(
         await _scopeRevision(
           db,
@@ -708,16 +666,17 @@ void main() {
 
   test(
     'throwing comparison onCommitted cannot undo durable acknowledgment',
-      () async {
-    final persistence = _ProviderPersistence();
-    final owner = LearningOwner.guest();
-    final store = ComparisonLearningRepository(
+    () async {
+      final h = await _harness();
+      addTearDown(h.close);
+      final owner = LearningOwner.guest();
+      final store = SqliteComparisonLearningRepository(
+        database: h.database.handle,
         scope: ComparisonProfileScope(courseId: 'en-fr', owner: owner),
         authGeneration: 0,
         currentAuth: () =>
             LearningAuthScope(owner: owner, generation: 0, ready: true),
         backendOwner: () => owner,
-        persistence: persistence,
         transitions: ComparisonLearningTransitionEngine(
           catalogue: loadFrenchComparisonCatalogue(),
         ),
@@ -725,8 +684,8 @@ void main() {
         newToken: () => 'abcdefghijklmnopqrstuv',
         onCommitted: () => throw StateError('observer failed'),
       );
-    final empty = await store.load();
-    final command = store.prepare(
+      final empty = await store.load();
+      final command = store.prepare(
         state: empty,
         activityId: activity,
         action: StartComparisonRun(
@@ -734,49 +693,49 @@ void main() {
           policy: LessonPolicy(),
         ),
       );
-    expect((await store.submit(command)).state.revision, 1);
-    expect((await store.load()).revision, 1);
+      expect((await store.submit(command)).state.revision, 1);
+      expect((await store.load()).revision, 1);
     },
   );
 }
 
 User _userFor(String id) => User.fromJson({
-      'id': id,
-      'aud': 'authenticated',
-      'app_metadata': <String, dynamic>{},
-      'user_metadata': <String, dynamic>{},
-      'created_at': '2026-01-01T00:00:00Z',
-    })!;
+  'id': id,
+  'aud': 'authenticated',
+  'app_metadata': <String, dynamic>{},
+  'user_metadata': <String, dynamic>{},
+  'created_at': '2026-01-01T00:00:00Z',
+})!;
 
 SupabaseClient _backendClient() => SupabaseClient(
   'https://providers.example.invalid',
   'public-test-key',
-        httpClient: MockClient((request) async {
-      final email = (jsonDecode(request.body) as Map)['email'] as String;
-      final id = email.split('@').first;
-      final payload = jsonEncode({
-        'sub': id,
-        'exp': DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600,
-      });
+  httpClient: MockClient((request) async {
+    final email = (jsonDecode(request.body) as Map)['email'] as String;
+    final id = email.split('@').first;
+    final payload = jsonEncode({
+      'sub': id,
+      'exp': DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600,
+    });
     final token =
         '${base64Url.encode(utf8.encode('{"alg":"HS256"}'))}.'
-          '${base64Url.encode(utf8.encode(payload))}.signature';
-      return http.Response(
-          jsonEncode({
-            'access_token': token,
-            'refresh_token': 'test-refresh',
-            'token_type': 'bearer',
-            'expires_in': 3600,
-            'user': {
-              'id': id,
-              'aud': 'authenticated',
-              'app_metadata': <String, dynamic>{},
-              'user_metadata': <String, dynamic>{},
-              'created_at': '2026-01-01T00:00:00Z',
-            },
-          }),
-          200,
-          request: request,
+        '${base64Url.encode(utf8.encode(payload))}.signature';
+    return http.Response(
+      jsonEncode({
+        'access_token': token,
+        'refresh_token': 'test-refresh',
+        'token_type': 'bearer',
+        'expires_in': 3600,
+        'user': {
+          'id': id,
+          'aud': 'authenticated',
+          'app_metadata': <String, dynamic>{},
+          'user_metadata': <String, dynamic>{},
+          'created_at': '2026-01-01T00:00:00Z',
+        },
+      }),
+      200,
+      request: request,
       headers: {'content-type': 'application/json'},
     );
   }),

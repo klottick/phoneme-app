@@ -16,7 +16,6 @@ import 'package:linguist/src/core/course/sentence_hunt_content.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/comparison_learning_state.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_command.dart';
-import 'package:linguist/src/core/course/sentence_hunt_learning_codec.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_store.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_providers.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
@@ -210,11 +209,11 @@ void main() {
             }),
           ],
           child: MaterialApp(
-              home: Scaffold(
+            home: Scaffold(
               body: ListView(
                 children: const <Widget>[
-            SizedBox(height: 1000),
-            SentenceHuntProgressSection(),
+                  SizedBox(height: 1000),
+                  SentenceHuntProgressSection(),
                 ],
               ),
             ),
@@ -299,7 +298,7 @@ void main() {
               ),
             ),
           ),
-      sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
+          sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
           sentenceHuntLearningStateProvider.overrideWith(
             (ref) async => SentenceHuntLearningState.empty(
               SentenceHuntProfileScope(
@@ -308,10 +307,10 @@ void main() {
               ),
             ),
           ),
-      sentenceHuntLearningStoreProvider.overrideWith((ref) async {
-        storeFactories++;
-        throw StateError('pending sections must not acquire a store');
-      }),
+          sentenceHuntLearningStoreProvider.overrideWith((ref) async {
+            storeFactories++;
+            throw StateError('pending sections must not acquire a store');
+          }),
         ],
         child: const LinguistApp(),
       ),
@@ -330,7 +329,7 @@ void main() {
     expect(find.text('5 items'), findsNWidgets(3));
     expect(find.textContaining('not yet available'), findsNWidgets(3));
     expect(
-        find.text(
+      find.text(
         'Content not yet available: French/audio or rights review is pending.',
       ),
       findsNWidgets(3),
@@ -371,10 +370,10 @@ void main() {
               ),
             ),
           ),
-      learningAuthScopeProvider.overrideWith((ref) => auth),
-      sentenceHuntLearningStoreProvider.overrideWith((ref) async => store),
-      sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
-      courseReferenceAudioProvider.overrideWithValue(audio),
+          learningAuthScopeProvider.overrideWith((ref) => auth),
+          sentenceHuntLearningStoreProvider.overrideWith((ref) async => store),
+          sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
+          courseReferenceAudioProvider.overrideWithValue(audio),
         ],
         child: const LinguistApp(),
       ),
@@ -448,10 +447,10 @@ void main() {
               ),
             ),
           ),
-      sentenceHuntCatalogueProvider.overrideWith((ref) async {
-        catalogueFactories++;
-        return catalogue;
-      }),
+          sentenceHuntCatalogueProvider.overrideWith((ref) async {
+            catalogueFactories++;
+            return catalogue;
+          }),
           sentenceHuntLearningStateProvider.overrideWith(
             (ref) async => SentenceHuntLearningState.empty(
               SentenceHuntProfileScope(
@@ -460,10 +459,10 @@ void main() {
               ),
             ),
           ),
-      sentenceHuntLearningStoreProvider.overrideWith((ref) async {
-        storeFactories++;
-        throw StateError('invalid routes must not acquire a store');
-      }),
+          sentenceHuntLearningStoreProvider.overrideWith((ref) async {
+            storeFactories++;
+            throw StateError('invalid routes must not acquire a store');
+          }),
         ],
         child: const LinguistApp(),
       ),
@@ -495,7 +494,7 @@ void main() {
       expect(
         catalogueFactories,
         catalogueCountBeforeInvalidRoutes,
-          reason:
+        reason:
             'invalid route must be rejected before content acquisition: $uri',
       );
       expect(
@@ -525,7 +524,7 @@ void main() {
               ),
             ),
           ),
-      sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
+          sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
           sentenceHuntLearningStateProvider.overrideWith(
             (ref) async => SentenceHuntLearningState.empty(
               SentenceHuntProfileScope(
@@ -534,12 +533,12 @@ void main() {
               ),
             ),
           ),
-      sentenceHuntLearningStoreProvider.overrideWith((ref) async {
-        storeFactories++;
+          sentenceHuntLearningStoreProvider.overrideWith((ref) async {
+            storeFactories++;
             throw StateError(
               'accepted content test store is intentionally absent',
             );
-      }),
+          }),
         ],
         child: const LinguistApp(),
       ),
@@ -583,7 +582,7 @@ void main() {
               ),
             ),
           ),
-      sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
+          sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
           sentenceHuntLearningStateProvider.overrideWith(
             (ref) async => SentenceHuntLearningState.empty(
               SentenceHuntProfileScope(
@@ -592,10 +591,10 @@ void main() {
               ),
             ),
           ),
-      sentenceHuntLearningStoreProvider.overrideWith((ref) async {
-        storeFactories++;
-        throw StateError('pending content must not acquire a store');
-      }),
+          sentenceHuntLearningStoreProvider.overrideWith((ref) async {
+            storeFactories++;
+            throw StateError('pending content must not acquire a store');
+          }),
         ],
         child: const LinguistApp(),
       ),
@@ -642,14 +641,14 @@ void main() {
               ),
             ),
           ),
-      learningAuthScopeProvider.overrideWith((ref) => auth),
-      sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
-      sentenceHuntLearningStoreProvider.overrideWith((ref) async => store),
-      sentenceHuntLearningStateProvider.overrideWith((ref) async {
-        ref.watch(learningAuthScopeProvider);
-        stateLoads++;
-        throw StateError('sentence state unavailable');
-      }),
+          learningAuthScopeProvider.overrideWith((ref) => auth),
+          sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
+          sentenceHuntLearningStoreProvider.overrideWith((ref) async => store),
+          sentenceHuntLearningStateProvider.overrideWith((ref) async {
+            ref.watch(learningAuthScopeProvider);
+            stateLoads++;
+            throw StateError('sentence state unavailable');
+          }),
         ],
         child: const LinguistApp(),
       ),
@@ -748,13 +747,13 @@ void main() {
             ),
           ),
         ),
-      learningAuthScopeProvider.overrideWith((ref) => auth),
+        learningAuthScopeProvider.overrideWith((ref) => auth),
         learningDatabaseHandleProvider.overrideWithValue(fixture.handle),
-      sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
+        sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
         sentenceHuntLearningStoreProvider.overrideWith(
           (ref) async => recordingStore,
         ),
-      courseReferenceAudioProvider.overrideWithValue(audio),
+        courseReferenceAudioProvider.overrideWithValue(audio),
       ],
     );
     addTearDown(() async {
@@ -817,7 +816,7 @@ void main() {
     expect(beforeFinish.revision, revisionBeforeFinish);
     expect(beforeFinish.completions, isEmpty);
     expect(
-        SentenceHuntProgressSummary.fromState(
+      SentenceHuntProgressSummary.fromState(
         state: beforeFinish,
         catalogue: catalogue,
       ).completedSectionCount,
@@ -846,10 +845,10 @@ void main() {
       previous,
       next,
     ) {
-        sentenceProviderNotificationCount++;
-        if (next.asData?.value.revision == beforeFinish.revision + 1) {
-          finishPublicationCount++;
-        }
+      sentenceProviderNotificationCount++;
+      if (next.asData?.value.revision == beforeFinish.revision + 1) {
+        finishPublicationCount++;
+      }
     });
     addTearDown(publication.close);
     final _SqliteWriteGate failedFinishGate = fixture.interceptor
@@ -1015,7 +1014,7 @@ void main() {
     );
     expect(actualCompletion.committedAt, expectedCompletion.committedAt);
     expect(
-        SentenceHuntProgressSummary.fromState(
+      SentenceHuntProgressSummary.fromState(
         state: afterFinish,
         catalogue: catalogue,
       ).completedSectionCount,
@@ -1025,9 +1024,8 @@ void main() {
     final SentenceHuntReceipt finishReceipt =
         afterFinish.slots[sectionId]!.latestReceipt;
     final SentenceHuntCommand duplicateFinish = retryCommand;
-    const SentenceHuntLearningCodec codec = SentenceHuntLearningCodec();
     expect(
-      codec.canonicalCommand(duplicateFinish),
+      SentenceHuntCommandCodec.legacyCanonicalCommand(duplicateFinish),
       finishReceipt.canonicalCommand,
     );
     final SentenceHuntLearningStore store = (await tester.runAsync(
@@ -1158,7 +1156,7 @@ void main() {
     );
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
     expect(
-        find.text('Existing lessons (includes discovery pilot): 0/5 complete'),
+      find.text('Existing lessons (includes discovery pilot): 0/5 complete'),
       findsOneWidget,
     );
 
@@ -1198,21 +1196,21 @@ void main() {
 
   testWidgets(
     'sentence_progress_retry_does_not_duplicate_pending_acquisition',
-      (tester) async {
-    final SentenceHuntCatalogue catalogue = syntheticSentenceCatalogue();
-    final SentenceHuntProfileScope scope = SentenceHuntProfileScope(
+    (tester) async {
+      final SentenceHuntCatalogue catalogue = syntheticSentenceCatalogue();
+      final SentenceHuntProfileScope scope = SentenceHuntProfileScope(
         courseId: 'en-fr',
         owner: LearningOwner.guest(),
       );
-    final Completer<SentenceHuntLearningStore> pendingAcquisition =
-        Completer<SentenceHuntLearningStore>();
+      final Completer<SentenceHuntLearningStore> pendingAcquisition =
+          Completer<SentenceHuntLearningStore>();
       final _HeldSentenceStore store = _HeldSentenceStore(scope)
         ..releaseRetry();
-    var storeFactories = 0;
+      var storeFactories = 0;
 
       await tester.pumpWidget(
         ProviderScope(
-        overrides: [
+          overrides: [
             learningAuthScopeProvider.overrideWith(
               (ref) => LearningAuthTracker(
                 owner: LearningOwner.guest(),
@@ -1222,38 +1220,38 @@ void main() {
             sentenceHuntCatalogueProvider.overrideWith(
               (ref) async => catalogue,
             ),
-          sentenceHuntLearningStoreProvider.overrideWith((ref) async {
-            storeFactories++;
-            return pendingAcquisition.future;
-          }),
-          sentenceHuntLearningStateProvider.overrideWith((ref) async {
-            throw StateError('synthetic sentence state unavailable');
-          }),
-        ],
-        child: const MaterialApp(
+            sentenceHuntLearningStoreProvider.overrideWith((ref) async {
+              storeFactories++;
+              return pendingAcquisition.future;
+            }),
+            sentenceHuntLearningStateProvider.overrideWith((ref) async {
+              throw StateError('synthetic sentence state unavailable');
+            }),
+          ],
+          child: const MaterialApp(
             home: Scaffold(body: SentenceHuntProgressSection()),
           ),
         ),
       );
-    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
-    await tester.pumpAndSettle();
-    expect(find.text('Retry sentence progress'), findsOneWidget);
-    final TextButton initialRetryButton = tester.widget<TextButton>(
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pumpAndSettle();
+      expect(find.text('Retry sentence progress'), findsOneWidget);
+      final TextButton initialRetryButton = tester.widget<TextButton>(
         find.ancestor(
-            of: find.text('Retry sentence progress'),
+          of: find.text('Retry sentence progress'),
           matching: find.byType(TextButton),
         ),
       );
-    final VoidCallback retryAgain = initialRetryButton.onPressed!;
+      final VoidCallback retryAgain = initialRetryButton.onPressed!;
 
-    await tester.tap(find.text('Retry sentence progress'));
-    await tester.pumpAndSettle();
-    expect(storeFactories, 1);
-    expect(find.text('Retrying sentence progress…'), findsOneWidget);
+      await tester.tap(find.text('Retry sentence progress'));
+      await tester.pumpAndSettle();
+      expect(storeFactories, 1);
+      expect(find.text('Retrying sentence progress…'), findsOneWidget);
       final TextButton retryButton = tester.widget<TextButton>(
         find.ancestor(
-      of: find.text('Retrying sentence progress…'),
-      matching: find.byType(TextButton),
+          of: find.text('Retrying sentence progress…'),
+          matching: find.byType(TextButton),
         ),
       );
       expect(
@@ -1261,23 +1259,23 @@ void main() {
         isNull,
         reason: 'a pending acquisition cannot start a second retry',
       );
-    retryAgain();
-    await tester.pump();
+      retryAgain();
+      await tester.pump();
       expect(
         storeFactories,
         1,
         reason: 'a duplicate tap must not reacquire a pending store',
       );
 
-    pendingAcquisition.complete(store);
-    await tester.pumpAndSettle();
-    await tester.runAsync(() => store.retryFinished.future);
-    await tester.pumpAndSettle();
-    expect(storeFactories, 1);
-    expect(store.retryCalls, 1);
+      pendingAcquisition.complete(store);
+      await tester.pumpAndSettle();
+      await tester.runAsync(() => store.retryFinished.future);
+      await tester.pumpAndSettle();
+      expect(storeFactories, 1);
+      expect(store.retryCalls, 1);
 
-    await tester.pumpWidget(const SizedBox());
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
     },
   );
 
@@ -1301,21 +1299,21 @@ void main() {
     var stateBuilds = 0;
     final ProviderContainer container = ProviderContainer(
       overrides: [
-      learningAuthScopeProvider.overrideWith((ref) => auth),
-      sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
-      sentenceHuntLearningStoreProvider.overrideWith((ref) async {
-        storeFactories++;
-        if (storeFactories == 1) {
-          throw StateError('initial store acquisition failure');
-        }
-        acquisitionEntered.complete();
-        return acquisition.future;
-      }),
-      sentenceHuntLearningStateProvider.overrideWith((ref) async {
-        stateBuilds++;
-        await ref.watch(sentenceHuntLearningStoreProvider.future);
-        throw StateError('sentence state remains unavailable');
-      }),
+        learningAuthScopeProvider.overrideWith((ref) => auth),
+        sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
+        sentenceHuntLearningStoreProvider.overrideWith((ref) async {
+          storeFactories++;
+          if (storeFactories == 1) {
+            throw StateError('initial store acquisition failure');
+          }
+          acquisitionEntered.complete();
+          return acquisition.future;
+        }),
+        sentenceHuntLearningStateProvider.overrideWith((ref) async {
+          stateBuilds++;
+          await ref.watch(sentenceHuntLearningStoreProvider.future);
+          throw StateError('sentence state remains unavailable');
+        }),
       ],
     );
     final ProviderSubscription<AsyncValue<SentenceHuntState>>
@@ -1367,23 +1365,23 @@ void main() {
   });
 
   testWidgets(
-      'sentence_progress_retry_reacquires_repeated_failed_store_acquisitions',
-      (tester) async {
-    final SentenceHuntCatalogue catalogue = syntheticSentenceCatalogue();
-    final SentenceHuntProfileScope scope = SentenceHuntProfileScope(
+    'sentence_progress_retry_reacquires_repeated_failed_store_acquisitions',
+    (tester) async {
+      final SentenceHuntCatalogue catalogue = syntheticSentenceCatalogue();
+      final SentenceHuntProfileScope scope = SentenceHuntProfileScope(
         courseId: 'en-fr',
         owner: LearningOwner.guest(),
       );
       final _HeldSentenceStore store = _HeldSentenceStore(scope)
         ..releaseRetry();
-    final Completer<void> pendingAcquisitionEntered = Completer<void>();
-    final Completer<SentenceHuntLearningStore> pendingAcquisition =
-        Completer<SentenceHuntLearningStore>();
-    var storeFactories = 0;
+      final Completer<void> pendingAcquisitionEntered = Completer<void>();
+      final Completer<SentenceHuntLearningStore> pendingAcquisition =
+          Completer<SentenceHuntLearningStore>();
+      var storeFactories = 0;
 
       await tester.pumpWidget(
         ProviderScope(
-        overrides: [
+          overrides: [
             learningAuthScopeProvider.overrideWith(
               (ref) => LearningAuthTracker(
                 owner: LearningOwner.guest(),
@@ -1393,63 +1391,63 @@ void main() {
             sentenceHuntCatalogueProvider.overrideWith(
               (ref) async => catalogue,
             ),
-          sentenceHuntLearningStoreProvider.overrideWith((ref) async {
-            storeFactories++;
-            if (storeFactories < 3) {
-              throw StateError('transient store acquisition $storeFactories');
-            }
-            pendingAcquisitionEntered.complete();
-            return pendingAcquisition.future;
-          }),
-        ],
-        child: const MaterialApp(
+            sentenceHuntLearningStoreProvider.overrideWith((ref) async {
+              storeFactories++;
+              if (storeFactories < 3) {
+                throw StateError('transient store acquisition $storeFactories');
+              }
+              pendingAcquisitionEntered.complete();
+              return pendingAcquisition.future;
+            }),
+          ],
+          child: const MaterialApp(
             home: Scaffold(body: SentenceHuntProgressSection()),
           ),
         ),
       );
-    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
-    await tester.pumpAndSettle();
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pumpAndSettle();
 
-    expect(find.text('Sentence progress is unavailable.'), findsOneWidget);
-    expect(storeFactories, 1);
+      expect(find.text('Sentence progress is unavailable.'), findsOneWidget);
+      expect(storeFactories, 1);
 
-    await tester.tap(find.text('Retry sentence progress'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Retry sentence progress'));
+      await tester.pumpAndSettle();
       expect(
         storeFactories,
         2,
         reason: 'explicit retry must reacquire after a failed store future',
       );
-    expect(find.text('Sentence progress is unavailable.'), findsOneWidget);
+      expect(find.text('Sentence progress is unavailable.'), findsOneWidget);
 
-    await tester.tap(find.text('Retry sentence progress'));
-    await tester.pump();
-    await tester.runAsync(() => pendingAcquisitionEntered.future);
-    await tester.pump();
-    expect(storeFactories, 3);
+      await tester.tap(find.text('Retry sentence progress'));
+      await tester.pump();
+      await tester.runAsync(() => pendingAcquisitionEntered.future);
+      await tester.pump();
+      expect(storeFactories, 3);
       expect(
         find.text('Sentence progress is loading.'),
         findsOneWidget,
         reason: 'a pending retry acquisition remains unknown',
       );
 
-    pendingAcquisition.complete(store);
-    await tester.runAsync(() => store.retryFinished.future);
-    await tester.pumpAndSettle();
+      pendingAcquisition.complete(store);
+      await tester.runAsync(() => store.retryFinished.future);
+      await tester.pumpAndSettle();
       expect(
         storeFactories,
         3,
         reason: 'a successful store acquisition is reused',
       );
-    expect(store.retryCalls, 1);
+      expect(store.retryCalls, 1);
       expect(
         find.text('Sentence sections completed: 0/3'),
         findsOneWidget,
         reason: 'the real state provider loads the reacquired store state',
       );
 
-    await tester.pumpWidget(const SizedBox());
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
     },
   );
 }
@@ -1545,7 +1543,7 @@ Future<void> _exerciseCorruptSentenceRecovery(
               LearningAuthTracker(owner: LearningOwner.guest(), ready: true),
         ),
         learningDatabaseHandleProvider.overrideWithValue(fixture.handle),
-    sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
+        sentenceHuntCatalogueProvider.overrideWith((ref) async => catalogue),
       ],
       child: const LinguistApp(),
     ),
@@ -2002,7 +2000,6 @@ void _expectFinishRetryCommandsMatch({
   required SentenceHuntProfileScope scope,
   required String sectionId,
 }) {
-  const SentenceHuntLearningCodec codec = SentenceHuntLearningCodec();
   expect(failedCommand.scope, scope);
   expect(retryCommand.scope, scope);
   expect(failedCommand.sectionId, sectionId);
@@ -2018,8 +2015,8 @@ void _expectFinishRetryCommandsMatch({
   expect(retryCommand.sectionFingerprint, failedCommand.sectionFingerprint);
   expect(retryCommand.action, isA<FinishSentenceHuntRun>());
   expect(
-    codec.canonicalCommand(retryCommand),
-    codec.canonicalCommand(failedCommand),
+    SentenceHuntCommandCodec.legacyCanonicalCommand(retryCommand),
+    SentenceHuntCommandCodec.legacyCanonicalCommand(failedCommand),
   );
   expect(
     beforeFinish.completions,
@@ -2120,7 +2117,7 @@ final class _SentenceSqlInterceptor extends drift.QueryInterceptor {
     if (_isLearningWrite(statement)) await _waitForWriteGate();
     await executor.runCustom(statement, args);
     if (_isLearningWrite(statement)) _learningWritePendingCommit = true;
-    }
+  }
 
   @override
   Future<int> runUpdate(
@@ -2147,7 +2144,7 @@ final class _SentenceSqlInterceptor extends drift.QueryInterceptor {
     } finally {
       if (!_commitCompleted!.isCompleted) _commitCompleted!.complete();
     }
-}
+  }
 
   Future<void> _waitForWriteGate() async {
     final _SqliteWriteGate? gate = _nextWriteGate;
@@ -2305,8 +2302,8 @@ final class _InMemorySentenceHuntStore implements SentenceHuntLearningStore {
   _InMemorySentenceHuntStore({
     required this.scope,
     required SentenceHuntCatalogue catalogue,
-  })  : _transitions = SentenceHuntTransitionEngine(catalogue: catalogue),
-        state = SentenceHuntState.empty(scope);
+  }) : _transitions = SentenceHuntTransitionEngine(catalogue: catalogue),
+       state = SentenceHuntState.empty(scope);
 
   @override
   final SentenceHuntProfileScope scope;
@@ -2329,13 +2326,13 @@ final class _InMemorySentenceHuntStore implements SentenceHuntLearningStore {
     required String sectionId,
     required SentenceHuntAction action,
   }) => _transitions.prepare(
-        state: state,
-        sectionId: sectionId,
-        action: action,
-        authGeneration: 0,
-        token: (++_token).toString().padLeft(22, '0'),
-        submittedAt: _now(),
-      );
+    state: state,
+    sectionId: sectionId,
+    action: action,
+    authGeneration: 0,
+    token: (++_token).toString().padLeft(22, '0'),
+    submittedAt: _now(),
+  );
 
   @override
   Future<SentenceHuntCommit> submit(SentenceHuntCommand command) async {

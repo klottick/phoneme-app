@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'course_attempt.dart';
 import 'course_learning_checkpoint.dart';
-import 'course_learning_codec.dart';
 import 'course_learning_command.dart';
 import 'course_learning_state.dart';
 import 'lesson_policy.dart';
@@ -21,7 +20,7 @@ final class CourseLearningCommandCodec {
   }
 
   static String legacyCanonicalCommand(LearningCommand command) =>
-      const LearningDocumentCodec().canonicalCommand(command);
+      jsonEncode(_sort(_legacyCommandProjection(command)));
 
   static LearningCommand decodeCanonicalCommand(
     String raw, {
@@ -75,6 +74,159 @@ final class CourseLearningCommandCodec {
     }
   }
 }
+
+Map<String, Object?> _legacyCommandProjection(LearningCommand command) =>
+    <String, Object?>{
+      'scope': command.scope.storageKey,
+      'authGeneration': command.authGeneration,
+      'activityId': command.activityId,
+      'expected': _legacyCursor(command.expected),
+      'token': command.token,
+      'submittedAt': command.submittedAt.toUtc().toIso8601String(),
+      'action': _legacyAction(command.action),
+      'draws': command.draws
+          .map(
+            (RandomDraw draw) => <String, Object?>{
+              'upperBound': draw.upperBound,
+              'value': draw.value,
+            },
+          )
+          .toList(),
+      'candidate': _legacySnapshot(command.candidate),
+      'feedback': <String, Object?>{
+        'message': command.feedback.message,
+        'points': command.feedback.points,
+        'cascades': command.feedback.cascades,
+        'bonus': command.feedback.bonus,
+        'correct': command.feedback.correct,
+      },
+    };
+
+Map<String, Object?> _legacyCursor(SlotCursor cursor) => <String, Object?>{
+  'generation': cursor.generation,
+  'sequence': cursor.sequence,
+  'revision': cursor.revision,
+};
+
+Map<String, Object?> _legacyAction(LearningAction action) => switch (action) {
+  final StartLearningRun value => <String, Object?>{
+    'kind': 'startRun',
+    'options': value.options.policy.toJson(),
+  },
+  final ChooseSound value => <String, Object?>{
+    'kind': 'chooseSound',
+    'selectedSound': value.selectedSound,
+    'audioSource': value.audioSource.name,
+  },
+  final ChooseDrillWord value => <String, Object?>{
+    'kind': 'chooseDrillWord',
+    'selectedWord': value.selectedWord,
+    'audioSource': value.audioSource.name,
+  },
+  AdvanceLesson _ => <String, Object?>{'kind': 'advanceLesson'},
+  ReviewDiscoveryMistakes _ => <String, Object?>{
+    'kind': 'reviewDiscoveryMistakes',
+  },
+  final ObserveAssistance value => <String, Object?>{
+    'kind': 'observeAssistance',
+    'items':
+        value.items
+            .map(
+              (ItemContextKey item) => <String, Object?>{
+                'itemId': item.itemId,
+                'targetSound': item.targetSound,
+              },
+            )
+            .toList()
+          ..sort(
+            (Map<String, Object?> first, Map<String, Object?> second) =>
+                jsonEncode(first).compareTo(jsonEncode(second)),
+          ),
+    'flags': _legacyEnumSet(value.flags),
+  },
+  final FinishLearningActivity value => <String, Object?>{
+    'kind': 'finishLearningActivity',
+    'recordCompletion': value.recordCompletion,
+  },
+  EndDrill _ => <String, Object?>{'kind': 'endDrill'},
+  final SwapSoundTiles value => <String, Object?>{
+    'kind': 'swapSoundTiles',
+    'first': value.first,
+    'second': value.second,
+    'cue': value.cue == null
+        ? null
+        : <String, Object?>{
+            'wordId': value.cue!.wordId,
+            'targetSound': value.cue!.targetSound,
+            'audioSource': value.cue!.audioSource.name,
+          },
+    'elapsedSeconds': value.elapsedSeconds,
+  },
+  final LinkWordTiles value => <String, Object?>{
+    'kind': 'linkWordTiles',
+    'indices': value.indices,
+    'elapsedSeconds': value.elapsedSeconds,
+  },
+  final CheckpointArcade value => <String, Object?>{
+    'kind': 'checkpointArcade',
+    'elapsedSeconds': value.elapsedSeconds,
+    'paused': value.paused,
+  },
+  ContinueArcadeRound _ => <String, Object?>{'kind': 'continueArcadeRound'},
+};
+
+Map<String, Object?> _legacySnapshot(ActivitySnapshot snapshot) =>
+    switch (snapshot) {
+      final DiscoveryCheckpoint value => <String, Object?>{
+        'kind': 'discovery',
+        'session': value.session.toJson(),
+      },
+      final LegacyLessonCheckpoint value => <String, Object?>{
+        'kind': 'legacyLesson',
+        'wordIndex': value.wordIndex,
+        'selectedSound': value.selectedSound,
+        'finished': value.finished,
+      },
+      final DrillCheckpoint value => <String, Object?>{
+        'kind': 'drill',
+        'pairIds': value.pairIds,
+        'index': value.index,
+        'correct': value.correct,
+        'ended': value.ended,
+      },
+      final SoundGameCheckpoint value => <String, Object?>{
+        'kind': 'soundGame',
+        'board': <String, Object?>{
+          'board': value.board.board,
+          'stars': _legacySortedSet(value.board.stars),
+        },
+        'clock': _legacyClock(value.clock),
+      },
+      final WordGameCheckpoint value => <String, Object?>{
+        'kind': 'wordGame',
+        'board': <String, Object?>{
+          'board': value.board.board,
+          'target': value.board.target,
+          'moves': value.board.moves,
+          'combo': value.board.combo,
+          'stars': _legacySortedSet(value.board.stars),
+          'obstacles': _legacySortedSet(value.board.obstacles),
+        },
+        'clock': _legacyClock(value.clock),
+      },
+    };
+
+Map<String, Object?> _legacyClock(ArcadeClockState clock) => <String, Object?>{
+  'remaining': clock.remaining,
+  'round': clock.round,
+  'score': clock.score,
+  'paused': clock.paused,
+};
+
+List<int> _legacySortedSet(Set<int> values) => values.toList()..sort();
+
+List<String> _legacyEnumSet<T extends Enum>(Set<T> values) =>
+    values.map((T value) => value.name).toList()..sort();
 
 LearningAction _readAction(Object? raw) {
   final Map<String, Object?> value = _object(raw, 'action');
