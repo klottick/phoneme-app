@@ -109,6 +109,7 @@ class _PhonemeIdentifyScreenState extends ConsumerState<PhonemeIdentifyScreen> {
                                 _isPlaying ? Icons.stop : Icons.volume_up,
                               ),
                               iconSize: 48,
+                              tooltip: _isPlaying ? 'Playing phoneme' : 'Play phoneme',
                               onPressed: _isPlaying
                                   ? null
                                   : () => _playPhoneme(current.ipaSymbol),
@@ -119,6 +120,7 @@ class _PhonemeIdentifyScreenState extends ConsumerState<PhonemeIdentifyScreen> {
                                 _isPlaying ? Icons.stop : Icons.volume_down,
                               ),
                               iconSize: 48,
+                              tooltip: _isPlaying ? 'Playing sample word' : 'Play sample word',
                               onPressed: _isPlaying
                                   ? null
                                   : () => _playWord(

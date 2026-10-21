@@ -52,9 +52,9 @@ class _SpeakScreenState extends ConsumerState<SpeakScreen> {
                         const SizedBox(height: 8),
                         Text(
                           '(${current.phonemeA})',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                color: Colors.grey,
-                              ),
+                          style: Theme.of(
+                            context,
+                          ).textTheme.titleLarge?.copyWith(color: Colors.grey),
                         ),
                       ],
                     ),
@@ -67,6 +67,9 @@ class _SpeakScreenState extends ConsumerState<SpeakScreen> {
                     FloatingActionButton.large(
                       heroTag: 'record',
                       onPressed: _toggleRecording,
+                      tooltip: _isRecording
+                          ? 'Stop recording your pronunciation'
+                          : 'Record your pronunciation',
                       backgroundColor: _isRecording ? Colors.red : null,
                       child: Icon(_isRecording ? Icons.stop : Icons.mic),
                     ),
@@ -77,8 +80,8 @@ class _SpeakScreenState extends ConsumerState<SpeakScreen> {
                   _isRecording
                       ? 'Recording...'
                       : _hasRecording
-                          ? 'Recording saved'
-                          : 'Tap to record',
+                      ? 'Recording saved'
+                      : 'Tap to record',
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
                 if (_hasRecording && !_isRecording) ...[
@@ -90,11 +93,15 @@ class _SpeakScreenState extends ConsumerState<SpeakScreen> {
                         icon: Icon(_isPlaying ? Icons.stop : Icons.play_arrow),
                         iconSize: 32,
                         onPressed: _togglePlayback,
+                        tooltip: _isPlaying
+                            ? 'Stop playback of your recording'
+                            : 'Play your recording',
                       ),
                       const SizedBox(width: 16),
                       IconButton.filled(
                         icon: const Icon(Icons.refresh),
                         iconSize: 32,
+                        tooltip: 'Record again',
                         onPressed: () {
                           setState(() {
                             _hasRecording = false;
@@ -141,7 +148,8 @@ class _SpeakScreenState extends ConsumerState<SpeakScreen> {
       }
 
       final dir = await getApplicationDocumentsDirectory();
-      final path = '${dir.path}/practice_${DateTime.now().millisecondsSinceEpoch}.wav';
+      final path =
+          '${dir.path}/practice_${DateTime.now().millisecondsSinceEpoch}.wav';
       await recorder.startRecording(path);
       setState(() {
         _isRecording = true;

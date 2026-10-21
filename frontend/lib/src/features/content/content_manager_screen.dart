@@ -22,22 +22,22 @@ class CustomPhoneme {
   });
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'ipaSymbol': ipaSymbol,
-        'name': name,
-        'description': description,
-        'audioUrl': audioUrl,
-        'createdAt': createdAt.toIso8601String(),
-      };
+    'id': id,
+    'ipaSymbol': ipaSymbol,
+    'name': name,
+    'description': description,
+    'audioUrl': audioUrl,
+    'createdAt': createdAt.toIso8601String(),
+  };
 
   factory CustomPhoneme.fromJson(Map<String, dynamic> json) => CustomPhoneme(
-        id: json['id'],
-        ipaSymbol: json['ipaSymbol'],
-        name: json['name'],
-        description: json['description'],
-        audioUrl: json['audioUrl'],
-        createdAt: DateTime.parse(json['createdAt']),
-      );
+    id: json['id'],
+    ipaSymbol: json['ipaSymbol'],
+    name: json['name'],
+    description: json['description'],
+    audioUrl: json['audioUrl'],
+    createdAt: DateTime.parse(json['createdAt']),
+  );
 }
 
 class ContentManagerNotifier extends StateNotifier<List<CustomPhoneme>> {
@@ -89,8 +89,8 @@ class ContentManagerNotifier extends StateNotifier<List<CustomPhoneme>> {
 
 final contentManagerProvider =
     StateNotifierProvider<ContentManagerNotifier, List<CustomPhoneme>>((ref) {
-  return ContentManagerNotifier();
-});
+      return ContentManagerNotifier();
+    });
 
 class ContentManagerScreen extends ConsumerStatefulWidget {
   const ContentManagerScreen({super.key});
@@ -129,15 +129,14 @@ class _ContentManagerScreenState extends ConsumerState<ContentManagerScreen> {
               itemBuilder: (context, index) {
                 final phoneme = customPhonemes[index];
                 return ListTile(
-                  leading: CircleAvatar(
-                    child: Text(phoneme.ipaSymbol),
-                  ),
+                  leading: CircleAvatar(child: Text(phoneme.ipaSymbol)),
                   title: Text(phoneme.name),
                   subtitle: phoneme.description != null
                       ? Text(phoneme.description!)
                       : null,
                   trailing: IconButton(
                     icon: const Icon(Icons.delete),
+                    tooltip: 'Delete ${phoneme.name}',
                     onPressed: () => _deletePhoneme(phoneme.id),
                   ),
                 );
@@ -145,6 +144,7 @@ class _ContentManagerScreenState extends ConsumerState<ContentManagerScreen> {
             ),
       floatingActionButton: FloatingActionButton(
         onPressed: _showAddDialog,
+        tooltip: 'Add custom phoneme',
         child: const Icon(Icons.add),
       ),
     );
@@ -164,20 +164,25 @@ class _ContentManagerScreenState extends ConsumerState<ContentManagerScreen> {
           children: [
             TextField(
               controller: _ipaController,
-              decoration:
-                  const InputDecoration(labelText: 'IPA Symbol', hintText: 'æ'),
+              decoration: const InputDecoration(
+                labelText: 'IPA Symbol',
+                hintText: 'æ',
+              ),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _nameController,
-              decoration:
-                  const InputDecoration(labelText: 'Name', hintText: 'near-open front'),
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                hintText: 'near-open front',
+              ),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _descController,
-              decoration:
-                  const InputDecoration(labelText: 'Description (optional)'),
+              decoration: const InputDecoration(
+                labelText: 'Description (optional)',
+              ),
             ),
           ],
         ),
@@ -197,8 +202,9 @@ class _ContentManagerScreenState extends ConsumerState<ContentManagerScreen> {
                   id: 'custom_${DateTime.now().millisecondsSinceEpoch}',
                   ipaSymbol: _ipaController!.text,
                   name: _nameController!.text,
-                  description:
-                      _descController!.text.isEmpty ? null : _descController!.text,
+                  description: _descController!.text.isEmpty
+                      ? null
+                      : _descController!.text,
                   audioUrl: null,
                   createdAt: DateTime.now(),
                 );

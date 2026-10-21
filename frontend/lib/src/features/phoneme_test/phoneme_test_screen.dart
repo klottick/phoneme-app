@@ -93,18 +93,15 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
                           _wordMode && _sampleWord != null
                               ? _sampleWord!
                               : current.ipaSymbol,
-                          style: Theme.of(context)
-                              .textTheme
-                              .displayLarge
+                          style: Theme.of(context).textTheme.displayLarge
                               ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 16),
                         Text(
                           current.descriptor,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(color: Colors.grey),
+                          style: Theme.of(
+                            context,
+                          ).textTheme.titleMedium?.copyWith(color: Colors.grey),
                         ),
                         const SizedBox(height: 24),
                         Row(
@@ -112,32 +109,38 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
                           children: [
                             IconButton.filled(
                               icon: Icon(
-                                  _isRecording ? Icons.stop : Icons.volume_up),
+                                _isRecording ? Icons.stop : Icons.volume_up,
+                              ),
                               iconSize: 32,
                               onPressed: _isRecording
                                   ? null
                                   : () => _playPhoneme(current.ipaSymbol),
-                              tooltip: 'Listen',
+                              tooltip: _isRecording
+                                  ? 'Recording phoneme'
+                                  : 'Play phoneme',
                             ),
                             const SizedBox(width: 16),
                             if (_wordMode) ...[
                               IconButton.filled(
-                                icon: Icon(_isRecording
-                                    ? Icons.stop
-                                    : Icons.volume_down),
+                                icon: Icon(
+                                  _isRecording ? Icons.stop : Icons.volume_down,
+                                ),
                                 iconSize: 32,
                                 onPressed: _isRecording
                                     ? null
                                     : () => _playWord(_sampleWord),
-                                tooltip: 'Listen Word',
+                                tooltip: _isRecording
+                                    ? 'Recording phoneme'
+                                    : 'Play sample word',
                               ),
                             ],
                             const SizedBox(width: 16),
                             TextButton(
                               onPressed: () =>
                                   setState(() => _showHint = !_showHint),
-                              child:
-                                  Text(_showHint ? 'Hide Hint' : 'Show Hint'),
+                              child: Text(
+                                _showHint ? 'Hide Hint' : 'Show Hint',
+                              ),
                             ),
                           ],
                         ),
@@ -169,6 +172,8 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
                       onPressed: recordingAvailable ? _toggleRecording : null,
                       tooltip: !recordingAvailable
                           ? 'Recording is not available in this browser'
+                          : _isRecording
+                          ? 'Stop recording phoneme'
                           : 'Record phoneme',
                       backgroundColor: _isRecording ? Colors.red : null,
                       child: Icon(_isRecording ? Icons.stop : Icons.mic),
@@ -177,14 +182,18 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
                       const SizedBox(width: 16),
                       FloatingActionButton.large(
                         heroTag: 'record_word',
-                        onPressed: (!recordingAvailable || _isRecording || !_wordMode)
+                        onPressed:
+                            (!recordingAvailable || _isRecording || !_wordMode)
                             ? null
                             : _toggleWordRecording,
                         tooltip: !recordingAvailable
                             ? 'Recording is not available in this browser'
+                            : _isRecording
+                            ? 'Stop recording word'
                             : 'Record word',
-                        backgroundColor:
-                            _isRecording && _wordMode ? Colors.red : null,
+                        backgroundColor: _isRecording && _wordMode
+                            ? Colors.red
+                            : null,
                         child: Icon(
                           _isRecording && _wordMode
                               ? Icons.stop
@@ -199,12 +208,12 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
                   !recordingAvailable
                       ? 'Recording is not available in this browser'
                       : _isRecording
-                          ? 'Recording...'
-                          : _hasRecording
-                              ? 'Recording saved!'
-                              : _wordMode
-                                  ? 'Tap to say the word "$_sampleWord"'
-                                  : 'Tap to say the phoneme',
+                      ? 'Recording...'
+                      : _hasRecording
+                      ? 'Recording saved!'
+                      : _wordMode
+                      ? 'Tap to say the word "$_sampleWord"'
+                      : 'Tap to say the phoneme',
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
                 if (_hasRecording && !_isRecording) ...[
@@ -213,8 +222,9 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       FilledButton(
-                        onPressed:
-                            _wordMode ? _assessWordRecording : _assessRecording,
+                        onPressed: _wordMode
+                            ? _assessWordRecording
+                            : _assessRecording,
                         child: const Text('Check'),
                       ),
                       const SizedBox(width: 16),
@@ -239,7 +249,8 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: (_assessmentResult ?? _wordAssessmentResult)!
+                      color:
+                          (_assessmentResult ?? _wordAssessmentResult)!
                               .startsWith('✓')
                           ? Colors.green.withValues(alpha: 0.1)
                           : Colors.orange.withValues(alpha: 0.1),
@@ -250,7 +261,8 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
-                        color: (_assessmentResult ?? _wordAssessmentResult)!
+                        color:
+                            (_assessmentResult ?? _wordAssessmentResult)!
                                 .startsWith('✓')
                             ? Colors.green
                             : Colors.orange,
@@ -368,9 +380,9 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
     final file = File(_recordingPath!);
     if (!await file.exists()) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Recording file not found')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Recording file not found')));
       return;
     }
 
@@ -400,15 +412,16 @@ class _PhonemeTestScreenState extends ConsumerState<PhonemeTestScreen> {
     final file = File(_wordRecordingPath!);
     if (!await file.exists()) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Recording file not found')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Recording file not found')));
       return;
     }
 
     final phonemes = ref.read(phonemesProvider).valueOrNull ?? [];
-    final current =
-        phonemes.isNotEmpty ? phonemes[_index % phonemes.length] : null;
+    final current = phonemes.isNotEmpty
+        ? phonemes[_index % phonemes.length]
+        : null;
     final expectedPhoneme = current?.ipaSymbol ?? 'æ';
     final languageCode = ref.read(selectedLanguageCodeProvider);
 
