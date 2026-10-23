@@ -301,16 +301,18 @@ void main() {
   test('orbital_position_does_not_order_learning', () {
     final initial = findSpaceSystem('en-fr-u-y-system');
     expect(initial, isNotNull);
+    final authoredSystem = initial!;
     // Re-author every body position and orbital radius while keeping the
     // learning metadata identical; order must come from the author, not from
     // where a body is drawn.
+    final authoredOrder = [...authoredSystem.mainOrder];
     final permuted = MapSystemDefinition(
-      id: initial!.id,
-      title: initial.title,
-      description: initial.description,
-      planned: initial.planned,
+      id: authoredSystem.id,
+      title: authoredSystem.title,
+      description: authoredSystem.description,
+      planned: authoredSystem.planned,
       bodies: [
-        for (final body in initial.bodies)
+        for (final body in authoredSystem.bodies)
           MapBodyDefinition(
             id: body.id,
             title: body.title,
@@ -327,15 +329,63 @@ void main() {
             orbitRadius: body.orbitRadius * 0.5 + 0.2,
           ),
       ],
-      mainOrder: initial.mainOrder,
+      mainOrder: authoredOrder,
     );
+    authoredOrder.clear();
     expect(permuted.mainOrder, ['discovery']);
-    expect(identical(initial.mainOrder, initial.mainOrder), isTrue);
-    expect(permuted.mainOrder, initial.mainOrder);
+    expect(() => permuted.mainOrder.add('another'), throwsUnsupportedError);
+    expect(permuted.mainOrder, authoredSystem.mainOrder);
     // Shuffled presentation metadata still validates against the registry.
     expect(
       () => validateMapSystem(permuted, registry: LearningRegistry.french()),
       returnsNormally,
+    );
+  });
+
+  test('live_system_requires_required_bodies_in_main_order', () {
+    final registry = LearningRegistry.french();
+
+    expect(
+      () => validateMapSystem(system(), registry: registry),
+      throwsFormatException,
+      reason: 'a live system cannot omit its required destinations',
+    );
+    expect(
+      () => validateMapSystem(
+        system(bodies: [body(id: 'required')]),
+        registry: registry,
+      ),
+      throwsFormatException,
+      reason: 'every required live body must be in mainOrder',
+    );
+
+    final complete = system(
+      bodies: [
+        body(id: 'first'),
+        body(id: 'second'),
+        body(id: 'planned', planned: true, target: null, activityId: null),
+        body(
+          id: 'optional',
+          role: MapBodyRole.station,
+          optional: true,
+          target: MapTarget.review,
+          activityId: null,
+        ),
+      ],
+      mainOrder: ['first', 'second'],
+    );
+    expect(
+      () => validateMapSystem(complete, registry: registry),
+      returnsNormally,
+      reason: 'required bodies are ordered; planned and optional bodies are excluded',
+    );
+    expect(
+      () => validateMapSystem(
+        findSpaceSystem('en-fr-u-y-system')!,
+        registry: registry,
+      ),
+      returnsNormally,
+      reason: 'the authored initial system has its required live body ordered',
     );
   });
 }

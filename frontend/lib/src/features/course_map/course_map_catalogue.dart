@@ -137,6 +137,10 @@ void validateMapSystem(
     }
     return;
   }
+  if (system.bodies.isEmpty) {
+    throw FormatException(
+        _detail(systemId, 'a live system must have at least one body.'));
+  }
 
   final bodies = system.bodies;
   final bodyById = <String, MapBodyDefinition>{};
@@ -290,6 +294,12 @@ void validateMapSystem(
     if (body.planned) {
       throw FormatException(
           _detail(systemId, 'main order includes planned body "$id".'));
+    }
+  }
+  for (final body in bodies) {
+    if (!body.planned && !body.optional && !ordered.contains(body.id)) {
+      throw FormatException(_detail(
+          systemId, 'required live body "${body.id}" is missing from main order.'));
     }
   }
 }
