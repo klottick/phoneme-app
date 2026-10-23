@@ -15,9 +15,10 @@ This is spelling practice, not an assessment, mastery signal, qualified French l
 the whole `en-fr-connect-spellings` curriculum node is ready. The general find-in-context lesson and checkpoint remain
 planned. This U/Y-specific demo does not promote global coverage, authored curriculum chains, or any other sound.
 
-The first answer to each item in a run remains separately visible from feedback-assisted retries. The saved practice
-policy remains 80%. Only a qualifying, acknowledged Finish command in this activity may record completion. Review,
-inspection, restore, and lesson entry create no completion credit.
+The first answer to each item in a practice run remains separately visible from feedback-assisted retries. The saved
+practice policy remains 80%. Only a qualifying, acknowledged Finish command for a practice-mode run may record
+completion. Practice mistake review can improve that practice score; review-only work, inspection, restore, and lesson
+entry create no completion credit.
 
 ## Existing foundations and explicit non-reuse
 
@@ -112,7 +113,9 @@ Use the existing shared reference-audio service and alpha recording policy. Keep
 
 All ten references are covered word recordings in the pending candidate set. A covered-recording failure shows
 Retry/unavailable only and never substitutes device speech. Failed, cancelled, superseded, or stale playback grants no
-answer, heard mark, unlocked choice, or progress. Replay requires a fresh successful grant.
+answer, heard mark, unlocked choice, or progress. Initiating replay first retires any existing ready-to-answer grant;
+only successful completion of that still-current replay creates a replacement grant. Cancellation, failure, or stale
+completion cannot leave the old grant usable. Restoring saved answer feedback does not require replay.
 
 Each grant is bound to current owner/auth generation, course, spelling family, activity/revision, run generation,
 round, item, audio reference, and UI/prompt epoch; it is single-use for that answer. Stop, cancel, route exit,
@@ -145,25 +148,32 @@ shows saved feedback without replay or a new answer for that round. Corrupt, mis
 content fails closed and never reconstructs a reveal.
 
 Each first-pass item accepts one answer in its round. A spelling-owned checkpoint wraps the shared session with an
-immutable `firstAttemptAnswers` map. It is empty or equals the submitted first-pass prefix in round one, then contains
-exactly one Boolean for every item once review starts; review cannot mutate it. Restore validates this relation plus
-session reachability, queue/order, revision, item IDs, saved policy, phase, round, cursor, and submissions. Use a new
-spelling checkpoint format; leave old discovery/comparison/sentence bytes and decoders unchanged.
+immutable `firstAttemptAnswers` map. In round one its keys equal exactly the durable submitted first-pass prefix, in
+authored order: the map is empty iff that prefix is empty, and each Boolean equals that item's durable first answer.
+After the first pass it contains exactly one outcome for all ten items and never changes through review, retention, or
+restore. Check these outcomes against retained matching answer attempts/receipts where available; never reconstruct
+them from mutable `latestAnswers`. Restore also validates session reachability, queue/order, revision, item IDs, saved
+policy, phase, round, cursor, and submissions. Use a new spelling checkpoint format; leave old
+discovery/comparison/sentence bytes and decoders unchanged.
 
-The first-attempt score counts immutable first-pass outcomes. Practice score counts latest outcomes after all ten first
-answers and at later debriefs. Display both; retries can improve practice score but never first score. “First attempt in
-this run” means only the first answer to that item in this run; it never claims globally unseen, unexposed, or
-unassisted content. Review retries need fresh playback and are conservatively recorded as repeat-in-run,
-post-debrief, feedback-assisted (answer-revealed and explanation-visible flags).
+The first-attempt score counts immutable first-pass outcomes. A normal practice run's score counts its latest outcomes
+after all ten first answers and at later debriefs. Display both; in-mode mistake retries can improve that practice score
+but never the first score. “First attempt in this run” means only the first answer to that item in that practice run; it
+never claims globally unseen, unexposed, or unassisted content. Review retries need fresh playback and are
+conservatively recorded as repeat-in-run, post-debrief, feedback-assisted (answer-revealed and explanation-visible
+flags). Review-only runs preserve the carried-forward practice first-attempt result; their retries do not rewrite that
+result or the earlier practice score.
 
 The saved default `LessonPolicy` is 80%; its exact threshold and policy revision govern resume rather than a new
 default. Bind it as `discoveryThreshold`, policy revision `1`, threshold `80` at run start and persist those values.
 Mistake review queues only currently wrong items in authored order. ACKed Finish with
 `recordCompletion: true` is valid only at debrief, with all ten latest outcomes and saved threshold met. Only that
 command writes this activity's revision-1 completion under saved policy. Review Finish uses
-`recordCompletion: false`. Entry, answer ACK, summary, inspection, provider load, restore, and review Finish do not
-write completion. A below-threshold practice run may be reviewed, left, or abandoned, but cannot finish with credit.
-The summary is practice, not assessment.
+`recordCompletion: false`. The domain transition and storage validator require review-only Finish to remain false and
+reject any new completion for a `reviewOnly` run, regardless of URL/query state. A `review=true` view of a saved
+practice debrief also cannot issue a credit-eligible Finish. Entry, answer ACK, summary, inspection, provider load,
+restore, and review Finish do not write completion. A below-threshold practice run may be reviewed, left, or
+abandoned, but cannot finish with credit. The summary is practice, not assessment.
 
 ## Learning architecture and physical schema
 
@@ -180,9 +190,22 @@ remain closed to unknown kinds. Existing storage keys, payload bytes, receipts, 
 Physical schema v2 is necessary: v1 CHECKs reject family/activity kind `spelling`, answer kind `spellingChoice`,
 evidence kind `spellingPlayback`, and option-ID value fields. V2 explicitly validates spelling shapes for scopes,
 bindings, runs (`activity_kind = spelling`), attempts, values/evidence, mistakes, summaries, completions, and exposure
-where used. Spelling runs use `run_mode = practice`; review operates in that saved run and does not create a separate
-profile/run family. V2 permits exactly `firstInRun` and `afterDebrief` spelling summary buckets. Both SQL
-constraints/triggers and typed validation reject cross-family field combinations.
+where used. Normal practice runs use `run_mode = practice`; ordinary in-mode mistake review stays practice and may
+raise its saved practice score to the 80% threshold. V2 permits both `practice` and `reviewOnly` for spelling run mode,
+and exactly `firstInRun` and `afterDebrief` spelling summary buckets. Both SQL constraints/triggers and typed
+validation reject cross-family field combinations.
+
+`review=true` is inspection-only on route entry: it may read an existing complete-first-pass practice debrief or a
+saved review-only state. Missing or incomplete-first-pass state shows unavailable/recovery guidance or an explicit
+Continue practice link; it does not auto-start a run, create a first pass, answer, or issue a review command. Opening,
+rendering, or inspecting state is read-only. From a saved practice debrief with mistakes, only an explicit learner
+`Start review-only` action dispatches a saved start command. That command starts a new generation of this same
+`en-fr-u-y-spelling` activity in the same spelling family, with `run_mode = reviewOnly` and the saved policy. It carries
+forward the immutable practice `firstAttemptAnswers`, preserves historical practice attempts and existing completion,
+and is not a second profile. No missed items means a saved read-only debrief, not an automatic review run. Returning to
+the normal URL reloads the persisted `reviewOnly` mode; stripping the query cannot convert it into practice or enable
+credit. Only a separate explicit new practice-start command/generation may begin a future credit-eligible practice run.
+Review-only outcomes remain separate from the prior practice score and cannot create completion.
 
 The attempt uses `answer_kind = spellingChoice`, spelling skill, practice origin, pending content state, and
 selected/expected option IDs. First-pass attempts use `firstInRun`; retries use `repeatInRun` and the post-debrief
@@ -197,19 +220,22 @@ Bind via scoped attempt plus activity, run, round, item, revision, reference ID,
 Cancelled/failed evidence cannot authorize an answer. Scope and foreign keys bind owner/course/family; triggers require
 this shape and reject comparison/sentence evidence.
 
-Mistakes and summaries are spelling-family aggregates, never course/comparison aggregates. Mistake identity is
-activity/item/target/revision. Summary identity is activity/item/target/revision/bucket; store target only in the
-existing checked `sound` column and require spelling skill. Add/validate explicit unique spelling keys for mistakes
-`(scope, activity, item, target, revision)` and summaries `(scope, activity, item, target, revision, bucket)`. Preserve
-separate `firstInRun` and `afterDebrief` buckets. Completion uses this activity, revision, and saved policy identity.
+Mistakes and summaries are spelling-family aggregates, never course/comparison aggregates. In
+`learning_mistakes`, target identity is in the existing `target_sound` column; mistake identity is
+activity/item/`target_sound`/revision. In `learning_summaries`, target identity is in the existing `sound` column (not a
+`target_sound` column); summary identity is activity/item/`sound`/revision/bucket, with spelling skill required. Add or
+validate explicit unique spelling keys for mistakes `(scope, activity, item, target_sound, revision)` and summaries
+`(scope, activity, item, sound, revision, bucket)`. Preserve separate `firstInRun` and `afterDebrief` buckets.
+Completion uses this activity, revision, and saved policy identity.
 Any exposure is spelling-family-scoped; it cannot rewrite discovery progress. Run-local scores remain in spelling
 checkpoint/summary state; do not write this demo to `learning_best_scores` or the supported cloud outbox.
 
 ## V1 → V2 migration and downgrade contract
 
 This is a real physical migration, not a profile-version change disguised as a schema no-op. New empty DBs are exact
-v2. Reject version-zero DBs containing non-SQLite schema objects, unknown/future versions, altered v1, or v1 failing
-the frozen structural contract, without reset, repair, or deletion.
+v2. Reject version-zero DBs containing any non-internal schema object (table, index, trigger, or view whose name is not
+`sqlite_*`), unknown/future versions, altered v1, or v1 failing the frozen structural contract, without reset, repair,
+or deletion.
 
 Keep a frozen exact-v1 oracle independent of current v2 definitions. Before migration validate v1 table names/DDL,
 columns, types/nullability, CHECKs, explicit indexes, triggers, foreign-key signatures/actions, and integrity. Do not
@@ -221,18 +247,23 @@ value, canonical command JSON, checkpoint JSON, latest/historical receipt, and o
 re-encode, skip, repair, or change legacy family payloads/versions; their adapters retain fail-closed validation. A
 successful physical rebuild changes DB-file bytes; no whole-file identity is promised.
 
-The rebuild/copy, required constraints/indexes/triggers, metadata, and `PRAGMA user_version` transition are one
-recoverable atomic migration under shared open/connection and SQLite write fencing. Dispatch no family command against
-a partial schema. Foreign-key pragmas cannot be toggled within a transaction: manage required connection setup
-outside it, preserve FK actions, restore enforcement on every path, and run production schema/FK checks before
-accepting the connection; verify enforcement is on and `foreign_key_check` is empty. Select exact Drift API/operation
-order only after checking the installed dependency and
-native/web paths; this spec gives no unverified API syntax or copy/paste SQL.
+The migration has two failure boundaries. **Before commit**, rebuilding/copying rows, changing DDL, creating indexes and
+triggers, transitioning `PRAGMA user_version`, and strict target structural/data/foreign-key validation all belong to
+one recoverable atomic upgrade under shared open/connection and SQLite write fencing. Validate copied row identities,
+values, order, canonical/checkpoint bytes, target schema, and `PRAGMA foreign_key_check` before commit; the foreign-key
+check is available inside the transaction even when enforcement is temporarily off. Any pre-commit failure rolls back
+to v1, retaining its logical rows, DDL, user version, and JSON bytes. No family command may observe a partial schema.
 
-Inject failures across preflight, rebuild/copy, constraints, indexes, triggers, validation, and version change. Rollback
-must retain original logical rows, DDL, user version, canonical/checkpoint bytes (not necessarily whole-file bytes).
-Test fresh-v2 create, v1 migrate/reopen, every rejection/failure path, and concurrent tab/connection opens/writes: no
-partial state, duplicate command, reset, second DB, or second writer.
+Foreign-key connection configuration occurs outside the transaction and is restored in a `finally` path as applicable.
+**After commit**, verify foreign-key enforcement is on before publishing a usable connection. If restoration,
+verification, or connection publication fails after commit, fail closed and close the unsafe handle while preserving
+committed v2. Do not promise rollback from v2 to v1 or reset the database. Retry must reopen and validate v2 rather than
+rerunning the v1 migration. Inject failures in both phases; verify pre-commit rollback and post-commit v2 preservation,
+safe close, and v2 reopen. Test fresh-v2 create, v1 migrate/reopen, every rejection path, and concurrent
+tab/connection opens/writes: no partial state, duplicate command, reset, second DB, or second writer.
+
+Select exact Drift API/operation order only after checking the installed dependency and native/web paths; this spec
+gives no unverified API syntax or copy/paste SQL.
 
 Open/migration failure can make all shared-DB families unavailable. Preserve data and explicit retry/reopen; never
 report empty state or promise unrelated families are available while their DB cannot open. With valid v2, spelling
@@ -244,12 +275,14 @@ data-preserving recovery.
 
 ## Map, routes, and progress ownership
 
-Add `MapTarget.dedicatedSpelling`. Keep the existing `spelling` body ID, planet role, title `Sound → spelling`, and
-third position; make it a live required main destination bound to `en-fr-u-y-spelling`. Set main order exactly to
-`discovery`, `comparison`, `spelling`. This adds the third available main lesson and corresponding honest counts and
-recommendation. Show the exact practice disclosure as the body's authored explanation. “All available main lessons
-complete” appears only when all three are known available, current, and
-complete; unknown, unavailable, or stale state is not completion.
+Add `MapTarget.dedicatedSpelling`. Keep the existing `spelling` body ID, planet role, title `Sound → spelling`, body
+list order, normalized coordinates, orbit radius, and system IDs unchanged; the body already follows `context` in the
+body list. “Third” means third in `mainOrder` only: set the order exactly to `discovery`, `comparison`, `spelling` and
+bind the live required main destination to `en-fr-u-y-spelling`. Show the exact practice disclosure as the body's
+authored explanation. When all three main destinations are known available, current, and complete, preserve the exact
+existing completion message `All currently available lessons complete.` and show the count
+`Available main lessons: 3/3 available complete`. Keep unknown/unavailable guards; do not rename the old label or count
+format.
 
 Spelling recommendation, run, review, and completion read only spelling family state. No discovery/comparison
 prerequisite or credit transfer. Context and checkpoint remain planned; the generic curriculum spelling node and
@@ -259,10 +292,12 @@ legacy lessons are not remapped.
 Only lesson route: `/course-spelling/en-fr-u-y-spelling`; review:
 `/course-spelling/en-fr-u-y-spelling?review=true`. One `review=false` is valid. Reject unknown activity, unknown query
 key, duplicate key, or invalid value before store, SQLite, or audio acquisition. Add no item deep link. Map
-start/resume/review bind only to this route, never generic `open`. `review=true` requires an existing spelling
-checkpoint and never initializes a run or first pass. It restores saved feedback, resumes a saved review queue, or starts
-the saved debrief's mistake-only queue; retries need fresh playback and cannot record completion. Preserve existing
-routes/labels, motion/pause,
+start/resume/review bind only to this route, never generic `open`. `review=true` reads only an existing complete-first-pass
+practice debrief or saved review-only state; it never initializes a run or first pass. Missing/incomplete state shows
+unavailable/recovery or an explicit Continue practice link. It restores saved feedback or saved queue state without
+mutating on route entry/render/inspection. Starting review-only work requires the explicit learner action and saved
+command above. Review-route Finish is false/no-credit even when viewing an old practice debrief; storage/domain rules,
+not query state alone, enforce persisted `reviewOnly` credit denial. Preserve existing routes/labels, motion/pause,
 theme, 48-pixel minimum targets, keyboard navigation, narrow layouts, large text, and saved preferences.
 
 ## Acceptance boundaries for later work
@@ -277,13 +312,20 @@ These are future requirements, not evidence any test or release gate has passed.
    injected-failure rollback, concurrent write fencing, and FK/action preservation.
 3. Typed tests cover exact answer/value/evidence shapes, owner/family isolation, scoped/stale/cancelled playback,
    feedback hidden until save, wrong/correct answers, frozen retry, held/lost/duplicate ACKs, restore, stable first
-   score, saved 80%, qualifying ACKed completion, and review Finish without completion. Valid-v2 content corruption is
-   local; DB migration failure may block all families without losing data.
-4. Router tests reject invalid forms before store/SQLite/audio acquisition. Map tests assert the three ordered mains,
+   score, saved 80%, qualifying ACKed completion, and review Finish without completion. Verify persisted `reviewOnly`
+   cannot create completion after query removal and does not alter prior practice results. Valid-v2 content corruption
+   is local; DB migration failure may block all families without losing data.
+4. Router tests reject invalid forms before store/SQLite/audio acquisition; review-route entry/render/inspection is
+   read-only, and only the explicit learner action starts review-only work. Map tests assert the three ordered mains,
    third-body counts/recommendation, unknown/unavailable safety, independent progress, and no inspection credit.
-5. Preserve route/storage/canonical-byte/regression goldens. Run ordinary known test roots and identify the two existing
-   excluded retention roots (`course_learning_retention_test.dart`, `learning_sql_retention_test.dart`) separately;
-   exclusions are not passing results. Run analysis and default JavaScript build, not Wasm. Audio checks are
+5. The ordinary test set is the explicitly enumerated top-level `*_test.dart` files in `frontend/test/unit/` and
+   `frontend/test/widget/`. Exclude exactly the files
+   `frontend/test/unit/course_learning_retention_test.dart` and
+   `frontend/test/unit/learning_sql_retention_test.dart`; these are files, not excluded test roots, and exclusions are
+   not passing results. Do not substitute a bare recursive `flutter test`, use recursive discovery as the scope
+   definition, or drop newly added test files from the enumeration. These ordinary tests are additional to, not a
+   substitute for, the separately required native and web migration/integration gates. Preserve route/storage/
+   canonical-byte/regression goldens. Run analysis and default JavaScript build, not Wasm. Audio checks are
    technical/metadata only; automated playback uses fake audio only.
 6. Seeded-v1 real web-SQL migration plus new answer/reopen is a separate web gate. Full production actual-URL reload is
    a separate release gate; neither is implied by native SQL, fake audio, a normal web build, or this document. Real
