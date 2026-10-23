@@ -47,11 +47,11 @@ class CourseMapCanvas extends StatelessWidget {
           ? _authoredMarkerRect(state, current, width, height)
           : placements[current];
       return SizedBox(
-        key: fallback ? const ValueKey('map-list-fallback') : null,
         height: height,
         child: CourseMapMotion(
           anchor: currentRect?.center,
           child: Stack(
+            key: fallback ? const ValueKey('map-list-fallback') : null,
             clipBehavior: Clip.none,
             fit: StackFit.expand,
             children: [

@@ -27,7 +27,60 @@ class CourseSystemView extends StatefulWidget {
 }
 
 class _CourseSystemViewState extends State<CourseSystemView> {
+  final ScrollController _scrollController = ScrollController();
+  final GlobalKey _scrollViewportKey = GlobalKey();
+  final GlobalKey _mapCanvasKey = GlobalKey();
   bool _showDestinations = false;
+  bool _mapVisible = false;
+  bool _visibilityUpdateScheduled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_scheduleVisibilityUpdate);
+  }
+
+  @override
+  void didUpdateWidget(covariant CourseSystemView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _scheduleVisibilityUpdate();
+  }
+
+  @override
+  void dispose() {
+    _scrollController
+      ..removeListener(_scheduleVisibilityUpdate)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _scheduleVisibilityUpdate() {
+    if (_visibilityUpdateScheduled) return;
+    _visibilityUpdateScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _visibilityUpdateScheduled = false;
+      if (!mounted) return;
+      final mapRenderObject = _mapCanvasKey.currentContext?.findRenderObject();
+      final viewportRenderObject = _scrollViewportKey.currentContext
+          ?.findRenderObject();
+      final visible =
+          mapRenderObject is RenderBox &&
+          mapRenderObject.hasSize &&
+          viewportRenderObject is RenderBox &&
+          viewportRenderObject.hasSize &&
+          _intersectsVisibleViewport(mapRenderObject, viewportRenderObject);
+      if (_mapVisible != visible) setState(() => _mapVisible = visible);
+    });
+  }
+
+  bool _intersectsVisibleViewport(RenderBox map, RenderBox viewport) {
+    final mapRect = map.localToGlobal(Offset.zero) & map.size;
+    final viewportRect = viewport.localToGlobal(Offset.zero) & viewport.size;
+    final screenRect = Offset.zero & MediaQuery.sizeOf(context);
+    final visibleRect = mapRect.intersect(viewportRect).intersect(screenRect);
+    return visibleRect.width > 0 && visibleRect.height > 0;
+  }
+
   MapBodyState? get _selected {
     for (final body in widget.state.bodies) {
       if (body.definition.id == widget.selectedBodyId) return body;
@@ -39,6 +92,7 @@ class _CourseSystemViewState extends State<CourseSystemView> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
+        _scheduleVisibilityUpdate();
         final selected = _selected;
         MapBodyState? currentBody;
         for (final body in widget.state.bodies) {
@@ -105,11 +159,15 @@ class _CourseSystemViewState extends State<CourseSystemView> {
 
         Widget mapCanvas() => Padding(
           padding: const EdgeInsets.all(8),
-          child: CourseMapCanvas(
-            state: widget.state,
-            selectedBodyId: widget.selectedBodyId,
-            onInspect: widget.onInspect,
-            focusOrderOffset: 0,
+          child: TickerMode(
+            enabled: _mapVisible,
+            child: CourseMapCanvas(
+              key: _mapCanvasKey,
+              state: widget.state,
+              selectedBodyId: widget.selectedBodyId,
+              onInspect: widget.onInspect,
+              focusOrderOffset: 0,
+            ),
           ),
         );
 
@@ -145,45 +203,55 @@ class _CourseSystemViewState extends State<CourseSystemView> {
 
         return FocusTraversalGroup(
           policy: OrderedTraversalPolicy(),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 18, 16, 4),
-                  child: Text(
-                    'SOUND SYSTEM',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      letterSpacing: 2,
+          child: NotificationListener<ScrollMetricsNotification>(
+            onNotification: (_) {
+              _scheduleVisibilityUpdate();
+              return false;
+            },
+            child: SingleChildScrollView(
+              key: _scrollViewportKey,
+              controller: _scrollController,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 18, 16, 4),
+                    child: Text(
+                      'SOUND SYSTEM',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        letterSpacing: 2,
+                      ),
                     ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(
-                    findSpaceSystem(widget.state.systemId)?.title ??
-                        'Sound system',
-                    style: Theme.of(context).textTheme.titleLarge,
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      findSpaceSystem(widget.state.systemId)?.title ??
+                          'Sound system',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
                   ),
-                ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: Text('Explore the destinations in this sound system.'),
-                ),
-                if (fallback) currentLocationCue(),
-                if (fallback && selected != null) selectedPanel(),
-                if (fallback) destinationList(hasSelectedAction ? 1 : 0),
-                if (!fallback) mapCanvas(),
-                if (!fallback) currentLocationCue(),
-                if (!fallback && selected != null) selectedPanel(),
-                if (!fallback) disclosure(),
-                if (!fallback && _showDestinations)
-                  destinationList(disclosureOrder + 1),
-                if (fallback) mapCanvas(),
-                const SizedBox(height: 20),
-                if (widget.footer != null) widget.footer!,
-              ],
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      'Explore the destinations in this sound system.',
+                    ),
+                  ),
+                  if (fallback) currentLocationCue(),
+                  if (fallback && selected != null) selectedPanel(),
+                  if (fallback) destinationList(hasSelectedAction ? 1 : 0),
+                  if (!fallback) mapCanvas(),
+                  if (!fallback) currentLocationCue(),
+                  if (!fallback && selected != null) selectedPanel(),
+                  if (!fallback) disclosure(),
+                  if (!fallback && _showDestinations)
+                    destinationList(disclosureOrder + 1),
+                  if (fallback) mapCanvas(),
+                  const SizedBox(height: 20),
+                  if (widget.footer != null) widget.footer!,
+                ],
+              ),
             ),
           ),
         );

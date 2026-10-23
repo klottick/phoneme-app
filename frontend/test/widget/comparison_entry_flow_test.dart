@@ -891,7 +891,8 @@ void main() {
     await tester.pumpAndSettle();
     await _inspectMixedComparison(tester);
     expect(find.text('Review comparison'), findsOneWidget);
-    expect(find.text('Practise again'), findsOneWidget);
+    expect(find.text('Open comparison practice'), findsOneWidget);
+    expect(find.text('Practise again'), findsNothing);
   });
 
   testWidgets('home_continue_resumes_active_draft_without_mutation', (
@@ -952,7 +953,7 @@ void main() {
     expect(fixture.store.commands.length, commandsBefore);
   });
 
-  testWidgets('home_review_and_practise_again_preserve_completed_debrief', (
+  testWidgets('home_review_and_practice_doorway_preserve_completed_debrief', (
     tester,
   ) async {
     disableMapMotion(tester);
@@ -982,7 +983,8 @@ void main() {
     await tester.pump();
     await _inspectMixedComparison(tester);
     expect(find.text('Review comparison'), findsOneWidget);
-    expect(find.text('Practise again'), findsOneWidget);
+    expect(find.text('Open comparison practice'), findsOneWidget);
+    expect(find.text('Practise again'), findsNothing);
     late GoRouter router;
 
     var loadAck = await _runRealAsync(tester, () async => Completer<void>());
@@ -1024,11 +1026,11 @@ void main() {
     await tester.pumpAndSettle();
     loadAck = await _runRealAsync(tester, () async => Completer<void>());
     fixture.store.nextLoadAck = loadAck;
-    final practiseAgainLoadCalls = fixture.store.loadCalls;
-    await tester.ensureVisible(find.text('Practise again'));
-    await tester.tap(find.text('Practise again'));
+    final practiceDoorwayLoadCalls = fixture.store.loadCalls;
+    await tester.ensureVisible(find.text('Open comparison practice'));
+    await tester.tap(find.text('Open comparison practice'));
     await tester.pump();
-    await _waitForLoadCall(tester, fixture.store, practiseAgainLoadCalls + 1);
+    await _waitForLoadCall(tester, fixture.store, practiceDoorwayLoadCalls + 1);
     await tester.runAsync(() => loadAck.future);
     await tester.pump();
     expect(find.byType(ComparisonLessonScreen), findsOneWidget);
@@ -1054,16 +1056,38 @@ void main() {
     expect(
       fixture.store.commands.length,
       commandsBefore,
-      reason: 'Home Practise again must preserve the saved debrief',
+      reason: 'the map doorway must preserve the saved debrief without a write',
     );
-    expect(
-      find.descendant(
-        of: find.byType(ComparisonLessonScreen),
-        matching: find.text('Practise again'),
-      ),
-      findsOneWidget,
-      reason: 'new run remains an explicit saved-debrief action',
+    final screenPractiseAgain = find.descendant(
+      of: find.byType(ComparisonLessonScreen),
+      matching: find.text('Practise again'),
     );
+    expect(screenPractiseAgain, findsOneWidget);
+
+    final restartAck = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
+    fixture.store.nextSubmitAck = restartAck;
+    await tester.ensureVisible(screenPractiseAgain);
+    await tester.tap(screenPractiseAgain);
+    await tester.pump();
+    await _waitForCommandCount(tester, fixture.store, commandsBefore + 1);
+    expect(fixture.store.commands.last.action, isA<StartComparisonRun>());
+    await tester.runAsync(() => restartAck.future);
+    await tester.pump();
+
+    final restarted = await _runRealAsync(tester, fixture.store.snapshot);
+    final restartedSession = LessonSectionSession.fromJson(
+      Map<String, dynamic>.from(restarted.checkpoint!.sessionJson),
+      itemIds: fixture.catalogue.exercises
+          .map((exercise) => exercise.id)
+          .toList(),
+      contentRevision: fixture.catalogue.contentRevision,
+    );
+    expect(restartedSession.phase, LessonSectionPhase.exercise);
+    expect(restarted.completions, hasLength(1));
+    expect(fixture.store.commands.length, commandsBefore + 1);
   });
 
   testWidgets('comparison_and_discovery_load_failures_are_independent', (
