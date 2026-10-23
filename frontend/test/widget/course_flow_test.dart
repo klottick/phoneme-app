@@ -17,6 +17,7 @@ import 'package:linguist/src/core/course/storage/learning_database.dart'
     show LearningDatabaseHandle;
 import 'package:linguist/src/features/course/course_lesson_screen.dart';
 import '../support/course_learning_widget_store.dart';
+import '../support/map_motion_test_support.dart';
 import '../support/sqlite_learning_test_harness.dart';
 
 class TestFrenchAudio implements CourseAudio {
@@ -87,6 +88,7 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
   testWidgets('onboard into a directional course and open silent arcade',
       (tester) async {
+    disableMapMotion(tester);
     final tempDir = (await tester.runAsync(
       () => Directory.systemTemp.createTemp('course-flow-sqlite-'),
     ))!;
@@ -108,12 +110,8 @@ void main() {
     expect(find.text('I speak English'), findsOneWidget);
     await tester.tap(find.text('Start English → French'));
     await tester.pumpAndSettle();
-    expect(find.text('French for English speakers'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('Play for a minute'), 250,
-        scrollable: find.byType(Scrollable).first);
-    await tester.pumpAndSettle();
-    expect(find.text('Play for a minute').hitTestable(), findsOneWidget);
-    await tester.tap(find.text('Play for a minute'));
+    expect(find.text('All destinations'), findsOneWidget);
+    await tester.tap(find.text('Games').last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Word Match'));
     await tester.pumpAndSettle();

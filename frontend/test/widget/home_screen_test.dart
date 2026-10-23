@@ -3,12 +3,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:linguist/src/features/home/home_screen.dart';
+import '../support/map_motion_test_support.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('HomeScreen', () {
     testWidgets('renders without crashing', (tester) async {
+      disableMapMotion(tester);
       await tester.pumpWidget(
         const ProviderScope(
           child: MaterialApp(home: HomeScreen()),
@@ -20,6 +22,7 @@ void main() {
     });
 
     testWidgets('displays the app title', (tester) async {
+      disableMapMotion(tester);
       await tester.pumpWidget(
         const ProviderScope(
           child: MaterialApp(home: HomeScreen()),
