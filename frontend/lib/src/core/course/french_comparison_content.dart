@@ -2,7 +2,7 @@ import 'comparison_content.dart';
 import 'course_exercise.dart';
 import 'french_course.dart';
 
-ComparisonCatalogue loadFrenchComparisonCatalogue() {
+Map<String, List<String>> _frenchWordReferencePhonemes() {
   final referencePhonemes = <String, List<String>>{};
   for (final reference in frenchCurriculum.audioReferences) {
     if (!reference.id.startsWith('fr-word-')) continue;
@@ -11,6 +11,11 @@ ComparisonCatalogue loadFrenchComparisonCatalogue() {
     final phonemes = frenchCitationPhonemes[wordText];
     if (phonemes != null) referencePhonemes[reference.id] = phonemes;
   }
+  return referencePhonemes;
+}
+
+ComparisonCatalogue loadFrenchComparisonCatalogue() {
+  final referencePhonemes = _frenchWordReferencePhonemes();
 
   const rows = <({
     String id,
@@ -179,14 +184,7 @@ ComparisonCatalogue loadFrenchComparisonCatalogue() {
   );
 }
 ComparisonCatalogue loadFrenchUyDemoComparisonCatalogue() {
-  final referencePhonemes = <String, List<String>>{};
-  for (final reference in frenchCurriculum.audioReferences) {
-    if (!reference.id.startsWith('fr-word-')) continue;
-    final wordText = reference.id.substring('fr-word-'.length);
-    if (reference.spokenText != wordText) continue;
-    final phonemes = frenchCitationPhonemes[wordText];
-    if (phonemes != null) referencePhonemes[reference.id] = phonemes;
-  }
+  final referencePhonemes = _frenchWordReferencePhonemes();
 
   const rows =
       <
