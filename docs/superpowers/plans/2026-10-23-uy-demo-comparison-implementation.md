@@ -1,6 +1,6 @@
 # Dedicated /u/–/y/ Comparison Planet Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan one task at a time. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan one task at a time. The current execution choice is sequential GPT-6 Luna implementation workers with controller review; do not begin until the user separately approves this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn the existing planned `comparison` body into a dedicated, resumable best-effort `/u/`–`/y/` practice destination without changing mixed comparison or discovery progress.
 
@@ -31,7 +31,7 @@
 2. A pre-upgrade mixed profile with a corrupt or unknown comparison-family row is not treated as empty, skipped or rewritten — Task 3 snapshots normalized rows/canonical bytes around the failed read and proves other family scopes remain loadable.
 3. A registered-but-unavailable dedicated catalogue differs from both an unknown activity and an empty profile with a persisted dedicated binding — Tasks 1, 3 and 5 assert local unavailability on empty state, fail-closed family handling for an unvalidatable persisted binding, and unchanged rows.
 4. Owner changes during B playback or frozen-save retry cannot answer/commit with the new owner or retain A/B grants — Task 4's controlled-audio test asserts no stale submit and unchanged owner-scoped rows.
-5. Debrief, route review and map inspection do not transfer completion or move the learner — Tasks 4–5 assert hidden active content, saved authored notes only at debrief, review Finish without new completion, inspection without navigation/write, and no sibling/discovery credit.
+5. Debrief, route review and map inspection do not transfer completion or move the learner — Tasks 4–5 assert hidden active content, saved authored notes only at debrief, review Finish without new completion, inspection without navigation/write, dedicated start/resume/review routing, unchanged mixed open/review routes, and no sibling/discovery credit.
 
 ---
 
@@ -57,8 +57,9 @@ Do not edit `learning_database.dart`, generated schema, audio manifests/assets, 
 - Task 2 preserves `ComparisonLearningStateValidator.validate(state, catalogue)` for old mixed callers and adds `validateRegistered(state, registry)`. `ComparisonLearningCommandCodec` preserves catalogue-based decode methods and adds `decodeRegisteredCanonicalCommand(raw, {required scope, required registry})` and `decodeRegisteredLegacyCanonicalCommand(raw, {required scope, required registry})`.
 - Task 3 preserves `comparisonCatalogueProvider` as the existing mixed `Provider<ComparisonCatalogue>`; adds `uyDemoComparisonCatalogueProvider` and `comparisonCatalogueRegistryProvider`. `comparisonLearningStoreProvider` constructs exactly one `SqliteComparisonLearningRepository` with the registry-backed transition engine; it does not open SQLite until load/submit.
 - Task 4 preserves `ComparisonLessonScreen({key, required activityId, review = false, policy, pairId, catalogueLoader})`; its default mixed provider behavior and legacy route remain compatible. Registry lookup occurs before store acquisition; a registered unavailable activity displays local retry, unknown IDs never fall back to mixed.
-- Task 5 adds `MapTarget.dedicatedComparison`; `MapBodyDefinition.activityId` is exactly `uyDemoComparisonActivityId`. The new target reads only `state.slots[activityId]`, that registration's catalogue and its current-revision acknowledged completion.
-- Task 5 preserves `projectCourseMap`'s existing named arguments and adds optional `AsyncValue<ComparisonCatalogueRegistry>? comparisonCatalogueRegistry`; omitted legacy callers retain mixed projection while the dedicated body is unavailable, never fabricated as available. `courseMapLocation(MapTarget target, MapLaunch launch)` keeps its signature and adds a fixed dedicated-route branch. `ComparisonProgressSummary.fromState({required state, required catalogue})` keeps its signature and derives activity identity from `catalogue.activityId`; mixed labels stay byte-for-byte the same.
+- Task 3 preserves legacy `ComparisonLearningSqlTestHarness` calls while using the exact constructor `ComparisonLearningSqlTestHarness({ComparisonCatalogue? catalogue, ComparisonCatalogueRegistry? registry, required LearningAuthScope Function() currentAuth, required LearningOwner Function() backendOwner})`. It rejects both/neither `catalogue` and `registry` with `ArgumentError`, stores the resolved immutable `registry` as the authoritative field, and keeps `ComparisonCatalogue get catalogue => registry.requireAvailable(comparisonActivityId)` as the legacy mixed-catalogue getter. Legacy tests continue passing only `catalogue:`; registry tests pass only `registry:`. `createRepository` always constructs the transition engine from the resolved registry.
+- Task 5 adds `MapTarget.dedicatedComparison`; `MapBodyDefinition.activityId` is exactly `uyDemoComparisonActivityId`, and map-catalogue validation requires the dedicated target to be a planet. The new target reads only `state.slots[activityId]`, that registration's catalogue and its current-revision acknowledged completion. Its not-started/resumable/completed states produce `MapLaunch.start`/`resume`/`review`; it never produces `.open`.
+- Task 5 preserves `projectCourseMap`'s existing named arguments and adds optional `AsyncValue<ComparisonCatalogueRegistry>? comparisonCatalogueRegistry`; omitted legacy callers retain mixed projection while the dedicated body is unavailable, never fabricated as available. `courseMapLocation(MapTarget target, MapLaunch launch)` keeps its signature: dedicated `.start` and `.resume` map to `/course-comparison/en-fr-u-y-comparison`, dedicated `.review` maps to `/course-comparison/en-fr-u-y-comparison?review=true`, and dedicated `.open` has no route. Existing mixed `.open` and `.review` routes remain unchanged. `ComparisonProgressSummary.fromState({required state, required catalogue})` keeps its signature and derives activity identity from `catalogue.activityId`; mixed labels stay byte-for-byte the same.
 
 ## Task 1: Authored catalogue and local registry contract
 
@@ -70,7 +71,7 @@ Do not edit `learning_database.dart`, generated schema, audio manifests/assets, 
 - Consumes: existing `ComparisonCatalogue.fromDrafts`, citation sequence loader and the exact inventory in approved spec §3.
 - Produces: the two IDs/loader and immutable registration/registry API in Shared interfaces. Do not alter `comparisonActivityId` or `loadFrenchComparisonCatalogue()`.
 
-- [ ] **Step 1: Write red inventory/registry tests.** In `comparison_content_test.dart`, add `uy_demo_catalogue_matches_spec_inventory_and_validates_ordinals`; compare all ten ordered `(pairId, A reference/target, B reference/target, relation, note)` tuples to spec §3 table, and assert both ordinals are `1`, revision `1`, purpose `practice`, review `pending`, ten unique IDs and 5/5 balance. Add `uy_demo_invalid_reference_ordinal_key_count_or_balance_rejects_whole_catalogue` for each invalid mutation. In the new registry test, assert immutable lookup, duplicate rejection, and distinct unknown/unavailable results.
+- [ ] **Step 1: Write red inventory/registry tests.** In `comparison_content_test.dart`, add `uy_demo_catalogue_matches_spec_inventory_and_validates_ordinals`; compare all ten ordered `(pairId, A reference/target, B reference/target, relation, note)` tuples to spec §3 table, and assert both ordinals are `1`, revision `1`, purpose `practice`, review `pending`, ten unique IDs and 5/5 balance. Add `uy_demo_invalid_reference_ordinal_target_key_duplicate_count_or_balance_rejects_whole_catalogue` with separate mutations for unknown reference, invalid ordinal/target identity, annotation-target mismatch, invalid relation/key, duplicate ID, row count, and relation balance. In the new registry test, assert immutable lookup, duplicate rejection, and distinct unknown/unavailable results.
 
 ```dart
 expect(catalogue.exercises.map((e) => e.id),
@@ -122,7 +123,7 @@ expect(mixedStart.scope.storageKey, 'course.learning.comparison.v1.ZW4tZnI.g');
 - Consumes: Task 2 registry engine/state/validator/codecs and existing `SqliteLearningCommandCoordinator` contract, including `commandExpectedScopeRevision` and `cursorFor(state, activityId)`.
 - Produces: one `SqliteComparisonLearningRepository` over one `ComparisonLearningSqlAdapter`; `cursorFor` reads `state.slots[activityId]`, `duplicateResult` returns that slot, and writes touch only the submitted activity run.
 
-- [ ] **Step 1: Write red real-SQL tests.** Extend the existing file-backed `ComparisonLearningSqlTestHarness` with optional `registry:` while retaining required `catalogue:` legacy construction. In `comparison_learning_multi_activity_sql_test.dart`, use the real repository/SQLite handle to test `interleaved_activity_commands_keep_independent_sql_slots_and_scope_fence`, `failed_frozen_command_retries_once_and_ack_survives_reopen_for_each_activity`, `preupgrade_mixed_rows_and_canonical_bytes_load_without_rewrite`, `unknown_comparison_row_fails_closed_without_mutation`, and `unavailable_registration_empty_vs_persisted_binding`. Include two independent finishes/reviews, held receipt-insert failure, exact-command retry/duplicate ACK, owner isolation, and SQL assertions that both `learning_runs` rows coexist under the existing unique index.
+- [ ] **Step 1: Write red real-SQL tests.** Extend `ComparisonLearningSqlTestHarness` using the exact signature and exactly-one-of `catalogue:`/`registry:` contract in Shared interfaces. Keep every existing `catalogue:` call source-compatible; new multi-activity tests construct it with only `registry:`. Assert the constructor rejects both and neither inputs, and that the legacy `catalogue` getter resolves the mixed entry. In `comparison_learning_multi_activity_sql_test.dart`, use the real repository/SQLite handle to test `interleaved_activity_commands_keep_independent_sql_slots_and_scope_fence`, `failed_frozen_command_retries_once_and_ack_survives_reopen_for_each_activity`, `preupgrade_mixed_rows_and_canonical_bytes_load_without_rewrite`, `unknown_comparison_row_fails_closed_without_mutation`, and `unavailable_registration_empty_vs_persisted_binding`. Include two independent finishes/reviews, held receipt-insert failure, exact-command retry/duplicate ACK, owner isolation, and SQL assertions that both `learning_runs` rows coexist under the existing unique index.
 
 ```dart
 expect(reloaded.slots.keys, containsAll([comparisonActivityId, uyDemoComparisonActivityId]));
@@ -145,7 +146,7 @@ expect(reloaded.commitOrdinal, greaterThan(reloaded.slots[comparisonActivityId]!
 - Consumes: Task 3 `comparisonCatalogueRegistryProvider`, unchanged `ComparisonLearningStore` methods and Task 2 `state.slots[activityId]`.
 - Produces: `/course-comparison/en-fr-u-y-comparison` into the existing shared `ComparisonLessonScreen`; no new screen/session/store or route alias. Constructor and existing mixed `/course-comparison/en-fr-phoneme-comparison` and `/compare` behavior remain unchanged.
 
-- [ ] **Step 1: Write red production-router/widget tests.** Add `uy_demo_route_uses_exact_catalogue_and_rejects_unknown_or_duplicate_query_before_store`: exercise `LinguistApp`/`appRouterProvider`, assert dedicated pair IDs resolve only in the dedicated catalogue and an unknown activity, duplicated `pairId`, duplicate `review`, or foreign pair has zero store acquisition/audio requests and cannot fall through to mixed. Add `uy_demo_active_prompt_hides_authored_answers_until_saved_debrief` and `uy_demo_owner_change_during_sample_b_and_frozen_retry_has_no_stale_submit` using the existing controlled audio and file-backed SQL fixture.
+- [ ] **Step 1: Write red production-router/widget tests.** Add `uy_demo_route_uses_exact_catalogue_and_rejects_unknown_or_duplicate_query_before_store`: exercise `LinguistApp`/`appRouterProvider`, assert `?pairId=uy-demo-pair-01` and singleton `review=true|false` resolve only in the dedicated catalogue; reject an unknown activity, unknown query key, invalid `review` value, duplicated `pairId`, duplicate `review`, and foreign/mixed `?pairId=fr07b-pair-01` before store acquisition or audio request. Preserve the existing query contract: only one `review=true|false` and one `pairId` are accepted; duplicates/unknowns never fall through to mixed. Add `uy_demo_active_prompt_hides_authored_answers_until_saved_debrief` and `uy_demo_owner_change_during_sample_b_and_frozen_retry_has_no_stale_submit` using the existing controlled audio and file-backed SQL fixture.
 
 ```dart
 expect(router.state.uri.path, '/course-comparison/en-fr-u-y-comparison');
@@ -169,19 +170,71 @@ expect(audio.requests, isEmpty, reason: 'invalid route is rejected before acquis
 - Consumes: Task 1 registration IDs/lookup; Task 3 registry provider and shared SQL state; Task 4 exact comparison route. Mixed target/navigation and all old map IDs remain intact.
 - Produces: `MapTarget.dedicatedComparison`; body `comparison` is a live required planet bound to `uyDemoComparisonActivityId`; `mainOrder == ['discovery', 'comparison']`; projection uses only that activity's registration/slot/current-revision completion.
 
-- [ ] **Step 1: Write red map and browser tests.** Add exact map assertions for discovery/comparison main order, typed dedicated planet binding, unchanged mixed station, and still-planned context/spelling/checkpoint. Add projection cases for not-started/resumable/current-revision-completed, invalid new registration with empty profile versus persisted binding, family corruption leaving discovery/sentence independent, and sibling completion not affecting this planet. Browser test follows the production map -> dedicated route -> one controlled A/B answer -> reload/resume path with the real router and browser SQL; fake audio only.
+- [ ] **Step 1: Write red map and browser tests.** Add exact map assertions for discovery/comparison main order, typed dedicated planet binding, unchanged mixed station, still-planned context/spelling/checkpoint, and activity-local launch states. Assert inspection performs no navigation/write; dedicated start/resume/review map to their fixed route, while the existing mixed `.open`/`.review` mappings and query remain unchanged. Assert the dedicated target never emits `.open`. Add projection cases for not-started/resumable/current-revision-completed, invalid new registration with empty profile versus persisted binding, family corruption leaving discovery/sentence independent, and sibling completion not affecting this planet. In `uy_demo_comparison_browser_test.dart`, use the production router and real web SQL with controlled fake audio to record one A/B answer, dispose the provider container and database handle, recreate them in the same browser page/profile, and assert the dedicated checkpoint resumes and mixed state is unchanged. Keep held/failed ACK and exact retry coverage in Task 3's file-backed SQL tests and lifecycle/owner-fence coverage in Task 4's controlled widget tests; this browser test does not replace those. The browser test is an in-page provider/database reopen, not a browser/page reload; do not use real audio.
 
 ```dart
 expect(system.mainOrder, ['discovery', 'comparison']);
 expect(comparison.definition.target, MapTarget.dedicatedComparison);
 expect(comparison.definition.activityId, uyDemoComparisonActivityId);
+expect(comparison.launch, MapLaunch.start); // not-started; resume/review are also asserted
+expect(courseMapLocation(MapTarget.dedicatedComparison, MapLaunch.start),
+    '/course-comparison/en-fr-u-y-comparison');
+expect(courseMapLocation(MapTarget.dedicatedComparison, MapLaunch.resume),
+    '/course-comparison/en-fr-u-y-comparison');
+expect(courseMapLocation(MapTarget.dedicatedComparison, MapLaunch.review),
+    '/course-comparison/en-fr-u-y-comparison?review=true');
+expect(courseMapLocation(MapTarget.dedicatedComparison, MapLaunch.open), isNull);
 expect(mixed.definition.target, MapTarget.mixedComparison);
+expect(courseMapLocation(MapTarget.mixedComparison, MapLaunch.open),
+    '/course-comparison/en-fr-phoneme-comparison');
+expect(courseMapLocation(MapTarget.mixedComparison, MapLaunch.review),
+    '/course-comparison/en-fr-phoneme-comparison?review=true');
 ```
 
-- [ ] **Step 2: Run RED.** Run `$FLUTTER test --no-pub test/unit/course_map_catalogue_test.dart test/unit/course_map_projection_test.dart test/unit/course_map_providers_test.dart test/widget/course_map_navigation_test.dart test/widget/course_map_integration_test.dart test/widget/course_map_accessibility_test.dart --reporter expanded`. Expected: missing target/order/dedicated projection assertions fail; discovery and mixed baseline assertions stay green.
-- [ ] **Step 3: Add typed map target and activity-local projection.** Change only the existing `comparison` body from planned to live; validate its exact target/activity binding independently of catalogue availability. Render the exact demo disclosure on this planet. Resolve registration by activity ID. A registered-invalid new catalogue yields a dedicated local unavailable/retry body while mixed remains valid on an empty profile; a shared-family read failure may make both comparison bodies unavailable but leaves discovery/sentence independent. Completed is only its own acknowledged current-revision completion; resumable reads only its own valid slot/checkpoint. Do not add a prerequisite, transfer credit, or rewrite route destinations.
-- [ ] **Step 4: Make map counts/navigation honest and run focused GREEN.** Map selection remains inspection only. Add fixed dedicated target routes for open/resume and review; keep old mixed routes/query behavior. Progress counts only available authored main activities, labels dedicated pair counts as `/u/`–`/y/` comparison, leaves optional mixed counts separate, and retains visible “Coming soon” context/spelling/checkpoint. Preserve map animation, pause, light/dark, focus/semantics and 48px controls. Rerun Step 2 plus `$FLUTTER test --no-pub test/widget/comparison_entry_flow_test.dart test/widget/course_map_owner_recovery_test.dart test/widget/course_map_motion_test.dart --reporter expanded`.
-- [ ] **Step 5: Exercise actual browser flow and final gates.** From `frontend/`, run `$FLUTTER drive --driver=test_driver/integration_test.dart --target=integration_test/uy_demo_comparison_browser_test.dart -d chrome`; assert production router reaches the dedicated activity, reload resumes only its slot, mixed state is unchanged, invalid/unknown route acquires no store, and no actual audio was played. Then run the final verification list below.
+- [ ] **Step 2: Run RED.** Run `$FLUTTER test --no-pub test/unit/course_map_catalogue_test.dart test/unit/course_map_projection_test.dart test/unit/course_map_providers_test.dart test/widget/course_map_navigation_test.dart test/widget/course_map_integration_test.dart test/widget/course_map_accessibility_test.dart --reporter expanded`. Expected: missing target/order/role/dedicated projection assertions fail; discovery and mixed baseline assertions stay green. Also run the Step 5 WebDriver integration command against the new browser test before implementation; the driver must start and the test must reach a behavioral failure for the unavailable new map/route, not a browser/driver setup failure. Preserve the raw RED log; if the environment prevents reaching the assertion, record it as not-run/open rather than claiming a RED result.
+- [ ] **Step 3: Add typed map target and activity-local projection.** Change only the existing `comparison` body from planned to live; validate the dedicated target as a planet bound exactly to `uyDemoComparisonActivityId`, independently of catalogue availability, while the existing mixed target remains a station bound exactly to `comparisonActivityId`. Render the exact demo disclosure on this planet. Resolve registration by activity ID. A registered-invalid new catalogue yields a dedicated local unavailable/retry body while mixed remains valid on an empty profile; a shared-family read failure may make both comparison bodies unavailable but leaves discovery/sentence independent. Completed is only its own acknowledged current-revision completion; resumable reads only its own valid slot/checkpoint. Not-started/resumable/completed map to `.start`/`.resume`/`.review`, never `.open`; selection remains inspection only. Do not add a prerequisite, transfer credit, or rewrite route destinations.
+- [ ] **Step 4: Make map counts/navigation honest and run focused GREEN.** Map selection remains inspection only. Dedicated `.start` and `.resume` go to `/course-comparison/en-fr-u-y-comparison`; `.review` goes to that fixed route with `?review=true`; no dedicated `.open` action is offered. Show dedicated action labels (“Start comparison”, “Continue comparison”, “Review comparison”) without changing mixed `.open` (“Open destination”) or mixed `.review` (“Review comparison”) behavior. Progress counts only available authored main activities, labels dedicated pair counts as `/u/`–`/y/` comparison, leaves optional mixed counts separate, and retains visible “Coming soon” context/spelling/checkpoint. Preserve map animation, pause, light/dark, focus/semantics and 48px controls. Rerun Step 2 plus `$FLUTTER test --no-pub test/widget/comparison_entry_flow_test.dart test/widget/course_map_owner_recovery_test.dart test/widget/course_map_motion_test.dart --reporter expanded`.
+- [ ] **Step 5: Run the web integration gate with the verified WebDriver path.** No new dependency is required. Do not use `-d chrome`: that device path did not reach the debug service in this environment. Follow `frontend/integration_test/learning_storage_qualification_runbook.md`'s Web Server/WebDriver pattern, reusing `test_driver/integration_test.dart`. From `frontend/`, set `CHROME_BIN` and `CHROMEDRIVER_BIN` to installed version-matching absolute executable paths and choose a dedicated free `DRIVER_PORT` (use `4445` only if the loopback port is free; if occupied, choose another free port and do not stop/replace its owner). Confirm the browser/driver versions, start only the owned ChromeDriver process with loopback access, bound the drive run to 10 minutes, and stop only that captured PID in an `EXIT` trap. Do not reuse a human Chrome profile; let WebDriver use its fresh automation profile. Preserve the raw command output and ChromeDriver log under unique `.superpowers/uy-mini-course-design/` evidence filenames.
+
+```bash
+# From frontend/. Set absolute paths to installed, version-matching executables.
+set -euo pipefail
+FLUTTER=/home/klottick/develop/flutter-3.47.7-sqlite/bin/flutter
+CHROME_BIN=/absolute/path/to/installed/chrome
+CHROMEDRIVER_BIN=/absolute/path/to/matching/chromedriver
+DRIVER_PORT=4445
+RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)-$$
+DRIVER_LOG=../.superpowers/uy-mini-course-design/task-5-chromedriver-$RUN_ID.log
+"$CHROME_BIN" --version
+"$CHROMEDRIVER_BIN" --version
+if ss -H -ltn "sport = :$DRIVER_PORT" | grep -q .; then
+  echo "ChromeDriver port $DRIVER_PORT is occupied; choose another free port." >&2
+  exit 1
+fi
+"$CHROMEDRIVER_BIN" --port="$DRIVER_PORT" --allowed-ips=127.0.0.1 \
+  >"$DRIVER_LOG" 2>&1 &
+DRIVER_PID=$!
+trap 'kill "$DRIVER_PID" 2>/dev/null || true; wait "$DRIVER_PID" 2>/dev/null || true' EXIT
+ready=false
+for _ in $(seq 1 40); do
+  if curl --fail --silent "http://127.0.0.1:$DRIVER_PORT/status" |
+      python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["value"]["ready"] else 1)'; then
+    ready=true
+    break
+  fi
+  sleep 0.25
+done
+test "$ready" = true
+PATH="/home/klottick/develop/flutter-3.47.7-sqlite/bin:$PATH" \
+CHROME_EXECUTABLE="$CHROME_BIN" timeout 10m "$FLUTTER" drive \
+  --driver=test_driver/integration_test.dart \
+  --driver-port="$DRIVER_PORT" \
+  --chrome-binary="$CHROME_BIN" \
+  --target=integration_test/uy_demo_comparison_browser_test.dart \
+  -d web-server 2>&1 | tee "../.superpowers/uy-mini-course-design/task-5-web-integration-$RUN_ID.log"
+```
+
+Expected: ChromeDriver `/status` reports `value.ready == true`; `flutter drive` exits 0 and reports the browser integration test passed; the test asserts one fake-audio answer, provider/database close-and-reopen, dedicated checkpoint resume, unchanged mixed state, and invalid/unknown route rejection without store acquisition. This is real web-SQL/provider-reopen evidence, not a full browser/page reload or real-audio evidence.
 - [ ] **Step 6: Check, commit and publish Task 5.** Format owned Dart paths; run `$FLUTTER analyze --no-pub` and `git diff --check`. From a new scoped branch based on current published `origin/main`, stage only Task 5's eight source, six existing widget/unit tests and browser test from its Files block; commit `feat: add dedicated comparison planet to map`, push/open the final scoped PR to `main`; controller independently reviews exact head/base and gates before guarded merge.
 
 ## Verification and publication gates
@@ -194,27 +247,44 @@ DART=/home/klottick/develop/flutter-3.47.7-sqlite/bin/dart
 ```
 
 - Each task PR: focused tests and named affected-neighbor tests in its task; `$FLUTTER analyze --no-pub`; `git diff --check`; `$DART format --output=none --set-exit-if-changed <owned Dart paths>`. Capture actual output; no historical counts are new evidence.
-- Final ordinary unit/widget suite, from `frontend/`, explicitly enumerate every `test/**/*_test.dart` except only the two named retention suites (do not run bare `flutter test`):
+- Final ordinary unit/widget suite, from `frontend/`, explicitly enumerate only the top-level `*_test.dart` files in `test/unit` and `test/widget`, excluding exactly `course_learning_retention_test.dart` and `learning_sql_retention_test.dart`. Use the bounded original Python enumeration (not recursive `find`), save both the printed sorted file list and unfiltered stdout/stderr/exit status, and do not accidentally add integration or new test roots:
 
 ```bash
-find test -type f -name '*_test.dart' \
-  ! -name course_learning_retention_test.dart \
-  ! -name learning_sql_retention_test.dart -print0 |
-  sort -z | xargs -0 "$FLUTTER" test --no-pub --reporter expanded
+set -o pipefail
+RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)-$$
+python3 - <<'PY' 2>&1 | tee "../.superpowers/uy-mini-course-design/task-5-ordinary-tests-$RUN_ID.log"
+from pathlib import Path
+import subprocess
+excluded = {'course_learning_retention_test.dart', 'learning_sql_retention_test.dart'}
+files = sorted(str(p) for root in ('test/unit', 'test/widget')
+               for p in Path(root).glob('*_test.dart') if p.name not in excluded)
+assert files
+print('\n'.join(files), flush=True)
+subprocess.run(['/home/klottick/develop/flutter-3.47.7-sqlite/bin/flutter',
+                'test', '--no-pub', '--reporter', 'expanded', *files], check=True)
+PY
 ```
 
+Expected: Python/test command exits 0 and all explicitly enumerated files pass.
+Deferred platform/storage stress and integration device qualification are not
+silently added; record the exact two exclusions.
+
 - Final static/build gates, from `frontend/`: `$FLUTTER analyze --no-pub`; `$FLUTTER build web --release --no-pub` (default JavaScript build, not Wasm).
-- Actual browser gate, from `frontend/`: the Task 5 `flutter drive ... -d chrome` command. It uses controlled fake audio for deterministic interaction; it is not real playback evidence.
+- Web integration gate, from `frontend/`: the Task 5 `flutter drive ... -d web-server` WebDriver command. It uses controlled fake audio and real web SQL for one answer plus in-page provider/database close-and-reopen; it is not real playback or browser-reload evidence.
 - Read-only audio technical verifier, from repository root: `python3 scripts/verify_french_audio.py --repo-root .`. Expect only technical/metadata verification of pending candidates; do not promote status or claim linguistic/rights/device qualification.
 - Keep the existing unrelated Sound Match work, `.playwright-mcp/`, other branches/worktrees and durable records untouched. The historical 1,622 frontend pass baseline is not a fresh run and must not be repeated as evidence.
-- After Task 5 is reviewed and merged, controller fast-forwards a clean primary checkout to published `main` and runs `python3 scripts/local_demo.py update --flutter /home/klottick/develop/flutter-3.47.7-sqlite/bin/flutter`; preserve hosted-demo origin/config/progress/prior releases. Verify `demo-build.json` and the live hosted map/lesson. No automatic qualification, public release, or data-wiping rollback.
+- After Task 5 is reviewed and merged, controller fast-forwards a clean primary checkout to published `main` and runs `python3 scripts/local_demo.py update --flutter /home/klottick/develop/flutter-3.47.7-sqlite/bin/flutter`; preserve hosted-demo origin/config/progress/prior releases. Verify `demo-build.json` and the production-JavaScript map/lesson. For the separate controller Playwright gate, set `WEB_PORT=8095`; check `ss -H -ltn "sport = :$WEB_PORT"` and, if occupied, choose another free port without stopping/replacing its owner. Serve the committed release output from a separate terminal at repository root: `timeout 15m python3 -m http.server --bind 127.0.0.1 --directory build/local-demo/current "$WEB_PORT"`. Set `RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)-$$` and `PROFILE=/tmp/opencode/uy-demo-comparison-playwright-$RUN_ID`; require `test ! -e "$PROFILE"` before configuring Playwright's persistent browser profile to use it. Do not use the human profile or `.playwright-mcp/`, clear storage, or delete the new profile. On the same origin, navigate through the map UI (complete existing French-course onboarding if this fresh profile requires it), choose the dedicated planet, activate “Start comparison”, and wait for the first neutral prompt/initial checkpoint save without activating either audio control. Call Playwright's actual page reload on that same URL; expected route before and after is the same-origin hash route `/#/course-comparison/en-fr-u-y-comparison`, with the initial prompt resumed and the map showing the dedicated comparison as in progress/“Continue comparison”. Then return through the UI to the map and verify that resumable state. Flutter's current web URL strategy is hash-based (no `usePathUrlStrategy` call), so the route remains in the fragment and the local static server reloads the app document from `/`. Record the production JS build revision, same-origin URL, fresh profile path, exact pre/post-reload route and resumable UI evidence, and any failure as an open gate. Do not answer or claim playback qualification. No automatic qualification, public release, or data-wiping rollback.
 
 ## Plan self-review
 
 - **Spec coverage:** §1–2 preservation/scope, registry errors and family corruption: Tasks 1–3. §3 inventory, metadata, prompt/disclosure/debrief/audio gates: Tasks 1 and 4. §4 routing, typed map binding, independent state/progress/recovery and no hard lock: Tasks 3–5. §5 acceptance/preservation and verification: all tasks plus final gates. §6 pending linguistic/rights/playback/accessibility/privacy/release gates remain explicit.
 - **Step scan:** Every task starts with named failing assertions, has a red command, an implementation boundary, green focused/neighbor commands and scoped publication. No product code is included in this documentation change.
-- **Type consistency:** Registry/registration names, `registry:` engine constructor, `slots[activityId]`, legacy mixed `slot`, registered validator/codec and map target are defined above and reused consistently.
+- **Type consistency:** Registry/registration names, `registry:` engine constructor, `slots[activityId]`, legacy mixed `slot`, registered validator/codec, exact one-of catalogue/registry test harness constructor, and dedicated map start/resume/review actions are defined above and reused consistently.
 - **Review Focus:** All five conditions map to explicit SQLite, provider, widget/router or map/browser assertions in the owning task.
-- **Proportion:** The plan reuses the exact spec inventory table by reference rather than copying it; test snippets are assertions, not a solution transcript.
+- **Browser gates:** Flutter WebDriver integration and controller production-JavaScript Playwright reload are separate complementary gates; no in-process test claims a full page reload.
+- **Verification scope:** Ordinary unit/widget enumeration is bounded to the two original roots and excludes only the named retention suites; raw list and output are retained. No bare `flutter test` or native/full retention gate is implied.
+- **Proportion:** The plan reuses the exact spec inventory table by reference rather than copying it; test snippets are assertions, not a solution transcript. The execution note sends shared constraints/interfaces/review focus with each assigned task rather than duplicating the full plan.
 
-**Execution boundary:** This is a plan only. User review/approval of this plan is required before any Task 1 product-code work. Implementation uses the already selected sequential GPT-6 Luna worker and controller review/guarded-PR workflow; dependent tasks start only from the preceding merged `origin/main`.
+**Execution boundary:** This is a plan only. Human review/approval is required before any Task 1 product-code work. Execute with one sequential GPT-6 Luna implementation subagent at a time; workers do not spawn subagents or merge PRs, and the controller independently reviews/verifies and merges only through the guarded PR process. Dependent tasks start only from the preceding merged `origin/main`.
+
+**Worker execution note:** For each handoff, give the assigned worker the exact text of **Global Constraints**, **Shared interfaces**, and **Review Focus** verbatim as binding context, plus only that worker's task section, its owned-file/interface contract, and acceptance steps. Keep tasks sequential on the preceding published merge; do not copy or reissue the full plan, and do not begin any worker task before separate human approval of this plan.
