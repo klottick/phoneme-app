@@ -1,4 +1,4 @@
-import 'dart:ui' show Tristate;
+import 'dart:ui' show PointerDeviceKind, Tristate;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -372,117 +372,229 @@ void main() {
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.linux;
       final semantics = tester.ensureSemantics();
-      SharedPreferences.setMockInitialValues({
-        'selected_course_id': 'en-fr',
-        'theme_mode': 'light',
+      try {
+        for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+          SharedPreferences.setMockInitialValues({
+            'selected_course_id': 'en-fr',
+            'theme_mode': mode.name,
+          });
+          disableMapMotion(tester);
+          final store = CourseLearningWidgetStore();
+          final audio = ControlledListeningAudio();
+          final container = ProviderContainer(
+            overrides: [
+              courseLearningStoreProvider.overrideWithValue(store),
+              courseAudioProvider.overrideWithValue(audio),
+              comparisonLearningStateProvider.overrideWith(
+                (ref) async => ComparisonLearningState.empty(
+                  ComparisonProfileScope(
+                    courseId: 'en-fr',
+                    owner: LearningOwner.guest(),
+                  ),
+                ),
+              ),
+            ],
+          );
+          await tester.pumpWidget(
+            UncontrolledProviderScope(
+              container: container,
+              child: const LinguistApp(),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final router = container.read(appRouterProvider);
+
+          try {
+            Future<void> expectTarget(Finder finder, String label) async {
+              await tester.ensureVisible(finder);
+              final size = tester.getSize(finder);
+              final controlTheme = Theme.of(
+                tester.element(find.byType(CourseMapScreen)),
+              );
+              final densityDiagnostic =
+                  'mode=$mode, visualDensity=${controlTheme.visualDensity}, '
+                  'materialTapTargetSize=${controlTheme.materialTapTargetSize}';
+              expect(
+                size.width,
+                greaterThanOrEqualTo(48),
+                reason: '$label hit width; $densityDiagnostic',
+              );
+              expect(
+                size.height,
+                greaterThanOrEqualTo(48),
+                reason: '$label hit height; $densityDiagnostic',
+              );
+              final semanticRect = tester.getSemantics(finder).rect;
+              expect(
+                semanticRect.width,
+                greaterThanOrEqualTo(48),
+                reason: '$label semantic width; $densityDiagnostic',
+              );
+              expect(
+                semanticRect.height,
+                greaterThanOrEqualTo(48),
+                reason: '$label semantic height; $densityDiagnostic',
+              );
+            }
+
+            final starChart = find
+                .ancestor(
+                  of: find.byTooltip('Star chart'),
+                  matching: find.byType(IconButton),
+                )
+                .first;
+            final settings = find
+                .ancestor(
+                  of: find.byTooltip('Settings'),
+                  matching: find.byType(IconButton),
+                )
+                .first;
+            final recovery = find.widgetWithText(
+              TextButton,
+              'Open discovery recovery',
+            );
+            await expectTarget(starChart, 'Star chart');
+            await expectTarget(settings, 'Settings');
+            await expectTarget(recovery, 'Open discovery recovery');
+
+            Future<void> focusByKeyboard(Finder control, String label) async {
+              bool hasKeyboardFocus() =>
+                  tester
+                      .getSemantics(control)
+                      .getSemanticsData()
+                      .flagsCollection
+                      .isFocused ==
+                  Tristate.isTrue;
+
+              for (var tab = 0; tab < 20 && !hasKeyboardFocus(); tab++) {
+                await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+                await tester.pump();
+              }
+              expect(
+                hasKeyboardFocus(),
+                isTrue,
+                reason: '$label must receive keyboard focus by Tab in $mode',
+              );
+            }
+
+            await focusByKeyboard(starChart, 'Star chart');
+            await focusByKeyboard(recovery, 'Open discovery recovery');
+          } finally {
+            await tester.pumpWidget(const SizedBox.shrink());
+            router.dispose();
+            container.dispose();
+            await audio.dispose();
+          }
+        }
+      } finally {
+        semantics.dispose();
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
+
+  testWidgets(
+    'dark_keyboard_and_pointer_focus_render_opaque_button_boundaries',
+    (tester) async {
+      final focusNodes = List.generate(3, (_) => FocusNode());
+      addTearDown(() {
+        for (final node in focusNodes) {
+          node.dispose();
+        }
       });
-      disableMapMotion(tester);
-      final store = CourseLearningWidgetStore();
-      final audio = ControlledListeningAudio();
-      final container = ProviderContainer(
-        overrides: [
-          courseLearningStoreProvider.overrideWithValue(store),
-          courseAudioProvider.overrideWithValue(audio),
-          comparisonLearningStateProvider.overrideWith(
-            (ref) async => ComparisonLearningState.empty(
-              ComparisonProfileScope(
-                courseId: 'en-fr',
-                owner: LearningOwner.guest(),
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: darkTheme,
+          home: Theme(
+            data: spaceCourseTheme(darkTheme),
+            child: Scaffold(
+              backgroundColor: SpaceCourseColors.panel,
+              body: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FilledButton(
+                      key: const ValueKey('focus-filled'),
+                      focusNode: focusNodes[0],
+                      onPressed: () {},
+                      child: const Text('Filled'),
+                    ),
+                    TextButton(
+                      key: const ValueKey('focus-text'),
+                      focusNode: focusNodes[1],
+                      onPressed: () {},
+                      child: const Text('Text'),
+                    ),
+                    OutlinedButton(
+                      key: const ValueKey('focus-outlined'),
+                      focusNode: focusNodes[2],
+                      onPressed: () {},
+                      child: const Text('Outlined'),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ],
-      );
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: const LinguistApp(),
         ),
       );
-      await tester.pumpAndSettle();
-      final router = container.read(appRouterProvider);
-      addTearDown(() async {
-        await tester.pumpWidget(const SizedBox.shrink());
-        router.dispose();
-        container.dispose();
-        await audio.dispose();
-      });
 
-      Future<void> expectTarget(Finder finder, String label) async {
-        await tester.ensureVisible(finder);
-        final size = tester.getSize(finder);
-        final controlTheme = Theme.of(
-          tester.element(find.byType(CourseMapScreen)),
-        );
-        final densityDiagnostic =
-            'visualDensity=${controlTheme.visualDensity}, materialTapTargetSize=${controlTheme.materialTapTargetSize}';
+      final controls = [
+        find.byKey(const ValueKey('focus-filled')),
+        find.byKey(const ValueKey('focus-text')),
+        find.byKey(const ValueKey('focus-outlined')),
+      ];
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer();
+      for (var index = 0; index < controls.length; index++) {
+        focusNodes[index].requestFocus();
+        await tester.pump();
+        expect(focusNodes[index].hasFocus, isTrue);
+
+        final materialFinder = find
+            .descendant(of: controls[index], matching: find.byType(Material))
+            .first;
+        final renderedMaterial = tester.widget<Material>(materialFinder);
+        final renderedShape = renderedMaterial.shape! as OutlinedBorder;
+        final renderedSide = renderedShape.side;
         expect(
-          size.width,
-          greaterThanOrEqualTo(48),
-          reason: '$label hit width; $densityDiagnostic',
+          renderedSide.color,
+          SpaceCourseColors.textPrimary,
+          reason: 'button $index rendered focus boundary color',
         );
         expect(
-          size.height,
-          greaterThanOrEqualTo(48),
-          reason: '$label hit height; $densityDiagnostic',
-        );
-        final semanticRect = tester.getSemantics(finder).rect;
-        expect(
-          semanticRect.width,
-          greaterThanOrEqualTo(48),
-          reason: '$label semantic width',
+          (renderedSide.color.a * 255).round(),
+          0xFF,
+          reason: 'button $index focus boundary is opaque',
         );
         expect(
-          semanticRect.height,
-          greaterThanOrEqualTo(48),
-          reason: '$label semantic height',
+          renderedSide.width,
+          greaterThanOrEqualTo(2),
+          reason: 'button $index rendered focus boundary width',
+        );
+        expect(
+          _contrast(renderedSide.color, SpaceCourseColors.panel),
+          greaterThanOrEqualTo(3),
+          reason: 'button $index focus boundary against adjacent panel',
+        );
+        expect(
+          _contrast(renderedSide.color, SpaceCourseColors.action),
+          greaterThanOrEqualTo(3),
+          reason: 'button $index focus boundary against action surface',
+        );
+
+        await mouse.moveTo(tester.getCenter(controls[index]));
+        await tester.pump();
+        expect(focusNodes[index].hasFocus, isTrue);
+        final hoveredMaterial = tester.widget<Material>(materialFinder);
+        final hoveredShape = hoveredMaterial.shape! as OutlinedBorder;
+        expect(
+          hoveredShape.side.color,
+          SpaceCourseColors.textPrimary,
+          reason: 'pointer hover preserves button $index keyboard boundary',
         );
       }
-
-      final starChart = find
-          .ancestor(
-            of: find.byTooltip('Star chart'),
-            matching: find.byType(IconButton),
-          )
-          .first;
-      final settings = find
-          .ancestor(
-            of: find.byTooltip('Settings'),
-            matching: find.byType(IconButton),
-          )
-          .first;
-      final recovery = find.widgetWithText(
-        TextButton,
-        'Open discovery recovery',
-      );
-      await expectTarget(starChart, 'Star chart');
-      await expectTarget(settings, 'Settings');
-      await expectTarget(recovery, 'Open discovery recovery');
-
-      Future<void> focusByKeyboard(Finder control, String label) async {
-        bool hasKeyboardFocus() =>
-            tester
-                .getSemantics(control)
-                .getSemanticsData()
-                .flagsCollection
-                .isFocused ==
-            Tristate.isTrue;
-
-        for (var tab = 0; tab < 20 && !hasKeyboardFocus(); tab++) {
-          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-          await tester.pump();
-        }
-        expect(
-          hasKeyboardFocus(),
-          isTrue,
-          reason: '$label must receive keyboard focus by Tab',
-        );
-      }
-
-      await focusByKeyboard(starChart, 'Star chart');
-      await focusByKeyboard(recovery, 'Open discovery recovery');
-      semantics.dispose();
-      debugDefaultTargetPlatformOverride = null;
+      await mouse.removePointer();
     },
   );
 }
