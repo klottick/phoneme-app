@@ -1110,6 +1110,13 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
       LessonSectionSession session, ComparisonLearningState state) {
     final exercise = catalogue.exercise(session.currentItemId!);
     final correct = _localCorrect;
+    final feedback = widget.activityId == uyDemoComparisonActivityId ||
+            !_answered ||
+            correct == null
+        ? null
+        : correct
+            ? ListeningFeedback.correct
+            : ListeningFeedback.notYet;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       SoundComparison(
         prompt: SoundComparisonPrompt(
@@ -1123,11 +1130,7 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
           playing: _playing,
           blocked: !_ownsAuthAndRoute(_store!),
           answered: _answered,
-          feedback: !_answered || correct == null
-              ? null
-              : correct
-                  ? ListeningFeedback.correct
-                  : ListeningFeedback.notYet,
+          feedback: feedback,
         ),
         heardSamples: _grants.heardSamples,
         selectedRelation: _selected,

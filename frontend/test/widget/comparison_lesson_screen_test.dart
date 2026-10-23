@@ -816,6 +816,15 @@ Future<void> _answerVisiblePair(
   await tester.pump();
 }
 
+void _expectNoComparisonCorrectnessFeedback(WidgetTester tester) {
+  expect(find.text('Correct'), findsNothing);
+  expect(find.text('Not yet'), findsNothing);
+  expect(
+    tester.widget<SoundComparison>(find.byType(SoundComparison)).state.feedback,
+    isNull,
+  );
+}
+
 void main() {
   final catalogue = loadFrenchComparisonCatalogue();
   var ownerNumber = 0;
@@ -965,9 +974,20 @@ void main() {
     h.persistence.writeEntered = answerEntered;
     await tester.tap(find.text('Same'));
     await tester.runAsync(() => answerEntered.future);
+    _expectNoComparisonCorrectnessFeedback(tester);
     expect(find.textContaining('HIDDEN-UY-NOTE-6D21'), findsNothing);
     answerGate.complete();
     var saved = await _readSnapshot(tester, h.store);
+    for (
+      var frame = 0;
+      frame < 30 && find.text('Continue').evaluate().isEmpty;
+      frame++
+    ) {
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump();
+    }
+    expect(find.text('Continue'), findsOneWidget);
+    _expectNoComparisonCorrectnessFeedback(tester);
     expect(saved.attempts, hasLength(1));
     expect(saved.attempts.single.activityId, uyDemoComparisonActivityId);
     expect(saved.attempts.single.correct, isFalse);
@@ -1059,6 +1079,103 @@ void main() {
     expect(find.text('Passing needs 8 of 10 correct.'), findsOneWidget);
     expect(find.text('Compare the vowel in each sample.'), findsNothing);
   });
+
+  testWidgets(
+    'uy_demo_correct_answer_hides_feedback_through_ack_and_restore',
+    (tester) async {
+      final demo = loadFrenchUyDemoComparisonCatalogue();
+      final registry = ComparisonCatalogueRegistry([
+        ComparisonCatalogueRegistration.available(catalogue),
+        ComparisonCatalogueRegistration.available(demo),
+      ]);
+      final h = await harness(
+        tester,
+        requestedCatalogue: demo,
+        registry: registry,
+      );
+      ProviderContainer? container;
+      addTearDown(() {
+        final mounted = container;
+        if (mounted != null) cleanup(mounted, h.audio);
+      });
+      container = await _mountComparison(
+        tester,
+        store: h.store,
+        audio: h.audio,
+        catalogue: demo,
+        activityId: uyDemoComparisonActivityId,
+        registry: registry,
+      );
+      final exercise = demo.exercises.first;
+      await tester.tap(find.text('Listen to sample A'));
+      h.audio.completeNext(
+        CourseAudioResult.completed(
+          referenceId: exercise.sampleA.referenceId,
+          source: CourseAudioSource.unverifiedRecording,
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('Listen to sample B'));
+      h.audio.completeNext(
+        CourseAudioResult.completed(
+          referenceId: exercise.sampleB.referenceId,
+          source: CourseAudioSource.unverifiedRecording,
+        ),
+      );
+      await tester.pump();
+
+      final answerGate = await _runRealAsync(
+        tester,
+        () async => Completer<void>(),
+      );
+      final answerEntered = await _runRealAsync(
+        tester,
+        () async => Completer<void>(),
+      );
+      addTearDown(() {
+        if (!answerGate.isCompleted) answerGate.complete();
+      });
+      h.persistence.holdNextWrite = answerGate;
+      h.persistence.writeEntered = answerEntered;
+      await tester.tap(find.text('Different'));
+      await tester.runAsync(() => answerEntered.future);
+      _expectNoComparisonCorrectnessFeedback(tester);
+      final held = await _readSnapshot(tester, h.store);
+      expect(held.attempts, isEmpty);
+      expect(find.text('Continue'), findsNothing);
+
+      answerGate.complete();
+      final saved = await _readSnapshot(tester, h.store);
+      expect(saved.attempts, hasLength(1));
+      expect(saved.attempts.single.correct, isTrue);
+      expect(saved.attempts.single.activityId, uyDemoComparisonActivityId);
+      for (
+        var frame = 0;
+        frame < 30 && find.text('Continue').evaluate().isEmpty;
+        frame++
+      ) {
+        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+        await tester.pump();
+      }
+      expect(find.text('Continue'), findsOneWidget);
+      _expectNoComparisonCorrectnessFeedback(tester);
+      final audioRequestsBeforeRestore = h.audio.requests.length;
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      cleanup(container, h.audio);
+      container = await _mountComparison(
+        tester,
+        store: h.store,
+        audio: h.audio,
+        catalogue: demo,
+        activityId: uyDemoComparisonActivityId,
+        registry: registry,
+      );
+      expect(find.text('Continue'), findsOneWidget);
+      _expectNoComparisonCorrectnessFeedback(tester);
+      expect(h.audio.requests, hasLength(audioRequestsBeforeRestore));
+    },
+  );
 
   testWidgets(
     'uy_demo_owner_change_during_sample_b_and_frozen_retry_has_no_stale_submit',
@@ -1192,6 +1309,7 @@ void main() {
         await tester.pump();
       }
       expect(find.text('Retry saving'), findsOneWidget);
+      _expectNoComparisonCorrectnessFeedback(tester);
       final frozen = storeB.submitted.last;
       expect(frozen.action, isA<AnswerComparisonPair>());
       final staleRetry = tester
@@ -4793,6 +4911,7 @@ void main() {
       final view = tester.widget<SoundComparison>(find.byType(SoundComparison));
       expect(view.state.answered, isTrue);
       expect(view.state.feedback, ListeningFeedback.correct);
+      expect(find.text('Correct'), findsOneWidget);
       expect(view.selectedRelation, isNull);
       expect(h.audio.requests, isEmpty);
       expect(
@@ -4969,6 +5088,57 @@ void main() {
       expect(find.text('Retry saving'), findsNothing);
     },
   );
+
+  testWidgets('uy_demo_review_finish_never_adds_dedicated_completion', (
+    tester,
+  ) async {
+    final demo = loadFrenchUyDemoComparisonCatalogue();
+    final registry = ComparisonCatalogueRegistry([
+      ComparisonCatalogueRegistration.available(catalogue),
+      ComparisonCatalogueRegistration.available(demo),
+    ]);
+    final h = await harness(
+      tester,
+      requestedCatalogue: demo,
+      registry: registry,
+    );
+    final seeded = await _seedFirstPass(
+      tester,
+      h.store,
+      catalogue: demo,
+      policy: LessonPolicy(),
+      activityId: uyDemoComparisonActivityId,
+    );
+    expect(seeded.slots[uyDemoComparisonActivityId], isNotNull);
+    expect(seeded.completions, isEmpty);
+    final container = await _mountComparison(
+      tester,
+      store: h.store,
+      audio: h.audio,
+      catalogue: demo,
+      activityId: uyDemoComparisonActivityId,
+      registry: registry,
+      review: true,
+    );
+    addTearDown(() => cleanup(container, h.audio));
+
+    expect(find.text('Comparison debrief'), findsOneWidget);
+    await tester.tap(find.text('Finish comparison'));
+    await _readSnapshot(tester, h.store);
+    await tester.pump();
+    await pumpUntil(tester, find.text('Comparison complete.'));
+
+    final finished = await _readSnapshot(tester, h.store);
+    expect(finished.completions, isEmpty);
+    expect(
+      h.store.prepared.last.action,
+      isA<FinishComparisonRun>().having(
+        (action) => action.recordCompletion,
+        'recordCompletion',
+        false,
+      ),
+    );
+  });
 
   testWidgets('route cover and app pause compose without hidden playback', (
     tester,
