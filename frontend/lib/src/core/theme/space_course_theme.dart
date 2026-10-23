@@ -109,6 +109,11 @@ ThemeData spaceCourseTheme(ThemeData inherited) {
       style: ButtonStyle(
         minimumSize: inherited.filledButtonTheme.style?.minimumSize,
         shape: inherited.filledButtonTheme.style?.shape,
+        side: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.focused)
+              ? const BorderSide(color: SpaceCourseColors.textPrimary, width: 2)
+              : BorderSide.none,
+        ),
         backgroundColor: WidgetStateProperty.resolveWith(
           (states) => states.contains(WidgetState.disabled)
               ? SpaceCourseColors.raised
@@ -142,7 +147,7 @@ ThemeData spaceCourseTheme(ThemeData inherited) {
         side: WidgetStateProperty.resolveWith(
           (states) => BorderSide(
             color: states.contains(WidgetState.focused)
-                ? SpaceCourseColors.currentRing
+                ? SpaceCourseColors.textPrimary
                 : SpaceCourseColors.border,
             width: states.contains(WidgetState.focused) ? 2 : 1,
           ),
@@ -152,6 +157,11 @@ ThemeData spaceCourseTheme(ThemeData inherited) {
     textButtonTheme: TextButtonThemeData(
       style: ButtonStyle(
         minimumSize: inherited.textButtonTheme.style?.minimumSize,
+        side: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.focused)
+              ? const BorderSide(color: SpaceCourseColors.textPrimary, width: 2)
+              : BorderSide.none,
+        ),
         foregroundColor: WidgetStateProperty.resolveWith(
           (states) => states.contains(WidgetState.disabled)
               ? disabledForeground
@@ -219,6 +229,12 @@ class SpaceCourseTheme extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) =>
-      Theme(data: spaceCourseTheme(Theme.of(context)), child: child);
+  Widget build(BuildContext context) {
+    final ThemeData inherited = Theme.of(context);
+    final ThemeData courseTheme = spaceCourseTheme(inherited).copyWith(
+      visualDensity: VisualDensity.standard,
+      materialTapTargetSize: MaterialTapTargetSize.padded,
+    );
+    return Theme(data: courseTheme, child: child);
+  }
 }

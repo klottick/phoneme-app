@@ -1,5 +1,9 @@
+import 'dart:ui' show Tristate;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/app.dart';
 import 'package:linguist/src/core/theme/app_theme.dart';
@@ -122,6 +126,26 @@ void main() {
     final focusedBorder =
         dark.inputDecorationTheme.focusedBorder!.borderSide.color;
     expect(_contrast(focusedBorder, SpaceCourseColors.panel), greaterThan(3));
+    final focused = {WidgetState.focused};
+    for (final style in [
+      dark.filledButtonTheme.style!,
+      dark.textButtonTheme.style!,
+      dark.outlinedButtonTheme.style!,
+    ]) {
+      final focusSide = style.side?.resolve(focused);
+      expect(focusSide, isNotNull, reason: 'focused buttons need a boundary');
+      final resolvedFocusSide = focusSide!;
+      expect(resolvedFocusSide.color, SpaceCourseColors.textPrimary);
+      expect(resolvedFocusSide.width, greaterThanOrEqualTo(2));
+      expect(
+        _contrast(resolvedFocusSide.color, SpaceCourseColors.panel),
+        greaterThanOrEqualTo(3),
+      );
+      expect(
+        _contrast(resolvedFocusSide.color, SpaceCourseColors.action),
+        greaterThanOrEqualTo(3),
+      );
+    }
   });
 
   testWidgets('saved_light_dark_system_preferences_survive_navigation', (
@@ -342,6 +366,125 @@ void main() {
       );
     }
   });
+
+  testWidgets(
+    'linux_home_header_and_recovery_controls_keep_48px_keyboard_targets',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      final semantics = tester.ensureSemantics();
+      SharedPreferences.setMockInitialValues({
+        'selected_course_id': 'en-fr',
+        'theme_mode': 'light',
+      });
+      disableMapMotion(tester);
+      final store = CourseLearningWidgetStore();
+      final audio = ControlledListeningAudio();
+      final container = ProviderContainer(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(store),
+          courseAudioProvider.overrideWithValue(audio),
+          comparisonLearningStateProvider.overrideWith(
+            (ref) async => ComparisonLearningState.empty(
+              ComparisonProfileScope(
+                courseId: 'en-fr',
+                owner: LearningOwner.guest(),
+              ),
+            ),
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const LinguistApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final router = container.read(appRouterProvider);
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        router.dispose();
+        container.dispose();
+        await audio.dispose();
+      });
+
+      Future<void> expectTarget(Finder finder, String label) async {
+        await tester.ensureVisible(finder);
+        final size = tester.getSize(finder);
+        final controlTheme = Theme.of(
+          tester.element(find.byType(CourseMapScreen)),
+        );
+        final densityDiagnostic =
+            'visualDensity=${controlTheme.visualDensity}, materialTapTargetSize=${controlTheme.materialTapTargetSize}';
+        expect(
+          size.width,
+          greaterThanOrEqualTo(48),
+          reason: '$label hit width; $densityDiagnostic',
+        );
+        expect(
+          size.height,
+          greaterThanOrEqualTo(48),
+          reason: '$label hit height; $densityDiagnostic',
+        );
+        final semanticRect = tester.getSemantics(finder).rect;
+        expect(
+          semanticRect.width,
+          greaterThanOrEqualTo(48),
+          reason: '$label semantic width',
+        );
+        expect(
+          semanticRect.height,
+          greaterThanOrEqualTo(48),
+          reason: '$label semantic height',
+        );
+      }
+
+      final starChart = find
+          .ancestor(
+            of: find.byTooltip('Star chart'),
+            matching: find.byType(IconButton),
+          )
+          .first;
+      final settings = find
+          .ancestor(
+            of: find.byTooltip('Settings'),
+            matching: find.byType(IconButton),
+          )
+          .first;
+      final recovery = find.widgetWithText(
+        TextButton,
+        'Open discovery recovery',
+      );
+      await expectTarget(starChart, 'Star chart');
+      await expectTarget(settings, 'Settings');
+      await expectTarget(recovery, 'Open discovery recovery');
+
+      Future<void> focusByKeyboard(Finder control, String label) async {
+        bool hasKeyboardFocus() =>
+            tester
+                .getSemantics(control)
+                .getSemanticsData()
+                .flagsCollection
+                .isFocused ==
+            Tristate.isTrue;
+
+        for (var tab = 0; tab < 20 && !hasKeyboardFocus(); tab++) {
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+          await tester.pump();
+        }
+        expect(
+          hasKeyboardFocus(),
+          isTrue,
+          reason: '$label must receive keyboard focus by Tab',
+        );
+      }
+
+      await focusByKeyboard(starChart, 'Star chart');
+      await focusByKeyboard(recovery, 'Open discovery recovery');
+      semantics.dispose();
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
 }
 
 double _contrast(Color foreground, Color background) {
