@@ -1,5 +1,8 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:linguist/src/core/theme/space_course_colors.dart';
 import 'package:linguist/src/features/course_map/course_map_canvas.dart';
 import 'package:linguist/src/features/course_map/course_map_motion.dart';
 import 'package:linguist/src/features/course_map/course_map_state.dart';
@@ -10,6 +13,58 @@ void _resumeMotion(WidgetTester tester) {
 }
 
 void main() {
+  testWidgets('motion_control_has_theme_independent_contrast_and_focus', (
+    tester,
+  ) async {
+    for (final theme in [ThemeData.light(), ThemeData.dark()]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: theme,
+          home: const Scaffold(
+            body: SizedBox(
+              width: 300,
+              height: 240,
+              child: CourseMapMotion(
+                anchor: Offset(150, 120),
+                child: ColoredBox(color: SpaceCourseColors.canvas),
+              ),
+            ),
+          ),
+        ),
+      );
+      final toggle = find.byKey(const ValueKey('map-motion-toggle'));
+      final button = tester.widget<IconButton>(toggle);
+      final surface = button.style?.backgroundColor?.resolve({});
+      final foreground = button.style?.foregroundColor?.resolve({});
+      final boundary = button.style?.side?.resolve({})?.color;
+      expect(surface, isNotNull, reason: 'visible surface in $theme');
+      expect(foreground, isNotNull, reason: 'visible icon in $theme');
+      expect(boundary, isNotNull, reason: 'visible boundary in $theme');
+      expect(_contrast(foreground!, surface!), greaterThanOrEqualTo(3));
+      expect(
+        _contrast(boundary!, SpaceCourseColors.canvas),
+        greaterThanOrEqualTo(3),
+      );
+      expect(button.focusColor, SpaceCourseColors.currentRing);
+      expect(tester.getSize(toggle).shortestSide, greaterThanOrEqualTo(48));
+      expect(button.tooltip, 'Pause map motion');
+
+      final dispatcher = tester.binding.platformDispatcher;
+      dispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(reduceMotion: true);
+      await tester.pump();
+      final reducedButton = tester.widget<IconButton>(toggle);
+      expect(reducedButton.onPressed, isNull);
+      final reducedSemantics = tester.getSemantics(toggle).getSemanticsData();
+      expect(reducedSemantics.flagsCollection.isEnabled, ui.Tristate.isFalse);
+      expect(find.bySemanticsLabel('Play map motion'), findsOneWidget);
+      dispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures();
+      await tester.pump();
+      addTearDown(dispatcher.clearAccessibilityFeaturesTestValue);
+    }
+  });
+
   testWidgets('orbit_is_34_seconds_and_selection_does_not_move_anchor', (
     tester,
   ) async {
@@ -390,4 +445,11 @@ void main() {
     await tester.pump(const Duration(seconds: 4));
     expect(childBuilds, builds);
   });
+}
+
+double _contrast(Color foreground, Color background) {
+  final first = foreground.computeLuminance();
+  final second = background.computeLuminance();
+  return (first > second ? first + .05 : second + .05) /
+      (first > second ? second + .05 : first + .05);
 }

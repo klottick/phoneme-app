@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../core/theme/space_course_colors.dart';
+
 /// Decorative motion isolated from the supplied map and its learning state.
 ///
 /// A host that retains this subtree while hiding it must pair its visibility
@@ -140,6 +142,16 @@ class _CourseMapMotionState extends State<CourseMapMotion>
               key: const ValueKey('map-motion-toggle'),
               tooltip: playing ? 'Pause map motion' : 'Play map motion',
               constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+              focusColor: SpaceCourseColors.currentRing,
+              style: IconButton.styleFrom(
+                foregroundColor: SpaceCourseColors.textPrimary,
+                backgroundColor: SpaceCourseColors.raised,
+                side: const BorderSide(
+                  color: SpaceCourseColors.currentRing,
+                  width: 2,
+                ),
+                shape: const CircleBorder(),
+              ),
               onPressed: reduced
                   ? null
                   : () => setState(() => _paused = !_paused),
