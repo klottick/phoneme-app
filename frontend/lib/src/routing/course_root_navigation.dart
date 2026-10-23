@@ -30,7 +30,7 @@ class CourseRootNavigation extends StatelessWidget {
           2 => '/arcade',
           _ => '/course-progress',
         };
-        if (index != _index) context.go(route);
+        if (location != route) context.go(route);
       },
       destinations: const [
         NavigationDestination(icon: Icon(Icons.public), label: 'Map'),

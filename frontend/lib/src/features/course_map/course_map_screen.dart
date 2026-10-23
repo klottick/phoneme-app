@@ -31,6 +31,7 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(learningAuthScopeProvider);
+    final location = GoRouter.maybeOf(context)?.state.uri.path ?? '/home';
     final freshKey = (auth.owner, auth.generation, widget.systemId);
     if (ownerKey != freshKey) {
       ownerKey = freshKey;
@@ -66,8 +67,8 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: OutlinedButton(
               onPressed: () =>
-                  _launch(selectedComparison, auth, practiceAgain: true),
-              child: const Text('Practise again'),
+                  _launch(selectedComparison, auth, openSavedCheckpoint: true),
+              child: const Text('Open comparison practice'),
             ),
           ),
         if (availableDiscovery.isNotEmpty) ...[
@@ -128,7 +129,7 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
     );
 
     return CourseRootNavigation(
-      location: '/home',
+      location: location,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Linguist'),
@@ -176,7 +177,7 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
   void _launch(
     MapBodyState body,
     LearningAuthScope expectedAuth, {
-    bool practiceAgain = false,
+    bool openSavedCheckpoint = false,
   }) {
     final currentAuth = ref.read(learningAuthScopeProvider);
     if (currentAuth.owner != expectedAuth.owner ||
@@ -190,7 +191,7 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
     if (latest == null) return;
 
     final MapLaunch? launch;
-    if (practiceAgain) {
+    if (openSavedCheckpoint) {
       if (latest.readiness != MapReadiness.alpha ||
           latest.definition.target != MapTarget.mixedComparison ||
           latest.progress != MapProgress.completed ||

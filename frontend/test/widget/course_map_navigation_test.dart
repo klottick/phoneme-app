@@ -14,6 +14,7 @@ import 'package:linguist/src/features/course/comparison_lesson_screen.dart';
 import 'package:linguist/src/features/course/exercises/sentence_hunt_lesson_screen.dart';
 import 'package:linguist/src/features/course_map/course_map_screen.dart';
 import 'package:linguist/src/features/course_map/course_map_catalogue.dart';
+import 'package:linguist/src/features/course_map/course_map_canvas.dart';
 import 'package:linguist/src/features/course_map/course_map_motion.dart';
 import 'package:linguist/src/features/course_map/course_map_state.dart';
 import 'package:linguist/src/features/course_map/course_destination_panel.dart';
@@ -192,16 +193,20 @@ void main() {
     await tester.tap(find.text('Review').last, warnIfMissed: false);
     await _pumpApp(tester);
     expect(app.router.state.uri.path, '/course-review');
-    for (final path in const [
-      '/home',
-      '/course-review',
-      '/arcade',
-      '/course-progress',
+    for (final (path, destination) in const [
+      ('/home', 'Map'),
+      ('/course-review', 'Review'),
+      ('/arcade', 'Games'),
+      ('/course-progress', 'Progress'),
     ]) {
       app.router.go(path);
       await _pumpApp(tester);
       expect(app.router.state.uri.toString(), path);
       expect(find.byType(NavigationBar), findsOneWidget);
+      await tester.tap(find.text(destination).last);
+      await _pumpApp(tester);
+      expect(app.router.state.uri.toString(), path);
+      expect(app.router.canPop(), isFalse);
     }
     app.router.go('/course-progress');
     await _pumpApp(tester);
@@ -214,7 +219,7 @@ void main() {
     );
   });
 
-  testWidgets('reselecting_map_on_chart_keeps_chart_route', (tester) async {
+  testWidgets('map_tab_returns_to_home_from_chart', (tester) async {
     final app = await _mountMapApp(tester);
     addTearDown(() => _unmountMapApp(tester, app));
 
@@ -224,12 +229,10 @@ void main() {
     await tester.tap(find.text('Map').last);
     await _pumpApp(tester);
 
-    expect(app.router.state.uri.path, '/course-chart');
+    expect(app.router.state.uri.path, '/home');
   });
 
-  testWidgets('reselecting_map_on_direct_system_keeps_system_route', (
-    tester,
-  ) async {
+  testWidgets('map_tab_returns_to_home_from_direct_system', (tester) async {
     final app = await _mountMapApp(tester);
     addTearDown(() => _unmountMapApp(tester, app));
 
@@ -238,7 +241,20 @@ void main() {
     await tester.tap(find.text('Map').last);
     await _pumpApp(tester);
 
-    expect(app.router.state.uri.path, '/course-system/en-fr-u-y-system');
+    expect(app.router.state.uri.path, '/home');
+  });
+
+  testWidgets('reselecting_map_on_home_does_not_duplicate_the_root', (
+    tester,
+  ) async {
+    final app = await _mountMapApp(tester);
+    addTearDown(() => _unmountMapApp(tester, app));
+
+    await tester.tap(find.text('Map').last);
+    await _pumpApp(tester);
+
+    expect(app.router.state.uri.toString(), '/home');
+    expect(app.router.canPop(), isFalse);
   });
 
   testWidgets('mixed_comparison_review_action_keeps_its_identity', (
@@ -618,4 +634,188 @@ void main() {
     );
     expect(tester.binding.transientCallbackCount, 0);
   });
+
+  testWidgets(
+    'production_home_scroll_stops_offscreen_map_motion_and_resumes_in_place',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(
+        () => tester.platformDispatcher.clearTextScaleFactorTestValue(),
+      );
+
+      final app = await _mountMapApp(tester, normalMotion: true);
+      addTearDown(() => _unmountMapApp(tester, app));
+      expect(app.router.state.uri.path, '/home');
+
+      final motion = find.byType(CourseMapMotion);
+      final ship = find.byKey(const ValueKey('map-motion-ship'));
+      expect(motion, findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
+
+      await tester.ensureVisible(find.text('Open discovery recovery'));
+      await tester.pump();
+      await tester.pump();
+
+      final scrollViewport = tester.getRect(find.byType(SingleChildScrollView));
+      final hiddenMap = tester.getRect(find.byType(CourseMapCanvas));
+      expect(
+        hiddenMap.intersect(scrollViewport).isEmpty,
+        isTrue,
+        reason: 'the production map canvas must be outside its scroll viewport',
+      );
+      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isFalse);
+      final hiddenShip = tester.getCenter(ship);
+      final hiddenRelative =
+          hiddenShip - tester.getTopLeft(find.byType(CourseMapCanvas));
+
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(tester.getCenter(ship), hiddenShip);
+      expect(tester.binding.transientCallbackCount, 0);
+
+      await tester.ensureVisible(ship);
+      await tester.pump();
+      await tester.pump();
+      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
+      final resumedRelative =
+          tester.getCenter(ship) -
+          tester.getTopLeft(find.byType(CourseMapCanvas));
+      expect((resumedRelative - hiddenRelative).distance, lessThan(0.1));
+
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(
+        tester.getCenter(ship) -
+            tester.getTopLeft(find.byType(CourseMapCanvas)),
+        isNot(hiddenRelative),
+      );
+
+      await tester.ensureVisible(find.byTooltip('Pause map motion'));
+      await tester.pump();
+      await tester.tap(find.byTooltip('Pause map motion'));
+      await tester.pump();
+      expect(find.byTooltip('Play map motion'), findsOneWidget);
+      final pausedRelative =
+          tester.getCenter(ship) -
+          tester.getTopLeft(find.byType(CourseMapCanvas));
+
+      final disclosure = find.text('All destinations');
+      await tester.ensureVisible(disclosure);
+      await tester.tap(disclosure);
+      await tester.pump();
+      final comparison = find.widgetWithText(ListTile, 'Compare /u/ and /y/');
+      await tester.ensureVisible(comparison);
+      await tester.tap(comparison);
+      await tester.pump();
+      await tester.ensureVisible(find.text('SOUND SYSTEM'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.byTooltip('Play map motion'), findsOneWidget);
+      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
+      final selectedPausedRelative =
+          tester.getCenter(ship) -
+          tester.getTopLeft(find.byType(CourseMapCanvas));
+      expect((selectedPausedRelative - pausedRelative).distance, lessThan(0.1));
+
+      await tester.ensureVisible(find.text('Open discovery recovery'));
+      await tester.pump();
+      await tester.pump();
+      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isFalse);
+      final hiddenPausedShip = tester.getCenter(ship);
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(tester.getCenter(ship), hiddenPausedShip);
+
+      await tester.ensureVisible(ship);
+      await tester.pump();
+      await tester.pump();
+      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
+      expect(find.byTooltip('Play map motion'), findsOneWidget);
+      final stillPausedRelative =
+          tester.getCenter(ship) -
+          tester.getTopLeft(find.byType(CourseMapCanvas));
+      expect((stillPausedRelative - pausedRelative).distance, lessThan(0.1));
+
+      await tester.ensureVisible(find.byTooltip('Play map motion'));
+      await tester.pump();
+      await tester.tap(find.byTooltip('Play map motion'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(
+        tester.getCenter(ship) -
+            tester.getTopLeft(find.byType(CourseMapCanvas)),
+        isNot(stillPausedRelative),
+      );
+    },
+  );
+
+  testWidgets(
+    'initial_fallback_below_fold_remeasures_when_viewport_and_text_scale_change',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(
+        () => tester.platformDispatcher.clearTextScaleFactorTestValue(),
+      );
+
+      final app = await _mountMapApp(tester, normalMotion: true);
+      addTearDown(() => _unmountMapApp(tester, app));
+
+      final motion = find.byType(CourseMapMotion);
+      final ship = find.byKey(const ValueKey('map-motion-ship'));
+      expect(find.byKey(const ValueKey('map-list-fallback')), findsOneWidget);
+      expect(motion, findsOneWidget);
+      final scrollViewport = tester.getRect(find.byType(SingleChildScrollView));
+      final hiddenMap = tester.getRect(find.byType(CourseMapCanvas));
+      expect(hiddenMap.intersect(scrollViewport).isEmpty, isTrue);
+      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isFalse);
+      expect(tester.binding.transientCallbackCount, 0);
+      final initialShip = tester.getCenter(ship);
+
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(tester.getCenter(ship), initialShip);
+      expect(tester.binding.transientCallbackCount, 0);
+
+      tester.view.physicalSize = const Size(390, 844);
+      tester.platformDispatcher.textScaleFactorTestValue = 1;
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('map-list-fallback')), findsNothing);
+      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
+      final normalShip = tester.getCenter(ship);
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(tester.getCenter(ship), isNot(normalShip));
+
+      tester.view.physicalSize = const Size(360, 640);
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      await tester.pump();
+      await tester.pump();
+      await tester.ensureVisible(find.text('SOUND SYSTEM'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('map-list-fallback')), findsOneWidget);
+      final fallbackScrollViewport = tester.getRect(
+        find.byType(SingleChildScrollView),
+      );
+      final fallbackMap = tester.getRect(find.byType(CourseMapCanvas));
+      expect(fallbackMap.intersect(fallbackScrollViewport).isEmpty, isTrue);
+      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isFalse);
+      final resizedFallbackShip = tester.getCenter(ship);
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(tester.getCenter(ship), resizedFallbackShip);
+      expect(tester.binding.transientCallbackCount, 0);
+
+      await tester.ensureVisible(ship);
+      await tester.pump();
+      await tester.pump();
+      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
+      final resumedShip = tester.getCenter(ship);
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(tester.getCenter(ship), isNot(resumedShip));
+    },
+  );
 }
