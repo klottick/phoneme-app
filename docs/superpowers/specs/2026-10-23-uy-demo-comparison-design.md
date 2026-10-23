@@ -11,8 +11,12 @@ rights, playback, assessment, privacy or release sign-off.
 
 **Implementation plan:**
 [2026-10-23-uy-demo-comparison-implementation.md](../plans/2026-10-23-uy-demo-comparison-implementation.md)
-is written and awaits user review. No product implementation is authorized until
-that plan is separately reviewed and approved.
+was separately approved and published in PR #111 before implementation. Its
+approved tasks were delivered through PRs #112–116. See the
+[delivery and acceptance status](../status/2026-10-23-uy-demo-comparison.md)
+for publication evidence and remaining qualification gates. The approval of
+this design and plan does not close those gates or authorize scope beyond the
+scoped demo delivery.
 
 **Baseline inspected:** published `origin/main`
 `e3b6e613c1dbbdeb51cbdeabe7d0830708538e5c`.
