@@ -25,16 +25,17 @@ class CourseMapCanvas extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       final width = constraints.maxWidth;
-      final rows = (state.bodies.length / 3).ceil();
-      final height = math.max(width * 1.35, rows * 160.0);
       final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.2;
       final longTitle = state.bodies.any(
         (body) => body.definition.title.length > 32,
       );
       final fallback = width < 370 || largeText || longTitle;
+      final height = fallback
+          ? math.min(width * .6, 240.0).toDouble()
+          : (width / .94).clamp(320.0, 520.0).toDouble();
       final placements = fallback
           ? const <String, Rect>{}
-          : _placementsForBodies(state.bodies, width, height);
+          : _authoredPlacements(state.bodies, width, height);
       return SizedBox(
         key: fallback ? const ValueKey('map-list-fallback') : null,
         height: height,
@@ -42,30 +43,32 @@ class CourseMapCanvas extends StatelessWidget {
           clipBehavior: Clip.none,
           fit: StackFit.expand,
           children: [
-            const Positioned.fill(child: _OrbitalArt()),
+            Positioned.fill(
+              child: _OrbitalArt(
+                radii:
+                    state.bodies
+                        .map((body) => body.definition.orbitRadius)
+                        .toSet()
+                        .toList()
+                      ..sort(),
+              ),
+            ),
             for (final body in state.bodies)
               if (fallback)
                 _decorativeBody(body, width, height)
               else
                 _interactiveBody(
                   body,
-                  placements[body.definition.id]!,
+                  placements[body.definition.id]!.center,
                   state.bodies.indexOf(body),
                   focusOrderOffset,
                 ),
             if (state.currentBodyId case final currentId?)
               if (state.bodies.any((body) => body.definition.id == currentId))
                 Positioned.fromRect(
-                  rect:
-                      (fallback
-                              ? _authoredMarkerRect(
-                                  state,
-                                  currentId,
-                                  width,
-                                  height,
-                                )
-                              : placements[currentId]!)
-                          .deflate(-2),
+                  rect: fallback
+                      ? _authoredMarkerRect(state, currentId, width, height)
+                      : placements[currentId]!,
                   child: const IgnorePointer(
                     child: ExcludeSemantics(
                       child: Align(
@@ -92,10 +95,18 @@ class CourseMapCanvas extends StatelessWidget {
     },
   );
 
-  Widget _interactiveBody(MapBodyState body, Rect rect, int index, int offset) {
+  Widget _interactiveBody(
+    MapBodyState body,
+    Offset center,
+    int index,
+    int offset,
+  ) {
     final current = body.definition.id == state.currentBodyId;
-    return Positioned.fromRect(
-      rect: rect,
+    return Positioned(
+      left: center.dx - 24,
+      top: center.dy - 24,
+      width: 48,
+      height: 48,
       child: FocusTraversalOrder(
         order: NumericFocusOrder((offset + index).toDouble()),
         child: Semantics(
@@ -105,12 +116,13 @@ class CourseMapCanvas extends StatelessWidget {
               '${body.definition.title}, ${_role(body.definition.role)}, ${_availability(body)}${current ? ', current location, stationary' : ''}',
           button: true,
           selected: body.definition.id == selectedBodyId,
-          child: InkWell(
-            onTap: () => onInspect(body.definition.id),
-            child: Padding(
-              padding: const EdgeInsets.all(4),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+          child: Tooltip(
+            message: body.definition.title,
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: () => onInspect(body.definition.id),
+              child: Stack(
+                alignment: Alignment.center,
                 children: [
                   Opacity(
                     key: ValueKey('body-art-${body.definition.id}'),
@@ -143,18 +155,23 @@ class CourseMapCanvas extends StatelessWidget {
                       ),
                     ),
                   ),
-                  Text(
-                    body.definition.title,
-                    textAlign: TextAlign.center,
-                    maxLines: 3,
-                    style: const TextStyle(
-                      color: SpaceCourseColors.textPrimary,
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: DecoratedBox(
+                      decoration: const BoxDecoration(
+                        color: SpaceCourseColors.canvas,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(1),
+                        child: Icon(
+                          _readinessIcon(body),
+                          size: 16,
+                          color: SpaceCourseColors.textPrimary,
+                        ),
+                      ),
                     ),
-                  ),
-                  Icon(
-                    _readinessIcon(body),
-                    size: 18,
-                    color: SpaceCourseColors.textSecondary,
                   ),
                 ],
               ),
@@ -242,42 +259,41 @@ class CourseMapCanvas extends StatelessWidget {
   };
 }
 
-Map<String, Rect> _placementsForBodies(
+Map<String, Rect> _authoredPlacements(
   List<MapBodyState> bodies,
   double width,
   double height,
 ) {
-  const columns = 3;
-  const itemWidth = 112.0;
-  const itemHeight = 156.0;
-  final rows = (height / 160).floor();
-  final cellWidth = width / columns;
-  final cellHeight = height / rows;
-  final available = <Rect>[];
-  for (var index = 0; index < rows * columns && index < 12; index++) {
-    final row = index ~/ columns;
-    final column = index % columns;
-    available.add(
-      Rect.fromLTWH(
-        column * cellWidth + (cellWidth - itemWidth) / 2,
-        row * cellHeight + (cellHeight - itemHeight) / 2,
-        itemWidth,
-        itemHeight,
-      ),
-    );
-  }
   final result = <String, Rect>{};
   for (final body in bodies) {
-    final target = Offset(
+    final authored = Offset(
       body.definition.x * width,
       body.definition.y * height,
     );
-    available.sort(
-      (a, b) => (a.center - target).distanceSquared.compareTo(
-        (b.center - target).distanceSquared,
-      ),
+    final candidates = <Offset>[authored];
+    for (var radius = 4.0; radius <= 20; radius += 4) {
+      for (var step = 0; step < 32; step++) {
+        final angle = step * math.pi / 16;
+        candidates.add(
+          authored + Offset(math.cos(angle) * radius, math.sin(angle) * radius),
+        );
+      }
+    }
+    final chosen = candidates.firstWhere((center) {
+      if (center.dx < 24 ||
+          center.dx > width - 24 ||
+          center.dy < 24 ||
+          center.dy > height - 24) {
+        return false;
+      }
+      final candidate = Rect.fromCenter(center: center, width: 48, height: 48);
+      return result.values.every((placed) => !placed.overlaps(candidate));
+    }, orElse: () => authored);
+    result[body.definition.id] = Rect.fromCenter(
+      center: chosen,
+      width: 48,
+      height: 48,
     );
-    result[body.definition.id] = available.removeAt(0);
   }
   return result;
 }
@@ -300,30 +316,68 @@ Rect _authoredMarkerRect(
 }
 
 class _OrbitalArt extends StatelessWidget {
-  const _OrbitalArt();
+  const _OrbitalArt({required this.radii});
+  final List<double> radii;
+
   @override
-  Widget build(BuildContext context) => CustomPaint(painter: _OrbitPainter());
+  Widget build(BuildContext context) {
+    final maxRadius = radii.isEmpty ? 1.0 : radii.last;
+    return ColoredBox(
+      color: SpaceCourseColors.canvas,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          for (final radius in radii)
+            Positioned.fill(
+              child: CustomPaint(
+                key: ValueKey('orbit-radius-${radius.toStringAsFixed(2)}'),
+                painter: _OrbitPainter(radius, maxRadius),
+              ),
+            ),
+          const Positioned.fill(
+            child: CustomPaint(painter: _StarFieldPainter()),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _OrbitPainter extends CustomPainter {
+  const _OrbitPainter(this.orbitRadius, this.maxOrbitRadius);
+
+  final double orbitRadius;
+  final double maxOrbitRadius;
+
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawColor(SpaceCourseColors.canvas, BlendMode.src);
+    final maxSemiAxis = math.min(size.width * .47, size.height * .45);
+    final radius = orbitRadius / maxOrbitRadius * maxSemiAxis;
     final paint = Paint()
       ..color = SpaceCourseColors.border.withValues(alpha: .7)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1;
-    final center = Offset(size.width / 2, size.height * .47);
-    for (final fraction in [.18, .31, .44, .58, .71]) {
-      canvas.drawOval(
-        Rect.fromCenter(
-          center: center,
-          width: size.width * fraction * 2,
-          height: size.width * fraction * 1.45,
-        ),
-        paint,
-      );
-    }
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(size.width / 2, size.height * .47),
+        width: radius * 2,
+        height: radius * 1.44,
+      ),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _OrbitPainter oldDelegate) =>
+      orbitRadius != oldDelegate.orbitRadius ||
+      maxOrbitRadius != oldDelegate.maxOrbitRadius;
+}
+
+class _StarFieldPainter extends CustomPainter {
+  const _StarFieldPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
     final starPaint = Paint()..color = const Color(0xFFFFE2A3);
     for (final p in [
       const Offset(.12, .1),
@@ -342,5 +396,5 @@ class _OrbitPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _OrbitPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _StarFieldPainter oldDelegate) => false;
 }

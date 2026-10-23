@@ -35,131 +35,182 @@ class _CourseSystemViewState extends State<CourseSystemView> {
 
   @override
   Widget build(BuildContext context) {
-    final selected = _selected;
-    MapBodyState? currentBody;
-    for (final body in widget.state.bodies) {
-      if (body.definition.id == widget.state.currentBodyId) currentBody = body;
-    }
-    final hasSelectedAction =
-        selected != null &&
-        selected.readiness != MapReadiness.planned &&
-        selected.launch != null;
-    final disclosureOrder =
-        widget.state.bodies.length + (hasSelectedAction ? 1 : 0);
-    return FocusTraversalGroup(
-      policy: OrderedTraversalPolicy(),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 18, 16, 4),
-              child: Text(
-                'SOUND SYSTEM',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  letterSpacing: 2,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final selected = _selected;
+        MapBodyState? currentBody;
+        for (final body in widget.state.bodies) {
+          if (body.definition.id == widget.state.currentBodyId) {
+            currentBody = body;
+          }
+        }
+        final hasSelectedAction =
+            selected != null &&
+            selected.readiness != MapReadiness.planned &&
+            selected.launch != null;
+        final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.2;
+        final longTitle = widget.state.bodies.any(
+          (body) => body.definition.title.length > 32,
+        );
+        final fallback =
+            constraints.maxWidth - 16 < 370 || largeText || longTitle;
+        final actionOrder = fallback ? 0 : widget.state.bodies.length;
+        final disclosureOrder = fallback
+            ? -1
+            : widget.state.bodies.length + (hasSelectedAction ? 1 : 0);
+
+        Widget selectedPanel() => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: CourseDestinationPanel(
+            body: selected!,
+            onLaunch: selected.launch == null
+                ? null
+                : () => widget.onLaunch(selected),
+            focusOrder: actionOrder,
+          ),
+        );
+
+        Widget disclosure() => Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+          child: FocusTraversalOrder(
+            order: NumericFocusOrder(disclosureOrder.toDouble()),
+            child: Semantics(
+              key: const ValueKey('destination-list-disclosure-semantics'),
+              sortKey: OrdinalSortKey(disclosureOrder.toDouble()),
+              child: OutlinedButton.icon(
+                key: const ValueKey('destination-list-disclosure'),
+                onPressed: () =>
+                    setState(() => _showDestinations = !_showDestinations),
+                icon: Icon(_showDestinations ? Icons.expand_less : Icons.list),
+                label: Text(
+                  _showDestinations ? 'Hide destinations' : 'All destinations',
+                ),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(48, 48),
                 ),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                findSpaceSystem(widget.state.systemId)?.title ?? 'Sound system',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: Text('Explore the destinations in this sound system.'),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(8),
-              child: CourseMapCanvas(
-                state: widget.state,
-                selectedBodyId: widget.selectedBodyId,
-                onInspect: widget.onInspect,
-                focusOrderOffset: 0,
-              ),
-            ),
-            if (currentBody == null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Semantics(
-                  label: 'Current location unknown',
+          ),
+        );
+
+        Widget destinationList(int order) => CourseDestinationList(
+          state: widget.state,
+          selectedBodyId: widget.selectedBodyId,
+          onInspect: widget.onInspect,
+          focusOrderOffset: order,
+          currentBodyId: widget.state.currentBodyId,
+        );
+
+        Widget mapCanvas() => Padding(
+          padding: const EdgeInsets.all(8),
+          child: CourseMapCanvas(
+            state: widget.state,
+            selectedBodyId: widget.selectedBodyId,
+            onInspect: widget.onInspect,
+            focusOrderOffset: 0,
+          ),
+        );
+
+        return FocusTraversalGroup(
+          policy: OrderedTraversalPolicy(),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 18, 16, 4),
                   child: Text(
-                    'Current location unknown',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurface,
+                    'SOUND SYSTEM',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      letterSpacing: 2,
                     ),
                   ),
                 ),
-              ),
-            if (currentBody != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Semantics(
-                  label:
-                      'Current location: ${currentBody.definition.title}, stationary',
-                  child: ExcludeSemantics(
-                    child: Text(
-                      'Current location: ${currentBody.definition.title} · stationary',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurface,
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Text(
+                    findSpaceSystem(widget.state.systemId)?.title ??
+                        'Sound system',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: Text('Explore the destinations in this sound system.'),
+                ),
+                if (fallback && currentBody == null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Semantics(
+                      label: 'Current location unknown',
+                      child: Text(
+                        'Current location unknown',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ),
-            if (selected != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: CourseDestinationPanel(
-                  body: selected,
-                  onLaunch: selected.launch == null
-                      ? null
-                      : () => widget.onLaunch(selected),
-                  focusOrder: widget.state.bodies.length,
-                ),
-              ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-              child: FocusTraversalOrder(
-                order: NumericFocusOrder(disclosureOrder.toDouble()),
-                child: Semantics(
-                  key: const ValueKey('destination-list-disclosure-semantics'),
-                  sortKey: OrdinalSortKey(disclosureOrder.toDouble()),
-                  child: OutlinedButton.icon(
-                    key: const ValueKey('destination-list-disclosure'),
-                    onPressed: () =>
-                        setState(() => _showDestinations = !_showDestinations),
-                    icon: Icon(
-                      _showDestinations ? Icons.expand_less : Icons.list,
-                    ),
-                    label: Text(
-                      _showDestinations
-                          ? 'Hide destinations'
-                          : 'All destinations',
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(48, 48),
+                if (fallback && currentBody != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Semantics(
+                      label:
+                          'Current location: ${currentBody.definition.title}, stationary',
+                      child: ExcludeSemantics(
+                        child: Text(
+                          'Current location: ${currentBody.definition.title} · stationary',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
+                if (fallback && selected != null) selectedPanel(),
+                if (fallback) destinationList(hasSelectedAction ? 1 : 0),
+                if (!fallback) mapCanvas(),
+                if (!fallback && currentBody == null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Semantics(
+                      label: 'Current location unknown',
+                      child: Text(
+                        'Current location unknown',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                    ),
+                  ),
+                if (!fallback && currentBody != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Semantics(
+                      label:
+                          'Current location: ${currentBody.definition.title}, stationary',
+                      child: ExcludeSemantics(
+                        child: Text(
+                          'Current location: ${currentBody.definition.title} · stationary',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (!fallback && selected != null) selectedPanel(),
+                if (!fallback) disclosure(),
+                if (!fallback && _showDestinations)
+                  destinationList(disclosureOrder + 1),
+                if (fallback) mapCanvas(),
+                const SizedBox(height: 20),
+              ],
             ),
-            if (_showDestinations)
-              CourseDestinationList(
-                state: widget.state,
-                selectedBodyId: widget.selectedBodyId,
-                onInspect: widget.onInspect,
-                focusOrderOffset: disclosureOrder + 1,
-                currentBodyId: widget.state.currentBodyId,
-              ),
-            const SizedBox(height: 20),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

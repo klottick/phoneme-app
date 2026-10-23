@@ -75,16 +75,27 @@ void main() {
           ),
         );
         expect(tester.takeException(), isNull, reason: '$size at scale $scale');
-        final listButton = find.text('All destinations');
-        await tester.ensureVisible(listButton);
-        expect(listButton, findsOneWidget, reason: '$size at scale $scale');
-        final button = tester.widget<OutlinedButton>(
-          find.ancestor(of: listButton, matching: find.byType(OutlinedButton)),
-        );
-        expect(
-          button.style?.minimumSize?.resolve({})?.height ?? 0,
-          greaterThanOrEqualTo(48),
-        );
+        final fallback =
+            size.width < 370 ||
+            scale > 1.2 ||
+            frenchSpaceSystems.first.bodies.any(
+              (body) => body.title.length > 32,
+            );
+        if (!fallback) {
+          final listButton = find.text('All destinations');
+          await tester.ensureVisible(listButton);
+          expect(listButton, findsOneWidget, reason: '$size at scale $scale');
+          final button = tester.widget<OutlinedButton>(
+            find.ancestor(
+              of: listButton,
+              matching: find.byType(OutlinedButton),
+            ),
+          );
+          expect(
+            button.style?.minimumSize?.resolve({})?.height ?? 0,
+            greaterThanOrEqualTo(48),
+          );
+        }
         if (size.width == 390 && scale == 1) {
           final targets = [
             for (final id in frenchSpaceSystems.first.bodies.map(
@@ -105,6 +116,11 @@ void main() {
           expect(
             find.byKey(const ValueKey('destination-semantics-discovery')),
             findsNothing,
+          );
+          expect(
+            find.byKey(const ValueKey('destination-list-semantics-discovery')),
+            findsOneWidget,
+            reason: 'linear fallback visible at $size scale $scale',
           );
         }
         final launch = find.text('Open destination');
@@ -225,10 +241,19 @@ void main() {
       ),
       findsOneWidget,
     );
+    final currentCue = tester.getRect(find.byIcon(Icons.navigation));
+    final currentBody = tester.getRect(
+      find.byKey(const ValueKey('destination-semantics-discovery')),
+    );
+    final selectedBody = tester.getRect(
+      find.byKey(const ValueKey('destination-semantics-comparison')),
+    );
+    expect((currentCue.center - currentBody.center).distance, lessThan(40));
+    expect((currentCue.center - selectedBody.center).distance, greaterThan(40));
     expect(
       find.descendant(
-        of: find.byType(CourseMapCanvas),
-        matching: find.text('Hear the difference'),
+        of: find.byKey(const ValueKey('destination-semantics-discovery')),
+        matching: find.byType(Tooltip),
       ),
       findsOneWidget,
     );
@@ -253,14 +278,171 @@ void main() {
         ),
       ),
     );
-    await tester.ensureVisible(find.text('All destinations'));
-    await tester.tap(find.text('All destinations'));
-    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('destination-list-semantics-discovery')),
+      findsOneWidget,
+    );
     const title =
         'Hear the difference with this intentionally long destination name';
     await tester.ensureVisible(find.text(title).last);
     expect(find.text(title), findsNWidgets(2));
     expect(find.byKey(const ValueKey('map-list-fallback')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('destination-semantics-discovery')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('orbital_controls_follow_authored_positions_and_stay_stable', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final state = _state('geometry', currentBodyId: 'discovery');
+
+    Future<List<Offset>> renderAndReadCenters() async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CourseSystemView(
+              state: state,
+              selectedBodyId: 'discovery',
+              onInspect: (_) {},
+              onLaunch: (_) {},
+            ),
+          ),
+        ),
+      );
+      final canvas = tester.getRect(find.byType(CourseMapCanvas));
+      final actual = <Offset>[];
+      for (final body in state.bodies) {
+        final target = tester.getRect(
+          find.byKey(ValueKey('destination-semantics-${body.definition.id}')),
+        );
+        final center = target.center - canvas.topLeft;
+        final authored = Offset(
+          body.definition.x * canvas.width,
+          body.definition.y * canvas.height,
+        );
+        expect(
+          (center - authored).distance,
+          lessThanOrEqualTo(24),
+          reason:
+              '${body.definition.id} should stay near its authored scene position',
+        );
+        actual.add(center);
+      }
+      for (var left = 0; left < actual.length; left++) {
+        for (var right = left + 1; right < actual.length; right++) {
+          final first = tester.getRect(
+            find.byKey(
+              ValueKey(
+                'destination-semantics-${state.bodies[left].definition.id}',
+              ),
+            ),
+          );
+          final second = tester.getRect(
+            find.byKey(
+              ValueKey(
+                'destination-semantics-${state.bodies[right].definition.id}',
+              ),
+            ),
+          );
+          expect(first.overlaps(second), isFalse);
+        }
+      }
+      return actual;
+    }
+
+    final first = await renderAndReadCenters();
+    expect(first.toSet().length, state.bodies.length);
+    final second = await renderAndReadCenters();
+    expect(second, first);
+
+    final radii = state.bodies
+        .map((body) => body.definition.orbitRadius)
+        .toSet();
+    for (final radius in radii) {
+      expect(
+        find.byKey(ValueKey('orbit-radius-${radius.toStringAsFixed(2)}')),
+        findsOneWidget,
+      );
+    }
+  });
+
+  testWidgets('orbital_scene_height_is_bounded_by_viewport_not_body_count', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    Future<double> heightFor(CourseMapState state) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CourseSystemView(
+              state: state,
+              selectedBodyId: 'discovery',
+              onInspect: (_) {},
+              onLaunch: (_) {},
+            ),
+          ),
+        ),
+      );
+      return tester.getSize(find.byType(CourseMapCanvas)).height;
+    }
+
+    final full = _state('height');
+    final oneBody = CourseMapState(
+      systemId: full.systemId,
+      bodies: [full.bodies.first],
+      currentBodyId: full.currentBodyId,
+      allAvailableMainComplete: full.allAvailableMainComplete,
+      completedLegacyLessonIds: full.completedLegacyLessonIds,
+    );
+    final fullHeight = await heightFor(full);
+    final oneBodyHeight = await heightFor(oneBody);
+    expect(fullHeight, lessThanOrEqualTo(420));
+    expect(fullHeight, oneBodyHeight);
+  });
+
+  testWidgets('linear_fallback_precedes_compact_noninteractive_scene', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(3)),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: CourseSystemView(
+            state: _state('fallback'),
+            selectedBodyId: 'discovery',
+            onInspect: (_) {},
+            onLaunch: (_) {},
+          ),
+        ),
+      ),
+    );
+    final canvas = tester.getRect(find.byType(CourseMapCanvas));
+    final action = tester.getRect(find.text('Open destination'));
+    final firstLinearEntry = tester.getRect(
+      find.byKey(const ValueKey('destination-list-semantics-discovery')),
+    );
+    expect(action.bottom, lessThan(canvas.top));
+    expect(firstLinearEntry.top, lessThan(canvas.top));
+    expect(canvas.height, lessThanOrEqualTo(240));
     expect(
       find.byKey(const ValueKey('destination-semantics-discovery')),
       findsNothing,
@@ -301,6 +483,22 @@ void main() {
       final surface = Theme.of(panelText).cardColor;
       expect(_contrast(panelColor, surface), greaterThanOrEqualTo(4.5));
       expect(find.byType(CustomPaint), findsWidgets);
+      if (find.byType(ListTile).evaluate().isEmpty) {
+        final disclosure = find.byKey(
+          const ValueKey('destination-list-disclosure'),
+        );
+        await tester.ensureVisible(disclosure);
+        await tester.tap(disclosure);
+        await tester.pumpAndSettle();
+      }
+      final selectedTile = tester.widget<ListTile>(find.byType(ListTile).first);
+      final listForeground =
+          selectedTile.selectedColor ??
+          Theme.of(panelText).colorScheme.onSurface;
+      final listSurface =
+          selectedTile.selectedTileColor ??
+          Theme.of(panelText).colorScheme.surface;
+      expect(_contrast(listForeground, listSurface), greaterThanOrEqualTo(4.5));
     }
   });
 
