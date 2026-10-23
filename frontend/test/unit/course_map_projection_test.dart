@@ -383,7 +383,14 @@ void main() {
       bestScores: completed.bestScores,
       pending: completed.pending,
     );
-    expect(projectCourseState(historical).allAvailableMainComplete, isFalse);
+    final historicalMap = projectCourseState(historical);
+    expect(historicalMap.allAvailableMainComplete, isFalse);
+    expect(
+      historicalMap.bodies
+          .singleWhere((body) => body.definition.id == 'discovery')
+          .progress,
+      MapProgress.resumable,
+    );
     final legacy = CourseLearningState(
       scope: completed.scope,
       revision: completed.revision,
@@ -405,7 +412,14 @@ void main() {
       bestScores: completed.bestScores,
       pending: completed.pending,
     );
-    expect(projectCourseState(legacy).allAvailableMainComplete, isFalse);
+    final legacyMap = projectCourseState(legacy);
+    expect(legacyMap.allAvailableMainComplete, isFalse);
+    expect(
+      legacyMap.bodies
+          .singleWhere((body) => body.definition.id == 'discovery')
+          .progress,
+      MapProgress.resumable,
+    );
   });
 
   test('sentence_qualification_dominates_progress', () async {
