@@ -360,6 +360,14 @@ linguistic-review gates remain PENDING manual evidence.
 
 ### FR-11 — Build the main-path overworld and optional side quests
 
+**Map-first design update (2026-10-23):** The user requested the map earlier to
+showcase the lesson journey and approved a phone-first space-system visual
+direction. The [proposed scoped design](../specs/2026-10-23-map-first-space-course-design.md)
+defines FR-11-A plus necessary Home/router/theme integration ahead of unfinished
+spelling/assessment work. Written-spec review and a subsequent implementation
+plan are still required; no map implementation or full FR-11/FR-18 completion is
+claimed. Existing activity access and audio/content qualification gates remain.
+
 **Priority:** P1. **Owner:** path/navigation UI agent. **Depends on:** FR-01, FR-04, FR-05 contracts; FR-07 for end-to-end validation.
 
 **Files:** Create `frontend/lib/src/features/home/course_overworld.dart`, `course_path_node.dart`, `frontend/lib/src/core/course/course_path_state.dart`, `frontend/test/unit/course_path_state_test.dart`, and `frontend/test/widget/course_overworld_test.dart`. FR-18 owns edits to `home_screen.dart` and `app_router.dart`.
