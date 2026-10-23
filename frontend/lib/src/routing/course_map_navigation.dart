@@ -10,6 +10,8 @@ String? courseMapLocation(MapTarget target, MapLaunch launch) {
       '/course-lesson/en-fr-u-y?review=true',
     (MapTarget.mixedComparison, MapLaunch.open) =>
       '/course-comparison/en-fr-phoneme-comparison',
+    (MapTarget.mixedComparison, MapLaunch.review) =>
+      '/course-comparison/en-fr-phoneme-comparison?review=true',
     (MapTarget.review, MapLaunch.open) => '/course-review',
     (MapTarget.sentenceSections, MapLaunch.open) => '/course-sentence-hunt',
     (MapTarget.arcade, MapLaunch.open) => '/arcade',

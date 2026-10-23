@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/course/course_learning_providers.dart';
+import '../../core/course/course_attempt.dart';
 import '../../core/course/french_sentence_package.dart';
 import '../../routing/course_map_navigation.dart';
 import '../../routing/course_root_navigation.dart';
@@ -48,9 +49,27 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
     final completedDiscovery = availableDiscovery
         .where((body) => body.progress == MapProgress.completed)
         .length;
+    final selectedComparison = state.bodies
+        .where(
+          (body) =>
+              body.definition.id == (selected ?? state.currentBodyId) &&
+              body.definition.target == MapTarget.mixedComparison &&
+              body.readiness == MapReadiness.alpha &&
+              body.progress == MapProgress.completed,
+        )
+        .firstOrNull;
     final footer = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (selectedComparison != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: OutlinedButton(
+              onPressed: () =>
+                  _launch(selectedComparison, auth, practiceAgain: true),
+              child: const Text('Practise again'),
+            ),
+          ),
         if (availableDiscovery.isNotEmpty) ...[
           Text(
             'Discovery lessons: $completedDiscovery/${availableDiscovery.length} available complete',
@@ -147,48 +166,54 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
                 state: state,
                 selectedBodyId: selected ?? state.currentBodyId,
                 onInspect: (id) => setState(() => selected = id),
-                onLaunch: (body) {
-                  final currentAuth = ref.read(learningAuthScopeProvider);
-                  if (currentAuth.owner != auth.owner ||
-                      currentAuth.generation != auth.generation) {
-                    return;
-                  }
-                  final current = ref.read(
-                    courseMapStateProvider(widget.systemId),
-                  );
-                  final latest = current.bodies
-                      .where(
-                        (candidate) =>
-                            candidate.definition.id == body.definition.id,
-                      )
-                      .firstOrNull;
-                  if (latest == null ||
-                      latest.launch == null ||
-                      latest.readiness == MapReadiness.planned) {
-                    return;
-                  }
-                  final recovery =
-                      latest.readiness == MapReadiness.loading ||
-                      latest.readiness == MapReadiness.unavailable ||
-                      latest.readiness == MapReadiness.qualificationBlocked;
-                  if (recovery &&
-                      !(latest.launch == MapLaunch.open &&
-                          (latest.definition.target ==
-                                  MapTarget.mixedComparison ||
-                              latest.definition.target ==
-                                  MapTarget.sentenceSections))) {
-                    return;
-                  }
-                  final route = courseMapLocation(
-                    latest.definition.target!,
-                    latest.launch!,
-                  );
-                  if (route != null) context.push(route);
-                },
+                onLaunch: (body) => _launch(body, auth),
                 footer: footer,
               ),
       ),
     );
+  }
+
+  void _launch(
+    MapBodyState body,
+    LearningAuthScope expectedAuth, {
+    bool practiceAgain = false,
+  }) {
+    final currentAuth = ref.read(learningAuthScopeProvider);
+    if (currentAuth.owner != expectedAuth.owner ||
+        currentAuth.generation != expectedAuth.generation) {
+      return;
+    }
+    final current = ref.read(courseMapStateProvider(widget.systemId));
+    final latest = current.bodies
+        .where((candidate) => candidate.definition.id == body.definition.id)
+        .firstOrNull;
+    if (latest == null) return;
+
+    final MapLaunch? launch;
+    if (practiceAgain) {
+      if (latest.readiness != MapReadiness.alpha ||
+          latest.definition.target != MapTarget.mixedComparison ||
+          latest.progress != MapProgress.completed ||
+          latest.launch != MapLaunch.review) {
+        return;
+      }
+      launch = MapLaunch.open;
+    } else {
+      launch = latest.launch;
+      if (launch == null || latest.readiness == MapReadiness.planned) return;
+      final recovery =
+          latest.readiness == MapReadiness.loading ||
+          latest.readiness == MapReadiness.unavailable ||
+          latest.readiness == MapReadiness.qualificationBlocked;
+      if (recovery &&
+          !(launch == MapLaunch.open &&
+              (latest.definition.target == MapTarget.mixedComparison ||
+                  latest.definition.target == MapTarget.sentenceSections))) {
+        return;
+      }
+    }
+    final route = courseMapLocation(latest.definition.target!, launch);
+    if (route != null) context.push(route);
   }
 
   Future<void> _retryProgress() async {

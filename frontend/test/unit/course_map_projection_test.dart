@@ -219,6 +219,88 @@ void main() {
           .readiness,
       MapReadiness.unavailable,
     );
+    expect(
+      state.bodies
+          .singleWhere((b) => b.definition.id == 'mixed-comparison')
+          .evidenceLabels,
+      isEmpty,
+    );
+  });
+
+  test('comparison_refresh_and_foreign_scope_hide_stale_evidence', () {
+    final owner = LearningOwner.guest();
+    final previous = ComparisonLearningState.empty(
+      ComparisonProfileScope(courseId: 'en-fr', owner: owner),
+    );
+    CourseMapState project({
+      required AsyncValue<ComparisonLearningState> comparison,
+    }) => projectCourseMap(
+      system: frenchSpaceSystems.first,
+      auth: LearningAuthScope(owner: owner, generation: 1, ready: true),
+      registry: LearningRegistry.french(),
+      course: AsyncData(
+        CourseLearningState.empty(
+          LearningScope(courseId: 'en-fr', owner: owner),
+        ),
+      ),
+      comparison: comparison,
+      comparisonCatalogue: AsyncData(loadFrenchComparisonCatalogue()),
+      sentences: const AsyncLoading(),
+      sentenceCatalogue: const AsyncLoading(),
+    );
+
+    final refreshing = project(
+      comparison: const AsyncLoading<ComparisonLearningState>()
+          .copyWithPrevious(AsyncData(previous)),
+    ).bodies.singleWhere((body) => body.definition.id == 'mixed-comparison');
+    expect(refreshing.readiness, MapReadiness.loading);
+    expect(refreshing.evidenceLabels, isEmpty);
+
+    final foreign = project(
+      comparison: AsyncData(
+        ComparisonLearningState.empty(
+          ComparisonProfileScope(
+            courseId: 'en-fr',
+            owner: LearningOwner.account('foreign-learner'),
+          ),
+        ),
+      ),
+    ).bodies.singleWhere((body) => body.definition.id == 'mixed-comparison');
+    expect(foreign.readiness, MapReadiness.loading);
+    expect(foreign.evidenceLabels, isEmpty);
+  });
+
+  test('comparison_body_projects_complete_committed_evidence_summary', () {
+    final owner = LearningOwner.guest();
+    final comparisonState = ComparisonLearningState.empty(
+      ComparisonProfileScope(courseId: 'en-fr', owner: owner),
+    );
+    final state = projectCourseMap(
+      system: frenchSpaceSystems.first,
+      auth: LearningAuthScope(owner: owner, generation: 0, ready: true),
+      registry: LearningRegistry.french(),
+      course: AsyncData(
+        CourseLearningState.empty(
+          LearningScope(courseId: 'en-fr', owner: owner),
+        ),
+      ),
+      comparison: AsyncData(comparisonState),
+      comparisonCatalogue: AsyncData(loadFrenchComparisonCatalogue()),
+      sentences: const AsyncLoading(),
+      sentenceCatalogue: const AsyncLoading(),
+    );
+    final comparison = state.bodies.singleWhere(
+      (body) => body.definition.id == 'mixed-comparison',
+    );
+
+    expect(comparison.evidenceLabels, [
+      'Comparison practice, not phoneme mastery',
+      'Comparison pairs attempted: 0/10',
+      'Comparison answers: 0/0',
+      'After-debrief comparison answers: 0',
+      'Comparison completion policies: 0',
+      'Unresolved comparison pairs: 0',
+    ]);
   });
 
   test('sentence_catalogue_refresh_does_not_retain_qualification', () async {
