@@ -111,6 +111,36 @@ class _CourseSystemViewState extends State<CourseSystemView> {
           ),
         );
 
+        Widget currentLocationCue() {
+          final label = currentBody == null
+              ? 'Current location unknown'
+              : 'Current location: ${currentBody.definition.title}, stationary';
+          final copy = currentBody == null
+              ? 'Current location unknown'
+              : 'Current location: ${currentBody.definition.title} · stationary';
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Semantics(
+              label: label,
+              child: currentBody == null
+                  ? Text(
+                      copy,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                    )
+                  : ExcludeSemantics(
+                      child: Text(
+                        copy,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                    ),
+            ),
+          );
+        }
+
         return FocusTraversalGroup(
           policy: OrderedTraversalPolicy(),
           child: SingleChildScrollView(
@@ -139,67 +169,11 @@ class _CourseSystemViewState extends State<CourseSystemView> {
                   padding: EdgeInsets.symmetric(horizontal: 16),
                   child: Text('Explore the destinations in this sound system.'),
                 ),
-                if (fallback && currentBody == null)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Semantics(
-                      label: 'Current location unknown',
-                      child: Text(
-                        'Current location unknown',
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
-                      ),
-                    ),
-                  ),
-                if (fallback && currentBody != null)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Semantics(
-                      label:
-                          'Current location: ${currentBody.definition.title}, stationary',
-                      child: ExcludeSemantics(
-                        child: Text(
-                          'Current location: ${currentBody.definition.title} · stationary',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
+                if (fallback) currentLocationCue(),
                 if (fallback && selected != null) selectedPanel(),
                 if (fallback) destinationList(hasSelectedAction ? 1 : 0),
                 if (!fallback) mapCanvas(),
-                if (!fallback && currentBody == null)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Semantics(
-                      label: 'Current location unknown',
-                      child: Text(
-                        'Current location unknown',
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
-                      ),
-                    ),
-                  ),
-                if (!fallback && currentBody != null)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Semantics(
-                      label:
-                          'Current location: ${currentBody.definition.title}, stationary',
-                      child: ExcludeSemantics(
-                        child: Text(
-                          'Current location: ${currentBody.definition.title} · stationary',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
+                if (!fallback) currentLocationCue(),
                 if (!fallback && selected != null) selectedPanel(),
                 if (!fallback) disclosure(),
                 if (!fallback && _showDestinations)
