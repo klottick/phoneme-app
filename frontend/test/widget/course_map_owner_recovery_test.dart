@@ -8,6 +8,7 @@ import 'package:linguist/src/core/course/comparison_learning_state.dart';
 import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/course_learning_command.dart';
+import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/course_learning_registry.dart';
 import 'package:linguist/src/core/course/lesson_section_session.dart';
 import 'package:linguist/src/core/course/french_sentence_package.dart';
@@ -21,6 +22,23 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../support/course_learning_widget_store.dart';
 import '../support/map_motion_test_support.dart';
 import '../support/sentence_hunt_fixtures.dart';
+
+class _HeldRetryStore extends CourseLearningWidgetStore {
+  _HeldRetryStore({required super.scope}) {
+    failLoad = true;
+  }
+
+  final entered = Completer<void>();
+  final gate = Completer<void>();
+
+  @override
+  Future<CourseLearningState> retryLoad() async {
+    if (!entered.isCompleted) entered.complete();
+    await gate.future;
+    failLoad = false;
+    return committedState;
+  }
+}
 
 List<Override> _ownerFixture(LearningAuthTracker tracker) => [
   learningAuthScopeProvider.overrideWith((ref) => tracker),
@@ -89,6 +107,26 @@ void main() {
     );
     tracker.observe(owner: LearningOwner.account('B'), ready: true);
     await tester.pumpAndSettle();
+    final secondOwnerView = tester.widget<CourseSystemView>(
+      find.byType(CourseSystemView),
+    );
+    secondOwnerView.onInspect('review');
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<CourseSystemView>(find.byType(CourseSystemView))
+          .selectedBodyId,
+      'review',
+    );
+    tracker.observe(owner: LearningOwner.account('A'), ready: true);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<CourseSystemView>(find.byType(CourseSystemView))
+          .selectedBodyId,
+      'discovery',
+      reason: 'returning A after B is a fresh owner generation',
+    );
     tracker.observe(owner: guest, ready: true);
     await tester.pumpAndSettle();
     expect(
@@ -165,6 +203,75 @@ void main() {
     expect(find.text('Hear the difference'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'retired retry finally cannot clear replacement owner busy state',
+    (tester) async {
+      disableMapMotion(tester);
+      final ownerA = LearningOwner.account('retry-A');
+      final ownerB = LearningOwner.account('retry-B');
+      final tracker = LearningAuthTracker(owner: ownerA, ready: true);
+      final storeA = _HeldRetryStore(
+        scope: LearningScope(courseId: 'en-fr', owner: ownerA),
+      );
+      final storeB = _HeldRetryStore(
+        scope: LearningScope(courseId: 'en-fr', owner: ownerB),
+      );
+      var activeStore = storeA;
+      final epoch = StateProvider<int>((ref) => 0);
+      final container = ProviderContainer(
+        overrides: [
+          ..._ownerFixture(tracker),
+          courseLearningStoreProvider.overrideWith((ref) {
+            ref.watch(epoch);
+            return activeStore;
+          }),
+        ],
+      );
+      addTearDown(() async {
+        if (!storeA.gate.isCompleted) storeA.gate.complete();
+        if (!storeB.gate.isCompleted) storeB.gate.complete();
+        container.dispose();
+      });
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const LinguistApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final retry = find.text('Retry loading progress');
+      await tester.ensureVisible(retry);
+      await tester.tap(retry);
+      await tester.pump();
+      await storeA.entered.future;
+
+      activeStore = storeB;
+      tracker.observe(owner: ownerB, ready: true);
+      container.read(epoch.notifier).state++;
+      await tester.pumpAndSettle();
+      final replacementRetry = find.text('Retry loading progress');
+      await tester.ensureVisible(replacementRetry);
+      await tester.tap(replacementRetry);
+      await tester.pump();
+      await storeB.entered.future;
+      expect(find.text('Retrying…'), findsOneWidget);
+
+      storeA.gate.complete();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(
+        find.text('Retrying…'),
+        findsOneWidget,
+        reason: 'A completion must not clear B’s in-flight retry indicator',
+      );
+
+      storeB.gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Retrying…'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('family_failures_leave_other_bodies_and_recovery_usable', (
     tester,

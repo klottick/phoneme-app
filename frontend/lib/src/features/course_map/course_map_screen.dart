@@ -25,6 +25,7 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
   String? selected;
   bool retrying = false;
   Object? ownerKey;
+  int retryOperation = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -38,9 +39,25 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
     final system = findSpaceSystem(widget.systemId);
     final state = ref.watch(courseMapStateProvider(widget.systemId));
     final profile = ref.watch(courseLearningStateProvider);
+    final availableDiscovery = state.bodies.where(
+      (body) =>
+          body.definition.target == MapTarget.discovery &&
+          body.readiness == MapReadiness.alpha &&
+          body.progress != MapProgress.unknown,
+    );
+    final completedDiscovery = availableDiscovery
+        .where((body) => body.progress == MapProgress.completed)
+        .length;
     final footer = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (availableDiscovery.isNotEmpty) ...[
+          Text(
+            'Discovery lessons: $completedDiscovery/${availableDiscovery.length} available complete',
+          ),
+          if (completedDiscovery == availableDiscovery.length)
+            const Text('All currently available lessons complete.'),
+        ],
         if (state.bodies.isEmpty ||
             state.bodies.every((body) => body.launch == null))
           TextButton(
@@ -177,21 +194,25 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
   Future<void> _retryProgress() async {
     final store = ref.read(courseLearningStoreProvider);
     final scope = ref.read(learningAuthScopeProvider);
+    final operation = ++retryOperation;
+    bool isCurrentOperation() {
+      if (!mounted ||
+          operation != retryOperation ||
+          !identical(store, ref.read(courseLearningStoreProvider))) {
+        return false;
+      }
+      final now = ref.read(learningAuthScopeProvider);
+      return now.owner == scope.owner && now.generation == scope.generation;
+    }
+
     setState(() => retrying = true);
     try {
       await store.retryLoad();
-      if (!mounted ||
-          !identical(store, ref.read(courseLearningStoreProvider))) {
-        return;
-      }
-      final now = ref.read(learningAuthScopeProvider);
-      if (now.owner == scope.owner && now.generation == scope.generation) {
-        ref.invalidate(courseLearningStateProvider);
-      }
+      if (isCurrentOperation()) ref.invalidate(courseLearningStateProvider);
     } on Object {
       // Keep the validated unavailable state and its retry action in place.
     } finally {
-      if (mounted) setState(() => retrying = false);
+      if (isCurrentOperation()) setState(() => retrying = false);
     }
   }
 }

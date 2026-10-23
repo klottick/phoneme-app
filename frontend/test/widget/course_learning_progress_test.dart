@@ -62,31 +62,31 @@ Override _comparisonPresentationOverride() =>
 SupabaseClient _authenticatedBackend() => SupabaseClient(
   'https://progress.example.invalid',
   'public-test-key',
-        authOptions: const AuthClientOptions(autoRefreshToken: false),
-        httpClient: MockClient((request) async {
-      final email = (jsonDecode(request.body) as Map)['email'] as String;
-      final id = email.split('@').first;
+  authOptions: const AuthClientOptions(autoRefreshToken: false),
+  httpClient: MockClient((request) async {
+    final email = (jsonDecode(request.body) as Map)['email'] as String;
+    final id = email.split('@').first;
     final token =
         '${base64Url.encode(utf8.encode('{"alg":"HS256"}'))}.'
         '${base64Url.encode(utf8.encode(jsonEncode({'sub': id, 'exp': DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600})))}.signature';
-      return http.Response(
-        jsonEncode({
-          'access_token': token,
-          'refresh_token': 'test-refresh',
-          'token_type': 'bearer',
-          'expires_in': 3600,
-          'user': {
-            'id': id,
-            'aud': 'authenticated',
-            'app_metadata': <String, dynamic>{},
-            'user_metadata': <String, dynamic>{},
-            'created_at': '2026-01-01T00:00:00Z',
-          },
-        }),
-        200,
-        request: request,
-        headers: {'content-type': 'application/json'},
-      );
+    return http.Response(
+      jsonEncode({
+        'access_token': token,
+        'refresh_token': 'test-refresh',
+        'token_type': 'bearer',
+        'expires_in': 3600,
+        'user': {
+          'id': id,
+          'aud': 'authenticated',
+          'app_metadata': <String, dynamic>{},
+          'user_metadata': <String, dynamic>{},
+          'created_at': '2026-01-01T00:00:00Z',
+        },
+      }),
+      200,
+      request: request,
+      headers: {'content-type': 'application/json'},
+    );
   }),
 );
 
@@ -127,7 +127,7 @@ void main() {
             ),
           ),
         ],
-      child: const MaterialApp(home: CourseProgressScreen()),
+        child: const MaterialApp(home: CourseProgressScreen()),
       ),
     );
     await tester.pumpAndSettle();
@@ -215,6 +215,7 @@ void main() {
     expect(find.text('Discovery lessons: 0/1 complete'), findsNothing);
 
     final originalHandle = container.read(learningDatabaseHandleProvider);
+    await tester.ensureVisible(find.text('Retry loading progress'));
     await tester.tap(find.text('Retry loading progress'));
     await tester.pumpAndSettle();
     expect(
@@ -296,11 +297,11 @@ void main() {
     );
     await tester.pumpWidget(
       ProviderScope(
-      overrides: [
-        courseLearningStateProvider.overrideWith((ref) async => state),
-        _comparisonPresentationOverride(),
-      ],
-      child: const MaterialApp(home: CourseProgressScreen()),
+        overrides: [
+          courseLearningStateProvider.overrideWith((ref) async => state),
+          _comparisonPresentationOverride(),
+        ],
+        child: const MaterialApp(home: CourseProgressScreen()),
       ),
     );
     await tester.pumpAndSettle();
@@ -329,13 +330,13 @@ void main() {
       findsOneWidget,
     );
     expect(
-        find.textContaining(
+      find.textContaining(
         'Detailed history, mistakes and lesson resume stay on this device.',
       ),
       findsOneWidget,
     );
     expect(
-        find.textContaining(
+      find.textContaining(
         'Supported backup is pending; local commits remain saved on this device.',
       ),
       findsOneWidget,
@@ -372,11 +373,11 @@ void main() {
     );
     await tester.pumpWidget(
       ProviderScope(
-      overrides: [
-        courseLearningStateProvider.overrideWith((ref) async => state),
-        _comparisonPresentationOverride(),
-      ],
-      child: const MaterialApp(home: CourseProgressScreen()),
+        overrides: [
+          courseLearningStateProvider.overrideWith((ref) async => state),
+          _comparisonPresentationOverride(),
+        ],
+        child: const MaterialApp(home: CourseProgressScreen()),
       ),
     );
     await tester.pumpAndSettle();
@@ -403,12 +404,12 @@ void main() {
     final store = _UnexpectedSyncStore(scope: scope);
     await tester.pumpWidget(
       ProviderScope(
-      overrides: [
-        courseLearningStoreProvider.overrideWithValue(store),
-        courseLearningStateProvider.overrideWith((ref) async => state),
-        _comparisonPresentationOverride(),
-      ],
-      child: const MaterialApp(home: CourseProgressScreen()),
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(store),
+          courseLearningStateProvider.overrideWith((ref) async => state),
+          _comparisonPresentationOverride(),
+        ],
+        child: const MaterialApp(home: CourseProgressScreen()),
       ),
     );
     await tester.pumpAndSettle();
@@ -418,7 +419,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(
-        find.text(
+      find.text(
         'Supported backup status could not be checked. Local commits remain saved on this device.',
       ),
       findsOneWidget,
@@ -451,22 +452,22 @@ void main() {
     });
     final container = ProviderContainer(
       overrides: [
-      selectedStore.overrideWith((ref) {
-        ref.watch(epoch);
-        return activeStore;
-      }),
+        selectedStore.overrideWith((ref) {
+          ref.watch(epoch);
+          return activeStore;
+        }),
         courseLearningStoreProvider.overrideWith(
           (ref) => ref.watch(selectedStore),
         ),
-      courseLearningStateProvider.overrideWith((ref) async => state),
-      _comparisonPresentationOverride(),
+        courseLearningStateProvider.overrideWith((ref) async => state),
+        _comparisonPresentationOverride(),
       ],
     );
     addTearDown(container.dispose);
     await tester.pumpWidget(
       UncontrolledProviderScope(
-      container: container,
-      child: const MaterialApp(home: CourseProgressScreen()),
+        container: container,
+        child: const MaterialApp(home: CourseProgressScreen()),
       ),
     );
     await tester.pumpAndSettle();
@@ -479,8 +480,8 @@ void main() {
     await tester.pump();
     oldStore.result.complete(
       const SupportedSyncResult(
-      status: SupportedSyncStatus.pending,
-      remainingEvents: 2,
+        status: SupportedSyncStatus.pending,
+        remainingEvents: 2,
       ),
     );
     await tester.pump();
@@ -538,17 +539,20 @@ void main() {
     );
     await tester.pumpWidget(
       ProviderScope(
-      overrides: [
-        courseLearningStateProvider.overrideWith((ref) async => state),
+        overrides: [
+          courseLearningStateProvider.overrideWith((ref) async => state),
           _comparisonPresentationOverride(),
-      ],
-      child: const MaterialApp(home: HomeScreen()),
+        ],
+        child: const MaterialApp(home: HomeScreen()),
       ),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
-    expect(find.text('Continue discovery'), findsOneWidget);
+    expect(
+      find.text('Discovery lessons: 0/1 available complete'),
+      findsOneWidget,
+    );
+    expect(find.text('Start lesson'), findsOneWidget);
   });
 
   testWidgets('home retry-loading calls retryLoad before refreshing state', (
@@ -557,41 +561,43 @@ void main() {
     final store = CourseLearningWidgetStore()..failLoad = true;
     await tester.pumpWidget(
       ProviderScope(
-      overrides: [
-        courseLearningStoreProvider.overrideWithValue(store),
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(store),
           _comparisonPresentationOverride(),
-      ],
-      child: const MaterialApp(home: HomeScreen()),
+        ],
+        child: const MaterialApp(home: HomeScreen()),
       ),
     );
     await tester.pumpAndSettle();
     expect(find.text('Retry loading progress'), findsOneWidget);
+    await tester.ensureVisible(find.text('Retry loading progress'));
     await tester.tap(find.text('Retry loading progress'));
     await tester.pumpAndSettle();
     expect(store.retryLoadCalls, 1);
-    expect(find.text('Continue discovery'), findsOneWidget);
+    expect(find.text('Start lesson'), findsOneWidget);
   });
 
   testWidgets(
     'progress retry-loading calls retryLoad before refreshing state',
-      (tester) async {
-    final store = CourseLearningWidgetStore()..failLoad = true;
+    (tester) async {
+      final store = CourseLearningWidgetStore()..failLoad = true;
       await tester.pumpWidget(
         ProviderScope(
-      overrides: [
-        courseLearningStoreProvider.overrideWithValue(store),
+          overrides: [
+            courseLearningStoreProvider.overrideWithValue(store),
             _comparisonPresentationOverride(),
-      ],
-      child: const MaterialApp(home: CourseProgressScreen()),
+          ],
+          child: const MaterialApp(home: CourseProgressScreen()),
         ),
       );
-    await tester.pumpAndSettle();
-    expect(find.text('Retry loading progress'), findsOneWidget);
-    await tester.tap(find.text('Retry loading progress'));
-    await tester.pumpAndSettle();
-    expect(store.retryLoadCalls, 1);
-    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
-    expect(
+      await tester.pumpAndSettle();
+      expect(find.text('Retry loading progress'), findsOneWidget);
+      await tester.ensureVisible(find.text('Retry loading progress'));
+      await tester.tap(find.text('Retry loading progress'));
+      await tester.pumpAndSettle();
+      expect(store.retryLoadCalls, 1);
+      expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
+      expect(
         find.text('Existing lessons (includes discovery pilot): 0/5 complete'),
         findsOneWidget,
       );
@@ -601,54 +607,55 @@ void main() {
   for (final surface in ['home', 'progress']) {
     testWidgets(
       '$surface retry completion cannot refresh a replacement owner',
-        (tester) async {
-      final oldStore = CourseLearningWidgetStore();
-      final newStore = CourseLearningWidgetStore();
-      final retryGate = Completer<void>();
-      oldStore.loadHandler = (call) async {
-        if (call == 1) throw const LearningUnavailableException();
-        await retryGate.future;
-        return oldStore.committedState;
-      };
-      var activeStore = oldStore;
-      final epoch = StateProvider<int>((ref) => 0);
-      final selectedStore = Provider<CourseLearningStore>((ref) {
-        ref.watch(epoch);
-        return activeStore;
-      });
-        final container = ProviderContainer(
-          overrides: [
-        selectedStore.overrideWith((ref) {
+      (tester) async {
+        final oldStore = CourseLearningWidgetStore();
+        final newStore = CourseLearningWidgetStore();
+        final retryGate = Completer<void>();
+        oldStore.loadHandler = (call) async {
+          if (call == 1) throw const LearningUnavailableException();
+          await retryGate.future;
+          return oldStore.committedState;
+        };
+        var activeStore = oldStore;
+        final epoch = StateProvider<int>((ref) => 0);
+        final selectedStore = Provider<CourseLearningStore>((ref) {
           ref.watch(epoch);
           return activeStore;
-        }),
+        });
+        final container = ProviderContainer(
+          overrides: [
+            selectedStore.overrideWith((ref) {
+              ref.watch(epoch);
+              return activeStore;
+            }),
             courseLearningStoreProvider.overrideWith(
               (ref) => ref.watch(selectedStore),
             ),
-        _comparisonPresentationOverride(),
+            _comparisonPresentationOverride(),
           ],
         );
-      addTearDown(container.dispose);
+        addTearDown(container.dispose);
         final page = surface == 'home'
             ? const HomeScreen()
             : const CourseProgressScreen();
         await tester.pumpWidget(
           UncontrolledProviderScope(
-        container: container,
-        child: MaterialApp(home: page),
+            container: container,
+            child: MaterialApp(home: page),
           ),
         );
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Retry loading progress'));
-      await tester.pump();
-      expect(oldStore.retryLoadCalls, 1);
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Retry loading progress'));
+        await tester.tap(find.text('Retry loading progress'));
+        await tester.pump();
+        expect(oldStore.retryLoadCalls, 1);
 
-      activeStore = newStore;
-      container.read(epoch.notifier).state++;
-      await tester.pumpAndSettle();
-      expect(newStore.loadCalls, 1);
-      retryGate.complete();
-      await tester.pumpAndSettle();
+        activeStore = newStore;
+        container.read(epoch.notifier).state++;
+        await tester.pumpAndSettle();
+        expect(newStore.loadCalls, 1);
+        retryGate.complete();
+        await tester.pumpAndSettle();
         expect(
           newStore.loadCalls,
           1,
@@ -697,11 +704,11 @@ void main() {
     );
     await tester.pumpWidget(
       ProviderScope(
-      overrides: [
-        courseLearningStateProvider.overrideWith((ref) async => state),
-        _comparisonPresentationOverride(),
-      ],
-      child: const MaterialApp(home: CourseProgressScreen(review: true)),
+        overrides: [
+          courseLearningStateProvider.overrideWith((ref) async => state),
+          _comparisonPresentationOverride(),
+        ],
+        child: const MaterialApp(home: CourseProgressScreen(review: true)),
       ),
     );
     await tester.pumpAndSettle();
