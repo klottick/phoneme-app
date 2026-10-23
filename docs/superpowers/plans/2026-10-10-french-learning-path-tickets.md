@@ -364,11 +364,13 @@ linguistic-review gates remain PENDING manual evidence.
 showcase the lesson journey and approved a phone-first space-system visual
 direction. The [approved scoped design](../specs/2026-10-23-map-first-space-course-design.md)
 defines FR-11-A plus necessary Home/router/theme integration ahead of unfinished
-spelling/assessment work. Written-spec review and a subsequent implementation
-plan are separate gates. The written spec was approved and merged in PR #101;
-the [implementation plan](2026-10-23-map-first-space-implementation.md) now awaits
-user review. No map implementation or full FR-11/FR-18 completion is claimed.
-Existing activity access and audio/content qualification gates remain.
+spelling/assessment work. The design was approved and merged in PR #101; the
+[implementation plan](2026-10-23-map-first-space-implementation.md) was approved
+and merged in PR #102. FR-11-A and scoped Home/router/theme integration were
+reviewed and merged in PRs #103–108. See the [engineering outcome and acceptance
+status](../status/2026-10-23-map-first-space-course.md). This delivers FR-11-A
+only, not full FR-11/FR-18. Existing activity access and audio/content
+qualification gates remain open.
 
 **Priority:** P1. **Owner:** path/navigation UI agent. **Depends on:** FR-01, FR-04, FR-05 contracts; FR-07 for end-to-end validation.
 

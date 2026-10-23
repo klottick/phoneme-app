@@ -10,9 +10,15 @@
 
 **Spec:** [Approved map-first space-course design](../specs/2026-10-23-map-first-space-course-design.md), approved in the controlling conversation and merged through [PR #101](https://github.com/klottick/phoneme-app/pull/101), merge `66c2e7934324326af0aea1753a8f98137f6fd3cf`.
 
-**Plan status:** proposed; awaiting user approval before product-code execution.
-Planning baseline is published `origin/main` at that merge. Re-fetch before each
-implementation PR; this baseline is not permission to ignore intervening changes.
+**Plan status:** approved by the user before product-code execution and published
+in PR #102. User subsequently changed the implementation worker choice from
+Qwen to GPT-6 Luna; no further Qwen workers were used. The scoped FR-11-A
+implementation and Home/router/theme integration were reviewed and merged in
+PRs #103–108. See the [delivery status](../status/2026-10-23-map-first-space-course.md).
+This plan does not claim full FR-11/FR-18 or close the remaining content,
+assessment, platform, accessibility, privacy, or release gates.
+The original planning baseline was published `origin/main` at the design merge;
+each implementation PR was based on its preceding published merge.
 
 ## Global Constraints
 
@@ -488,8 +494,9 @@ scheduled for Task 6. No native/full accessibility/audio qualification is implie
   summary/checkpoint providers, qualification and test harnesses.
 - [x] Define owned files, shared signatures, sequencing and regression gates.
 - [x] Self-review spec coverage, types, task step precision and Review Focus.
-- [ ] User approves this plan; only then begin Task 1 using the standing
-  sequential implementer/controller workflow.
+- [x] User approved this plan before Task 1; approved execution followed the
+  sequential implementer/controller workflow. The user changed the worker
+  choice to GPT-6 Luna before implementation; no further Qwen workers were used.
 
 Coverage: spec §§1–3 → Tasks 1, 3, 5; §§4–5 → Tasks 1–2, 5; §6 → Task 5;
 §7 → Tasks 3–4; §8 → Tasks 3, 6; §§9–10 → every PR plus final gate.
