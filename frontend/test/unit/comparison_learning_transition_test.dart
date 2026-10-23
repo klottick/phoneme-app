@@ -10,6 +10,7 @@ import 'package:linguist/src/core/course/lesson_policy.dart';
 import 'package:linguist/src/core/course/french_comparison_content.dart';
 import 'package:linguist/src/core/course/comparison_learning_transition.dart';
 import 'package:linguist/src/core/course/lesson_section_session.dart';
+import 'package:linguist/src/core/course/storage/comparison_learning_storage_validator.dart';
 
 void main() {
   test('profile storage keys encode guest and account independently', () {
@@ -649,6 +650,257 @@ void main() {
     expect(d.state.mistakes.values.single.failureCount, 2001);
     expect(d.state.completions, hasLength(1));
   }, timeout: const Timeout(Duration(minutes: 2)));
+
+  test('interleaved_domain_slots_keep_activity_cursors_and_scope_ordinals', () {
+    final driver = _RegisteredDriver();
+    final initial = driver.state;
+    final mixedStart = driver.engine.prepare(
+      state: initial,
+      activityId: comparisonActivityId,
+      action: StartComparisonRun(
+        sessionId: 'mixed-start',
+        policy: LessonPolicy(),
+      ),
+      authGeneration: 0,
+      token: driver.token(),
+      submittedAt: driver.now(),
+    );
+    final dedicatedStart = driver.engine.prepare(
+      state: initial,
+      activityId: uyDemoComparisonActivityId,
+      action: StartComparisonRun(
+        sessionId: 'dedicated-start',
+        policy: LessonPolicy(),
+      ),
+      authGeneration: 0,
+      token: driver.token(),
+      submittedAt: driver.now(),
+    );
+
+    expect(
+      mixedStart.expected,
+      ComparisonCursor(generation: 0, sequence: 0, revision: 0),
+    );
+    expect(
+      dedicatedStart.expected,
+      ComparisonCursor(generation: 0, sequence: 0, revision: 0),
+    );
+    expect(mixedStart.expectedScopeRevision, 0);
+    expect(dedicatedStart.expectedScopeRevision, 0);
+
+    driver.commit(mixedStart);
+    final afterMixed = driver.state;
+    expect(afterMixed.revision, 1);
+    expect(afterMixed.slots.keys, contains(comparisonActivityId));
+    expect(afterMixed.slot, same(afterMixed.slots[comparisonActivityId]));
+    expect(afterMixed.checkpoint, same(afterMixed.slot!.checkpoint));
+    expect(initial.slots, isEmpty);
+    expect(
+      () => driver.engine.evaluate(
+        state: afterMixed,
+        command: dedicatedStart,
+        committedAt: driver.now(),
+      ),
+      throwsArgumentError,
+    );
+
+    driver.commit(
+      driver.engine.prepare(
+        state: driver.state,
+        activityId: uyDemoComparisonActivityId,
+        action: StartComparisonRun(
+          sessionId: 'dedicated-start',
+          policy: LessonPolicy(),
+        ),
+        authGeneration: 0,
+        token: driver.token(),
+        submittedAt: driver.now(),
+      ),
+    );
+
+    expect(driver.state.revision, 2);
+    expect(
+      driver.state.slots.keys,
+      containsAll([comparisonActivityId, uyDemoComparisonActivityId]),
+    );
+    expect(driver.state.slots[comparisonActivityId], same(afterMixed.slot));
+    expect(driver.state.slot, same(driver.state.slots[comparisonActivityId]));
+    expect(
+      driver.state.slots.values.map((slot) => slot.cursor).toList(),
+      everyElement(ComparisonCursor(generation: 1, sequence: 1, revision: 0)),
+    );
+    expect(driver.state.receipts.map((receipt) => receipt.commitOrdinal), [
+      1,
+      2,
+    ]);
+    expect(
+      driver.state.slots[comparisonActivityId]!.latestReceipt.commitOrdinal,
+      1,
+    );
+    expect(
+      driver
+          .state
+          .slots[uyDemoComparisonActivityId]!
+          .latestReceipt
+          .commitOrdinal,
+      2,
+    );
+    expect(() => driver.state.slots.clear(), throwsUnsupportedError);
+    ComparisonLearningStateValidator.validateRegistered(
+      driver.state,
+      driver.registry,
+    );
+
+    final source = driver.state;
+    final suppliedSlots = Map<String, ComparisonSlot>.of(source.slots);
+    ComparisonLearningState copyState({
+      Map<String, ComparisonSlot>? slots,
+      ComparisonSlot? slot,
+    }) => ComparisonLearningState(
+      scope: source.scope,
+      revision: source.revision,
+      commitOrdinal: source.commitOrdinal,
+      slot: slot,
+      slots: slots,
+      attempts: source.attempts,
+      receipts: source.receipts,
+      mistakes: source.mistakes,
+      summaries: source.summaries,
+      completions: source.completions,
+    );
+    final detached = copyState(slots: suppliedSlots);
+    suppliedSlots.clear();
+    expect(
+      detached.slots.keys,
+      containsAll([comparisonActivityId, uyDemoComparisonActivityId]),
+    );
+    expect(
+      () => copyState(slot: source.slot, slots: source.slots),
+      throwsArgumentError,
+    );
+  });
+
+  test(
+    'registered activities keep independent evidence across restart and review',
+    () {
+      final driver = _RegisteredDriver();
+      final initial = driver.state;
+      driver.act(
+        comparisonActivityId,
+        StartComparisonRun(sessionId: 'mixed', policy: LessonPolicy()),
+      );
+      driver.act(
+        uyDemoComparisonActivityId,
+        StartComparisonRun(
+          sessionId: 'dedicated-first',
+          policy: LessonPolicy(),
+        ),
+      );
+      final mixedSlot = driver.state.slots[comparisonActivityId]!;
+      final mixedCheckpoint = jsonEncode(mixedSlot.checkpoint.sessionJson);
+
+      driver.answerCurrent(uyDemoComparisonActivityId, correct: false);
+      expect(
+        driver.state.attempts.single.activityId,
+        uyDemoComparisonActivityId,
+      );
+      expect(
+        driver.state.mistakes.keys.single.activityId,
+        uyDemoComparisonActivityId,
+      );
+      driver.act(
+        uyDemoComparisonActivityId,
+        StartComparisonRun(
+          sessionId: 'dedicated-second',
+          policy: LessonPolicy(),
+        ),
+      );
+      expect(driver.state.slots[comparisonActivityId], same(mixedSlot));
+      expect(
+        jsonEncode(
+          driver.state.slots[comparisonActivityId]!.checkpoint.sessionJson,
+        ),
+        mixedCheckpoint,
+      );
+      expect(driver.state.attempts, hasLength(1));
+      expect(
+        driver.state.slots[uyDemoComparisonActivityId]!.cursor,
+        ComparisonCursor(generation: 2, sequence: 3, revision: 0),
+      );
+      expect(
+        driver
+            .state
+            .slots[uyDemoComparisonActivityId]!
+            .checkpoint
+            .contentRevision,
+        driver.catalogue(uyDemoComparisonActivityId).contentRevision,
+      );
+
+      for (var index = 0; index < 10; index++) {
+        driver.answerCurrent(uyDemoComparisonActivityId, correct: index != 1);
+        driver.act(uyDemoComparisonActivityId, const AdvanceComparisonPair());
+      }
+      driver.act(
+        uyDemoComparisonActivityId,
+        const FinishComparisonRun(recordCompletion: true),
+      );
+      expect(driver.state.completions, hasLength(1));
+      expect(
+        driver.state.completions.single.activityId,
+        uyDemoComparisonActivityId,
+      );
+      expect(
+        driver.state.completions.single.contentRevision,
+        driver.catalogue(uyDemoComparisonActivityId).contentRevision,
+      );
+      expect(
+        driver.state.slots[comparisonActivityId]!.latestReceipt.commitOrdinal,
+        lessThan(driver.state.commitOrdinal),
+      );
+
+      driver.act(uyDemoComparisonActivityId, const ReviewComparisonPairs());
+      driver.answerCurrent(uyDemoComparisonActivityId, correct: true);
+      driver.act(uyDemoComparisonActivityId, const AdvanceComparisonPair());
+      driver.act(
+        uyDemoComparisonActivityId,
+        const FinishComparisonRun(recordCompletion: false),
+      );
+
+      expect(driver.state.attempts, hasLength(12));
+      expect(
+        driver.state.attempts.every(
+          (attempt) => attempt.activityId == uyDemoComparisonActivityId,
+        ),
+        isTrue,
+      );
+      expect(driver.state.mistakes, isEmpty);
+      expect(
+        driver.state.summaries.keys.every(
+          (key) => key.activityId == uyDemoComparisonActivityId,
+        ),
+        isTrue,
+      );
+      expect(driver.state.completions, hasLength(1));
+      expect(driver.state.slots[comparisonActivityId], same(mixedSlot));
+      expect(initial.slots, isEmpty);
+      expect(
+        driver.state.receipts.map((receipt) => receipt.commitOrdinal),
+        List<int>.generate(driver.state.commitOrdinal, (index) => index + 1),
+      );
+      expect(
+        driver
+            .state
+            .slots[uyDemoComparisonActivityId]!
+            .latestReceipt
+            .commitOrdinal,
+        driver.state.commitOrdinal,
+      );
+      ComparisonLearningStateValidator.validateRegistered(
+        driver.state,
+        driver.registry,
+      );
+    },
+  );
 }
 
 final class _Driver {
@@ -788,3 +1040,105 @@ ComparisonPlaybackObservation _copyObservation(ComparisonPlaybackObservation o,
         pairId: pairId ?? o.pairId,
         profile: profile ?? o.profile,
         uiGeneration: uiGeneration ?? o.uiGeneration);
+
+final class _RegisteredDriver {
+  _RegisteredDriver()
+    : mixedCatalogue = loadFrenchComparisonCatalogue(),
+      dedicatedCatalogue = loadFrenchUyDemoComparisonCatalogue(),
+      scope = ComparisonProfileScope(
+        courseId: 'en-fr',
+        owner: LearningOwner.guest(),
+      ) {
+    registry = ComparisonCatalogueRegistry([
+      ComparisonCatalogueRegistration.available(mixedCatalogue),
+      ComparisonCatalogueRegistration.available(dedicatedCatalogue),
+    ]);
+    engine = ComparisonLearningTransitionEngine(registry: registry);
+    state = ComparisonLearningState.empty(scope);
+  }
+
+  final ComparisonCatalogue mixedCatalogue;
+  final ComparisonCatalogue dedicatedCatalogue;
+  final ComparisonProfileScope scope;
+  late final ComparisonCatalogueRegistry registry;
+  late final ComparisonLearningTransitionEngine engine;
+  late ComparisonLearningState state;
+  int _counter = 0;
+
+  ComparisonCatalogue catalogue(String activityId) =>
+      registry.requireAvailable(activityId);
+
+  DateTime now() => DateTime.utc(2026, 10, 23).add(Duration(seconds: _counter));
+
+  String token() => 'token${(++_counter).toString().padLeft(17, '0')}';
+
+  ComparisonLearningTransition commit(ComparisonLearningCommand command) {
+    final transition = engine.evaluate(
+      state: state,
+      command: command,
+      committedAt: now(),
+    );
+    state = transition.nextState;
+    return transition;
+  }
+
+  ComparisonLearningTransition act(String activityId, ComparisonAction action) {
+    final command = engine.prepare(
+      state: state,
+      activityId: activityId,
+      action: action,
+      authGeneration: 0,
+      token: token(),
+      submittedAt: now(),
+    );
+    return commit(command);
+  }
+
+  LessonSectionSession session(String activityId) {
+    final current = state.slots[activityId]!;
+    final content = catalogue(activityId);
+    return LessonSectionSession.fromJson(
+      Map<String, dynamic>.from(current.checkpoint.sessionJson),
+      itemIds: content.exercises.map((exercise) => exercise.id).toList(),
+      contentRevision: content.contentRevision,
+    );
+  }
+
+  ComparisonLearningTransition answerCurrent(
+    String activityId, {
+    required bool correct,
+  }) {
+    final current = state.slots[activityId]!;
+    final run = session(activityId);
+    final exercise = catalogue(activityId).exercise(run.currentItemId!);
+    final relation = correct
+        ? exercise.expectedRelation
+        : exercise.expectedRelation == PhonemeRelation.same
+        ? PhonemeRelation.different
+        : PhonemeRelation.same;
+    return act(
+      activityId,
+      AnswerComparisonPair(
+        ComparePhonemesAnswer(
+          selectedRelation: relation,
+          expectedRelationSnapshot: exercise.expectedRelation,
+          observations: [
+            for (final sample in [exercise.sampleA, exercise.sampleB])
+              ComparisonPlaybackObservation(
+                slot: sample.slot,
+                referenceId: sample.referenceId,
+                outcome: CourseAudioOutcome.completed,
+                source: CourseAudioSource.unverifiedRecording,
+                activityId: activityId,
+                runGeneration: current.cursor.generation,
+                round: run.round,
+                pairId: exercise.id,
+                profile: scope,
+                uiGeneration: _counter,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}

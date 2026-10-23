@@ -60,7 +60,7 @@ final class ComparisonLearningCommand {
       : authGeneration = comparisonCounter(authGeneration, 'authGeneration'),
         expectedScopeRevision = comparisonCounter(
             expectedScopeRevision, 'expectedScopeRevision') {
-    if (activityId != comparisonActivityId ||
+    if (activityId.trim().isEmpty ||
         !RegExp(r'^[A-Za-z0-9_-]{22}$').hasMatch(token) ||
         !submittedAt.isUtc) {
       throw ArgumentError('Invalid comparison command');

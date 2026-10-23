@@ -18,8 +18,24 @@ final class ComparisonLearningTransition {
 }
 
 final class ComparisonLearningTransitionEngine {
-  ComparisonLearningTransitionEngine({required this.catalogue});
-  final ComparisonCatalogue catalogue;
+  ComparisonLearningTransitionEngine({
+    ComparisonCatalogue? catalogue,
+    ComparisonCatalogueRegistry? registry,
+  }) : registry = _resolveRegistry(catalogue, registry);
+
+  static ComparisonCatalogueRegistry _resolveRegistry(
+    ComparisonCatalogue? catalogue,
+    ComparisonCatalogueRegistry? registry,
+  ) {
+    if ((catalogue == null) == (registry == null)) {
+      throw ArgumentError('Supply exactly one catalogue or registry.');
+    }
+    return registry ?? ComparisonCatalogueRegistry.single(catalogue!);
+  }
+
+  final ComparisonCatalogueRegistry registry;
+  ComparisonCatalogue get catalogue =>
+      registry.requireAvailable(comparisonActivityId);
 
   ComparisonLearningCommand prepare(
       {required ComparisonLearningState state,
@@ -28,10 +44,11 @@ final class ComparisonLearningTransitionEngine {
       required int authGeneration,
       required String token,
       required DateTime submittedAt}) {
-    if (activityId != catalogue.activityId || state.scope.courseId != 'en-fr') {
+    registry.requireAvailable(activityId);
+    if (state.scope.courseId != 'en-fr') {
       throw ArgumentError('Comparison identity mismatch');
     }
-    final slot = state.slot;
+    final slot = state.slots[activityId];
     final expected = slot?.cursor ??
         ComparisonCursor(generation: 0, sequence: 0, revision: 0);
     final command = ComparisonLearningCommand(
@@ -54,15 +71,16 @@ final class ComparisonLearningTransitionEngine {
       {required ComparisonLearningState state,
       required ComparisonLearningCommand command,
       required DateTime committedAt}) {
+    final catalogue = registry.requireAvailable(command.activityId);
+    final before = state.slots[command.activityId];
     if (command.scope != state.scope ||
-        command.activityId != catalogue.activityId ||
+        command.expectedScopeRevision != state.revision ||
         !committedAt.isUtc ||
         command.expected !=
-            (state.slot?.cursor ??
+            (before?.cursor ??
                 ComparisonCursor(generation: 0, sequence: 0, revision: 0))) {
       throw ArgumentError('Stale comparison command');
     }
-    final before = state.slot;
     LessonSectionSession session;
     if (command.action
         case StartComparisonRun(:final sessionId, :final policy)) {
@@ -240,11 +258,13 @@ final class ComparisonLearningTransitionEngine {
         latestReceipt: receipt);
     final retainedAttempts = [...state.attempts, ...attempts];
     final retainedReceipts = [...state.receipts, receipt];
+    final slots = Map<String, ComparisonSlot>.of(state.slots)
+      ..[command.activityId] = slot;
     final next = ComparisonLearningState(
         scope: state.scope,
         revision: state.revision + 1,
         commitOrdinal: ordinal,
-        slot: slot,
+        slots: slots,
         attempts: retainedAttempts
             .skip(retainedAttempts.length > 2000
                 ? retainedAttempts.length - 2000
