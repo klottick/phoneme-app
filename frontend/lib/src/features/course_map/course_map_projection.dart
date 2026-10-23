@@ -175,8 +175,17 @@ CourseMapState projectCourseMap({
                 : MapProgress.notStarted,
             recommended: false,
             explanation: 'Optional mixed-sound comparison practice.',
-            launch: MapLaunch.open,
-            evidenceLabels: [summary.practiceLabel, summary.answersLabel],
+            launch: summary.hasCurrentRevisionCompletion
+                ? MapLaunch.review
+                : MapLaunch.open,
+            evidenceLabels: [
+              summary.practiceLabel,
+              summary.pairsLabel,
+              summary.answersLabel,
+              summary.afterDebriefLabel,
+              summary.completionLabel,
+              summary.unresolvedLabel,
+            ],
           ),
         );
       }

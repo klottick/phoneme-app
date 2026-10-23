@@ -26,6 +26,7 @@ import 'package:linguist/src/core/course/storage/sentence_hunt_learning_command_
 import 'package:linguist/src/core/course/storage/sentence_hunt_learning_sql_repository.dart';
 import 'package:linguist/src/features/course/sentence_hunt_progress_section.dart';
 import 'package:linguist/src/features/course/sentence_hunt_progress_summary.dart';
+import 'package:linguist/src/features/course_map/course_map_screen.dart';
 import 'package:linguist/src/features/course/exercises/sentence_hunt_lesson_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../support/course_learning_widget_store.dart';
@@ -161,7 +162,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    final router = GoRouter.of(tester.element(find.text('Continue discovery')));
+    final router = _routerFromMap(tester);
     router.go('/course-sentence-hunt/${fixtureSectionIds.first}');
     await tester.pumpAndSettle();
 
@@ -267,18 +268,38 @@ void main() {
               ),
             ),
           ),
+          sentenceHuntCatalogueProvider.overrideWith(
+            (ref) async => syntheticSentenceCatalogue(reviewed: false),
+          ),
         ],
         child: const LinguistApp(),
       ),
     );
     await tester.pumpAndSettle();
 
-    await tester.scrollUntilVisible(
-      find.text('Sentence sound hunt'),
-      160,
-      scrollable: find.byType(Scrollable).first,
-    );
-    expect(find.text('Sentence sound hunt'), findsOneWidget);
+    expect(find.byType(CourseMapScreen), findsOneWidget);
+    final disclosure = find.text('All destinations');
+    if (disclosure.evaluate().isNotEmpty) {
+      await tester.ensureVisible(disclosure);
+      await tester.pumpAndSettle();
+      expect(disclosure.hitTestable(), findsOneWidget);
+      await tester.tap(disclosure);
+      await tester.pumpAndSettle();
+    }
+    final sentenceStation = find.widgetWithText(ListTile, 'Sentence practice');
+    expect(sentenceStation, findsOneWidget);
+    await tester.ensureVisible(sentenceStation);
+    await tester.pumpAndSettle();
+    await tester.tap(sentenceStation);
+    await tester.pumpAndSettle();
+    final viewSections = find.text('View sections');
+    expect(viewSections, findsOneWidget);
+    await tester.ensureVisible(viewSections);
+    await tester.pumpAndSettle();
+    expect(viewSections.hitTestable(), findsOneWidget);
+    await tester.tap(viewSections);
+    await tester.pumpAndSettle();
+    expect(find.text('Sentence sections'), findsOneWidget);
   });
 
   testWidgets('pending_sections_stay_visible_and_do_not_start', (tester) async {
@@ -317,7 +338,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final router = GoRouter.of(tester.element(find.text('Continue discovery')));
+    final router = _routerFromMap(tester);
     router.go('/course-sentence-hunt');
     await tester.pumpAndSettle();
     expect(find.text('Sentence sections'), findsOneWidget);
@@ -392,7 +413,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final router = GoRouter.of(tester.element(find.text('Continue discovery')));
+    final router = _routerFromMap(tester);
     router.go('/course-sentence-hunt');
     await tester.pumpAndSettle();
     expect(find.text('Start Vowels'), findsOneWidget);
@@ -468,7 +489,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    final router = GoRouter.of(tester.element(find.text('Continue discovery')));
+    final router = _routerFromMap(tester);
     final int catalogueCountBeforeInvalidRoutes = catalogueFactories;
     for (final uri in <String>[
       '/course-sentence-hunt?review=true',
@@ -544,7 +565,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    final router = GoRouter.of(tester.element(find.text('Continue discovery')));
+    final router = _routerFromMap(tester);
     const path =
         '/course-sentence-hunt/en-fr-sentence-hunt-vowels?review=false&itemId=fr08-vowel-01';
     router.go(path);
@@ -600,7 +621,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    final router = GoRouter.of(tester.element(find.text('Continue discovery')));
+    final router = _routerFromMap(tester);
     const path =
         '/course-sentence-hunt/en-fr-sentence-hunt-vowels?review=false&itemId=fr08-vowel-01';
     router.go(path);
@@ -656,13 +677,38 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Progress'));
     await tester.pumpAndSettle();
+    expect(
+      GoRouter.of(tester.element(find.byType(NavigationBar)))
+          .routeInformationProvider
+          .value
+          .uri
+          .path,
+      '/course-progress',
+      reason: 'the retry is exercised in the real Progress root route',
+    );
     await tester.scrollUntilVisible(
       find.text('Retry sentence progress'),
       160,
       scrollable: find.byType(Scrollable).first,
     );
-    expect(find.text('Retry sentence progress'), findsOneWidget);
-    await tester.tap(find.text('Retry sentence progress'));
+    final retry = find.text('Retry sentence progress');
+    expect(retry, findsOneWidget);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(retry);
+    await tester.pumpAndSettle();
+    final retryRect = tester.getRect(retry);
+    final navigationRect = tester.getRect(find.byType(NavigationBar));
+    expect(
+      retryRect.bottom,
+      lessThanOrEqualTo(navigationRect.top),
+      reason: 'sentence retry must remain above the root navigation bar',
+    );
+    expect(
+      retry.hitTestable(),
+      findsOneWidget,
+      reason: 'sentence retry has current visible geometry after scrolling',
+    );
+    await tester.tap(retry);
     await tester.pump();
     await tester.runAsync(() => store.retryEntered.future);
 
@@ -780,7 +826,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final router = GoRouter.of(tester.element(find.text('Continue discovery')));
+    final router = _routerFromMap(tester);
     router.go('/course-sentence-hunt/en-fr-sentence-hunt-vowels');
     await tester.pumpAndSettle();
     expect(find.byType(SentenceHuntLessonScreen), findsOneWidget);
@@ -1122,23 +1168,28 @@ void main() {
       () => container.read(sentenceHuntLearningStateProvider.future),
     );
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.text('Sentence sections completed: 1/3'),
-      160,
-      scrollable: find.byType(Scrollable).first,
-      maxScrolls: 100,
-    );
-    expect(
-      find.text('Sentence sections completed: 1/3'),
-      findsOneWidget,
-      reason: 'Home reflects the provider notification without invalidation',
-    );
-    await tester.scrollUntilVisible(
-      find.text('Continue discovery'),
-      -160,
-      scrollable: find.byType(Scrollable).first,
-    );
-    expect(find.text('Continue discovery'), findsOneWidget);
+    expect(find.byType(CourseMapScreen), findsOneWidget);
+    final destinations = find.text('All destinations');
+    if (destinations.evaluate().isNotEmpty) {
+      await tester.ensureVisible(destinations);
+      await tester.pumpAndSettle();
+      await tester.tap(destinations);
+      await tester.pumpAndSettle();
+    }
+    final sentenceStation = find.widgetWithText(ListTile, 'Sentence practice');
+    expect(sentenceStation, findsOneWidget);
+    await tester.ensureVisible(sentenceStation);
+    await tester.pumpAndSettle();
+    await tester.tap(sentenceStation);
+    await tester.pumpAndSettle();
+    final openSections = find.text('Open destination');
+    expect(openSections, findsOneWidget);
+    await tester.ensureVisible(openSections);
+    await tester.pumpAndSettle();
+    expect(openSections.hitTestable(), findsOneWidget);
+    await tester.tap(openSections);
+    await tester.pumpAndSettle();
+    expect(find.text('Sentence sections'), findsOneWidget);
     router.go('/course-progress');
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
@@ -1451,6 +1502,9 @@ void main() {
     },
   );
 }
+
+GoRouter _routerFromMap(WidgetTester tester) =>
+    GoRouter.of(tester.element(find.byType(CourseMapScreen)));
 
 SentenceHuntCatalogue _catalogueWithVowelsOnlyAvailable() {
   final SentenceHuntPackageFixture fixture = syntheticSentencePackage().copy();

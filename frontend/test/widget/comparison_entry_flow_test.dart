@@ -27,6 +27,7 @@ import 'package:linguist/src/core/course/storage/learning_database.dart'
 import 'package:linguist/src/core/course/sentence_hunt_learning_providers.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
 import 'package:linguist/src/features/course/comparison_lesson_screen.dart';
+import 'package:linguist/src/features/course_map/course_map_screen.dart';
 import 'package:linguist/src/features/course/comparison_progress_summary.dart';
 import 'package:linguist/src/features/course/course_progress_screen.dart';
 import 'package:linguist/src/features/course/course_lesson_screen.dart';
@@ -34,6 +35,7 @@ import 'package:linguist/src/features/course/discovery_lesson_screen.dart';
 import 'package:linguist/src/features/audio/audio_compare_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../support/course_learning_widget_store.dart';
+import '../support/map_motion_test_support.dart';
 import '../support/sentence_hunt_fixtures.dart';
 import '../support/sqlite_learning_test_harness.dart';
 
@@ -46,6 +48,7 @@ void main() {
   testWidgets('comparison_retry_contains_catalogue_factory_failure', (
     tester,
   ) async {
+    disableMapMotion(tester);
     final tempDir = (await tester.runAsync(
       () => Directory.systemTemp.createTemp('comparison-error-'),
     ))!;
@@ -86,10 +89,14 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Comparison alpha'), findsOneWidget);
-    expect(find.text('Unavailable'), findsOneWidget);
-    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
-    expect(find.text('Continue discovery'), findsOneWidget);
+    expect(find.byType(CourseMapScreen), findsOneWidget);
+    await _inspectMixedComparison(tester);
+    expect(find.textContaining('Destination unavailable'), findsOneWidget);
+    expect(
+      find.textContaining('Discovery lessons:'),
+      findsNothing,
+      reason: 'foreign discovery state remains unknown, not a fabricated zero',
+    );
 
     await tester.tap(find.byTooltip('Progress'));
     await tester.pumpAndSettle();
@@ -123,7 +130,8 @@ void main() {
     );
     router.go('/home');
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Continue discovery'));
+    await tester.ensureVisible(find.text('Open discovery recovery'));
+    await tester.tap(find.text('Open discovery recovery'));
     await tester.pumpAndSettle();
     expect(find.byType(DiscoveryLessonScreen), findsOneWidget);
     expect(databaseOpenCalls, 0);
@@ -132,6 +140,7 @@ void main() {
   testWidgets(
     'reopened_comparison_has_no_restored_hearing_and_stale_snapshot_reloads',
     (tester) async {
+      disableMapMotion(tester);
       final tempDir = (await tester.runAsync(
         () => Directory.systemTemp.createTemp('comparison-reopen-'),
       ))!;
@@ -209,7 +218,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      final router = GoRouter.of(tester.element(find.text('Comparison alpha')));
+      final router = GoRouter.of(tester.element(find.byType(CourseMapScreen)));
       router.go('/course-comparison/$comparisonActivityId');
       await tester.pumpAndSettle();
       expect(find.text('Listen to sample A'), findsOneWidget);
@@ -444,6 +453,7 @@ void main() {
   testWidgets('comparison_entry_is_additive_and_unknown_is_local', (
     tester,
   ) async {
+    disableMapMotion(tester);
     final fixture = await _repositoryFixture(tester);
     final homeLoadAck = await _runRealAsync(
       tester,
@@ -460,8 +470,9 @@ void main() {
     await tester.runAsync(() => homeLoadAck.future);
     await tester.pump();
     await tester.pump();
-    expect(find.text('Comparison alpha'), findsOneWidget);
-    expect(find.text('Continue comparison'), findsOneWidget);
+    expect(find.byType(CourseMapScreen), findsOneWidget);
+    await _inspectMixedComparison(tester);
+    expect(find.text('Open destination'), findsOneWidget);
     final screenLoadAck = await _runRealAsync(
       tester,
       () async => Completer<void>(),
@@ -469,7 +480,7 @@ void main() {
     fixture.store.nextLoadAck = screenLoadAck;
     final startAck = await _runRealAsync(tester, () async => Completer<void>());
     fixture.store.nextSubmitAck = startAck;
-    GoRouter.of(tester.element(find.text('Comparison alpha'))).go(
+    GoRouter.of(tester.element(find.byType(CourseMapScreen))).go(
       '/course-comparison/en-fr-phoneme-comparison?review=false&pairId=fr07b-pair-01',
     );
     for (var i = 0; i < 20 && fixture.store.loadCalls < 2; i++) {
@@ -527,6 +538,7 @@ void main() {
   testWidgets('comparison_home_entry_survives_independent_progress_error', (
     tester,
   ) async {
+    disableMapMotion(tester);
     final discovery = CourseLearningWidgetStore()..failLoad = true;
     final comparisonScope = ComparisonProfileScope(
       courseId: 'en-fr',
@@ -544,13 +556,14 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Comparison alpha'), findsOneWidget);
+    expect(find.byType(CourseMapScreen), findsOneWidget);
     expect(find.text('Retry loading progress'), findsOneWidget);
   });
 
   testWidgets('invalid_comparison_route_rejects_before_profile_store_factory', (
     tester,
   ) async {
+    disableMapMotion(tester);
     var factories = 0;
     var catalogueFactories = 0;
     final scope = ComparisonProfileScope(
@@ -579,9 +592,9 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Comparison alpha'), findsOneWidget);
+    expect(find.byType(CourseMapScreen), findsOneWidget);
     final catalogueFactoryCount = catalogueFactories;
-    final router = GoRouter.of(tester.element(find.text('Comparison alpha')));
+    final router = GoRouter.of(tester.element(find.byType(CourseMapScreen)));
     for (final uri in [
       '/course-comparison/unknown',
       '/course-comparison/en-fr-phoneme-comparison?review=maybe',
@@ -613,6 +626,7 @@ void main() {
   testWidgets(
     'invalid_activity_and_query_precede_catalogue_and_profile_access',
     (tester) async {
+      disableMapMotion(tester);
       var catalogueFactories = 0;
       var profileFactories = 0;
       await tester.pumpWidget(
@@ -637,9 +651,9 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Comparison alpha'), findsOneWidget);
-      expect(catalogueFactories, 0);
-      final router = GoRouter.of(tester.element(find.text('Comparison alpha')));
+      expect(find.byType(CourseMapScreen), findsOneWidget);
+      final homeCatalogueFactoryCount = catalogueFactories;
+      final router = GoRouter.of(tester.element(find.byType(CourseMapScreen)));
       for (final uri in [
         '/course-comparison/not-the-activity',
         '/course-comparison/en-fr-phoneme-comparison?unknown=value',
@@ -653,7 +667,11 @@ void main() {
           findsOneWidget,
           reason: uri,
         );
-        expect(catalogueFactories, 0, reason: 'catalogue before guard: $uri');
+        expect(
+          catalogueFactories,
+          homeCatalogueFactoryCount,
+          reason: 'invalid route must not add catalogue construction: $uri',
+        );
         expect(profileFactories, 0, reason: 'profile before guard: $uri');
       }
     },
@@ -662,6 +680,7 @@ void main() {
   testWidgets('corrupt_comparison_catalogue_is_local_unavailable', (
     tester,
   ) async {
+    disableMapMotion(tester);
     final v2State = _nonemptyV2State();
     await tester.pumpWidget(
       ProviderScope(
@@ -686,8 +705,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Comparison alpha'), findsOneWidget);
-    var router = GoRouter.of(tester.element(find.text('Comparison alpha')));
+    expect(find.byType(CourseMapScreen), findsOneWidget);
+    var router = GoRouter.of(tester.element(find.byType(CourseMapScreen)));
     router.go('/course-progress');
     await tester.pumpAndSettle();
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
@@ -739,6 +758,7 @@ void main() {
   testWidgets('comparison_state_error_keeps_entry_and_recovery_action', (
     tester,
   ) async {
+    disableMapMotion(tester);
     final fixture = await _repositoryFixture(tester);
     final discoveryStore = CourseLearningWidgetStore();
     fixture.persistence.failNextRead = true;
@@ -764,9 +784,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.runAsync(() => initialLoad.future);
     await tester.pumpAndSettle();
-    expect(find.text('Comparison alpha'), findsOneWidget);
-    expect(find.text('Unavailable'), findsOneWidget);
-    await tester.ensureVisible(find.text('Open comparison recovery'));
+    expect(find.byType(CourseMapScreen), findsOneWidget);
+    await _inspectMixedComparison(tester);
+    expect(find.textContaining('Destination unavailable'), findsOneWidget);
+    await tester.ensureVisible(find.text('Open mixed comparison recovery'));
     final retryAck = await _runRealAsync(tester, () async => Completer<void>());
     fixture.store.nextLoadAck = retryAck;
     final recoveryStartAck = await _runRealAsync(
@@ -774,7 +795,7 @@ void main() {
       () async => Completer<void>(),
     );
     fixture.store.nextSubmitAck = recoveryStartAck;
-    await tester.tap(find.text('Open comparison recovery'));
+    await tester.tap(find.text('Open mixed comparison recovery'));
     await tester.pump();
     await tester.runAsync(() => retryAck.future);
     await tester.pump();
@@ -802,6 +823,7 @@ void main() {
   testWidgets('v2_failure_does_not_hide_comparison_entry_or_count', (
     tester,
   ) async {
+    disableMapMotion(tester);
     final scope = ComparisonProfileScope(
       courseId: 'en-fr',
       owner: LearningOwner.guest(),
@@ -820,14 +842,16 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Comparison alpha'), findsOneWidget);
-    expect(find.text('Continue comparison'), findsOneWidget);
+    expect(find.byType(CourseMapScreen), findsOneWidget);
+    await _inspectMixedComparison(tester);
+    expect(find.text('Open destination'), findsOneWidget);
     expect(find.text('Retry loading progress'), findsOneWidget);
   });
 
   testWidgets('home_offers_review_only_for_committed_current_completion', (
     tester,
   ) async {
+    disableMapMotion(tester);
     final driver = _Driver()..start();
     driver.answer(true);
     final state = driver.state;
@@ -865,6 +889,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await _inspectMixedComparison(tester);
     expect(find.text('Review comparison'), findsOneWidget);
     expect(find.text('Practise again'), findsOneWidget);
   });
@@ -872,6 +897,7 @@ void main() {
   testWidgets('home_continue_resumes_active_draft_without_mutation', (
     tester,
   ) async {
+    disableMapMotion(tester);
     final fixture = await _repositoryFixture(tester);
     final seeded = await _seedActiveDraft(tester, fixture.store);
     final before = await _runRealAsync(tester, fixture.store.snapshot);
@@ -893,18 +919,18 @@ void main() {
     await tester.runAsync(() => homeLoadAck.future);
     await tester.pump();
     await tester.pump();
-    expect(find.text('Continue comparison'), findsOneWidget);
-    expect(find.text('Review comparison'), findsNothing);
+    await _inspectMixedComparison(tester);
+    expect(find.text('Open destination'), findsOneWidget);
     final homeLoadCalls = fixture.store.loadCalls;
     final screenLoadAck = await _runRealAsync(
       tester,
       () async => Completer<void>(),
     );
     fixture.store.nextLoadAck = screenLoadAck;
-    await tester.ensureVisible(find.text('Continue comparison'));
+    await tester.ensureVisible(find.text('Open destination'));
     final continueButton = find.widgetWithText(
       FilledButton,
-      'Continue comparison',
+      'Open destination',
     );
     expect(tester.widget<FilledButton>(continueButton).onPressed, isNotNull);
     await tester.tap(continueButton);
@@ -929,6 +955,7 @@ void main() {
   testWidgets('home_review_and_practise_again_preserve_completed_debrief', (
     tester,
   ) async {
+    disableMapMotion(tester);
     final fixture = await _repositoryFixture(tester);
     final completed = await _seedCompletedRun(
       tester,
@@ -953,6 +980,7 @@ void main() {
     await tester.runAsync(() => homeLoadAck.future);
     await tester.pump();
     await tester.pump();
+    await _inspectMixedComparison(tester);
     expect(find.text('Review comparison'), findsOneWidget);
     expect(find.text('Practise again'), findsOneWidget);
     late GoRouter router;
@@ -961,7 +989,7 @@ void main() {
     fixture.store.nextLoadAck = loadAck;
     final reviewLoadCalls = fixture.store.loadCalls;
     await tester.ensureVisible(find.text('Review comparison'));
-    await tester.tap(find.text('Review comparison'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Review comparison'));
     await tester.pump();
     await _waitForLoadCall(tester, fixture.store, reviewLoadCalls + 1);
     await tester.runAsync(() => loadAck.future);
@@ -1029,7 +1057,10 @@ void main() {
       reason: 'Home Practise again must preserve the saved debrief',
     );
     expect(
-      find.widgetWithText(OutlinedButton, 'Practise again'),
+      find.descendant(
+        of: find.byType(ComparisonLessonScreen),
+        matching: find.text('Practise again'),
+      ),
       findsOneWidget,
       reason: 'new run remains an explicit saved-debrief action',
     );
@@ -1102,6 +1133,7 @@ void main() {
   testWidgets('home_primary_legacy_and_audio_compare_keep_real_destinations', (
     tester,
   ) async {
+    disableMapMotion(tester);
     tester.view.physicalSize = const Size(1600, 1200);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -1125,9 +1157,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    final router = GoRouter.of(tester.element(find.text('Continue discovery')));
-    await tester.tap(find.text('Continue discovery'));
-    await tester.pumpAndSettle();
+    final router = GoRouter.of(tester.element(find.byType(CourseMapScreen)));
+    await openMapDiscoveryAction(tester, action: 'Start lesson');
     expect(find.byType(DiscoveryLessonScreen), findsOneWidget);
 
     const legacy = <(String, String)>[
@@ -1139,11 +1170,13 @@ void main() {
     for (final (title, id) in legacy) {
       router.pop();
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(
-        find.text(title),
-        220,
-        scrollable: find.byType(Scrollable).first,
-      );
+      final legacyDisclosure = find.text('Legacy practice');
+      if (find.text(title).evaluate().isEmpty) {
+        await tester.ensureVisible(legacyDisclosure);
+        await tester.tap(legacyDisclosure);
+        await tester.pumpAndSettle();
+      }
+      await tester.ensureVisible(find.text(title));
       await tester.tap(find.text(title));
       await tester.pumpAndSettle();
       expect(find.byType(CourseLessonScreen), findsOneWidget, reason: title);
@@ -1157,20 +1190,8 @@ void main() {
 
     router.pop();
     await tester.pumpAndSettle();
-    final homeScroll = find
-        .descendant(
-          of: find.byType(ListView).first,
-          matching: find.byType(Scrollable),
-        )
-        .first;
-    await tester.scrollUntilVisible(
-      find.text('Practice tools'),
-      220,
-      scrollable: homeScroll,
-    );
+    await tester.ensureVisible(find.text('Practice tools'));
     await tester.tap(find.text('Practice tools'));
-    await tester.pumpAndSettle();
-    await tester.drag(find.byType(ListView).first, const Offset(0, -500));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Audio Compare'));
     await tester.tap(find.text('Audio Compare'));
@@ -1214,7 +1235,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.runAsync(() => loadAck.future);
     await tester.pumpAndSettle();
-    final router = GoRouter.of(tester.element(find.text('Comparison alpha')));
+    final router = GoRouter.of(tester.element(find.byType(CourseMapScreen)));
     router.go('/course-progress');
     await tester.pumpAndSettle();
     final mistake = find.text('Comparison pair fr07b-pair-04');
@@ -1358,6 +1379,7 @@ void main() {
   testWidgets('comparison_finish_ack_retry_and_duplicate_receipt_are_durable', (
     tester,
   ) async {
+    disableMapMotion(tester);
     tester.view.physicalSize = const Size(1100, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -1387,7 +1409,7 @@ void main() {
     await tester.runAsync(() => homeLoadAck.future);
     await tester.pump();
     await tester.pump();
-    final router = GoRouter.of(tester.element(find.text('Comparison alpha')));
+    final router = GoRouter.of(tester.element(find.byType(CourseMapScreen)));
     var popCount = 0;
     var previousDepth =
         router.routerDelegate.currentConfiguration.matches.length;
@@ -1407,7 +1429,9 @@ void main() {
     final startAck = await _runRealAsync(tester, () async => Completer<void>());
     fixture.store.nextLoadAck = screenLoadAck;
     fixture.store.nextSubmitAck = startAck;
-    await tester.tap(find.text('Continue comparison'));
+    await _inspectMixedComparison(tester);
+    await tester.ensureVisible(find.text('Open destination'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Open destination'));
     await tester.pump();
     await _waitForLoadCall(tester, fixture.store, 2);
     await tester.runAsync(() => screenLoadAck.future);
@@ -1591,7 +1615,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
     }
     expect(find.byType(ComparisonLessonScreen), findsNothing);
-    expect(find.text('Comparison alpha'), findsOneWidget);
+    expect(find.byType(CourseMapScreen), findsOneWidget);
     expect(popCount, 1);
     await _waitForLoadCall(tester, fixture.store, loadsBeforeRefresh + 1);
     await tester.runAsync(() => refreshReadGate.entered.future);
@@ -1651,6 +1675,7 @@ void main() {
   });
 
   testWidgets('comparison_review_finish_never_adds_completion', (tester) async {
+    disableMapMotion(tester);
     tester.view.physicalSize = const Size(1100, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -1691,8 +1716,9 @@ void main() {
     await tester.runAsync(() => homeLoadAck.future);
     await tester.pump();
     await tester.pump();
+    await _inspectMixedComparison(tester);
     expect(find.text('Review comparison'), findsOneWidget);
-    final router = GoRouter.of(tester.element(find.text('Review comparison')));
+    final router = GoRouter.of(tester.element(find.byType(CourseMapScreen)));
     var popCount = 0;
     var previousDepth =
         router.routerDelegate.currentConfiguration.matches.length;
@@ -1709,7 +1735,8 @@ void main() {
       () async => Completer<void>(),
     );
     fixture.store.nextLoadAck = reviewLoadAck;
-    await tester.tap(find.text('Review comparison'));
+    await tester.ensureVisible(find.text('Review comparison'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Review comparison'));
     await tester.pump();
     await _waitForLoadCall(tester, fixture.store, 2);
     await tester.runAsync(() => reviewLoadAck.future);
@@ -1742,7 +1769,9 @@ void main() {
     router.pop();
     await tester.pumpAndSettle();
     expect(find.byType(ComparisonLessonScreen), findsNothing);
-    await tester.tap(find.text('Review comparison'));
+    await _inspectMixedComparison(tester);
+    await tester.ensureVisible(find.text('Review comparison'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Review comparison'));
     await tester.pump();
     await _waitForLoadCall(tester, fixture.store, 3);
     await tester.runAsync(() => resumeAck.future);
@@ -1806,7 +1835,7 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
     expect(find.byType(ComparisonLessonScreen), findsNothing);
-    expect(find.text('Comparison alpha'), findsOneWidget);
+    expect(find.byType(CourseMapScreen), findsOneWidget);
     expect(popCount, popsBeforeReviewFinish + 1);
     final afterReviewFinish = await _runRealAsync(
       tester,
@@ -1841,6 +1870,7 @@ void main() {
   });
 
   testWidgets('comparison_owner_refresh_a_to_b_to_a_isolation', (tester) async {
+    disableMapMotion(tester);
     tester.view.physicalSize = const Size(1100, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -1922,11 +1952,16 @@ void main() {
     final storeA2 = ownerFixture.storeFor(ownerA, 2);
     await tester.runAsync(() => initialAck.future);
     await tester.pumpAndSettle();
+    await _inspectMixedComparison(tester);
     expect(find.text('Comparison pairs attempted: 10/10'), findsOneWidget);
     expect(find.text('Comparison completion policies: 1'), findsOneWidget);
     expect(find.text('Review comparison'), findsOneWidget);
-    expect(find.text('Continue comparison'), findsNothing);
-    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
+    expect(find.text('Open destination'), findsNothing);
+    expect(
+      find.textContaining('Discovery lessons:'),
+      findsNothing,
+      reason: 'foreign V2 state remains unknown for the current owner',
+    );
 
     final gateB = await _newPersistenceReadGate(
       tester,
@@ -1937,26 +1972,30 @@ void main() {
     tracker.observe(owner: ownerB, ready: true);
     await tester.pump();
     await tester.runAsync(() => gateB.entered.future);
-    expect(find.text('Comparison alpha'), findsOneWidget);
-    expect(find.text('Review comparison'), findsNothing);
+    await _inspectMixedComparison(tester);
+    expect(find.byType(CourseMapScreen), findsOneWidget);
     expect(find.text('Comparison completion policies: 1'), findsNothing);
     expect(find.text('Comparison pairs attempted: 10/10'), findsNothing);
-    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
+    expect(
+      find.textContaining('Discovery lessons:'),
+      findsNothing,
+      reason: 'foreign V2 state remains unknown for the current owner',
+    );
     final storeB3 = ownerFixture.storeFor(ownerB, 3);
     final bLoadAck = await _runRealAsync(tester, () async => Completer<void>());
     storeB3.nextLoadAck = bLoadAck;
     await _releasePersistenceRead(tester, gateB);
     await tester.runAsync(() => bLoadAck.future);
     await tester.pumpAndSettle();
+    await _inspectMixedComparison(tester);
     expect(find.text('Comparison pairs attempted: 1/10'), findsOneWidget);
     expect(find.text('Comparison answers: 1/1'), findsOneWidget);
     expect(find.text('Comparison completion policies: 0'), findsOneWidget);
-    expect(find.text('Continue comparison'), findsOneWidget);
-    expect(find.text('Review comparison'), findsNothing);
+    expect(find.text('Open destination'), findsOneWidget);
     expect(completedA.completions, hasLength(1));
     expect(evidenceB.completions, isEmpty);
 
-    final router = GoRouter.of(tester.element(find.text('Comparison alpha')));
+    final router = GoRouter.of(tester.element(find.byType(CourseMapScreen)));
     router.go('/course-progress');
     await tester.pumpAndSettle();
     expect(find.text('Comparison pairs attempted: 1/10'), findsOneWidget);
@@ -1982,9 +2021,16 @@ void main() {
     await _releasePersistenceRead(tester, gateA);
     await tester.runAsync(() => aReturnAck.future);
     await tester.pumpAndSettle();
+    router.go('/home');
+    await tester.pumpAndSettle();
+    await _inspectMixedComparison(tester);
     expect(find.text('Comparison pairs attempted: 10/10'), findsOneWidget);
     expect(find.text('Comparison completion policies: 1'), findsOneWidget);
-    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
+    expect(
+      find.textContaining('Discovery lessons:'),
+      findsNothing,
+      reason: 'foreign V2 state remains unknown for the current owner',
+    );
 
     final failedBRead = await _newPersistenceReadGate(
       tester,
@@ -1996,9 +2042,14 @@ void main() {
     tracker.observe(owner: ownerB, ready: true);
     await tester.pump();
     await tester.runAsync(() => failedBRead.entered.future);
+    await _inspectMixedComparison(tester);
     expect(find.text('Comparison pairs attempted: 10/10'), findsNothing);
     expect(find.text('Comparison completion policies: 1'), findsNothing);
-    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
+    expect(
+      find.textContaining('Discovery lessons:'),
+      findsNothing,
+      reason: 'foreign V2 state remains unknown for the current owner',
+    );
     final storeB5 = ownerFixture.storeFor(ownerB, 5);
     final failedLoadAck = await _runRealAsync(
       tester,
@@ -2008,10 +2059,19 @@ void main() {
     await _releasePersistenceRead(tester, failedBRead);
     await tester.runAsync(() => failedLoadAck.future);
     await tester.pumpAndSettle();
-    expect(find.text('Retry comparison progress'), findsOneWidget);
+    await _inspectMixedComparison(tester);
+    expect(find.text('Open mixed comparison recovery'), findsOneWidget);
     expect(find.text('Comparison pairs attempted: 10/10'), findsNothing);
     expect(find.text('Comparison pairs attempted: 1/10'), findsNothing);
-    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
+    expect(
+      find.textContaining('Discovery lessons:'),
+      findsNothing,
+      reason: 'foreign V2 state remains unknown for the current owner',
+    );
+    router.go('/course-progress');
+    await tester.pumpAndSettle();
+    expect(find.text('Retry comparison progress'), findsOneWidget);
+    expect(find.text('Comparison completion policies: 1'), findsNothing);
     expect(
       find.text(
         'Supported backup is pending; local commits remain saved on this device.',
@@ -2021,18 +2081,22 @@ void main() {
 
     router.go('/home');
     await tester.pumpAndSettle();
-    expect(find.text('Comparison alpha'), findsOneWidget);
-    expect(find.text('Unavailable'), findsOneWidget);
+    await _inspectMixedComparison(tester);
+    expect(find.byType(CourseMapScreen), findsOneWidget);
+    expect(find.textContaining('Destination unavailable'), findsOneWidget);
     expect(find.text('Comparison completion policies: 1'), findsNothing);
     expect(find.text('Comparison completion policies: 0'), findsNothing);
-    expect(find.text('Review comparison'), findsNothing);
-    expect(find.text('Continue comparison'), findsNothing);
-    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
+    expect(find.text('Review lesson'), findsNothing);
+    expect(find.text('Open destination'), findsNothing);
+    expect(
+      find.textContaining('Discovery lessons:'),
+      findsNothing,
+      reason: 'foreign V2 state remains unknown for the current owner',
+    );
     router.go('/course-progress');
     await tester.pumpAndSettle();
     expect(find.text('Retry comparison progress'), findsOneWidget);
     expect(find.text('Comparison completion policies: 1'), findsNothing);
-    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
 
     final retryAck = await _runRealAsync(tester, () async => Completer<void>());
     final recoveredAck = await _runRealAsync(
@@ -2055,10 +2119,14 @@ void main() {
 
     router.go('/home');
     await tester.pumpAndSettle();
+    await _inspectMixedComparison(tester);
     expect(find.text('Comparison pairs attempted: 1/10'), findsOneWidget);
-    expect(find.text('Continue comparison'), findsOneWidget);
-    expect(find.text('Review comparison'), findsNothing);
-    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
+    expect(find.text('Open destination'), findsOneWidget);
+    expect(
+      find.textContaining('Discovery lessons:'),
+      findsNothing,
+      reason: 'foreign V2 state remains unknown for the current owner',
+    );
     expect(completedA.completions, hasLength(1));
     expect(evidenceB.summaries.values.single.firstInRun.total, 1);
     expect(storeA2.commands, isEmpty);
@@ -2189,7 +2257,7 @@ void main() {
         await tester.pump();
         await tester.pump();
         await tester.scrollUntilVisible(
-          find.text('Comparison alpha'),
+          find.byType(CourseMapScreen),
           140,
           scrollable: find.byType(Scrollable).first,
         );
@@ -2314,6 +2382,9 @@ void main() {
         expect(v2Store.submitCalls, v2SubmitBefore);
         expect(find.text('Retry loading progress'), findsNothing);
 
+        router.go('/home');
+        await tester.pumpAndSettle();
+        await _inspectMixedComparison(tester);
         const labels = [
           'Comparison practice, not phoneme mastery',
           'Comparison pairs attempted: 10/10',
@@ -2323,11 +2394,7 @@ void main() {
           'Unresolved comparison pairs: 2',
         ];
         for (final label in labels) {
-          await tester.scrollUntilVisible(
-            find.text(label),
-            160,
-            scrollable: find.byType(Scrollable).first,
-          );
+          await tester.ensureVisible(find.text(label));
           expect(
             find.text(label),
             findsOneWidget,
@@ -2335,6 +2402,8 @@ void main() {
           );
           expect(tester.takeException(), isNull, reason: 'scale $scale');
         }
+        router.go('/course-progress');
+        await tester.pumpAndSettle();
         final pair04 = find.text('Comparison pair fr07b-pair-04');
         await tester.scrollUntilVisible(
           pair04,
@@ -2456,6 +2525,20 @@ void main() {
     expect(after.completions, seeded.completions);
     expect(fixture.store.commands.length, commandsBefore);
   });
+}
+
+Future<void> _inspectMixedComparison(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  final disclosure = find.byKey(const ValueKey('destination-list-disclosure'));
+  if (disclosure.evaluate().isNotEmpty) {
+    await tester.ensureVisible(disclosure);
+    await tester.tap(disclosure);
+    await tester.pumpAndSettle();
+  }
+  final destination = find.text('Mixed comparison practice');
+  await tester.ensureVisible(destination);
+  await tester.tap(destination);
+  await tester.pumpAndSettle();
 }
 
 final class _Driver {

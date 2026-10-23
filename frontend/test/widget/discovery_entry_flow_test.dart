@@ -26,37 +26,58 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../support/controlled_listening_audio.dart';
 import '../support/course_learning_widget_store.dart';
+import '../support/map_motion_test_support.dart';
 
 final _activeStoreProvider = StateProvider<CourseLearningWidgetStore>(
-    (ref) => CourseLearningWidgetStore());
-final _emptyComparisonStateOverride =
-    comparisonLearningStateProvider.overrideWith((ref) async =>
-        ComparisonLearningState.empty(ComparisonProfileScope(
-            courseId: 'en-fr', owner: LearningOwner.guest())));
+  (ref) => CourseLearningWidgetStore(),
+);
+final _emptyComparisonStateOverride = comparisonLearningStateProvider
+    .overrideWith(
+      (ref) async => ComparisonLearningState.empty(
+        ComparisonProfileScope(courseId: 'en-fr', owner: LearningOwner.guest()),
+      ),
+    );
 
-Future<ProviderContainer> _mountApp(WidgetTester tester,
-    CourseLearningWidgetStore store, ControlledListeningAudio audio) async {
-  await tester.pumpWidget(ProviderScope(overrides: [
-    courseLearningStoreProvider.overrideWithValue(store),
-    courseAudioProvider.overrideWithValue(audio),
-    _emptyComparisonStateOverride,
-  ], child: const LinguistApp()));
-  final scope = tester
-      .element(find.byType(LinguistApp))
-      .getElementForInheritedWidgetOfExactType<UncontrolledProviderScope>()!
-      .widget as UncontrolledProviderScope;
+Future<ProviderContainer> _mountApp(
+  WidgetTester tester,
+  CourseLearningWidgetStore store,
+  ControlledListeningAudio audio,
+) async {
+  disableMapMotion(tester);
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        courseLearningStoreProvider.overrideWithValue(store),
+        courseAudioProvider.overrideWithValue(audio),
+        _emptyComparisonStateOverride,
+      ],
+      child: const LinguistApp(),
+    ),
+  );
+  final scope =
+      tester
+              .element(find.byType(LinguistApp))
+              .getElementForInheritedWidgetOfExactType<
+                UncontrolledProviderScope
+              >()!
+              .widget
+          as UncontrolledProviderScope;
   return scope.container;
 }
 
 Future<(ProviderContainer, GoRouter, ControlledListeningAudio)> mountApp(
-    WidgetTester tester, CourseLearningWidgetStore store) async {
+  WidgetTester tester,
+  CourseLearningWidgetStore store,
+) async {
   final audio = ControlledListeningAudio();
   final container = await _mountApp(tester, store, audio);
   return (container, container.read(appRouterProvider), audio);
 }
 
-Future<void> unmountApp(WidgetTester tester,
-    (ProviderContainer, GoRouter, ControlledListeningAudio) app) async {
+Future<void> unmountApp(
+  WidgetTester tester,
+  (ProviderContainer, GoRouter, ControlledListeningAudio) app,
+) async {
   app.$3.releaseAll();
   await tester.pumpWidget(const SizedBox());
   app.$2.dispose();
@@ -65,18 +86,17 @@ Future<void> unmountApp(WidgetTester tester,
 }
 
 void main() {
-  setUp(() =>
-      SharedPreferences.setMockInitialValues({'selected_course_id': 'en-fr'}));
+  setUp(
+    () =>
+        SharedPreferences.setMockInitialValues({'selected_course_id': 'en-fr'}),
+  );
 
   testWidgets('home_enters_real_discovery_before_legacy', (tester) async {
     final store = CourseLearningWidgetStore();
     final app = await mountApp(tester, store);
     addTearDown(() => unmountApp(tester, app));
 
-    await tester.pumpAndSettle();
-    expect(find.text('Continue discovery'), findsOneWidget);
-    await tester.tap(find.text('Continue discovery'));
-    await tester.pumpAndSettle();
+    await openMapDiscoveryAction(tester, action: 'Start lesson');
     expect(find.text('Listening practice'), findsWidgets);
     expect(find.byType(DiscoveryLessonScreen), findsOneWidget);
     expect(find.text('Item 1 of 10'), findsOneWidget);
@@ -84,31 +104,29 @@ void main() {
     expect(find.textContaining('Word reference'), findsNothing);
   });
 
-  testWidgets('real_links_preserve_legacy_unknown_and_review_semantics',
-      (tester) async {
+  testWidgets('real_links_preserve_legacy_unknown_and_review_semantics', (
+    tester,
+  ) async {
     final store = CourseLearningWidgetStore();
     final app = await mountApp(tester, store);
     addTearDown(() => unmountApp(tester, app));
     await tester.pumpAndSettle();
 
-    for (final id in [
-      'en-fr-vowels',
-      'en-fr-nasal',
-      'en-fr-r',
-      'en-fr-mix',
-    ]) {
+    for (final id in ['en-fr-vowels', 'en-fr-nasal', 'en-fr-r', 'en-fr-mix']) {
       app.$2.go('/course-lesson/$id');
       await tester.pumpAndSettle();
-      final lesson =
-          tester.widget<CourseLessonScreen>(find.byType(CourseLessonScreen));
+      final lesson = tester.widget<CourseLessonScreen>(
+        find.byType(CourseLessonScreen),
+      );
       expect(lesson.lessonId, id);
       expect(find.text('Listen to French word'), findsOneWidget);
       await tester.tap(find.text('Listen to French word'));
       await tester.pump();
       app.$3.requests.last.complete();
       await tester.pumpAndSettle();
-      final definition =
-          frenchLessons.firstWhere((candidate) => candidate.id == id);
+      final definition = frenchLessons.firstWhere(
+        (candidate) => candidate.id == id,
+      );
       final word = wordByText(definition.words.first);
       final expected = definition.sounds.firstWhere(word.contains);
       await tester.tap(find.text('/$expected/').first);
@@ -139,8 +157,7 @@ void main() {
     app.$1.invalidate(courseLearningStateProvider);
     app.$2.go('/home');
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Continue discovery'));
-    await tester.pumpAndSettle();
+    await openMapDiscoveryAction(tester, action: 'Continue lesson');
     expect(find.text('Section debrief'), findsOneWidget);
     await tester.tap(find.text('Finish section'));
     await tester.pumpAndSettle();
@@ -154,45 +171,53 @@ void main() {
     ]) {
       app.$2.go('/home');
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(find.text(title), 250,
-          scrollable: find.byType(Scrollable).first);
+      if (find.text(title).evaluate().isEmpty) {
+        final legacyDisclosure = find.text('Legacy practice');
+        await tester.ensureVisible(legacyDisclosure);
+        await tester.tap(legacyDisclosure);
+        await tester.pumpAndSettle();
+      }
+      expect(find.text(title), findsOneWidget);
+      await tester.ensureVisible(find.text(title));
       await tester.tap(find.text(title));
       await tester.pumpAndSettle();
       expect(
-          tester
-              .widget<CourseLessonScreen>(find.byType(CourseLessonScreen))
-              .lessonId,
-          id);
+        tester
+            .widget<CourseLessonScreen>(find.byType(CourseLessonScreen))
+            .lessonId,
+        id,
+      );
     }
 
     app.$2.go('/course-review');
     await tester.pumpAndSettle();
     expect(
-        tester
-            .widget<CourseProgressScreen>(find.byType(CourseProgressScreen))
-            .review,
-        isTrue);
+      tester
+          .widget<CourseProgressScreen>(find.byType(CourseProgressScreen))
+          .review,
+      isTrue,
+    );
     expect(find.text('Unresolved sounds'), findsOneWidget);
     app.$2.go('/home');
     await tester.pumpAndSettle();
-    expect(find.text('Review discovery'), findsOneWidget);
-    await tester.tap(find.text('Review discovery'));
-    await tester.pumpAndSettle();
+    await openMapDiscoveryAction(tester, action: 'Review lesson');
     expect(app.$2.state.uri.path, '/course-lesson/en-fr-u-y');
     expect(app.$2.state.uri.queryParameters['review'], 'true');
     expect(
-        tester
-            .widget<DiscoveryLessonScreen>(find.byType(DiscoveryLessonScreen))
-            .review,
-        isTrue);
+      tester
+          .widget<DiscoveryLessonScreen>(find.byType(DiscoveryLessonScreen))
+          .review,
+      isTrue,
+    );
     expect(find.text('Section debrief'), findsOneWidget);
     await tester.tap(find.text('Finish section'));
     await tester.pumpAndSettle();
     expect(store.committedState.completions.length, 1);
   });
 
-  testWidgets('entry_layout_keyboard_and_load_states_are_honest',
-      (tester) async {
+  testWidgets('entry_layout_keyboard_and_load_states_are_honest', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(360, 640);
     tester.view.devicePixelRatio = 1;
     tester.binding.platformDispatcher.textScaleFactorTestValue = 2;
@@ -207,34 +232,40 @@ void main() {
     final loadingApp = await mountApp(tester, loadingStore);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
-    expect(find.text('Continue discovery'), findsNothing);
-    expect(find.text('Review discovery'), findsNothing);
+    expect(find.text('Continue lesson'), findsNothing);
+    expect(find.text('Review lesson'), findsNothing);
     expect(find.textContaining('Discovery lessons:'), findsNothing);
     loadingStore.loadGate!.complete();
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Continue discovery'), 180);
-    expect(find.text('Continue discovery'), findsOneWidget);
-    final homeMedia =
-        tester.widgetList<MediaQuery>(find.byType(MediaQuery)).first;
+    await tester.ensureVisible(find.text('Start lesson'));
+    expect(find.text('Start lesson'), findsOneWidget);
+    final homeMedia = tester
+        .widgetList<MediaQuery>(find.byType(MediaQuery))
+        .first;
     expect(homeMedia.data.size, const Size(360, 640));
     expect(homeMedia.data.textScaler.scale(1), 2);
     expect(tester.view.physicalSize, const Size(360, 640));
     expect(
-        loadingStore.submitted
-            .where((command) => command.action is StartLearningRun),
-        isEmpty);
+      loadingStore.submitted.where(
+        (command) => command.action is StartLearningRun,
+      ),
+      isEmpty,
+    );
 
     // Actually keyboard-activate the primary and each legacy destination at
     // the constrained viewport and enlarged text size.
     final primary = find.ancestor(
-        of: find.text('Continue discovery'),
-        matching: find.byType(FilledButton));
+      of: find.text('Start lesson'),
+      matching: find.byType(FilledButton),
+    );
     await _activateUsingKeyboard(tester, primary);
     expect(find.byType(DiscoveryLessonScreen), findsOneWidget);
     expect(
-        loadingStore.submitted
-            .where((command) => command.action is StartLearningRun),
-        hasLength(1));
+      loadingStore.submitted.where(
+        (command) => command.action is StartLearningRun,
+      ),
+      hasLength(1),
+    );
     loadingApp.$2.go('/home');
     await tester.pumpAndSettle();
 
@@ -244,16 +275,26 @@ void main() {
       ('en-fr-r', 'Meet the French R'),
       ('en-fr-mix', 'Mix your new sounds'),
     ]) {
-      await tester.scrollUntilVisible(find.text(title), 180);
+      if (find.text(title).evaluate().isEmpty) {
+        final legacyDisclosure = find.text('Legacy practice');
+        await tester.ensureVisible(legacyDisclosure);
+        await tester.tap(legacyDisclosure);
+        await tester.pumpAndSettle();
+      }
       expect(find.text(title), findsOneWidget);
-      final tile =
-          find.ancestor(of: find.text(title), matching: find.byType(ListTile));
+      await tester.ensureVisible(find.text(title));
+      expect(find.text(title), findsOneWidget);
+      final tile = find.ancestor(
+        of: find.text(title),
+        matching: find.byType(ListTile),
+      );
       await _activateUsingKeyboard(tester, tile);
       expect(
-          tester
-              .widget<CourseLessonScreen>(find.byType(CourseLessonScreen))
-              .lessonId,
-          id);
+        tester
+            .widget<CourseLessonScreen>(find.byType(CourseLessonScreen))
+            .lessonId,
+        id,
+      );
       loadingApp.$2.go('/home');
       await tester.pumpAndSettle();
     }
@@ -263,37 +304,40 @@ void main() {
     final failedStore = CourseLearningWidgetStore()..failLoad = true;
     final failedApp = await mountApp(tester, failedStore);
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Retry loading progress'), 180);
+    await tester.ensureVisible(find.text('Retry loading progress'));
     expect(find.text('Retry loading progress'), findsOneWidget);
-    expect(find.text('Continue discovery'), findsNothing);
-    expect(find.text('Review discovery'), findsNothing);
+    expect(find.text('Continue lesson'), findsNothing);
+    expect(find.text('Review lesson'), findsNothing);
     expect(find.textContaining('Discovery lessons:'), findsNothing);
-    expect(find.textContaining('Existing lessons (includes discovery pilot)'),
-        findsNothing);
     expect(
-        failedStore.submitted
-            .where((command) => command.action is StartLearningRun),
-        isEmpty);
+      find.textContaining('Existing lessons (includes discovery pilot)'),
+      findsNothing,
+    );
+    expect(
+      failedStore.submitted.where(
+        (command) => command.action is StartLearningRun,
+      ),
+      isEmpty,
+    );
     await tester.ensureVisible(find.text('Retry loading progress'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Retry loading progress'));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Continue discovery'), 180);
-    expect(find.text('Continue discovery'), findsOneWidget);
+    await tester.ensureVisible(find.text('Start lesson'));
+    expect(find.text('Start lesson'), findsOneWidget);
     await unmountApp(tester, failedApp);
   });
 
   for (final phase in ['first-pass', 'review', 'debrief']) {
-    testWidgets('primary discovery entry resumes saved $phase state',
-        (tester) async {
+    testWidgets('primary discovery entry resumes saved $phase state', (
+      tester,
+    ) async {
       final savedStore = CourseLearningWidgetStore();
       savedStore.seedSession(_savedSession(phase));
       final savedApp = await mountApp(tester, savedStore);
       addTearDown(() => unmountApp(tester, savedApp));
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(find.text('Continue discovery'), 180);
-      await tester.tap(find.text('Continue discovery'));
-      await tester.pumpAndSettle();
+      await openMapDiscoveryAction(tester, action: 'Continue lesson');
       if (phase == 'first-pass') {
         expect(find.text('Item 2 of 10'), findsOneWidget);
       } else if (phase == 'review') {
@@ -303,9 +347,11 @@ void main() {
       }
       expect(savedStore.prepareCalls, 0);
       expect(
-          savedStore.submitted
-              .where((command) => command.action is StartLearningRun),
-          isEmpty);
+        savedStore.submitted.where(
+          (command) => command.action is StartLearningRun,
+        ),
+        isEmpty,
+      );
       expect(savedStore.committedState.history, isEmpty);
     });
   }
@@ -334,20 +380,20 @@ void main() {
     await tester.pumpAndSettle();
     homeNavigationCount = 0;
     lastObservedUri = app.$2.state.uri;
-    expect(find.text('Continue discovery'), findsOneWidget);
+    expect(find.text('Start lesson'), findsOneWidget);
     final startCountBeforeRefresh = store.submitted
         .where((command) => command.action is StartLearningRun)
         .length;
     app.$2.go('/home');
     await tester.pumpAndSettle();
     expect(
-        store.submitted
-            .where((command) => command.action is StartLearningRun)
-            .length,
-        startCountBeforeRefresh);
+      store.submitted
+          .where((command) => command.action is StartLearningRun)
+          .length,
+      startCountBeforeRefresh,
+    );
 
-    await tester.tap(find.text('Continue discovery'));
-    await tester.pumpAndSettle();
+    await openMapDiscoveryAction(tester, action: 'Start lesson');
     expect(find.byType(DiscoveryLessonScreen), findsOneWidget);
     for (var i = 0; i < frenchUySection.items.length; i++) {
       final item = frenchUySection.items[i];
@@ -358,14 +404,20 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('/${item.expectedSound}/'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text(i == frenchUySection.items.length - 1
-          ? 'See section explanation'
-          : 'Next word'));
+      await tester.tap(
+        find.text(
+          i == frenchUySection.items.length - 1
+              ? 'See section explanation'
+              : 'Next word',
+        ),
+      );
       await tester.pumpAndSettle();
     }
     expect(find.text('Section debrief'), findsOneWidget);
-    expect(store.committedState.history.expand((batch) => batch.attempts),
-        hasLength(10));
+    expect(
+      store.committedState.history.expand((batch) => batch.attempts),
+      hasLength(10),
+    );
     final preFinishSummary = CourseCompletionSummary.fromState(
       state: store.committedState,
       registry: LearningRegistry.french(),
@@ -379,15 +431,18 @@ void main() {
     finishCallback();
     await tester.pump();
     expect(
-        store.submitted
-            .where((command) => command.action is FinishLearningActivity),
-        hasLength(1));
+      store.submitted.where(
+        (command) => command.action is FinishLearningActivity,
+      ),
+      hasLength(1),
+    );
     expect(store.committedState.completions, isEmpty);
     expect(app.$2.state.uri.path, '/course-lesson/en-fr-u-y');
     expect(homeNavigationCount, 0);
 
-    final pendingFinish = store.submitted
-        .singleWhere((command) => command.action is FinishLearningActivity);
+    final pendingFinish = store.submitted.singleWhere(
+      (command) => command.action is FinishLearningActivity,
+    );
     store.actionGates[FinishLearningActivity]!.complete();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
@@ -406,12 +461,17 @@ void main() {
     expect(app.$2.state.uri.path, '/home');
     expect(homeNavigationCount, 1);
     await tester.pumpAndSettle();
-    expect(find.text('Discovery lessons: 1/1 complete'), findsOneWidget);
-    expect(find.text('Review discovery'), findsOneWidget);
     expect(
-        store.submitted
-            .where((command) => command.action is FinishLearningActivity),
-        hasLength(2));
+      find.text('Discovery lessons: 1/1 available complete'),
+      findsOneWidget,
+    );
+    expect(find.text('Review lesson'), findsOneWidget);
+    expect(
+      store.submitted.where(
+        (command) => command.action is FinishLearningActivity,
+      ),
+      hasLength(2),
+    );
     await tester.pump(const Duration(milliseconds: 50));
     expect(homeNavigationCount, 1);
 
@@ -419,35 +479,54 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Discovery lessons: 1/1 complete'), findsOneWidget);
     expect(
-        find.text('Existing lessons (includes discovery pilot): 1/5 complete'),
-        findsOneWidget);
+      find.text('Existing lessons (includes discovery pilot): 1/5 complete'),
+      findsOneWidget,
+    );
   });
 
-  testWidgets('home account A-B-A replacement never publishes departed state',
-      (tester) async {
+  testWidgets('home account A-B-A replacement never publishes departed state', (
+    tester,
+  ) async {
     final accountA = _storeWithPilotCompletion('account-a');
     final accountBLoad = Completer<void>();
     final accountB = CourseLearningWidgetStore(
       scope: LearningScope(
-          courseId: 'en-fr', owner: LearningOwner.account('account-b')),
+        courseId: 'en-fr',
+        owner: LearningOwner.account('account-b'),
+      ),
     )..loadGate = accountBLoad;
     final staleALoad = Completer<void>();
     final accountARefresh = CourseLearningWidgetStore(
       scope: accountA.scope,
       initialState: accountA.committedState,
     )..loadGate = staleALoad;
+    final tracker = LearningAuthTracker(
+      owner: accountA.scope.owner,
+      ready: true,
+    );
     final audio = ControlledListeningAudio();
-    await tester.pumpWidget(ProviderScope(overrides: [
-      _activeStoreProvider.overrideWith((ref) => accountA),
-      courseLearningStoreProvider
-          .overrideWith((ref) => ref.watch(_activeStoreProvider)),
-      courseAudioProvider.overrideWithValue(audio),
-      _emptyComparisonStateOverride,
-    ], child: const LinguistApp()));
-    final scope = tester
-        .element(find.byType(LinguistApp))
-        .getElementForInheritedWidgetOfExactType<UncontrolledProviderScope>()!
-        .widget as UncontrolledProviderScope;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          _activeStoreProvider.overrideWith((ref) => accountA),
+          learningAuthScopeProvider.overrideWith((ref) => tracker),
+          courseLearningStoreProvider.overrideWith(
+            (ref) => ref.watch(_activeStoreProvider),
+          ),
+          courseAudioProvider.overrideWithValue(audio),
+          _emptyComparisonStateOverride,
+        ],
+        child: const LinguistApp(),
+      ),
+    );
+    final scope =
+        tester
+                .element(find.byType(LinguistApp))
+                .getElementForInheritedWidgetOfExactType<
+                  UncontrolledProviderScope
+                >()!
+                .widget
+            as UncontrolledProviderScope;
     final container = scope.container;
     final router = container.read(appRouterProvider);
     addTearDown(() async {
@@ -460,10 +539,16 @@ void main() {
       await audio.dispose();
     });
     await tester.pumpAndSettle();
-    expect(find.text('Discovery lessons: 1/1 complete'), findsOneWidget);
-    expect(find.text('Review discovery'), findsOneWidget);
+    expect(
+      find.text('Discovery lessons: 1/1 available complete'),
+      findsOneWidget,
+    );
+    expect(find.text('Review lesson'), findsOneWidget);
     await _expectLegacyCompletionIcon(
-        tester, 'Keep French vowels steady', true);
+      tester,
+      'Keep French vowels steady',
+      true,
+    );
     await _scrollHomeToDiscoverySummary(tester);
 
     // Replace the store with a same-owner delayed refresh, then change A→B.
@@ -471,44 +556,72 @@ void main() {
     container.read(_activeStoreProvider.notifier).state = accountARefresh;
     await tester.pump();
     container.read(_activeStoreProvider.notifier).state = accountB;
+    tracker.observe(owner: accountB.scope.owner, ready: true);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
     await _scrollHomeToDiscoverySummary(tester);
-    expect(find.text('Discovery lessons: 1/1 complete'), findsNothing);
-    expect(find.text('Review discovery'), findsNothing);
-    expect(find.text('Continue discovery'), findsNothing);
+    expect(
+      find.text('Discovery lessons: 1/1 available complete'),
+      findsNothing,
+    );
+    expect(find.text('Review lesson'), findsNothing);
+    expect(find.text('Start lesson'), findsNothing);
     await _expectLegacyCompletionIcon(
-        tester, 'Keep French vowels steady', false);
+      tester,
+      'Keep French vowels steady',
+      false,
+    );
     await _scrollHomeToDiscoverySummary(tester);
 
     accountBLoad.complete();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
     await tester.pumpAndSettle();
-    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
-    expect(find.text('Continue discovery'), findsOneWidget);
+    expect(
+      find.text('Discovery lessons: 0/1 available complete'),
+      findsOneWidget,
+    );
+    expect(find.text('Start lesson'), findsOneWidget);
     staleALoad.complete();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
     await _scrollHomeToDiscoverySummary(tester);
-    expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
-    expect(find.text('Review discovery'), findsNothing);
+    expect(
+      find.text('Discovery lessons: 0/1 available complete'),
+      findsOneWidget,
+    );
+    expect(find.text('Review lesson'), findsNothing);
     await _expectLegacyCompletionIcon(
-        tester, 'Keep French vowels steady', false);
+      tester,
+      'Keep French vowels steady',
+      false,
+    );
     await _scrollHomeToDiscoverySummary(tester);
 
     container.read(_activeStoreProvider.notifier).state = accountA;
+    tracker.observe(owner: accountA.scope.owner, ready: true);
     await tester.pumpAndSettle();
     await _scrollHomeToDiscoverySummary(tester);
-    expect(find.text('Discovery lessons: 1/1 complete'), findsOneWidget);
-    expect(find.text('Review discovery'), findsOneWidget);
+    expect(
+      find.text('Discovery lessons: 1/1 available complete'),
+      findsOneWidget,
+    );
+    expect(find.text('Review lesson'), findsOneWidget);
     await _expectLegacyCompletionIcon(
-        tester, 'Keep French vowels steady', true);
+      tester,
+      'Keep French vowels steady',
+      true,
+    );
   });
 
-  testWidgets('home hides completed state during explicit held refresh',
-      (tester) async {
+  testWidgets('home hides completed state during explicit held refresh', (
+    tester,
+  ) async {
     final initial = _storeWithPilotCompletion('refresh-owner');
+    final tracker = LearningAuthTracker(
+      owner: initial.scope.owner,
+      ready: true,
+    );
     var refresh = Completer<void>();
     var loads = 0;
     initial.loadHandler = (call) async {
@@ -517,17 +630,28 @@ void main() {
       return initial.committedState;
     };
     final audio = ControlledListeningAudio();
-    await tester.pumpWidget(ProviderScope(overrides: [
-      _activeStoreProvider.overrideWith((ref) => initial),
-      courseLearningStoreProvider
-          .overrideWith((ref) => ref.watch(_activeStoreProvider)),
-      courseAudioProvider.overrideWithValue(audio),
-      _emptyComparisonStateOverride,
-    ], child: const LinguistApp()));
-    final scope = tester
-        .element(find.byType(LinguistApp))
-        .getElementForInheritedWidgetOfExactType<UncontrolledProviderScope>()!
-        .widget as UncontrolledProviderScope;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          _activeStoreProvider.overrideWith((ref) => initial),
+          learningAuthScopeProvider.overrideWith((ref) => tracker),
+          courseLearningStoreProvider.overrideWith(
+            (ref) => ref.watch(_activeStoreProvider),
+          ),
+          courseAudioProvider.overrideWithValue(audio),
+          _emptyComparisonStateOverride,
+        ],
+        child: const LinguistApp(),
+      ),
+    );
+    final scope =
+        tester
+                .element(find.byType(LinguistApp))
+                .getElementForInheritedWidgetOfExactType<
+                  UncontrolledProviderScope
+                >()!
+                .widget
+            as UncontrolledProviderScope;
     final container = scope.container;
     final router = container.read(appRouterProvider);
     addTearDown(() async {
@@ -540,10 +664,16 @@ void main() {
     });
     await tester.pumpAndSettle();
     expect(loads, 1);
-    expect(find.text('Discovery lessons: 1/1 complete'), findsOneWidget);
-    expect(find.text('Review discovery'), findsOneWidget);
+    expect(
+      find.text('Discovery lessons: 1/1 available complete'),
+      findsOneWidget,
+    );
+    expect(find.text('Review lesson'), findsOneWidget);
     await _expectLegacyCompletionIcon(
-        tester, 'Keep French vowels steady', true);
+      tester,
+      'Keep French vowels steady',
+      true,
+    );
     await _scrollHomeToDiscoverySummary(tester);
 
     container.invalidate(courseLearningStateProvider);
@@ -552,10 +682,13 @@ void main() {
     expect(loads, 2);
     await _scrollHomeToDiscoverySummary(tester);
     expect(find.textContaining('Discovery lessons:'), findsNothing);
-    expect(find.text('Review discovery'), findsNothing);
-    expect(find.text('Continue discovery'), findsNothing);
+    expect(find.text('Review lesson'), findsNothing);
+    expect(find.text('Start lesson'), findsNothing);
     await _expectLegacyCompletionIcon(
-        tester, 'Keep French vowels steady', false);
+      tester,
+      'Keep French vowels steady',
+      false,
+    );
     await _scrollHomeToDiscoverySummary(tester);
 
     refresh.complete();
@@ -570,38 +703,57 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 20));
     expect(find.textContaining('Discovery lessons:'), findsNothing);
-    expect(find.textContaining('Existing lessons (includes discovery pilot)'),
-        findsNothing);
+    expect(
+      find.textContaining('Existing lessons (includes discovery pilot)'),
+      findsNothing,
+    );
   });
 
-  testWidgets('departed discovery save cannot publish after A-B-A',
-      (tester) async {
+  testWidgets('departed discovery save cannot publish after A-B-A', (
+    tester,
+  ) async {
     final scopeA = LearningScope(
-        courseId: 'en-fr', owner: LearningOwner.account('answer-owner-a'));
+      courseId: 'en-fr',
+      owner: LearningOwner.account('answer-owner-a'),
+    );
     final accountA = CourseLearningWidgetStore(scope: scopeA)
       ..actionGates[ChooseSound] = Completer<void>()
       ..failingActions.add(ChooseSound);
     final accountBLoad = Completer<void>();
     final accountB = CourseLearningWidgetStore(
       scope: LearningScope(
-          courseId: 'en-fr', owner: LearningOwner.account('answer-owner-b')),
+        courseId: 'en-fr',
+        owner: LearningOwner.account('answer-owner-b'),
+      ),
     )..loadGate = accountBLoad;
     final replacementA = CourseLearningWidgetStore(
       scope: scopeA,
       initialState: accountA.committedState,
     );
+    final tracker = LearningAuthTracker(owner: scopeA.owner, ready: true);
     final audio = ControlledListeningAudio();
-    await tester.pumpWidget(ProviderScope(overrides: [
-      _activeStoreProvider.overrideWith((ref) => accountA),
-      courseLearningStoreProvider
-          .overrideWith((ref) => ref.watch(_activeStoreProvider)),
-      courseAudioProvider.overrideWithValue(audio),
-      _emptyComparisonStateOverride,
-    ], child: const LinguistApp()));
-    final scope = tester
-        .element(find.byType(LinguistApp))
-        .getElementForInheritedWidgetOfExactType<UncontrolledProviderScope>()!
-        .widget as UncontrolledProviderScope;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          _activeStoreProvider.overrideWith((ref) => accountA),
+          learningAuthScopeProvider.overrideWith((ref) => tracker),
+          courseLearningStoreProvider.overrideWith(
+            (ref) => ref.watch(_activeStoreProvider),
+          ),
+          courseAudioProvider.overrideWithValue(audio),
+          _emptyComparisonStateOverride,
+        ],
+        child: const LinguistApp(),
+      ),
+    );
+    final scope =
+        tester
+                .element(find.byType(LinguistApp))
+                .getElementForInheritedWidgetOfExactType<
+                  UncontrolledProviderScope
+                >()!
+                .widget
+            as UncontrolledProviderScope;
     final container = scope.container;
     final router = container.read(appRouterProvider);
     addTearDown(() async {
@@ -615,28 +767,31 @@ void main() {
       await audio.dispose();
     });
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Continue discovery'));
-    await tester.pumpAndSettle();
+    await openMapDiscoveryAction(tester, action: 'Start lesson');
     await tester.tap(find.text('Listen to the word'));
     await tester.pump();
     audio.requests.last.complete();
     await tester.pumpAndSettle();
-    await tester
-        .tap(find.text('/${frenchUySection.items.first.expectedSound}/'));
+    await tester.tap(
+      find.text('/${frenchUySection.items.first.expectedSound}/'),
+    );
     await tester.pump();
     expect(find.text('Correct'), findsOneWidget);
     expect(find.text('Not yet'), findsNothing);
-    final departedAnswer = accountA.submitted
-        .singleWhere((command) => command.action is ChooseSound);
+    final departedAnswer = accountA.submitted.singleWhere(
+      (command) => command.action is ChooseSound,
+    );
     expect(departedAnswer.scope, scopeA);
 
     container.read(_activeStoreProvider.notifier).state = accountB;
+    tracker.observe(owner: accountB.scope.owner, ready: true);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
-    expect(find.text('Continue discovery'), findsNothing);
+    expect(find.text('Start lesson'), findsNothing);
     expect(find.text('Correct'), findsNothing);
     expect(find.text('Not yet'), findsNothing);
     container.read(_activeStoreProvider.notifier).state = replacementA;
+    tracker.observe(owner: replacementA.scope.owner, ready: true);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
     await tester.pumpAndSettle();
@@ -645,20 +800,22 @@ void main() {
     expect(find.text('Correct'), findsNothing);
     expect(find.text('Not yet'), findsNothing);
     expect(
-        replacementA.submitted
-            .where((command) => command.action is ChooseSound),
-        isEmpty);
+      replacementA.submitted.where((command) => command.action is ChooseSound),
+      isEmpty,
+    );
 
     accountA.actionGates[ChooseSound]!.complete();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
     await tester.pumpAndSettle();
-    expect(accountA.submitted.where((command) => command.action is ChooseSound),
-        hasLength(1));
     expect(
-        replacementA.submitted
-            .where((command) => command.action is ChooseSound),
-        isEmpty);
+      accountA.submitted.where((command) => command.action is ChooseSound),
+      hasLength(1),
+    );
+    expect(
+      replacementA.submitted.where((command) => command.action is ChooseSound),
+      isEmpty,
+    );
     expect(find.text('Retry saving'), findsNothing);
     expect(find.text('Correct'), findsNothing);
     expect(find.text('Not yet'), findsNothing);
@@ -672,37 +829,56 @@ Future<void> _scrollHomeToDiscoverySummary(WidgetTester tester) async {
 }
 
 Future<void> _expectLegacyCompletionIcon(
-    WidgetTester tester, String title, bool completed) async {
-  await tester.scrollUntilVisible(find.text(title), 250,
-      scrollable: find.byType(Scrollable).first);
+  WidgetTester tester,
+  String title,
+  bool completed,
+) async {
+  if (find.text(title).evaluate().isEmpty) {
+    final disclosure = find.text('Legacy practice');
+    await tester.ensureVisible(disclosure);
+    await tester.tap(disclosure);
+    await tester.pumpAndSettle();
+  }
+  await tester.ensureVisible(find.text(title));
   await tester.pump();
-  final tile =
-      find.ancestor(of: find.text(title), matching: find.byType(ListTile));
-  expect(find.descendant(of: tile, matching: find.byIcon(Icons.check)),
-      completed ? findsOneWidget : findsNothing);
+  final tile = find.ancestor(
+    of: find.text(title),
+    matching: find.byType(ListTile),
+  );
+  expect(
+    find.descendant(of: tile, matching: find.byIcon(Icons.check)),
+    completed ? findsOneWidget : findsNothing,
+  );
 }
 
 Future<void> _activateUsingKeyboard(WidgetTester tester, Finder control) async {
   final textFinder = find.descendant(of: control, matching: find.byType(Text));
   expect(textFinder, findsWidgets);
-  final focusNode =
-      Focus.of(tester.element(textFinder.first), createDependency: false);
+  final focusNode = Focus.of(
+    tester.element(textFinder.first),
+    createDependency: false,
+  );
   var reachedByTab = false;
   for (var i = 0; i < 50 && !reachedByTab; i++) {
     await tester.sendKeyEvent(LogicalKeyboardKey.tab);
     await tester.pump();
     reachedByTab = focusNode.hasFocus;
   }
-  expect(reachedByTab, isTrue,
-      reason: 'the control must be reachable through keyboard traversal');
+  expect(
+    reachedByTab,
+    isTrue,
+    reason: 'the control must be reachable through keyboard traversal',
+  );
   expect(focusNode.hasFocus, isTrue);
   await tester.sendKeyEvent(LogicalKeyboardKey.enter);
   await tester.pumpAndSettle();
 }
 
 CourseLearningWidgetStore _storeWithPilotCompletion(String userId) {
-  final scope =
-      LearningScope(courseId: 'en-fr', owner: LearningOwner.account(userId));
+  final scope = LearningScope(
+    courseId: 'en-fr',
+    owner: LearningOwner.account(userId),
+  );
   final state = CourseLearningState(
     scope: scope,
     revision: 1,
@@ -741,9 +917,10 @@ CourseLearningWidgetStore _storeWithPilotCompletion(String userId) {
 
 LessonSectionSession _savedSession(String phase) {
   final session = LessonSectionSession(
-      itemIds: frenchUySection.items.map((item) => item.id).toList(),
-      sessionId: 'saved-$phase',
-      policy: LessonPolicy());
+    itemIds: frenchUySection.items.map((item) => item.id).toList(),
+    sessionId: 'saved-$phase',
+    policy: LessonPolicy(),
+  );
   if (phase == 'first-pass') {
     session.submit(true);
     session.advance();
@@ -758,7 +935,7 @@ LessonSectionSession _savedSession(String phase) {
       true,
       false,
       true,
-      true
+      true,
     ];
     for (final correct in firstPass) {
       session.submit(correct);
@@ -776,8 +953,9 @@ LessonSectionSession _savedSession(String phase) {
 
 LessonSectionSession _passedSession(String sessionId) {
   final session = LessonSectionSession(
-      itemIds: frenchUySection.items.map((item) => item.id).toList(),
-      sessionId: sessionId);
+    itemIds: frenchUySection.items.map((item) => item.id).toList(),
+    sessionId: sessionId,
+  );
   for (var i = 0; i < 10; i++) {
     session.submit(true);
     session.advance();

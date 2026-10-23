@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:linguist/src/app.dart';
@@ -5,6 +6,7 @@ import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/comparison_learning_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../support/course_learning_widget_store.dart';
+import '../support/map_motion_test_support.dart';
 
 Override _comparisonStateOverride() =>
     comparisonLearningStateProvider.overrideWith((ref) async =>
@@ -16,18 +18,30 @@ void main() {
       SharedPreferences.setMockInitialValues({'selected_course_id': 'en-fr'}));
   testWidgets('course home opens discovery before legacy practice',
       (tester) async {
+    disableMapMotion(tester);
     await tester.pumpWidget(ProviderScope(overrides: [
       courseLearningStoreProvider
           .overrideWithValue(CourseLearningWidgetStore()),
       _comparisonStateOverride(),
     ], child: const LinguistApp()));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Continue discovery'));
+    final disclosure = find.text('All destinations');
+    await tester.ensureVisible(disclosure);
+    await tester.tap(disclosure);
+    await tester.pumpAndSettle();
+    final discoveryEntry = find.widgetWithText(ListTile, 'Hear the difference');
+    await tester.ensureVisible(discoveryEntry);
+    await tester.tap(discoveryEntry);
+    await tester.pumpAndSettle();
+    final discover = find.text('Start lesson');
+    await tester.ensureVisible(discover.first);
+    await tester.tap(discover.first);
     await tester.pumpAndSettle();
     expect(find.text('Listening practice'), findsWidgets);
     expect(find.text('Item 1 of 10'), findsOneWidget);
   });
   testWidgets('course progress and settings remain accessible', (tester) async {
+    disableMapMotion(tester);
     await tester.pumpWidget(ProviderScope(overrides: [
       courseLearningStoreProvider
           .overrideWithValue(CourseLearningWidgetStore()),
