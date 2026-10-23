@@ -23,9 +23,14 @@ final class ComparisonLearningStateValidator {
   static void validate(
     ComparisonLearningState state,
     ComparisonCatalogue catalogue,
+  ) => validateRegistered(state, ComparisonCatalogueRegistry.single(catalogue));
+
+  static void validateRegistered(
+    ComparisonLearningState state,
+    ComparisonCatalogueRegistry registry,
   ) {
     try {
-      _validate(state, catalogue);
+      _validate(state, registry);
     } on FormatException {
       rethrow;
     } on Object catch (error) {
@@ -35,11 +40,9 @@ final class ComparisonLearningStateValidator {
 
   static void _validate(
     ComparisonLearningState state,
-    ComparisonCatalogue catalogue,
+    ComparisonCatalogueRegistry registry,
   ) {
     if (state.schemaVersion != 1 ||
-        catalogue.activityId != comparisonActivityId ||
-        catalogue.contentRevision < 1 ||
         state.revision < 0 ||
         state.revision > comparisonMaxSafeInteger ||
         state.commitOrdinal < 0 ||
@@ -61,7 +64,7 @@ final class ComparisonLearningStateValidator {
         key.activityId,
         key.pairId,
         key.contentRevision,
-        catalogue,
+        _catalogueFor(registry, key.activityId),
       );
       if (key != mistake.key ||
           key.scope != state.scope ||
@@ -81,7 +84,7 @@ final class ComparisonLearningStateValidator {
         key.activityId,
         key.pairId,
         key.contentRevision,
-        catalogue,
+        _catalogueFor(registry, key.activityId),
       );
       if (entry.key != summary.key || key.scope != state.scope) {
         throw const FormatException('Invalid comparison summary identity.');
@@ -105,11 +108,12 @@ final class ComparisonLearningStateValidator {
     final receiptsBySequence = <String, ComparisonReceipt>{};
     final receiptTokens = <String>{};
     final receiptCursors = <String>{};
+    final lastReceiptByActivity = <String, ComparisonReceipt>{};
     for (var index = 0; index < state.receipts.length; index++) {
       final receipt = state.receipts[index];
-      final command = _decodeDomainReceipt(receipt, state.scope, catalogue);
+      final catalogue = _catalogueFor(registry, receipt.activityId);
+      final command = _decodeDomainReceipt(receipt, state.scope, registry);
       if (receipt.scope != state.scope ||
-          receipt.activityId != catalogue.activityId ||
           receipt.commitOrdinal > state.commitOrdinal ||
           !receiptTokens.add(receipt.token) ||
           !receiptCursors.add(_cursorKey(receipt.activityId, receipt.after)) ||
@@ -121,13 +125,20 @@ final class ComparisonLearningStateValidator {
       _validateReceiptAction(command, receipt, catalogue);
       if (index > 0) {
         final previous = state.receipts[index - 1];
-        if (receipt.commitOrdinal != previous.commitOrdinal + 1 ||
-            receipt.before != previous.after) {
+        if (receipt.commitOrdinal != previous.commitOrdinal + 1) {
           throw const FormatException(
-            'Retained receipt chain is inconsistent.',
+            'Retained scope receipt ordinals are inconsistent.',
           );
         }
       }
+      final previousForActivity = lastReceiptByActivity[receipt.activityId];
+      if (previousForActivity != null &&
+          receipt.before != previousForActivity.after) {
+        throw const FormatException(
+          'Retained activity receipt chain is inconsistent.',
+        );
+      }
+      lastReceiptByActivity[receipt.activityId] = receipt;
       receiptsBySequence[_cursorKey(receipt.activityId, receipt.after)] =
           receipt;
     }
@@ -135,6 +146,7 @@ final class ComparisonLearningStateValidator {
     final attemptIdentities = <String>{};
     final retainedCounts = <ComparisonSummaryKey, List<int>>{};
     for (final attempt in state.attempts) {
+      final catalogue = _catalogueFor(registry, attempt.activityId);
       _requireContent(
         attempt.activityId,
         attempt.pairId,
@@ -191,15 +203,11 @@ final class ComparisonLearningStateValidator {
       }
       final receipt = receiptsBySequence[identity];
       if (receipt != null) {
-        final command = _decodeDomainReceipt(receipt, state.scope, catalogue);
+        final command = _decodeDomainReceipt(receipt, state.scope, registry);
         if (command.action is! domain.AnswerComparisonPair) {
           throw const FormatException('Attempt links to a non-answer receipt.');
         }
         final answer = (command.action as domain.AnswerComparisonPair).answer;
-        if (receipt.commitOrdinal != attempt.sequence &&
-            receipt.commitOrdinal < attempt.sequence) {
-          throw const FormatException('Attempt/receipt ordinal mismatch.');
-        }
         if (receipt.after.generation != attempt.runGeneration ||
             receipt.after.sequence != attempt.sequence ||
             command.submittedAt != attempt.answeredAt ||
@@ -250,6 +258,7 @@ final class ComparisonLearningStateValidator {
 
     final completionIdentities = <String>{};
     for (final completion in state.completions) {
+      final catalogue = _catalogueFor(registry, completion.activityId);
       final identity = jsonEncode([
         completion.activityId,
         completion.contentRevision,
@@ -257,7 +266,6 @@ final class ComparisonLearningStateValidator {
         completion.thresholdPercent,
       ]);
       if (completion.scope != state.scope ||
-          completion.activityId != catalogue.activityId ||
           completion.contentRevision != catalogue.contentRevision ||
           completion.policyRevision != 1 ||
           completion.thresholdPercent < 1 ||
@@ -268,8 +276,7 @@ final class ComparisonLearningStateValidator {
       }
     }
 
-    final slot = state.slot;
-    if (slot == null) {
+    if (state.slots.isEmpty) {
       if (state.commitOrdinal != 0 ||
           state.revision != 0 ||
           state.attempts.isNotEmpty ||
@@ -284,128 +291,138 @@ final class ComparisonLearningStateValidator {
       return;
     }
 
-    if (slot.scope != state.scope ||
-        slot.activityId != catalogue.activityId ||
-        slot.checkpoint.scope != state.scope ||
-        slot.checkpoint.contentRevision != catalogue.contentRevision ||
-        slot.latestReceipt.commitOrdinal != state.commitOrdinal ||
-        slot.latestReceipt.after != slot.cursor) {
-      throw const FormatException('Comparison slot identity mismatch.');
-    }
     const checkpointCodec = ComparisonLearningCheckpointCodec();
-    final checkpointJson = checkpointCodec.encode(slot.checkpoint);
-    final checkpoint = checkpointCodec.decode(
-      checkpointJson,
-      scope: state.scope,
-      activityId: slot.activityId,
-      catalogue: catalogue,
-      policy: slot.checkpoint.policy,
-    );
-    final session = _session(checkpoint.sessionJson, catalogue);
-    final latest = slot.latestReceipt;
-    final latestCommand = _decodeDomainReceipt(latest, state.scope, catalogue);
-    if (latestCommand.token != latest.token ||
-        latestCommand.activityId != latest.activityId ||
-        latestCommand.expected != latest.before ||
-        latest.after != slot.cursor) {
-      throw const FormatException('Latest comparison receipt mismatch.');
-    }
-    _validateReceiptAction(latestCommand, latest, catalogue);
-    if (state.receipts.isNotEmpty &&
-        !_sameReceipt(state.receipts.last, latest)) {
-      throw const FormatException('Latest receipt differs from retained tail.');
-    }
-
-    if (latestCommand.action case domain.StartComparisonRun(
-      :final sessionId,
-      :final policy,
-    )) {
-      final fresh = LessonSectionSession(
-        itemIds: catalogue.exercises.map((exercise) => exercise.id).toList(),
-        sessionId: sessionId,
-        contentRevision: catalogue.contentRevision,
+    for (final slot in state.slots.values) {
+      final catalogue = _catalogueFor(registry, slot.activityId);
+      if (slot.scope != state.scope ||
+          slot.checkpoint.scope != state.scope ||
+          slot.checkpoint.contentRevision != catalogue.contentRevision ||
+          slot.latestReceipt.commitOrdinal > state.commitOrdinal ||
+          slot.latestReceipt.after != slot.cursor) {
+        throw const FormatException('Comparison slot identity mismatch.');
+      }
+      final checkpointJson = checkpointCodec.encode(slot.checkpoint);
+      final checkpoint = checkpointCodec.decodeRegistered(
+        checkpointJson,
+        scope: state.scope,
+        activityId: slot.activityId,
+        registry: registry,
         policy: slot.checkpoint.policy,
       );
-      if (slot.checkpoint.sessionId != sessionId ||
-          slot.checkpoint.policy.completionThresholdPercent !=
-              policy.completionThresholdPercent ||
-          jsonEncode(session.toJson()) != jsonEncode(fresh.toJson())) {
-        throw const FormatException('Latest start is not a fresh checkpoint.');
+      final session = _session(checkpoint.sessionJson, catalogue);
+      final latest = slot.latestReceipt;
+      final latestCommand = _decodeDomainReceipt(latest, state.scope, registry);
+      if (latestCommand.token != latest.token ||
+          latestCommand.activityId != latest.activityId ||
+          latestCommand.expected != latest.before ||
+          latest.after != slot.cursor) {
+        throw const FormatException('Latest comparison receipt mismatch.');
       }
-    } else if (latestCommand.action case domain.AnswerComparisonPair(
-      :final answer,
-    )) {
-      final pairId = answer.observations.first.pairId;
-      final retainedAttempt = state.attempts.where(
-        (attempt) =>
-            attempt.activityId == slot.activityId &&
-            attempt.runGeneration == latest.after.generation &&
-            attempt.sequence == latest.after.sequence,
+      _validateReceiptAction(latestCommand, latest, catalogue);
+      final retainedForActivity = state.receipts.where(
+        (receipt) => receipt.activityId == slot.activityId,
       );
-      final expectedCorrect =
-          answer.selectedRelation == answer.expectedRelationSnapshot;
-      if (!session.answered ||
-          session.currentItemId != pairId ||
-          answer.observations.first.round != session.round ||
-          session.lastCorrect != expectedCorrect ||
-          session.latestAnswers[pairId] != expectedCorrect ||
-          (retainedAttempt.isNotEmpty &&
-              (retainedAttempt.length != 1 ||
-                  retainedAttempt.single.pairId != pairId ||
-                  retainedAttempt.single.round != session.round ||
-                  retainedAttempt.single.selectedRelation !=
-                      answer.selectedRelation ||
-                  retainedAttempt.single.expectedRelation !=
-                      answer.expectedRelationSnapshot ||
-                  retainedAttempt.single.correct != expectedCorrect ||
-                  retainedAttempt.single.answeredAt !=
-                      latestCommand.submittedAt ||
-                  !_sameObservations(
-                    retainedAttempt.single.observations,
-                    answer.observations,
-                  )))) {
-        throw const FormatException('Latest answer differs from checkpoint.');
-      }
-    } else if (latestCommand.action is domain.AdvanceComparisonPair) {
-      if (session.answered) {
-        throw const FormatException('Latest advance left an answered item.');
-      }
-    } else if (latestCommand.action is domain.ReviewComparisonPairs) {
-      if (session.round < 2) {
+      if (retainedForActivity.isNotEmpty &&
+          !_sameReceipt(retainedForActivity.last, latest)) {
         throw const FormatException(
-          'Latest review did not start a review round.',
+          'Latest activity receipt differs from retained history.',
         );
       }
-    } else if (latestCommand.action case domain.FinishComparisonRun(
-      recordCompletion: true,
-    )) {
-      final threshold = session.policy.completionThresholdPercent;
-      if (!session.canComplete ||
-          !state.completions.any(
-            (completion) =>
-                completion.activityId == slot.activityId &&
-                completion.contentRevision == slot.checkpoint.contentRevision &&
-                completion.policyRevision == 1 &&
-                completion.thresholdPercent == threshold,
-          )) {
-        throw const FormatException(
-          'Recorded finish lacks eligible completion evidence.',
-        );
-      }
-    }
 
-    _validateCurrentRunAnswers(state, slot, session, catalogue);
-    _validateCompletionReceipts(state, catalogue);
+      if (latestCommand.action case domain.StartComparisonRun(
+        :final sessionId,
+        :final policy,
+      )) {
+        final fresh = LessonSectionSession(
+          itemIds: catalogue.exercises.map((exercise) => exercise.id).toList(),
+          sessionId: sessionId,
+          contentRevision: catalogue.contentRevision,
+          policy: slot.checkpoint.policy,
+        );
+        if (slot.checkpoint.sessionId != sessionId ||
+            slot.checkpoint.policy.completionThresholdPercent !=
+                policy.completionThresholdPercent ||
+            jsonEncode(session.toJson()) != jsonEncode(fresh.toJson())) {
+          throw const FormatException(
+            'Latest start is not a fresh checkpoint.',
+          );
+        }
+      } else if (latestCommand.action case domain.AnswerComparisonPair(
+        :final answer,
+      )) {
+        final pairId = answer.observations.first.pairId;
+        final retainedAttempt = state.attempts.where(
+          (attempt) =>
+              attempt.activityId == slot.activityId &&
+              attempt.runGeneration == latest.after.generation &&
+              attempt.sequence == latest.after.sequence,
+        );
+        final expectedCorrect =
+            answer.selectedRelation == answer.expectedRelationSnapshot;
+        if (!session.answered ||
+            session.currentItemId != pairId ||
+            answer.observations.first.round != session.round ||
+            session.lastCorrect != expectedCorrect ||
+            session.latestAnswers[pairId] != expectedCorrect ||
+            (retainedAttempt.isNotEmpty &&
+                (retainedAttempt.length != 1 ||
+                    retainedAttempt.single.pairId != pairId ||
+                    retainedAttempt.single.round != session.round ||
+                    retainedAttempt.single.selectedRelation !=
+                        answer.selectedRelation ||
+                    retainedAttempt.single.expectedRelation !=
+                        answer.expectedRelationSnapshot ||
+                    retainedAttempt.single.correct != expectedCorrect ||
+                    retainedAttempt.single.answeredAt !=
+                        latestCommand.submittedAt ||
+                    !_sameObservations(
+                      retainedAttempt.single.observations,
+                      answer.observations,
+                    )))) {
+          throw const FormatException('Latest answer differs from checkpoint.');
+        }
+      } else if (latestCommand.action is domain.AdvanceComparisonPair) {
+        if (session.answered) {
+          throw const FormatException('Latest advance left an answered item.');
+        }
+      } else if (latestCommand.action is domain.ReviewComparisonPairs) {
+        if (session.round < 2) {
+          throw const FormatException(
+            'Latest review did not start a review round.',
+          );
+        }
+      } else if (latestCommand.action case domain.FinishComparisonRun(
+        recordCompletion: true,
+      )) {
+        final threshold = session.policy.completionThresholdPercent;
+        if (!session.canComplete ||
+            !state.completions.any(
+              (completion) =>
+                  completion.activityId == slot.activityId &&
+                  completion.contentRevision ==
+                      slot.checkpoint.contentRevision &&
+                  completion.policyRevision == 1 &&
+                  completion.thresholdPercent == threshold,
+            )) {
+          throw const FormatException(
+            'Recorded finish lacks eligible completion evidence.',
+          );
+        }
+      }
+
+      _validateCurrentRunAnswers(state, slot, session, catalogue, registry);
+    }
+    _validateCompletionReceipts(state, registry);
   }
 
   static domain.ComparisonLearningCommand _decodeDomainReceipt(
     ComparisonReceipt receipt,
     ComparisonProfileScope scope,
-    ComparisonCatalogue catalogue,
-  ) => ComparisonLearningCommandCodec.decodeLegacyCanonicalCommand(
+    ComparisonCatalogueRegistry registry,
+  ) => ComparisonLearningCommandCodec.decodeRegisteredLegacyCanonicalCommand(
     receipt.canonicalCommand,
     scope: scope,
-    catalogue: catalogue,
+    registry: registry,
   );
 
   static void _validateReceiptAction(
@@ -473,6 +490,7 @@ final class ComparisonLearningStateValidator {
     ComparisonSlot slot,
     LessonSectionSession session,
     ComparisonCatalogue catalogue,
+    ComparisonCatalogueRegistry registry,
   ) {
     final factsBySequence = <int, (String, bool)>{};
     final latestByPair = <String, (int, bool)>{};
@@ -492,8 +510,11 @@ final class ComparisonLearningStateValidator {
     }
 
     void readReceipt(ComparisonReceipt receipt) {
-      if (receipt.generation != slot.cursor.generation) return;
-      final command = _decodeDomainReceipt(receipt, state.scope, catalogue);
+      if (receipt.activityId != slot.activityId ||
+          receipt.generation != slot.cursor.generation) {
+        return;
+      }
+      final command = _decodeDomainReceipt(receipt, state.scope, registry);
       if (command.action case domain.AnswerComparisonPair(:final answer)) {
         record(
           receipt.generation,
@@ -508,7 +529,9 @@ final class ComparisonLearningStateValidator {
       readReceipt(receipt);
     }
     readReceipt(slot.latestReceipt);
-    for (final attempt in state.attempts) {
+    for (final attempt in state.attempts.where(
+      (attempt) => attempt.activityId == slot.activityId,
+    )) {
       record(
         attempt.runGeneration,
         attempt.sequence,
@@ -528,28 +551,29 @@ final class ComparisonLearningStateValidator {
 
   static void _validateCompletionReceipts(
     ComparisonLearningState state,
-    ComparisonCatalogue catalogue,
+    ComparisonCatalogueRegistry registry,
   ) {
-    final slot = state.slot!;
     final receipts = <ComparisonReceipt>[
       ...state.receipts,
-      if (state.receipts.isEmpty) slot.latestReceipt,
+      if (state.receipts.isEmpty)
+        ...state.slots.values.map((slot) => slot.latestReceipt),
     ];
-    final policyByGeneration = <int, int>{};
+    final policyByGeneration = <String, int>{};
     final justifiedCompletions = <String>{};
     for (final receipt in receipts) {
-      final command = _decodeDomainReceipt(receipt, state.scope, catalogue);
+      final catalogue = _catalogueFor(registry, receipt.activityId);
+      final command = _decodeDomainReceipt(receipt, state.scope, registry);
+      final generationKey = '${receipt.activityId}:${receipt.generation}';
       switch (command.action) {
         case domain.StartComparisonRun(:final policy):
-          final previous = policyByGeneration[receipt.generation];
+          final previous = policyByGeneration[generationKey];
           if (previous != null &&
               previous != policy.completionThresholdPercent) {
             throw const FormatException('Conflicting start policies in a run.');
           }
-          policyByGeneration[receipt.generation] =
-              policy.completionThresholdPercent;
+          policyByGeneration[generationKey] = policy.completionThresholdPercent;
         case domain.FinishComparisonRun(recordCompletion: true):
-          final threshold = policyByGeneration[receipt.generation];
+          final threshold = policyByGeneration[generationKey];
           if (threshold != null) {
             justifiedCompletions.add(
               _completionKey(
@@ -579,7 +603,9 @@ final class ComparisonLearningStateValidator {
     final completeHistory = state.receipts.isNotEmpty
         ? state.receipts.first.commitOrdinal == 1 &&
               state.receipts.last.commitOrdinal == state.commitOrdinal
-        : slot.latestReceipt.commitOrdinal == 1 && state.commitOrdinal == 1;
+        : state.slots.length == 1 &&
+              state.slots.values.single.latestReceipt.commitOrdinal == 1 &&
+              state.commitOrdinal == 1;
     if (completeHistory &&
         state.completions.any(
           (completion) => !justifiedCompletions.contains(
@@ -612,6 +638,17 @@ final class ComparisonLearningStateValidator {
     itemIds: catalogue.exercises.map((exercise) => exercise.id).toList(),
     contentRevision: catalogue.contentRevision,
   );
+
+  static ComparisonCatalogue _catalogueFor(
+    ComparisonCatalogueRegistry registry,
+    String activityId,
+  ) {
+    final catalogue = registry.requireAvailable(activityId);
+    if (catalogue.activityId != activityId || catalogue.contentRevision < 1) {
+      throw const FormatException('Invalid registered comparison content.');
+    }
+    return catalogue;
+  }
 
   static void _requireContent(
     String activityId,

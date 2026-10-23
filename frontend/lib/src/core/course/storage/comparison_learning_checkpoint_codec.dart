@@ -66,13 +66,54 @@ final class ComparisonLearningCheckpointCodec {
     required String activityId,
     required ComparisonCatalogue catalogue,
     required LessonPolicy policy,
+  }) => _decode(
+    json,
+    scope: scope,
+    activityId: activityId,
+    catalogue: catalogue,
+    policy: policy,
+    requireMixedActivity: true,
+  );
+
+  ComparisonCheckpoint decodeRegistered(
+    String json, {
+    required ComparisonProfileScope scope,
+    required String activityId,
+    required ComparisonCatalogueRegistry registry,
+    required LessonPolicy policy,
+  }) {
+    try {
+      final catalogue = registry.requireAvailable(activityId);
+      return _decode(
+        json,
+        scope: scope,
+        activityId: activityId,
+        catalogue: catalogue,
+        policy: policy,
+        requireMixedActivity: false,
+      );
+    } on FormatException {
+      rethrow;
+    } on Object catch (error) {
+      throw FormatException('Invalid comparison checkpoint: $error');
+    }
+  }
+
+  ComparisonCheckpoint _decode(
+    String json, {
+    required ComparisonProfileScope scope,
+    required String activityId,
+    required ComparisonCatalogue catalogue,
+    required LessonPolicy policy,
+    required bool requireMixedActivity,
   }) {
     try {
       if (utf8.encode(json).length > learningMaxCheckpointBytes) {
         throw const FormatException('Checkpoint exceeds the byte limit.');
       }
       if (activityId != catalogue.activityId ||
-          catalogue.activityId != comparisonActivityId ||
+          (requireMixedActivity &&
+              catalogue.activityId != comparisonActivityId) ||
           catalogue.contentRevision < 1) {
         throw const FormatException('Checkpoint content identity mismatch.');
       }

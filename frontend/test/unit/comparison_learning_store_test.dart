@@ -114,6 +114,47 @@ void main() {
     },
   );
 
+  test('legacy mixed SQL repository remains single-slot compatible', () async {
+    final owner = LearningOwner.account('comparison-mixed-compatibility');
+    final auth = LearningAuthScope(owner: owner, generation: 4, ready: true);
+    final harness = ComparisonLearningSqlTestHarness(
+      catalogue: loadFrenchComparisonCatalogue(),
+      currentAuth: () => auth,
+      backendOwner: () => owner,
+    );
+    addTearDown(harness.dispose);
+    final repository = harness.createRepository(
+      owner: owner,
+      generation: auth.generation,
+    );
+
+    final empty = await repository.load();
+    final command = repository.prepare(
+      state: empty,
+      activityId: comparisonActivityId,
+      action: StartComparisonRun(
+        sessionId: 'legacy-mixed-compatibility',
+        policy: LessonPolicy(),
+      ),
+    );
+    final committed = await repository.submit(command);
+
+    expect(empty.slots, isEmpty);
+    expect(committed.state.slots.keys, [comparisonActivityId]);
+    expect(
+      committed.state.slot,
+      same(committed.state.slots[comparisonActivityId]),
+    );
+    expect(committed.state.checkpoint, same(committed.state.slot!.checkpoint));
+    expect(committed.state.revision, 1);
+    expect(committed.state.commitOrdinal, 1);
+    expect(committed.state.slot!.checkpoint.contentRevision, 1);
+    expect(
+      committed.state.slot!.cursor,
+      ComparisonCursor(generation: 1, sequence: 1, revision: 0),
+    );
+  });
+
   test(
     'SQL retained receipts win stale cursors across reopen and run restart',
     () async {

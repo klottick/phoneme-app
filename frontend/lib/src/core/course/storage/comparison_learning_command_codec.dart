@@ -25,7 +25,18 @@ final class ComparisonLearningCommandCodec {
     String raw, {
     required ComparisonProfileScope scope,
     required ComparisonCatalogue catalogue,
-  }) => _decode(raw, scope: scope, catalogue: catalogue, sqlScoped: true);
+  }) => _decode(
+    raw,
+    scope: scope,
+    registry: ComparisonCatalogueRegistry.single(catalogue),
+    sqlScoped: true,
+  );
+
+  static domain.ComparisonLearningCommand decodeRegisteredCanonicalCommand(
+    String raw, {
+    required ComparisonProfileScope scope,
+    required ComparisonCatalogueRegistry registry,
+  }) => _decode(raw, scope: scope, registry: registry, sqlScoped: true);
 
   /// Decodes the pre-SQL typed projection, which remains the domain state shape.
   /// The value has no scope revision, so it is never used as a SQL receipt proof.
@@ -33,12 +44,24 @@ final class ComparisonLearningCommandCodec {
     String raw, {
     required ComparisonProfileScope scope,
     required ComparisonCatalogue catalogue,
-  }) => _decode(raw, scope: scope, catalogue: catalogue, sqlScoped: false);
+  }) => _decode(
+    raw,
+    scope: scope,
+    registry: ComparisonCatalogueRegistry.single(catalogue),
+    sqlScoped: false,
+  );
+
+  static domain.ComparisonLearningCommand
+  decodeRegisteredLegacyCanonicalCommand(
+    String raw, {
+    required ComparisonProfileScope scope,
+    required ComparisonCatalogueRegistry registry,
+  }) => _decode(raw, scope: scope, registry: registry, sqlScoped: false);
 
   static domain.ComparisonLearningCommand _decode(
     String raw, {
     required ComparisonProfileScope scope,
-    required ComparisonCatalogue catalogue,
+    required ComparisonCatalogueRegistry registry,
     required bool sqlScoped,
   }) {
     try {
@@ -78,11 +101,13 @@ final class ComparisonLearningCommandCodec {
         ),
         _ => throw const FormatException('Invalid command owner.'),
       };
+      final activityId = _string(value['activityId'], 'activityId');
+      final catalogue = registry.requireAvailable(activityId);
       if (decodedOwner != scope.owner ||
           _integer(value['schemaVersion'], 'command.schemaVersion') != 1 ||
           _string(value['family'], 'command.family') != 'comparison' ||
           _string(value['courseId'], 'command.courseId') != scope.courseId ||
-          catalogue.activityId != comparisonActivityId ||
+          catalogue.activityId != activityId ||
           catalogue.contentRevision < 1) {
         throw const FormatException('Command profile/content mismatch.');
       }

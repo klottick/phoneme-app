@@ -388,28 +388,30 @@ final class ComparisonPairAttempt {
 }
 
 final class ComparisonLearningState {
-  ComparisonLearningState(
-      {required this.scope,
-      required this.revision,
-      required this.commitOrdinal,
-      required this.slot,
-      required List<ComparisonPairAttempt> attempts,
-      required List<ComparisonReceipt> receipts,
-      required Map<ComparisonPairMistakeKey, ComparisonPairMistake> mistakes,
-      required Map<ComparisonSummaryKey, ComparisonPairSummary> summaries,
-      required List<ComparisonCompletion> completions})
-      : attempts = List.unmodifiable(attempts),
-        receipts = List.unmodifiable(receipts),
-        mistakes = Map.unmodifiable(mistakes),
-        summaries = Map.unmodifiable(summaries),
-        completions = List.unmodifiable(completions),
-        schemaVersion = 1 {
+  ComparisonLearningState({
+    required this.scope,
+    required this.revision,
+    required this.commitOrdinal,
+    ComparisonSlot? slot,
+    Map<String, ComparisonSlot>? slots,
+    required List<ComparisonPairAttempt> attempts,
+    required List<ComparisonReceipt> receipts,
+    required Map<ComparisonPairMistakeKey, ComparisonPairMistake> mistakes,
+    required Map<ComparisonSummaryKey, ComparisonPairSummary> summaries,
+    required List<ComparisonCompletion> completions,
+  }) : slots = _freezeSlots(scope, slot, slots),
+       attempts = List.unmodifiable(attempts),
+       receipts = List.unmodifiable(receipts),
+       mistakes = Map.unmodifiable(mistakes),
+       summaries = Map.unmodifiable(summaries),
+       completions = List.unmodifiable(completions),
+       schemaVersion = 1 {
     comparisonCounter(revision, 'revision');
     comparisonCounter(commitOrdinal, 'commitOrdinal');
     if (commitOrdinal > revision ||
         attempts.length > 2000 ||
         receipts.length > 2000 ||
-        (commitOrdinal == 0) != (slot == null)) {
+        (commitOrdinal == 0) != this.slots.isEmpty) {
       throw ArgumentError('Invalid comparison state header');
     }
     if (commitOrdinal == 0 &&
@@ -424,24 +426,32 @@ final class ComparisonLearningState {
     final sequences = <String>{};
     final attemptIds = <String>{};
     final completionIds = <String>{};
-    if (this.receipts.any((r) =>
-            !tokens.add(r.token) ||
-            !sequences.add('${r.activityId}:${r.generation}:${r.sequence}')) ||
+    if (this.receipts.any(
+          (r) =>
+              !tokens.add(r.token) ||
+              !sequences.add('${r.activityId}:${r.generation}:${r.sequence}'),
+        ) ||
         this.attempts.toSet().length != this.attempts.length ||
         this.mistakes.entries.any((e) => e.key != e.value.key) ||
         this.summaries.entries.any((e) => e.key != e.value.key) ||
         this.completions.toSet().length != this.completions.length ||
-        (slot != null &&
-            (slot!.scope != scope ||
-                slot!.latestReceipt.after != slot!.cursor ||
-                slot!.latestReceipt.commitOrdinal > commitOrdinal)) ||
+        this.slots.entries.any(
+          (entry) =>
+              entry.key != entry.value.activityId ||
+              entry.value.scope != scope ||
+              entry.value.checkpoint.scope != scope ||
+              entry.value.latestReceipt.scope != scope ||
+              entry.value.latestReceipt.activityId != entry.key ||
+              entry.value.latestReceipt.after != entry.value.cursor ||
+              entry.value.latestReceipt.commitOrdinal > commitOrdinal,
+        ) ||
         this.attempts.any((x) => x.scope != scope) ||
         this.receipts.any((x) => x.scope != scope) ||
         this.mistakes.values.any((x) => x.scope != scope) ||
         this.summaries.keys.any((x) => x.scope != scope) ||
-        this
-            .completions
-            .any((x) => x.scope != scope || x.committedAt.isUtc == false)) {
+        this.completions.any(
+          (x) => x.scope != scope || x.committedAt.isUtc == false,
+        )) {
       throw ArgumentError('Comparison state scope mismatch');
     }
     for (final attempt in this.attempts) {
@@ -461,47 +471,66 @@ final class ComparisonLearningState {
     if (this.receipts.isNotEmpty &&
         this.receipts.last.commitOrdinal != commitOrdinal) {
       throw ArgumentError(
-          'Latest receipt ordinal must equal state commit ordinal.');
+        'Latest receipt ordinal must equal state commit ordinal.',
+      );
     }
-    if (slot != null && slot!.latestReceipt.commitOrdinal != commitOrdinal) {
-      throw ArgumentError('Slot latest receipt must be the current commit.');
+    if (this.receipts.isNotEmpty) {
+      final globalLatestSlot = this.slots[this.receipts.last.activityId];
+      if (globalLatestSlot == null ||
+          !_sameComparisonReceipt(
+            this.receipts.last,
+            globalLatestSlot.latestReceipt,
+          )) {
+        throw ArgumentError(
+          'Latest receipt must match the retained receipt tail.',
+        );
+      }
     }
-    if (slot != null &&
-        this.receipts.isNotEmpty &&
-        (this.receipts.last.token != slot!.latestReceipt.token ||
-            this.receipts.last.canonicalCommand !=
-                slot!.latestReceipt.canonicalCommand)) {
-      throw ArgumentError(
-          'Latest receipt must match the retained receipt tail.');
+    for (final entry in this.slots.entries) {
+      final retainedForActivity = this.receipts
+          .where((receipt) => receipt.activityId == entry.key)
+          .toList(growable: false);
+      if (retainedForActivity.isNotEmpty &&
+          !_sameComparisonReceipt(
+            retainedForActivity.last,
+            entry.value.latestReceipt,
+          )) {
+        throw ArgumentError(
+          'Latest activity receipt must match its retained history.',
+        );
+      }
     }
     final receiptsBySequence = <String, ComparisonReceipt>{
       for (final receipt in this.receipts)
         '${receipt.activityId}:${receipt.generation}:${receipt.sequence}':
-            receipt
+            receipt,
     };
     if (this.attempts.any((attempt) {
-      final receipt = receiptsBySequence[
-          '${attempt.activityId}:${attempt.runGeneration}:${attempt.sequence}'];
-      return receipt != null && receipt.commitOrdinal < attempt.sequence;
+      final receipt =
+          receiptsBySequence['${attempt.activityId}:${attempt.runGeneration}:${attempt.sequence}'];
+      return receipt != null &&
+          (receipt.after.generation != attempt.runGeneration ||
+              receipt.after.sequence != attempt.sequence);
     })) {
       throw ArgumentError('Available attempt/receipt link is inconsistent.');
     }
   }
   factory ComparisonLearningState.empty(ComparisonProfileScope scope) =>
       ComparisonLearningState(
-          scope: scope,
-          revision: 0,
-          commitOrdinal: 0,
-          slot: null,
-          attempts: const [],
-          receipts: const [],
-          mistakes: const {},
-          summaries: const {},
-          completions: const []);
+        scope: scope,
+        revision: 0,
+        commitOrdinal: 0,
+        attempts: const [],
+        receipts: const [],
+        mistakes: const {},
+        summaries: const {},
+        completions: const [],
+      );
   final int schemaVersion;
   final ComparisonProfileScope scope;
   final int revision, commitOrdinal;
-  final ComparisonSlot? slot;
+  final Map<String, ComparisonSlot> slots;
+  ComparisonSlot? get slot => slots[comparisonActivityId];
   ComparisonCheckpoint? get checkpoint => slot?.checkpoint;
   final List<ComparisonPairAttempt> attempts;
   final List<ComparisonReceipt> receipts;
@@ -509,3 +538,41 @@ final class ComparisonLearningState {
   final Map<ComparisonSummaryKey, ComparisonPairSummary> summaries;
   final List<ComparisonCompletion> completions;
 }
+
+Map<String, ComparisonSlot> _freezeSlots(
+  ComparisonProfileScope scope,
+  ComparisonSlot? legacySlot,
+  Map<String, ComparisonSlot>? slots,
+) {
+  final resolved = <String, ComparisonSlot>{};
+  if (slots != null) {
+    for (final entry in slots.entries) {
+      if (entry.key.trim().isEmpty ||
+          entry.key != entry.value.activityId ||
+          entry.value.scope != scope) {
+        throw ArgumentError('Comparison slot identity mismatch.');
+      }
+      resolved[entry.key] = entry.value;
+    }
+  }
+  if (legacySlot != null) {
+    if (legacySlot.activityId != comparisonActivityId ||
+        legacySlot.scope != scope ||
+        resolved.containsKey(comparisonActivityId)) {
+      throw ArgumentError('Legacy comparison slot is inconsistent.');
+    }
+    resolved[comparisonActivityId] = legacySlot;
+  }
+  return Map.unmodifiable(resolved);
+}
+
+bool _sameComparisonReceipt(ComparisonReceipt left, ComparisonReceipt right) =>
+    left.scope == right.scope &&
+    left.activityId == right.activityId &&
+    left.generation == right.generation &&
+    left.sequence == right.sequence &&
+    left.token == right.token &&
+    left.canonicalCommand == right.canonicalCommand &&
+    left.before == right.before &&
+    left.after == right.after &&
+    left.commitOrdinal == right.commitOrdinal;
