@@ -5,6 +5,7 @@ import 'package:flutter/semantics.dart';
 
 import '../../core/theme/space_course_colors.dart';
 import 'course_map_catalogue.dart';
+import 'course_map_motion.dart';
 import 'course_map_state.dart';
 
 class CourseMapCanvas extends StatelessWidget {
@@ -36,60 +37,72 @@ class CourseMapCanvas extends StatelessWidget {
       final placements = fallback
           ? const <String, Rect>{}
           : _authoredPlacements(state.bodies, width, height);
+      final current = state.currentBodyId;
+      final hasCurrentBody =
+          current != null &&
+          state.bodies.any((body) => body.definition.id == current);
+      final currentRect = !hasCurrentBody
+          ? null
+          : fallback
+          ? _authoredMarkerRect(state, current, width, height)
+          : placements[current];
       return SizedBox(
         key: fallback ? const ValueKey('map-list-fallback') : null,
         height: height,
-        child: Stack(
-          clipBehavior: Clip.none,
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: _OrbitalArt(
-                radii:
-                    state.bodies
-                        .map((body) => body.definition.orbitRadius)
-                        .toSet()
-                        .toList()
-                      ..sort(),
-              ),
-            ),
-            for (final body in state.bodies)
-              if (fallback)
-                _decorativeBody(body, width, height)
-              else
-                _interactiveBody(
-                  body,
-                  placements[body.definition.id]!.center,
-                  state.bodies.indexOf(body),
-                  focusOrderOffset,
+        child: CourseMapMotion(
+          anchor: currentRect?.center,
+          child: Stack(
+            clipBehavior: Clip.none,
+            fit: StackFit.expand,
+            children: [
+              Positioned.fill(
+                child: _OrbitalArt(
+                  radii:
+                      state.bodies
+                          .map((body) => body.definition.orbitRadius)
+                          .toSet()
+                          .toList()
+                        ..sort(),
                 ),
-            if (state.currentBodyId case final currentId?)
-              if (state.bodies.any((body) => body.definition.id == currentId))
-                Positioned.fromRect(
-                  rect: fallback
-                      ? _authoredMarkerRect(state, currentId, width, height)
-                      : placements[currentId]!,
-                  child: const IgnorePointer(
-                    child: ExcludeSemantics(
-                      child: Align(
-                        alignment: Alignment.topRight,
-                        child: Icon(
-                          Icons.navigation,
-                          size: 18,
-                          color: SpaceCourseColors.ship,
+              ),
+              for (final body in state.bodies)
+                if (fallback)
+                  _decorativeBody(body, width, height)
+                else
+                  _interactiveBody(
+                    body,
+                    placements[body.definition.id]!.center,
+                    state.bodies.indexOf(body),
+                    focusOrderOffset,
+                  ),
+              if (state.currentBodyId case final currentId?)
+                if (state.bodies.any((body) => body.definition.id == currentId))
+                  Positioned.fromRect(
+                    rect: fallback
+                        ? _authoredMarkerRect(state, currentId, width, height)
+                        : placements[currentId]!,
+                    child: const IgnorePointer(
+                      child: ExcludeSemantics(
+                        child: Align(
+                          alignment: Alignment.topRight,
+                          child: Icon(
+                            Icons.navigation,
+                            size: 18,
+                            color: SpaceCourseColors.ship,
+                          ),
                         ),
                       ),
                     ),
                   ),
+              Positioned(
+                left: width * .46,
+                top: height * .44,
+                child: const ExcludeSemantics(
+                  child: Icon(Icons.circle, size: 28, color: Color(0xFFE6C98F)),
                 ),
-            Positioned(
-              left: width * .46,
-              top: height * .44,
-              child: const ExcludeSemantics(
-                child: Icon(Icons.circle, size: 28, color: Color(0xFFE6C98F)),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
     },
