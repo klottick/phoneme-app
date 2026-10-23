@@ -1,8 +1,11 @@
 import 'dart:async';
 
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 
 import '../course_learning_error.dart';
+import 'learning_database_v1_schema.dart'
+    show publishedLearningV1SchemaStatements;
 import 'learning_storage_scope.dart';
 import 'learning_tables.dart';
 
@@ -10,6 +13,17 @@ part 'learning_database.g.dart';
 
 typedef LearningMigrationRunner =
     Future<void> Function(Migrator migrator, int from, int to);
+
+enum LearningMigrationFailurePoint {
+  beforeVersion2Commit,
+  afterVersion2Commit,
+  beforeForeignKeysEnabled,
+}
+
+typedef LearningMigrationTestHook =
+    FutureOr<void> Function(LearningMigrationFailurePoint point);
+
+const int _learningSchemaVersion = 2;
 
 const List<String> _tableNames = <String>[
   'learning_scopes',
@@ -278,6 +292,33 @@ const Map<String, List<String>> _columnNames = <String, List<String>>{
   ],
 };
 
+// The key columns are unchanged between the independently frozen v1 oracle
+// and the generated v2 model.
+const Map<String, List<String>> _primaryKeyColumns = <String, List<String>>{
+  'learning_scopes': <String>['id'],
+  'learning_content_bindings': <String>['id'],
+  'learning_runs': <String>[],
+  'learning_attempts': <String>[],
+  'learning_attempt_values': <String>[
+    'scope_id',
+    'attempt_id',
+    'field',
+    'ordinal',
+  ],
+  'learning_attempt_evidence': <String>[
+    'scope_id',
+    'attempt_id',
+    'evidence_index',
+  ],
+  'learning_command_receipts': <String>[],
+  'learning_mistakes': <String>[],
+  'learning_summaries': <String>[],
+  'learning_completions': <String>[],
+  'learning_exposure': <String>[],
+  'learning_best_scores': <String>['scope_id', 'activity_id'],
+  'supported_sync_outbox': <String>[],
+};
+
 const Set<String> _integerColumns = <String>{
   'id',
   'scope_id',
@@ -475,7 +516,11 @@ EXISTS (
       NEW.annotation_hash IS NULL AND NEW.annotation_revision IS NULL) OR
     (s.family = 'sentence-hunt' AND NEW.catalogue_fingerprint IS NULL AND
       NEW.section_fingerprint IS NOT NULL AND NEW.annotation_hash IS NULL AND
-      NEW.annotation_revision IS NULL)
+      NEW.annotation_revision IS NULL) OR
+    (s.family = 'spelling' AND s.course_id = 'en-fr' AND
+      NEW.activity_id = 'en-fr-u-y-spelling' AND
+      NEW.catalogue_fingerprint IS NOT NULL AND NEW.section_fingerprint IS NULL AND
+      NEW.annotation_hash IS NULL AND NEW.annotation_revision IS NULL)
   )
 )''';
 
@@ -495,11 +540,17 @@ EXISTS (
     (s.family = 'sentence-hunt' AND NEW.activity_kind = 'sentence-hunt' AND
       NEW.run_mode IN ('practice', 'reviewOnly') AND
       NEW.session_id IS NOT NULL AND NEW.policy_revision IS NOT NULL AND
-      NEW.threshold_percent IS NOT NULL AND NEW.run_start_round IS NOT NULL)
+      NEW.threshold_percent IS NOT NULL AND NEW.run_start_round IS NOT NULL) OR
+    (s.family = 'spelling' AND s.course_id = 'en-fr' AND
+      NEW.activity_id = 'en-fr-u-y-spelling' AND NEW.activity_kind = 'spelling' AND
+      NEW.run_mode IN ('practice', 'reviewOnly') AND NEW.session_id IS NOT NULL AND
+      NEW.policy_revision IS NOT NULL AND NEW.threshold_percent IS NOT NULL AND
+      NEW.run_start_round IS NOT NULL)
   )
 )''';
 
-const String _attemptFamilyCondition = '''
+const String _attemptFamilyCondition =
+    '''
 EXISTS (
   SELECT 1 FROM learning_scopes AS s
   WHERE s.id = NEW.scope_id AND (
@@ -533,11 +584,24 @@ EXISTS (
       NEW.teaching_exposed IS NOT NULL AND NEW.selected_relation IS NULL AND
       NEW.expected_relation IS NULL AND NEW.section_id IS NOT NULL AND
       NEW.activity_id = NEW.section_id AND NEW.sentence_id IS NOT NULL AND
-      NEW.annotation_hash IS NOT NULL AND NEW.annotation_revision IS NOT NULL)
+      NEW.annotation_hash IS NOT NULL AND NEW.annotation_revision IS NOT NULL) OR
+    (s.family = 'spelling' AND s.course_id = 'en-fr' AND
+      NEW.activity_id = 'en-fr-u-y-spelling' AND
+      NEW.item_id IN ($learningSpellingItemIdsSql) AND
+      NEW.item_occurrence IS NULL AND NEW.answer_kind = 'spellingChoice' AND
+      NEW.skill = 'spelling' AND NEW.origin = 'practice' AND
+      NEW.presentation IN ('firstInRun', 'repeatInRun') AND
+      NEW.assistance_mask IS NOT NULL AND NEW.content_state = 'pending' AND
+      NEW.audio_source = 'pendingRecording' AND NEW.round IS NOT NULL AND
+      NEW.after_debrief IS NOT NULL AND NEW.teaching_exposed IS NULL AND
+      NEW.selected_relation IS NULL AND NEW.expected_relation IS NULL AND
+      NEW.section_id IS NULL AND NEW.sentence_id IS NULL AND
+      NEW.annotation_hash IS NULL AND NEW.annotation_revision IS NULL)
   )
 )''';
 
-const String _attemptValueFamilyCondition = '''
+const String _attemptValueFamilyCondition =
+    '''
 EXISTS (
   SELECT 1 FROM learning_scopes AS s
   WHERE s.id = NEW.scope_id AND (
@@ -546,11 +610,47 @@ EXISTS (
        'expected_word', 'pair_id', 'selected_family', 'expected_family',
        'word_id', 'tile_index', 'target_sound', 'expected_membership')) OR
     (s.family = 'sentence-hunt' AND NEW.field IN
-      ('selected_token_id', 'expected_token_id'))
+      ('selected_token_id', 'expected_token_id')) OR
+    (s.family = 'spelling' AND EXISTS (
+      SELECT 1 FROM learning_attempts AS a
+      WHERE a.scope_id = NEW.scope_id AND a.attempt_id = NEW.attempt_id AND
+        a.activity_id = 'en-fr-u-y-spelling' AND
+        a.item_id IN ($learningSpellingItemIdsSql) AND
+        ((NEW.field = 'choice' AND
+            ((NEW.ordinal = 0 AND NEW.value_type = 'text' AND NEW.text_value = 'u') OR
+             (NEW.ordinal = 1 AND NEW.value_type = 'text' AND NEW.text_value = 'ou'))) OR
+         (NEW.field = 'selected_option_id' AND NEW.ordinal = 0 AND
+            NEW.value_type = 'text' AND NEW.text_value IN ('u', 'ou')) OR
+         (NEW.field = 'expected_option_id' AND NEW.ordinal = 0 AND
+            NEW.value_type = 'text' AND NEW.text_value =
+              (CASE a.item_id WHEN 'uy-demo-spelling-01' THEN 'ou'
+                WHEN 'uy-demo-spelling-02' THEN 'u' WHEN 'uy-demo-spelling-03' THEN 'u'
+                WHEN 'uy-demo-spelling-04' THEN 'ou' WHEN 'uy-demo-spelling-05' THEN 'ou'
+                WHEN 'uy-demo-spelling-06' THEN 'u' WHEN 'uy-demo-spelling-07' THEN 'ou'
+                WHEN 'uy-demo-spelling-08' THEN 'u' WHEN 'uy-demo-spelling-09' THEN 'u'
+                WHEN 'uy-demo-spelling-10' THEN 'ou' END)) OR
+         (NEW.field = 'word_id' AND NEW.ordinal = 0 AND
+            NEW.value_type = 'text' AND NEW.text_value =
+              (CASE a.item_id WHEN 'uy-demo-spelling-01' THEN 'tout'
+                WHEN 'uy-demo-spelling-02' THEN 'tu' WHEN 'uy-demo-spelling-03' THEN 'rue'
+                WHEN 'uy-demo-spelling-04' THEN 'rouge' WHEN 'uy-demo-spelling-05' THEN 'loup'
+                WHEN 'uy-demo-spelling-06' THEN 'lune' WHEN 'uy-demo-spelling-07' THEN 'doux'
+                WHEN 'uy-demo-spelling-08' THEN 'jus' WHEN 'uy-demo-spelling-09' THEN 'plume'
+                WHEN 'uy-demo-spelling-10' THEN 'vous' END)) OR
+         (NEW.field = 'target_sound' AND NEW.ordinal = 0 AND
+            NEW.value_type = 'text' AND NEW.text_value =
+              (CASE a.item_id WHEN 'uy-demo-spelling-01' THEN 'u'
+                WHEN 'uy-demo-spelling-02' THEN 'y' WHEN 'uy-demo-spelling-03' THEN 'y'
+                WHEN 'uy-demo-spelling-04' THEN 'u' WHEN 'uy-demo-spelling-05' THEN 'u'
+                WHEN 'uy-demo-spelling-06' THEN 'y' WHEN 'uy-demo-spelling-07' THEN 'u'
+                WHEN 'uy-demo-spelling-08' THEN 'y' WHEN 'uy-demo-spelling-09' THEN 'y'
+                WHEN 'uy-demo-spelling-10' THEN 'u' END)))
+    ))
   )
 )''';
 
-const String _attemptEvidenceFamilyCondition = '''
+const String _attemptEvidenceFamilyCondition =
+    '''
 EXISTS (
   SELECT 1 FROM learning_scopes AS s
   WHERE s.id = NEW.scope_id AND (
@@ -584,7 +684,28 @@ EXISTS (
       NEW.section_id IS NOT NULL AND NEW.item_id IS NOT NULL AND
       NEW.sentence_id IS NOT NULL AND NEW.audio_ref_id IS NOT NULL AND
       NEW.annotation_hash IS NOT NULL AND NEW.annotation_revision IS NOT NULL AND
-      NEW.content_revision IS NOT NULL)
+      NEW.content_revision IS NOT NULL) OR
+    (s.family = 'spelling' AND NEW.evidence_kind = 'spellingPlayback' AND
+      NEW.evidence_index = 0 AND NEW.slot IS NULL AND
+      NEW.reference_id IN ($learningSpellingReferenceIdsSql) AND
+      NEW.outcome = 'completed' AND NEW.source = 'unverifiedRecording' AND
+      NEW.activity_id = 'en-fr-u-y-spelling' AND NEW.run_generation IS NOT NULL AND
+      NEW.round IS NOT NULL AND NEW.pair_id IS NULL AND NEW.ui_generation IS NOT NULL AND
+      NEW.section_id IS NULL AND NEW.item_id IN ($learningSpellingItemIdsSql) AND
+      NEW.reference_id = (CASE NEW.item_id
+        WHEN 'uy-demo-spelling-01' THEN 'fr-word-tout'
+        WHEN 'uy-demo-spelling-02' THEN 'fr-word-tu'
+        WHEN 'uy-demo-spelling-03' THEN 'fr-word-rue'
+        WHEN 'uy-demo-spelling-04' THEN 'fr-word-rouge'
+        WHEN 'uy-demo-spelling-05' THEN 'fr-word-loup'
+        WHEN 'uy-demo-spelling-06' THEN 'fr-word-lune'
+        WHEN 'uy-demo-spelling-07' THEN 'fr-word-doux'
+        WHEN 'uy-demo-spelling-08' THEN 'fr-word-jus'
+        WHEN 'uy-demo-spelling-09' THEN 'fr-word-plume'
+        WHEN 'uy-demo-spelling-10' THEN 'fr-word-vous' END) AND
+      NEW.sentence_id IS NULL AND NEW.audio_ref_id IS NULL AND
+      NEW.annotation_hash IS NULL AND NEW.annotation_revision IS NULL AND
+      NEW.content_revision = 1)
   )
 )''';
 
@@ -606,14 +727,18 @@ EXISTS (
         NEW.threshold_percent BETWEEN 1 AND 100))) OR
     (s.family IN ('comparison', 'sentence-hunt') AND
       NEW.policy_kind = 'discoveryThreshold' AND
-      NEW.threshold_percent BETWEEN 1 AND 100)
+      NEW.threshold_percent BETWEEN 1 AND 100) OR
+    (s.family = 'spelling' AND
+      NEW.activity_id = 'en-fr-u-y-spelling' AND NEW.content_revision = 1 AND
+      NEW.policy_kind = 'discoveryThreshold' AND NEW.policy_revision = 1 AND
+      NEW.threshold_percent = 80)
   )
 )''';
 
 const String _exposureFamilyCondition = '''
 EXISTS (SELECT 1 FROM learning_scopes AS s
   WHERE s.id = NEW.scope_id AND s.family = NEW.family AND
-    s.family IN ('course', 'sentence-hunt'))''';
+     s.family IN ('course', 'sentence-hunt', 'spelling'))''';
 
 const String _outboxAccountCourseCondition = '''
 EXISTS (
@@ -714,6 +839,68 @@ BEGIN
 END''',
 ];
 
+// Drift 2.35.2's exclusively() starts exclusive.close() without awaiting its
+// future. On a remote executor, closing a failed database before that RPC
+// completes produces an unhandled ConnectionClosedException. Keep the public
+// interceptor boundary around opening callbacks and drain releases before
+// publishing or closing the database. This does not replace SQLite fencing.
+final class _OpeningExecutorLifecycle extends QueryInterceptor {
+  final Set<QueryExecutor> _exclusiveExecutors = <QueryExecutor>{};
+  final List<Future<void>> _releases = <Future<void>>[];
+  final List<(Object, StackTrace)> _releaseErrors = <(Object, StackTrace)>[];
+
+  @override
+  Future<bool> ensureOpen(QueryExecutor executor, QueryExecutorUser user) =>
+      executor.ensureOpen(_OpeningExecutorUser(user, this));
+
+  @override
+  QueryExecutor beginExclusive(QueryExecutor parent) {
+    final child = parent.beginExclusive();
+    _exclusiveExecutors.add(child);
+    return child;
+  }
+
+  @override
+  Future<void> close(QueryExecutor inner) {
+    final closing = inner.close();
+    if (!_exclusiveExecutors.remove(inner)) return closing;
+    final observed = closing.then<void>(
+      (_) {},
+      onError: (Object error, StackTrace trace) {
+        _releaseErrors.add((error, trace));
+      },
+    );
+    _releases.add(observed);
+    return observed;
+  }
+
+  Future<void> drainReleases() async {
+    while (_releases.isNotEmpty) {
+      final pending = List<Future<void>>.of(_releases);
+      _releases.clear();
+      await Future.wait(pending);
+    }
+    if (_releaseErrors.isNotEmpty) {
+      final (error, trace) = _releaseErrors.removeAt(0);
+      Error.throwWithStackTrace(error, trace);
+    }
+  }
+}
+
+final class _OpeningExecutorUser implements QueryExecutorUser {
+  _OpeningExecutorUser(this.original, this.lifecycle);
+
+  final QueryExecutorUser original;
+  final _OpeningExecutorLifecycle lifecycle;
+
+  @override
+  int get schemaVersion => original.schemaVersion;
+
+  @override
+  Future<void> beforeOpen(QueryExecutor executor, OpeningDetails details) =>
+      original.beforeOpen(executor.interceptWith(lifecycle), details);
+}
+
 @DriftDatabase(
   tables: <Type>[
     LearningScopes,
@@ -732,23 +919,96 @@ END''',
   ],
 )
 class LearningDatabase extends _$LearningDatabase {
+  static Future<void> _validatedOpenTail = Future<void>.value();
+
   LearningDatabase(super.connection)
-    : _targetSchemaVersion = 1,
-      _migrationRunner = _rejectUnsupportedMigration;
+    : _targetSchemaVersion = _learningSchemaVersion,
+      _migrationRunner = _rejectUnsupportedMigration,
+      _usesProductionMigration = true,
+      _migrationTestHook = null;
+
+  LearningDatabase._withMigrationTestHook(
+    super.connection,
+    LearningMigrationTestHook onPoint,
+  ) : _targetSchemaVersion = _learningSchemaVersion,
+      _migrationRunner = _rejectUnsupportedMigration,
+      _usesProductionMigration = true,
+      _migrationTestHook = onPoint;
 
   LearningDatabase.forTesting(
     super.connection, {
     required int targetSchemaVersion,
     required LearningMigrationRunner migrationRunner,
   }) : _targetSchemaVersion = targetSchemaVersion,
-       _migrationRunner = migrationRunner {
+       _migrationRunner = migrationRunner,
+       _usesProductionMigration = false,
+       _migrationTestHook = null {
     if (targetSchemaVersion < 1) {
       throw ArgumentError.value(targetSchemaVersion, 'targetSchemaVersion');
     }
   }
 
+  static Future<LearningDatabase> openValidated(
+    DatabaseConnection connection,
+  ) => _openValidated(connection);
+
+  @visibleForTesting
+  static Future<LearningDatabase> openValidatedForMigrationTesting(
+    DatabaseConnection connection, {
+    required LearningMigrationTestHook onPoint,
+  }) => _openValidated(connection, onPoint: onPoint);
+
+  static Future<LearningDatabase> _openValidated(
+    DatabaseConnection connection, {
+    LearningMigrationTestHook? onPoint,
+  }) async {
+    final previousOpen = _validatedOpenTail;
+    final openFinished = Completer<void>();
+    _validatedOpenTail = openFinished.future;
+    await previousOpen;
+    try {
+      return await _openValidatedOnce(connection, onPoint: onPoint);
+    } finally {
+      openFinished.complete();
+    }
+  }
+
+  static Future<LearningDatabase> _openValidatedOnce(
+    DatabaseConnection connection, {
+    LearningMigrationTestHook? onPoint,
+  }) async {
+    final lifecycle = _OpeningExecutorLifecycle();
+    final guardedConnection = connection.interceptWith(lifecycle);
+    final database = onPoint == null
+        ? LearningDatabase(guardedConnection)
+        : LearningDatabase._withMigrationTestHook(guardedConnection, onPoint);
+    try {
+      await database.customSelect('SELECT 1').getSingle();
+      await lifecycle.drainReleases();
+      return database;
+    } on Object catch (error, stackTrace) {
+      try {
+        await lifecycle.drainReleases();
+      } on Object {
+        // Preserve the primary opening failure, but report secondary cleanup
+        // failure without logging potentially sensitive SQL/error payloads.
+        debugPrint('Learning database exclusive-release cleanup also failed.');
+      }
+      try {
+        await database.close();
+      } on Object {
+        debugPrint(
+          'Learning database failed-open connection close also failed.',
+        );
+      }
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  }
+
   final int _targetSchemaVersion;
   final LearningMigrationRunner _migrationRunner;
+  final bool _usesProductionMigration;
+  final LearningMigrationTestHook? _migrationTestHook;
 
   @override
   int get schemaVersion => _targetSchemaVersion;
@@ -831,19 +1091,26 @@ class LearningDatabase extends _$LearningDatabase {
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
-    onCreate: _createSchemaV1,
-    onUpgrade: (Migrator migrator, int from, int to) =>
-        transaction(() => _migrationRunner(migrator, from, to)),
+    onCreate: _createSchemaV2,
+    onUpgrade: (Migrator migrator, int from, int to) {
+      if (_usesProductionMigration) return _upgradeToV2(migrator, from, to);
+      return transaction(() => _migrationRunner(migrator, from, to));
+    },
     beforeOpen: _beforeOpen,
   );
 
-  Future<void> _createSchemaV1(Migrator migrator) => transaction(() async {
+  Future<void> _createSchemaV2(Migrator migrator) => transaction(() async {
+    if (!_usesProductionMigration && _targetSchemaVersion != 2) {
+      throw const LearningUnsupportedVersionException(
+        'Test databases must use the literal fixture for physical schema v1.',
+      );
+    }
     final version = (await customSelect(
       'PRAGMA user_version',
     ).getSingle()).read<int>('user_version');
     if (version != 0) {
       throw LearningUnsupportedVersionException(
-        'Cannot create schema v1 over user_version=$version.',
+        'Cannot create schema v2 over user_version=$version.',
       );
     }
 
@@ -864,20 +1131,198 @@ class LearningDatabase extends _$LearningDatabase {
     for (final statement in _triggerStatements) {
       await customStatement(statement);
     }
+    await customStatement('PRAGMA user_version = 2');
+    await _validateSchemaV2();
   });
 
   Future<void> _beforeOpen(OpeningDetails details) async {
     await customStatement('PRAGMA foreign_keys = ON');
-    if (_targetSchemaVersion != 1) return;
-    if (details.versionNow != 1 ||
-        (!details.wasCreated && details.versionBefore != 1)) {
-      throw LearningUnsupportedVersionException(
-        'Unsupported learning database schema ${details.versionBefore} -> '
-        '${details.versionNow}.',
+    final foreignKeys = (await customSelect(
+      'PRAGMA foreign_keys',
+    ).getSingle()).read<int>('foreign_keys');
+    if (foreignKeys != 1) {
+      throw const LearningCorruptException(
+        'Learning database foreign keys are not enabled.',
       );
     }
-    await _validateSchemaV1();
+    if (!_usesProductionMigration) {
+      if (_targetSchemaVersion == 1) await _validateSchemaV1();
+      return;
+    }
+    final version = await _userVersion();
+    if (details.versionNow != _learningSchemaVersion ||
+        version != _learningSchemaVersion) {
+      throw LearningUnsupportedVersionException(
+        'Unsupported learning database schema ${details.versionBefore} -> '
+        '${details.versionNow} (physical $version).',
+      );
+    }
+    await _validateSchemaV2();
   }
+
+  Future<int> _userVersion() async => (await customSelect(
+    'PRAGMA user_version',
+  ).getSingle()).read<int>('user_version');
+
+  Future<int> _foreignKeysEnabled() async => (await customSelect(
+    'PRAGMA foreign_keys',
+  ).getSingle()).read<int>('foreign_keys');
+
+  Future<void> _upgradeToV2(
+    Migrator migrator,
+    int from,
+    int to,
+  ) => exclusively(() async {
+    if (from != 1 || to != _learningSchemaVersion) {
+      throw LearningUnsupportedVersionException(
+        'No production learning migration is available from $from to $to.',
+      );
+    }
+
+    var foreignKeysDisabled = false;
+    try {
+      await customStatement('PRAGMA foreign_keys = OFF');
+      foreignKeysDisabled = true;
+      if (await _foreignKeysEnabled() != 0) {
+        throw const LearningCorruptException(
+          'Could not disable foreign-key enforcement for migration.',
+        );
+      }
+
+      var migrated = false;
+      await transaction(() async {
+        // Acquire SQLite's writer fence before trusting Drift's opening details.
+        try {
+          await customStatement(
+            'UPDATE learning_scopes SET revision = revision WHERE id = -1',
+          );
+        } on Object catch (error, stackTrace) {
+          Error.throwWithStackTrace(
+            LearningCorruptException(
+              'Could not acquire the v1 migration write fence: $error',
+            ),
+            stackTrace,
+          );
+        }
+
+        final physicalVersion = await _userVersion();
+        if (physicalVersion == _learningSchemaVersion) {
+          // Another opener committed while this connection awaited the fence.
+          await _validateSchemaV2();
+          return;
+        }
+        if (physicalVersion != 1) {
+          throw LearningUnsupportedVersionException(
+            'Expected physical schema v1, found $physicalVersion.',
+          );
+        }
+
+        await _validateSchemaV1();
+        await _createMigrationSnapshots();
+
+        // Drift's alterTable correctly preserves explicit indexes but also
+        // recreates attached triggers verbatim. Remove the v1 triggers first,
+        // then explicitly install the complete v2 trigger set below.
+        for (final statement in _triggerStatements) {
+          await customStatement(
+            'DROP TRIGGER ${_quoteIdentifier(_triggerName(statement))}',
+          );
+        }
+
+        for (final table in <TableInfo<Table, Object?>>[
+          learningScopes,
+          learningRuns,
+          learningAttempts,
+          learningAttemptValues,
+          learningAttemptEvidence,
+          learningMistakes,
+          learningSummaries,
+          learningExposure,
+        ]) {
+          await migrator.alterTable(TableMigration(table));
+        }
+
+        for (final statement in _triggerStatements) {
+          await customStatement(statement);
+        }
+        await _verifyMigrationSnapshots();
+        await _dropMigrationSnapshots();
+        await customStatement('PRAGMA user_version = 2');
+        await _validateSchemaV2();
+        final violations = await customSelect('PRAGMA foreign_key_check').get();
+        if (violations.isNotEmpty) {
+          throw const LearningCorruptException(
+            'Migrated learning database contains foreign-key violations.',
+          );
+        }
+        await _migrationTestHook?.call(
+          LearningMigrationFailurePoint.beforeVersion2Commit,
+        );
+        migrated = true;
+      });
+
+      if (migrated) {
+        await _migrationTestHook?.call(
+          LearningMigrationFailurePoint.afterVersion2Commit,
+        );
+      }
+    } finally {
+      if (foreignKeysDisabled) {
+        await _migrationTestHook?.call(
+          LearningMigrationFailurePoint.beforeForeignKeysEnabled,
+        );
+        await customStatement('PRAGMA foreign_keys = ON');
+        if (await _foreignKeysEnabled() != 1) {
+          throw const LearningCorruptException(
+            'Foreign-key enforcement was not restored after migration.',
+          );
+        }
+        foreignKeysDisabled = false;
+      }
+    }
+  });
+
+  Future<void> _createMigrationSnapshots() async {
+    for (final table in _tableNames) {
+      final snapshot = _migrationSnapshotName(table);
+      await customStatement(
+        'CREATE TEMP TABLE ${_quoteIdentifier(snapshot)} AS '
+        'SELECT * FROM main.${_quoteIdentifier(table)}',
+      );
+    }
+  }
+
+  Future<void> _verifyMigrationSnapshots() async {
+    for (final table in _tableNames) {
+      final snapshot = _migrationSnapshotName(table);
+      final live = await customSelect(
+        'SELECT * FROM main.${_quoteIdentifier(table)} EXCEPT '
+        'SELECT * FROM temp.${_quoteIdentifier(snapshot)} LIMIT 1',
+      ).get();
+      final saved = await customSelect(
+        'SELECT * FROM temp.${_quoteIdentifier(snapshot)} EXCEPT '
+        'SELECT * FROM main.${_quoteIdentifier(table)} LIMIT 1',
+      ).get();
+      if (live.isNotEmpty || saved.isNotEmpty) {
+        throw LearningCorruptException(
+          'Learning migration changed rows in $table.',
+        );
+      }
+    }
+  }
+
+  Future<void> _dropMigrationSnapshots() async {
+    for (final table in _tableNames) {
+      await customStatement(
+        'DROP TABLE temp.${_quoteIdentifier(_migrationSnapshotName(table))}',
+      );
+    }
+  }
+
+  String _migrationSnapshotName(String table) => '_learning_v1_snapshot_$table';
+
+  String _quoteIdentifier(String identifier) =>
+      '"${identifier.replaceAll('"', '""')}"';
 
   String _expectedCreateTableStatement(TableInfo<Table, Object?> table) {
     // Drift keeps Migrator._writeCreateTable private. Mirror its pinned
@@ -941,26 +1386,88 @@ class LearningDatabase extends _$LearningDatabase {
     return context.sql;
   }
 
+  Future<void> _validateSchemaV2() async {
+    final expectedTables = <String, String>{
+      for (final table in allTables)
+        table.actualTableName: _expectedCreateTableStatement(table),
+    };
+    await _validateSchemaDefinitions(
+      expectedVersion: 2,
+      expectedTables: expectedTables,
+      expectedIndexes: _indexStatements,
+      expectedTriggers: _triggerStatements,
+    );
+  }
+
   Future<void> _validateSchemaV1() async {
+    final expectedTables = <String, String>{};
+    final expectedIndexes = <String>[];
+    final expectedTriggers = <String>[];
+    for (final statement in publishedLearningV1SchemaStatements) {
+      final trimmed = statement.trimLeft();
+      final table = RegExp(
+        r'^CREATE\s+TABLE\s+"([^"]+)"',
+        caseSensitive: false,
+      ).firstMatch(trimmed);
+      if (table != null) {
+        expectedTables[table.group(1)!] = statement;
+      } else if (RegExp(
+        r'^CREATE\s+(?:UNIQUE\s+)?INDEX\b',
+        caseSensitive: false,
+      ).hasMatch(trimmed)) {
+        expectedIndexes.add(statement);
+      } else if (RegExp(
+        r'^CREATE\s+TRIGGER\b',
+        caseSensitive: false,
+      ).hasMatch(trimmed)) {
+        expectedTriggers.add(statement);
+      } else {
+        throw const FormatException(
+          'Unexpected statement in frozen learning schema v1.',
+        );
+      }
+    }
+    await _validateSchemaDefinitions(
+      expectedVersion: 1,
+      expectedTables: expectedTables,
+      expectedIndexes: expectedIndexes,
+      expectedTriggers: expectedTriggers,
+    );
+  }
+
+  Future<void> _validateSchemaDefinitions({
+    required int expectedVersion,
+    required Map<String, String> expectedTables,
+    required List<String> expectedIndexes,
+    required List<String> expectedTriggers,
+  }) async {
+    if (await _userVersion() != expectedVersion) {
+      throw LearningCorruptException(
+        'Learning schema version differs from $expectedVersion.',
+      );
+    }
     final tables = await _schemaNames('table');
-    if (!_sameNames(tables, _tableNames)) {
-      throw const LearningCorruptException('Learning schema v1 tables differ.');
+    if (!_sameNames(tables, expectedTables.keys.toList())) {
+      throw LearningCorruptException(
+        'Learning schema v$expectedVersion tables differ.',
+      );
+    }
+    if ((await _schemaNames('view')).isNotEmpty) {
+      throw LearningCorruptException(
+        'Learning schema v$expectedVersion contains unexpected views.',
+      );
     }
 
     final tableSql = await _schemaSqlByName('table');
-    final tablesByName = <String, TableInfo<Table, Object?>>{
-      for (final table in allTables) table.actualTableName: table,
-    };
     for (final entry in _columnNames.entries) {
-      final expectedTableSql = _expectedCreateTableStatement(
-        tablesByName[entry.key]!,
-      );
+      final expectedTableSql = expectedTables[entry.key];
       final actualTableSql = tableSql[entry.key];
-      if (actualTableSql == null ||
+      if (expectedTableSql == null ||
+          actualTableSql == null ||
           _normalizeCreateTableSql(actualTableSql) !=
               _normalizeCreateTableSql(expectedTableSql)) {
         throw LearningCorruptException(
-          'Learning schema v1 table definition differs in ${entry.key}.',
+          'Learning schema v$expectedVersion table definition differs in ${entry.key}.',
         );
       }
 
@@ -968,7 +1475,7 @@ class LearningDatabase extends _$LearningDatabase {
       final columns = rows.map((row) => row.read<String>('name')).toList();
       if (!_sameNames(columns, entry.value)) {
         throw LearningCorruptException(
-          'Learning schema v1 columns differ in ${entry.key}.',
+          'Learning schema v$expectedVersion columns differ in ${entry.key}.',
         );
       }
       for (final row in rows) {
@@ -982,12 +1489,12 @@ class LearningDatabase extends _$LearningDatabase {
             (!isPrimaryIntegerId &&
                 row.read<int>('notnull') != (isNullable ? 0 : 1))) {
           throw LearningCorruptException(
-            'Learning schema v1 column ${entry.key}.$name differs.',
+            'Learning schema v$expectedVersion column ${entry.key}.$name differs.',
           );
         }
         if (isPrimaryIntegerId && row.read<int>('pk') != 1) {
           throw LearningCorruptException(
-            'Learning schema v1 primary key ${entry.key}.$name differs.',
+            'Learning schema v$expectedVersion primary key ${entry.key}.$name differs.',
           );
         }
       }
@@ -1000,44 +1507,41 @@ class LearningDatabase extends _$LearningDatabase {
       final actualPrimaryKey = actualPrimaryKeyRows
           .map((row) => row.read<String>('name'))
           .toList();
-      final expectedPrimaryKey = tablesByName[entry.key]!.$primaryKey
-          .map((column) => column.name)
-          .toList();
+      final expectedPrimaryKey = _primaryKeyColumns[entry.key]!;
       if (!_sameSequence(actualPrimaryKey, expectedPrimaryKey)) {
         throw LearningCorruptException(
-          'Learning schema v1 primary key differs in ${entry.key}.',
+          'Learning schema v$expectedVersion primary key differs in ${entry.key}.',
         );
       }
 
-      final expectedChecks = tablesByName[entry.key]!.customConstraints
-          .where(_startsWithCheck)
-          .map(_normalizeSql)
-          .toList();
+      final expectedChecks = _splitTableDefinitions(
+        expectedTableSql,
+      ).where(_startsWithCheck).map(_normalizeSql).toList();
       final actualChecks = _splitTableDefinitions(
         tableSql[entry.key]!,
       ).where(_startsWithCheck).map(_normalizeSql).toList();
       if (!_sameNames(actualChecks, expectedChecks)) {
         throw LearningCorruptException(
-          'Learning schema v1 CHECK constraints differ in ${entry.key}.',
+          'Learning schema v$expectedVersion CHECK constraints differ in ${entry.key}.',
         );
       }
     }
 
-    final expectedIndexes = <String>[
-      for (final statement in _indexStatements) _indexName(statement),
+    final expectedIndexNames = <String>[
+      for (final statement in expectedIndexes) _indexName(statement),
     ];
-    if (!_sameNames(await _schemaNames('index'), expectedIndexes)) {
-      throw const LearningCorruptException(
-        'Learning schema v1 indexes differ.',
+    if (!_sameNames(await _schemaNames('index'), expectedIndexNames)) {
+      throw LearningCorruptException(
+        'Learning schema v$expectedVersion indexes differ.',
       );
     }
     final indexSql = await _schemaSqlByName('index');
-    for (final statement in _indexStatements) {
+    for (final statement in expectedIndexes) {
       final definition = _parseIndexDefinition(statement);
       if (_normalizeSql(indexSql[definition.name] ?? '') !=
           _normalizeSql(statement)) {
         throw LearningCorruptException(
-          'Learning schema v1 index ${definition.name} differs.',
+          'Learning schema v$expectedVersion index ${definition.name} differs.',
         );
       }
 
@@ -1051,7 +1555,7 @@ class LearningDatabase extends _$LearningDatabase {
           index.read<String>('origin') != 'c' ||
           index.read<int>('partial') != 0) {
         throw LearningCorruptException(
-          'Learning schema v1 index metadata differs for ${definition.name}.',
+          'Learning schema v$expectedVersion index metadata differs for ${definition.name}.',
         );
       }
 
@@ -1065,7 +1569,7 @@ class LearningDatabase extends _$LearningDatabase {
           );
       if (keyColumns.length != definition.terms.length) {
         throw LearningCorruptException(
-          'Learning schema v1 index columns differ for ${definition.name}.',
+          'Learning schema v$expectedVersion index columns differ for ${definition.name}.',
         );
       }
       for (var index = 0; index < keyColumns.length; index++) {
@@ -1081,26 +1585,26 @@ class LearningDatabase extends _$LearningDatabase {
             (!simpleColumn && actualCid != -2) ||
             actual.read<int>('desc') != (expectedDescending ? 1 : 0)) {
           throw LearningCorruptException(
-            'Learning schema v1 index term differs for ${definition.name}.',
+            'Learning schema v$expectedVersion index term differs for ${definition.name}.',
           );
         }
       }
     }
 
-    final expectedTriggers = <String>[
-      for (final statement in _triggerStatements) _triggerName(statement),
+    final expectedTriggerNames = <String>[
+      for (final statement in expectedTriggers) _triggerName(statement),
     ];
-    if (!_sameNames(await _schemaNames('trigger'), expectedTriggers)) {
-      throw const LearningCorruptException(
-        'Learning schema v1 triggers differ.',
+    if (!_sameNames(await _schemaNames('trigger'), expectedTriggerNames)) {
+      throw LearningCorruptException(
+        'Learning schema v$expectedVersion triggers differ.',
       );
     }
     final triggerSql = await _schemaSqlByName('trigger');
-    for (final statement in _triggerStatements) {
+    for (final statement in expectedTriggers) {
       final name = _triggerName(statement);
       if (_normalizeSql(triggerSql[name] ?? '') != _normalizeSql(statement)) {
         throw LearningCorruptException(
-          'Learning schema v1 trigger $name differs.',
+          'Learning schema v$expectedVersion trigger $name differs.',
         );
       }
     }
@@ -1132,7 +1636,7 @@ class LearningDatabase extends _$LearningDatabase {
         _expectedForeignKeySignatures[table]!,
       )) {
         throw LearningCorruptException(
-          'Learning schema v1 foreign keys differ in $table.',
+          'Learning schema v$expectedVersion foreign keys differ in $table.',
         );
       }
     }
@@ -1141,8 +1645,8 @@ class LearningDatabase extends _$LearningDatabase {
       'PRAGMA foreign_key_check',
     ).get();
     if (foreignKeyViolations.isNotEmpty) {
-      throw const LearningCorruptException(
-        'Learning schema v1 contains foreign-key violations.',
+      throw LearningCorruptException(
+        'Learning schema v$expectedVersion contains foreign-key violations.',
       );
     }
   }
@@ -1288,14 +1792,15 @@ String _indexName(String statement) => _parseIndexDefinition(statement).name;
 
 ({String name, String table, bool unique, List<String> terms})
 _parseIndexDefinition(String statement) {
+  final normalizedStatement = statement.trimLeft();
   final match = RegExp(
     r'^CREATE\s+(UNIQUE\s+)?INDEX\s+([^\s]+)\s+ON\s+([^\s(]+)\s*\(',
     caseSensitive: false,
-  ).firstMatch(statement);
+  ).firstMatch(normalizedStatement);
   if (match == null) {
     throw FormatException('Invalid learning index statement: $statement');
   }
-  final terms = _splitSqlList(statement, match.end - 1);
+  final terms = _splitSqlList(normalizedStatement, match.end - 1);
   if (terms.isEmpty) {
     throw FormatException('Learning index has no terms: $statement');
   }
@@ -1308,10 +1813,11 @@ _parseIndexDefinition(String statement) {
 }
 
 String _triggerName(String statement) {
+  final normalizedStatement = statement.trimLeft();
   final match = RegExp(
     r'^CREATE\s+TRIGGER\s+([^\s]+)',
     caseSensitive: false,
-  ).firstMatch(statement);
+  ).firstMatch(normalizedStatement);
   if (match == null) {
     throw FormatException('Invalid learning trigger statement: $statement');
   }

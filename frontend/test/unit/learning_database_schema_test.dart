@@ -3,7 +3,14 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:linguist/src/core/course/course_attempt.dart';
+import 'package:linguist/src/core/course/course_learning_command.dart';
+import 'package:linguist/src/core/course/course_learning_state.dart';
+import 'package:linguist/src/core/course/course_learning_transition.dart';
+import 'package:linguist/src/core/course/storage/course_learning_sql_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:drift/drift.dart' show DatabaseConnection;
+import 'package:drift/native.dart';
 import 'package:linguist/src/core/course/comparison_learning_state.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/course/course_learning_checkpoint.dart';
@@ -15,10 +22,15 @@ import 'package:linguist/src/core/course/lesson_section_session.dart';
 import 'package:linguist/src/core/course/sentence_hunt_content.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
 import 'package:linguist/src/features/arcade/sound_match_engine.dart';
-import 'package:linguist/src/core/course/storage/learning_database.dart';
+import 'package:linguist/src/core/course/storage/learning_database.dart'
+    show
+        LearningDatabase,
+        LearningDatabaseHandle,
+        LearningMigrationFailurePoint;
 import 'package:linguist/src/core/course/storage/learning_tables.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 
+import '../support/learning_v1_fixture.dart';
 import '../support/learning_migration_failure_probe.dart';
 import '../support/sqlite_learning_test_harness.dart';
 
@@ -234,10 +246,268 @@ Future<LearningDatabase> _openDatabase() async {
 
 Future<File> _createVersionOneFile(Directory directory, String name) async {
   final file = File('${directory.path}/$name.sqlite');
-  final database = await openFileLearningTestDatabase(file);
-  await database.customSelect('SELECT 1').getSingle();
-  await database.close();
+  final raw = sqlite.sqlite3.open(file.path);
+  try {
+    expect(raw.select('PRAGMA user_version').single['user_version'], 0);
+    expect(
+      raw.select(
+        "SELECT name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' "
+        "AND type IN ('table', 'index', 'trigger', 'view')",
+      ),
+      isEmpty,
+    );
+    await createPublishedLearningV1Fixture((
+      String sql, [
+      List<Object?>? args,
+    ]) async {
+      raw.execute(sql, args ?? const <Object?>[]);
+    });
+    expect(raw.select('PRAGMA user_version').single['user_version'], 1);
+    expect(
+      raw.select("SELECT name FROM sqlite_schema WHERE type = 'table' ").length,
+      13,
+    );
+  } finally {
+    raw.close();
+  }
   return file;
+}
+
+Map<String, List<String>> _snapshotLearningRows(sqlite.Database raw) =>
+    <String, List<String>>{
+      for (final table in learningTableNames)
+        table:
+            (raw
+                .select('SELECT * FROM $table')
+                .map(
+                  (row) => jsonEncode(<String, Object?>{
+                    for (final column in row.keys) column: row[column],
+                  }),
+                )
+                .toList()
+              ..sort()),
+    };
+
+Map<String, Object?> _spellingScopeRow({int id = 80}) => <String, Object?>{
+  'id': id,
+  'owner_kind': 'guest',
+  'owner_id': '',
+  'course_id': 'en-fr',
+  'family': 'spelling',
+  'schema_version': 1,
+  'revision': 0,
+  'commit_ordinal': 0,
+  'availability_state': 'available',
+};
+
+Map<String, Object?> _spellingBindingRow({
+  int scopeId = 80,
+  int id = 801,
+  String activityId = 'en-fr-u-y-spelling',
+}) => <String, Object?>{
+  'id': id,
+  'scope_id': scopeId,
+  'activity_id': activityId,
+  'content_revision': 1,
+  'policy_kind': 'discoveryThreshold',
+  'policy_revision': 1,
+  'catalogue_fingerprint': 'uy-demo-spelling-v1',
+  'section_fingerprint': null,
+  'annotation_hash': null,
+  'annotation_revision': null,
+};
+
+Map<String, Object?> _spellingRunRow({
+  int scopeId = 80,
+  String activityId = 'en-fr-u-y-spelling',
+  String activityKind = 'spelling',
+  int contentBindingId = 801,
+  String token = 'SSSSSSSSSSSSSSSSSSSSSS',
+  String runMode = 'practice',
+}) => runRow(
+  scopeId: scopeId,
+  activityId: activityId,
+  activityKind: activityKind,
+  contentBindingId: contentBindingId,
+  token: token,
+  runMode: runMode,
+  sessionId: 'spelling-session',
+  policyRevision: 1,
+  thresholdPercent: 80,
+  runStartRound: 1,
+);
+
+Map<String, Object?> _spellingAttemptRow({
+  int scopeId = 80,
+  String attemptId = 'attempt-spelling',
+  String activityId = 'en-fr-u-y-spelling',
+  String answerKind = 'spellingChoice',
+  String? skill = 'spelling',
+  String? origin = 'practice',
+  String? presentation = 'firstInRun',
+}) => <String, Object?>{
+  'scope_id': scopeId,
+  'attempt_id': attemptId,
+  'activity_id': activityId,
+  'run_generation': 1,
+  'command_sequence': 1,
+  'batch_index': 0,
+  'item_id': 'uy-demo-spelling-01',
+  'item_occurrence': null,
+  'content_revision': 1,
+  'commit_ordinal': 1,
+  'answered_at_us': 100,
+  'committed_at_us': 101,
+  'answer_kind': answerKind,
+  'correct': 1,
+  'skill': skill,
+  'origin': origin,
+  'presentation': presentation,
+  'assistance_mask': 0,
+  'content_state': 'pending',
+  'audio_source': 'pendingRecording',
+  'round': 1,
+  'after_debrief': 0,
+  'teaching_exposed': null,
+  'selected_relation': null,
+  'expected_relation': null,
+  'section_id': null,
+  'sentence_id': null,
+  'annotation_hash': null,
+  'annotation_revision': null,
+};
+
+Map<String, Object?> _spellingValueRow({
+  String attemptId = 'attempt-spelling',
+  required String field,
+  required int ordinal,
+  required String value,
+  String valueType = 'text',
+}) => <String, Object?>{
+  'scope_id': 80,
+  'attempt_id': attemptId,
+  'field': field,
+  'ordinal': ordinal,
+  'value_type': valueType,
+  'text_value': valueType == 'text' ? value : null,
+  'int_value': valueType == 'int' ? int.tryParse(value) : null,
+  'bool_value': null,
+};
+
+Map<String, Object?> _spellingEvidenceRow({
+  String attemptId = 'attempt-spelling',
+  String evidenceKind = 'spellingPlayback',
+  int evidenceIndex = 0,
+}) => <String, Object?>{
+  'scope_id': 80,
+  'attempt_id': attemptId,
+  'evidence_index': evidenceIndex,
+  'evidence_kind': evidenceKind,
+  'slot': null,
+  'reference_id': 'fr-word-tout',
+  'outcome': 'completed',
+  'source': 'unverifiedRecording',
+  'activity_id': 'en-fr-u-y-spelling',
+  'run_generation': 1,
+  'round': 1,
+  'pair_id': null,
+  'ui_generation': 3,
+  'section_id': null,
+  'item_id': 'uy-demo-spelling-01',
+  'sentence_id': null,
+  'audio_ref_id': null,
+  'annotation_hash': null,
+  'annotation_revision': null,
+  'content_revision': 1,
+};
+
+Future<void> _insertValidSpellingRows(LearningDatabase database) async {
+  await insertRow(database, 'learning_scopes', _spellingScopeRow());
+  await insertRow(database, 'learning_content_bindings', _spellingBindingRow());
+  await insertRow(database, 'learning_runs', _spellingRunRow());
+  await insertRow(database, 'learning_attempts', _spellingAttemptRow());
+  for (final (String field, int ordinal, String value)
+      in <(String, int, String)>[
+        ('choice', 0, 'u'),
+        ('choice', 1, 'ou'),
+        ('selected_option_id', 0, 'ou'),
+        ('expected_option_id', 0, 'ou'),
+        ('word_id', 0, 'tout'),
+        ('target_sound', 0, 'u'),
+      ]) {
+    await insertRow(
+      database,
+      'learning_attempt_values',
+      _spellingValueRow(field: field, ordinal: ordinal, value: value),
+    );
+  }
+  await insertRow(
+    database,
+    'learning_attempt_evidence',
+    _spellingEvidenceRow(),
+  );
+  await insertRow(database, 'learning_mistakes', <String, Object?>{
+    'scope_id': 80,
+    'family': 'spelling',
+    'activity_id': 'en-fr-u-y-spelling',
+    'item_id': 'uy-demo-spelling-01',
+    'target_sound': 'u',
+    'skill': 'spelling',
+    'pair_id': null,
+    'section_id': null,
+    'sentence_id': null,
+    'audio_ref_id': null,
+    'annotation_hash': null,
+    'annotation_revision': null,
+    'content_revision': 1,
+    'first_wrong_attempt_id': 'attempt-spelling',
+    'latest_wrong_attempt_id': 'attempt-spelling',
+    'first_wrong_at_us': 100,
+    'latest_wrong_at_us': 101,
+    'failure_count': 1,
+    'last_run_generation': 1,
+  });
+  await insertRow(database, 'learning_summaries', <String, Object?>{
+    'scope_id': 80,
+    'family': 'spelling',
+    'activity_id': 'en-fr-u-y-spelling',
+    'sound': 'u',
+    'skill': 'spelling',
+    'origin': 'practice',
+    'presentation': null,
+    'assistance_mask': null,
+    'pair_id': null,
+    'section_id': null,
+    'item_id': 'uy-demo-spelling-01',
+    'sentence_id': null,
+    'audio_ref_id': null,
+    'annotation_hash': null,
+    'annotation_revision': null,
+    'content_revision': 1,
+    'bucket': 'firstInRun',
+    'correct': 1,
+    'total': 1,
+  });
+  await insertRow(database, 'learning_completions', <String, Object?>{
+    'scope_id': 80,
+    'activity_id': 'en-fr-u-y-spelling',
+    'content_revision': 1,
+    'policy_kind': 'discoveryThreshold',
+    'policy_revision': 1,
+    'threshold_percent': 80,
+    'committed_at_us': 101,
+  });
+  await insertRow(database, 'learning_exposure', <String, Object?>{
+    'scope_id': 80,
+    'family': 'spelling',
+    'activity_id': 'en-fr-u-y-spelling',
+    'item_id': 'uy-demo-spelling-01',
+    'target_sound': 'u',
+    'section_id': null,
+    'content_revision': 1,
+    'presentations': 1,
+    'assistance_mask': 0,
+  });
 }
 
 void _rewriteSchemaSql(
@@ -746,7 +1016,7 @@ Map<String, Object?> _courseOutbox({
 };
 
 void main() {
-  group('LearningDatabase schema v1', () {
+  group('LearningDatabase physical schema v2', () {
     test('constructs measured current typed checkpoint sizing fixtures', () {
       final fixtures = _maxCurrentCheckpointFixtures();
       final sizes = <String, int>{
@@ -941,9 +1211,9 @@ void main() {
         final database = await _openDatabase();
         addTearDown(database.close);
 
-        expect(database.schemaVersion, 1);
+        expect(database.schemaVersion, 2);
         expect(await tableNames(database), orderedEquals(learningTableNames));
-        expect(await pragmaUserVersion(database), 1);
+        expect(await pragmaUserVersion(database), 2);
         expect(await hasNoLearningRows(database), isTrue);
         expect(
           await database
@@ -1013,6 +1283,378 @@ void main() {
             'enqueue_commit_ordinal',
             'enqueue_event_index',
           ]),
+        );
+      },
+    );
+
+    test(
+      'rejects an altered v2 trigger before publishing the database',
+      () async {
+        final directory = await Directory.systemTemp.createTemp(
+          'learning-v2-altered-trigger-',
+        );
+        addTearDown(() async => directory.delete(recursive: true));
+        final file = File('${directory.path}/altered-trigger.sqlite');
+        final created = await LearningDatabase.openValidated(
+          DatabaseConnection(NativeDatabase(file)),
+        );
+        await created.close();
+
+        final raw = sqlite.sqlite3.open(file.path);
+        raw.execute('DROP TRIGGER trg_learning_attempts_scope_family_insert');
+        raw.execute(
+          'CREATE TRIGGER trg_learning_attempts_scope_family_insert '
+          'BEFORE INSERT ON learning_attempts BEGIN SELECT 1; END',
+        );
+        raw.close();
+
+        await expectLater(
+          LearningDatabase.openValidated(
+            DatabaseConnection(NativeDatabase(file)),
+          ),
+          throwsA(isA<LearningCorruptException>()),
+        );
+
+        final unchanged = sqlite.sqlite3.open(file.path);
+        expect(
+          unchanged.select('PRAGMA user_version').single['user_version'],
+          2,
+        );
+        expect(
+          unchanged
+              .select(
+                "SELECT sql FROM sqlite_schema WHERE type = 'trigger' "
+                "AND name = 'trg_learning_attempts_scope_family_insert'",
+              )
+              .single['sql'],
+          contains('SELECT 1'),
+        );
+        unchanged.close();
+      },
+    );
+
+    test(
+      'accepts valid v2 spelling rows and rejects cross-family shapes',
+      () async {
+        final database = await _openDatabase();
+        addTearDown(database.close);
+        await createCoreLearningRows(database);
+
+        await _insertValidSpellingRows(database);
+        expect(await pragmaUserVersion(database), 2);
+
+        await expectSqlRejected(
+          insertScope(
+            database,
+            id: 81,
+            ownerKind: 'guest',
+            ownerId: '',
+            courseId: 'en-fr',
+            family: 'unknown',
+          ),
+        );
+        await expectSqlRejected(
+          insertRow(
+            database,
+            'learning_content_bindings',
+            _spellingBindingRow(id: 802)
+              ..['section_fingerprint'] = 'not-spelling-content',
+          ),
+        );
+        await expectSqlRejected(
+          insertRow(
+            database,
+            'learning_runs',
+            _spellingRunRow(
+              token: 'TTTTTTTTTTTTTTTTTTTTTT',
+              activityKind: 'comparison',
+            ),
+          ),
+        );
+        await expectSqlRejected(
+          insertRow(
+            database,
+            'learning_runs',
+            _spellingRunRow(token: 'UUUUUUUUUUUUUUUUUUUUUU', runMode: 'review'),
+          ),
+        );
+        await expectSqlRejected(
+          insertRow(
+            database,
+            'learning_attempts',
+            _spellingAttemptRow(
+              attemptId: 'wrong-kind-spelling',
+              answerKind: 'soundChoice',
+              skill: 'listening',
+            ),
+          ),
+        );
+        await expectSqlRejected(
+          insertRow(
+            database,
+            'learning_attempt_values',
+            _spellingValueRow(
+              attemptId: 'attempt-spelling',
+              field: 'selected_option_id',
+              ordinal: 1,
+              value: '1',
+              valueType: 'int',
+            ),
+          ),
+        );
+        await expectSqlRejected(
+          insertRow(
+            database,
+            'learning_attempt_evidence',
+            _spellingEvidenceRow(
+              attemptId: 'attempt-spelling',
+              evidenceKind: 'comparisonPlayback',
+            ),
+          ),
+        );
+        await expectSqlRejected(
+          insertRow(
+            database,
+            'learning_attempt_evidence',
+            _spellingEvidenceRow(
+              attemptId: 'attempt-spelling',
+              evidenceIndex: 1,
+            ),
+          ),
+        );
+        await expectSqlRejected(
+          insertRow(database, 'learning_mistakes', <String, Object?>{
+            'scope_id': 80,
+            'family': 'course',
+            'activity_id': 'en-fr-u-y-spelling',
+            'item_id': 'uy-demo-spelling-02',
+            'target_sound': 'y',
+            'skill': 'listening',
+            'pair_id': null,
+            'section_id': null,
+            'sentence_id': null,
+            'audio_ref_id': null,
+            'annotation_hash': null,
+            'annotation_revision': null,
+            'content_revision': 1,
+            'first_wrong_attempt_id': 'attempt-spelling',
+            'latest_wrong_attempt_id': 'attempt-spelling',
+            'first_wrong_at_us': 100,
+            'latest_wrong_at_us': 101,
+            'failure_count': 1,
+            'last_run_generation': 1,
+          }),
+        );
+        await expectSqlRejected(
+          updateRows(
+            database,
+            'learning_summaries',
+            <String, Object?>{'bucket': 'repeatInRun'},
+            where: 'scope_id = ? AND family = ?',
+            whereArgs: <Object?>[80, 'spelling'],
+          ),
+        );
+        await expectSqlRejected(
+          insertRow(database, 'learning_completions', <String, Object?>{
+            'scope_id': 80,
+            'activity_id': 'en-fr-u-y-spelling',
+            'content_revision': 1,
+            'policy_kind': 'legacyOnePass',
+            'policy_revision': 1,
+            'threshold_percent': -1,
+            'committed_at_us': 101,
+          }),
+        );
+        await expectSqlRejected(
+          updateRows(
+            database,
+            'learning_exposure',
+            <String, Object?>{'content_revision': null},
+            where: 'scope_id = ? AND family = ?',
+            whereArgs: <Object?>[80, 'spelling'],
+          ),
+        );
+      },
+    );
+
+    for (final mutation in <String, Object?>{
+      'activity_id': 'another-spelling-activity',
+      'content_revision': 2,
+      'policy_revision': 2,
+      'threshold_percent': 79,
+    }.entries) {
+      test('spelling completion rejects mismatched ${mutation.key}', () async {
+        final database = await _openDatabase();
+        addTearDown(database.close);
+        await _insertValidSpellingRows(database);
+        await expectSqlRejected(
+          updateRows(
+            database,
+            'learning_completions',
+            <String, Object?>{mutation.key: mutation.value},
+            where: 'scope_id = ?',
+            whereArgs: <Object?>[80],
+          ),
+        );
+      });
+    }
+
+    test('spelling summaries use bucket-only presentation identity', () async {
+      final database = await _openDatabase();
+      addTearDown(database.close);
+      await _insertValidSpellingRows(database);
+
+      await updateRows(
+        database,
+        'learning_summaries',
+        <String, Object?>{'presentation': null, 'assistance_mask': null},
+        where: 'scope_id = ? AND family = ?',
+        whereArgs: <Object?>[80, 'spelling'],
+      );
+      final rows = await database
+          .customSelect(
+            'SELECT presentation, assistance_mask FROM learning_summaries '
+            "WHERE scope_id = 80 AND family = 'spelling'",
+          )
+          .get();
+      expect(rows, isNotEmpty);
+      for (final row in rows) {
+        expect(row.data['presentation'], isNull);
+        expect(row.data['assistance_mask'], isNull);
+      }
+      await expectSqlRejected(
+        updateRows(
+          database,
+          'learning_summaries',
+          <String, Object?>{'presentation': 'firstInRun', 'assistance_mask': 0},
+          where: 'scope_id = ? AND family = ?',
+          whereArgs: <Object?>[80, 'spelling'],
+        ),
+      );
+    });
+
+    test('spelling mistakes survive pruned attempt pointers', () async {
+      final database = await _openDatabase();
+      addTearDown(database.close);
+      await _insertValidSpellingRows(database);
+
+      await updateRows(
+        database,
+        'learning_mistakes',
+        <String, Object?>{
+          'first_wrong_attempt_id': null,
+          'latest_wrong_attempt_id': null,
+          'last_run_generation': null,
+        },
+        where: 'scope_id = ? AND family = ?',
+        whereArgs: <Object?>[80, 'spelling'],
+      );
+      final row = await database
+          .customSelect(
+            'SELECT failure_count, first_wrong_at_us, latest_wrong_at_us '
+            "FROM learning_mistakes WHERE scope_id = 80 AND family = 'spelling'",
+          )
+          .getSingle();
+      expect(row.read<int>('failure_count'), 1);
+      expect(row.read<int>('first_wrong_at_us'), 100);
+      expect(row.read<int>('latest_wrong_at_us'), 101);
+    });
+
+    test(
+      'spelling aggregate identities use the existing coalescing indexes',
+      () async {
+        final database = await _openDatabase();
+        addTearDown(database.close);
+        await _insertValidSpellingRows(database);
+
+        final mistakeIndex = await database
+            .customSelect(
+              "SELECT sql FROM sqlite_schema WHERE type = 'index' "
+              "AND name = 'ux_learning_mistakes_identity'",
+            )
+            .getSingle();
+        final summaryIndex = await database
+            .customSelect(
+              "SELECT sql FROM sqlite_schema WHERE type = 'index' "
+              "AND name = 'ux_learning_summaries_identity_bucket'",
+            )
+            .getSingle();
+        expect(
+          mistakeIndex.read<String>('sql'),
+          contains("COALESCE(item_id, '')"),
+        );
+        expect(
+          mistakeIndex.read<String>('sql'),
+          contains("COALESCE(target_sound, '')"),
+        );
+        expect(
+          summaryIndex.read<String>('sql'),
+          contains("COALESCE(item_id, '')"),
+        );
+        expect(
+          summaryIndex.read<String>('sql'),
+          contains("COALESCE(sound, '')"),
+        );
+
+        await expectLater(
+          insertRow(database, 'learning_mistakes', <String, Object?>{
+            'scope_id': 80,
+            'family': 'spelling',
+            'activity_id': 'en-fr-u-y-spelling',
+            'item_id': 'uy-demo-spelling-01',
+            'target_sound': 'u',
+            'skill': 'spelling',
+            'pair_id': null,
+            'section_id': null,
+            'sentence_id': null,
+            'audio_ref_id': null,
+            'annotation_hash': null,
+            'annotation_revision': null,
+            'content_revision': 1,
+            'first_wrong_attempt_id': 'attempt-spelling',
+            'latest_wrong_attempt_id': 'attempt-spelling',
+            'first_wrong_at_us': 100,
+            'latest_wrong_at_us': 101,
+            'failure_count': 1,
+            'last_run_generation': 1,
+          }),
+          throwsA(
+            predicate<Object>(
+              (error) => error.toString().contains(
+                "UNIQUE constraint failed: index 'ux_learning_mistakes_identity'",
+              ),
+            ),
+          ),
+        );
+        await expectLater(
+          insertRow(database, 'learning_summaries', <String, Object?>{
+            'scope_id': 80,
+            'family': 'spelling',
+            'activity_id': 'en-fr-u-y-spelling',
+            'sound': 'u',
+            'skill': 'spelling',
+            'origin': 'practice',
+            'presentation': null,
+            'assistance_mask': null,
+            'pair_id': null,
+            'section_id': null,
+            'item_id': 'uy-demo-spelling-01',
+            'sentence_id': null,
+            'audio_ref_id': null,
+            'annotation_hash': null,
+            'annotation_revision': null,
+            'content_revision': 1,
+            'bucket': 'firstInRun',
+            'correct': 1,
+            'total': 1,
+          }),
+          throwsA(
+            predicate<Object>(
+              (error) => error.toString().contains(
+                "UNIQUE constraint failed: index 'ux_learning_summaries_identity_bucket'",
+              ),
+            ),
+          ),
         );
       },
     );
@@ -2211,16 +2853,42 @@ void main() {
     );
 
     test(
+      'refuses nonempty version-zero files without overwriting them',
+      () async {
+        final directory = await Directory.systemTemp.createTemp(
+          'learning-v0-nonempty-',
+        );
+        addTearDown(() async => directory.delete(recursive: true));
+        final file = File('${directory.path}/nonempty.sqlite');
+        final raw = sqlite.sqlite3.open(file.path);
+        raw.execute('CREATE TABLE user_marker (id INTEGER PRIMARY KEY)');
+        raw.execute('INSERT INTO user_marker (id) VALUES (7)');
+        raw.close();
+        final before = await file.readAsBytes();
+
+        final database = await openFileLearningTestDatabase(file);
+        await expectLater(
+          database.customSelect('SELECT 1').getSingle(),
+          throwsA(isA<LearningUnsupportedVersionException>()),
+        );
+        await database.close();
+
+        expect(await file.readAsBytes(), orderedEquals(before));
+        final verify = sqlite.sqlite3.open(file.path);
+        expect(verify.select('PRAGMA user_version').single['user_version'], 0);
+        expect(verify.select('SELECT id FROM user_marker').single['id'], 7);
+        verify.close();
+      },
+    );
+
+    test(
       'rejects a version-1 file whose schema no longer matches v1',
       () async {
         final directory = await Directory.systemTemp.createTemp(
           'learning-drift-',
         );
         addTearDown(() async => directory.delete(recursive: true));
-        final file = File('${directory.path}/drift.sqlite');
-        final created = await openFileLearningTestDatabase(file);
-        await created.customSelect('SELECT 1').getSingle();
-        await created.close();
+        final file = await _createVersionOneFile(directory, 'drift');
         final raw = sqlite.sqlite3.open(file.path);
         raw.execute('DROP TABLE learning_exposure');
         raw.execute('CREATE TABLE preserved_marker (value TEXT)');
@@ -2313,7 +2981,8 @@ void main() {
               objectName: 'learning_attempt_values',
               remove:
                   ', FOREIGN KEY (scope_id, attempt_id) REFERENCES '
-                  'learning_attempts(scope_id, attempt_id) ON DELETE RESTRICT',
+                  'learning_attempts(scope_id, attempt_id) ON\n'
+                  '    DELETE RESTRICT',
             ),
           ),
         ];
@@ -2379,42 +3048,270 @@ void main() {
         'learning-v2-fail-',
       );
       addTearDown(() async => directory.delete(recursive: true));
-      final file = File('${directory.path}/rollback.sqlite');
-      final database = await openFileLearningTestDatabase(file);
-      await insertScope(
-        database,
-        id: 1,
-        ownerKind: 'guest',
-        ownerId: '',
-        courseId: 'en-fr',
-        family: 'course',
-        revision: 1,
-        commitOrdinal: 1,
-      );
-      await database.close();
+      final file = await _createVersionOneFile(directory, 'rollback');
+      final rawBefore = sqlite.sqlite3.open(file.path);
+      final before = _snapshotLearningRows(rawBefore);
+      rawBefore.close();
 
       await expectLater(
         runLearningMigrationFailureProbe(file),
         throwsA(isA<StateError>()),
       );
 
-      final reopened = await openFileLearningTestDatabase(file);
-      expect(await pragmaUserVersion(reopened), 1);
-      final preserved = await reopened
-          .customSelect(
-            'SELECT owner_id, revision FROM learning_scopes WHERE id = 1',
-          )
-          .getSingle();
-      expect(preserved.read<String>('owner_id'), '');
-      expect(preserved.read<int>('revision'), 1);
-      final marker = await reopened
-          .customSelect(
-            "SELECT name FROM sqlite_schema WHERE type = 'table' "
-            "AND name = 'migration_failure_probe'",
-          )
-          .get();
-      expect(marker, isEmpty);
+      final rawAfterProbe = sqlite.sqlite3.open(file.path);
+      expect(
+        rawAfterProbe.select('PRAGMA user_version').single['user_version'],
+        1,
+      );
+      expect(
+        rawAfterProbe.select(
+          "SELECT name FROM sqlite_schema WHERE type = 'table' "
+          "AND name = 'migration_failure_probe'",
+        ),
+        isEmpty,
+      );
+      expect(_snapshotLearningRows(rawAfterProbe), before);
+      rawAfterProbe.close();
+
+      final reopened = await LearningDatabase.openValidated(
+        DatabaseConnection(NativeDatabase(file)),
+      );
+      expect(await pragmaUserVersion(reopened), 2);
       await reopened.close();
+      final rawAfterMigration = sqlite.sqlite3.open(file.path);
+      expect(_snapshotLearningRows(rawAfterMigration), before);
+      rawAfterMigration.close();
+    });
+
+    test(
+      'published_v1_fixture_migrates_to_v2_and_preserves_old_rows',
+      () async {
+        final directory = await Directory.systemTemp.createTemp(
+          'learning-published-v1-',
+        );
+        addTearDown(() async => directory.delete(recursive: true));
+        final file = await _createVersionOneFile(directory, 'published-v1');
+        final beforeRaw = sqlite.sqlite3.open(file.path);
+        final before = _snapshotLearningRows(beforeRaw);
+        beforeRaw.close();
+
+        final database = await openFileLearningTestDatabase(file);
+        await database.customSelect('SELECT 1').getSingle();
+        expect(await pragmaUserVersion(database), 2);
+        expect(
+          await database.customSelect('PRAGMA foreign_key_check').get(),
+          isEmpty,
+        );
+        await database.close();
+        final afterRaw = sqlite.sqlite3.open(file.path);
+        expect(_snapshotLearningRows(afterRaw), before);
+        afterRaw.close();
+      },
+    );
+
+    test('precommit migration failure leaves exact v1 intact', () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'learning-v2-precommit-',
+      );
+      addTearDown(() async => directory.delete(recursive: true));
+      final file = await _createVersionOneFile(directory, 'precommit');
+      final beforeRaw = sqlite.sqlite3.open(file.path);
+      final before = _snapshotLearningRows(beforeRaw);
+      beforeRaw.close();
+
+      await expectLater(
+        LearningDatabase.openValidatedForMigrationTesting(
+          DatabaseConnection(NativeDatabase(file)),
+          onPoint: (point) async {
+            if (point == LearningMigrationFailurePoint.beforeVersion2Commit) {
+              throw StateError('injected before v2 commit');
+            }
+          },
+        ),
+        throwsA(isA<StateError>()),
+      );
+
+      final afterRaw = sqlite.sqlite3.open(file.path);
+      expect(afterRaw.select('PRAGMA user_version').single['user_version'], 1);
+      expect(_snapshotLearningRows(afterRaw), before);
+      afterRaw.close();
+    });
+
+    test(
+      'postcommit failure preserves v2 and a fresh validated retry',
+      () async {
+        final directory = await Directory.systemTemp.createTemp(
+          'learning-v2-postcommit-',
+        );
+        addTearDown(() async => directory.delete(recursive: true));
+        final file = await _createVersionOneFile(directory, 'postcommit');
+        final beforeRaw = sqlite.sqlite3.open(file.path);
+        final before = _snapshotLearningRows(beforeRaw);
+        beforeRaw.close();
+
+        await expectLater(
+          LearningDatabase.openValidatedForMigrationTesting(
+            DatabaseConnection(NativeDatabase(file)),
+            onPoint: (point) async {
+              if (point == LearningMigrationFailurePoint.afterVersion2Commit) {
+                throw StateError('injected after v2 commit');
+              }
+            },
+          ),
+          throwsA(isA<StateError>()),
+        );
+
+        final afterFailure = sqlite.sqlite3.open(file.path);
+        expect(
+          afterFailure.select('PRAGMA user_version').single['user_version'],
+          2,
+        );
+        expect(_snapshotLearningRows(afterFailure), before);
+        afterFailure.close();
+
+        final reopened = await LearningDatabase.openValidated(
+          DatabaseConnection(NativeDatabase(file)),
+        );
+        expect(await pragmaUserVersion(reopened), 2);
+        expect(
+          (await reopened.customSelect('PRAGMA foreign_keys').getSingle())
+              .read<int>('foreign_keys'),
+          1,
+        );
+        await reopened.close();
+      },
+    );
+
+    test(
+      'foreign-key restore failure preserves v2 and closes the handle',
+      () async {
+        final directory = await Directory.systemTemp.createTemp(
+          'learning-v2-foreign-key-restore-',
+        );
+        addTearDown(() async => directory.delete(recursive: true));
+        final file = await _createVersionOneFile(
+          directory,
+          'foreign-key-restore',
+        );
+        final beforeRaw = sqlite.sqlite3.open(file.path);
+        final before = _snapshotLearningRows(beforeRaw);
+        beforeRaw.close();
+
+        await expectLater(
+          LearningDatabase.openValidatedForMigrationTesting(
+            DatabaseConnection(NativeDatabase(file)),
+            onPoint: (point) async {
+              if (point ==
+                  LearningMigrationFailurePoint.beforeForeignKeysEnabled) {
+                throw StateError('injected foreign-key restore failure');
+              }
+            },
+          ),
+          throwsA(isA<StateError>()),
+        );
+
+        final afterFailure = sqlite.sqlite3.open(file.path);
+        expect(
+          afterFailure.select('PRAGMA user_version').single['user_version'],
+          2,
+        );
+        expect(_snapshotLearningRows(afterFailure), before);
+        afterFailure.close();
+        final reopened = await LearningDatabase.openValidated(
+          DatabaseConnection(NativeDatabase(file)),
+        );
+        expect(await pragmaUserVersion(reopened), 2);
+        expect(
+          (await reopened.customSelect('PRAGMA foreign_keys').getSingle())
+              .read<int>('foreign_keys'),
+          1,
+        );
+        await reopened.close();
+      },
+    );
+
+    test('concurrent_v1_opens_and_writes_never_observe_partial_v2', () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'learning-v2-concurrent-writer-',
+      );
+      addTearDown(() async => directory.delete(recursive: true));
+      final file = await _createVersionOneFile(directory, 'concurrent');
+      final beforeRaw = sqlite.sqlite3.open(file.path);
+      final before = _snapshotLearningRows(beforeRaw);
+      beforeRaw.close();
+
+      final migrationEntered = Completer<void>();
+      final releaseMigration = Completer<void>();
+      final migrationFuture = LearningDatabase.openValidatedForMigrationTesting(
+        DatabaseConnection(NativeDatabase(file)),
+        onPoint: (point) async {
+          if (point == LearningMigrationFailurePoint.beforeVersion2Commit) {
+            migrationEntered.complete();
+            await releaseMigration.future;
+          }
+        },
+      );
+      await migrationEntered.future;
+
+      final owner = LearningOwner.account('concurrent-writer');
+      final scope = LearningScope(courseId: 'en-fr', owner: owner);
+      final auth = LearningAuthScope(owner: owner, generation: 9, ready: true);
+      final writerOpenStarted = Completer<void>();
+      final writerHandle = LearningDatabaseHandle(
+        open: () {
+          if (!writerOpenStarted.isCompleted) writerOpenStarted.complete();
+          return LearningDatabase.openValidated(
+            DatabaseConnection(NativeDatabase(file)),
+          );
+        },
+      );
+      final repository = SqliteCourseLearningRepository(
+        database: writerHandle,
+        scope: scope,
+        authGeneration: auth.generation,
+        currentAuth: () => auth,
+        backendOwner: () => owner,
+        transitions: LearningTransitionEngine(LearningRegistry.french()),
+        clock: () => DateTime.utc(2026, 10, 23),
+        newToken: () => 'R${'1'.padLeft(21, '0')}',
+        random: math.Random(0),
+      );
+      final command = repository.prepare(
+        state: CourseLearningState.empty(scope),
+        activityId: 'lesson:en-fr-u-y',
+        action: StartLearningRun(options: RunOptions()),
+      );
+      final writeFuture = repository.submit(command);
+      await writerOpenStarted.future;
+      releaseMigration.complete();
+
+      final migrated = await migrationFuture;
+      final commit = await writeFuture;
+      expect(await pragmaUserVersion(migrated), 2);
+      expect(await pragmaUserVersion(await writerHandle.open()), 2);
+      expect(commit.state.revision, 1);
+      await migrated.close();
+      await writerHandle.close();
+
+      final afterRaw = sqlite.sqlite3.open(file.path);
+      final after = _snapshotLearningRows(afterRaw);
+      for (final table in learningTableNames) {
+        expect(after[table]!.toSet(), containsAll(before[table]!));
+      }
+      final receiptRows = afterRaw.select(
+        'SELECT COUNT(*) AS count FROM learning_command_receipts r '
+        'JOIN learning_scopes s ON s.id = r.scope_id '
+        "WHERE s.owner_id = 'concurrent-writer'",
+      );
+      expect(receiptRows.single['count'], 1);
+      final runRows = afterRaw.select(
+        'SELECT COUNT(*) AS count FROM learning_runs r '
+        'JOIN learning_scopes s ON s.id = r.scope_id '
+        "WHERE s.owner_id = 'concurrent-writer'",
+      );
+      expect(runRows.single['count'], 1);
+      expect(afterRaw.select('PRAGMA foreign_key_check'), isEmpty);
+      afterRaw.close();
     });
 
     test('shares concurrent opens and closes/reopens the same file', () async {
@@ -2457,7 +3354,7 @@ void main() {
       await handle.close();
       final LearningDatabase reopened = await handle.reopen();
       expect(identical(opened.first, reopened), isFalse);
-      expect(await pragmaUserVersion(reopened), 1);
+      expect(await pragmaUserVersion(reopened), 2);
       expect(
         (await reopened
                 .customSelect(
@@ -2480,7 +3377,7 @@ void main() {
         },
       );
       await expectLater(retryingHandle.open(), throwsA(isA<StateError>()));
-      expect(await pragmaUserVersion(await retryingHandle.open()), 1);
+      expect(await pragmaUserVersion(await retryingHandle.open()), 2);
       await retryingHandle.close();
     });
 
@@ -2536,7 +3433,7 @@ void main() {
         expect(identical(firstDatabase, secondDatabase), isFalse);
         expect(identical(reopenedDatabases[0], reopenedDatabases[1]), isTrue);
         expect(openCount, 2);
-        expect(await pragmaUserVersion(secondDatabase), 1);
+        expect(await pragmaUserVersion(secondDatabase), 2);
         expect(
           (await secondDatabase.customSelect('SELECT 1 AS usable').getSingle())
               .read<int>('usable'),

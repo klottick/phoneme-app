@@ -73,7 +73,7 @@ final learningDatabaseHandleProvider =
   final handle = LearningDatabaseHandle(
       open: () async {
         final connection = await openLearningDatabaseConnection();
-        return LearningDatabase(connection.connection);
+        return LearningDatabase.openValidated(connection.connection);
       });
   ref.onDispose(() => unawaited(handle.close()));
   return handle;
