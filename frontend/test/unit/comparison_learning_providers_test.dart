@@ -177,6 +177,66 @@ void main() {
     );
   });
 
+  test(
+    'typed dedicated catalogue validation is local and cannot write SQLite',
+    () async {
+      final validationFailure = _invalidComparisonCatalogueFailure();
+      final h = await _harness(
+        extraOverrides: [
+          uyDemoComparisonCatalogueProvider.overrideWith(
+            (ref) => throw validationFailure,
+          ),
+        ],
+      );
+      addTearDown(h.close);
+
+      final mixed = h.container.read(comparisonCatalogueProvider);
+      final registry = h.container.read(comparisonCatalogueRegistryProvider);
+      final registration = registry.registrationFor(uyDemoComparisonActivityId);
+      expect(registration, isNotNull);
+      expect(registration!.catalogue, equals(null));
+      expect(registration.cause, same(validationFailure));
+      expect(registry.requireAvailable(comparisonActivityId), same(mixed));
+      expect(h.database.openCalls, 0);
+
+      final store =
+          h.container.read(comparisonLearningStoreProvider)
+              as SqliteComparisonLearningRepository;
+      expect(store.transitions.registry, same(registry));
+      expect(h.database.openCalls, 0);
+
+      final state = await store.load();
+      final rowsBeforePrepare = await _comparisonSqlSnapshot(h.database.handle);
+      expect(
+        store.prepare(
+          state: state,
+          activityId: comparisonActivityId,
+          action: StartComparisonRun(
+            sessionId: 'mixed-survives-typed-validation',
+            policy: LessonPolicy(),
+          ),
+        ),
+        isA<ComparisonLearningCommand>(),
+      );
+      expect(
+        () => store.prepare(
+          state: state,
+          activityId: uyDemoComparisonActivityId,
+          action: StartComparisonRun(
+            sessionId: 'dedicated-typed-validation',
+            policy: LessonPolicy(),
+          ),
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(
+        await _comparisonSqlSnapshot(h.database.handle),
+        rowsBeforePrepare,
+        reason: 'failed dedicated prepare must not change any SQLite rows',
+      );
+    },
+  );
+
   test('comparison store tracks registry availability changes', () async {
     var dedicatedAvailable = true;
     final h = await _harness(
@@ -234,6 +294,31 @@ void main() {
       expect(
         () => h.container.read(comparisonCatalogueRegistryProvider),
         throwsA(isA<FormatException>()),
+      );
+      expect(h.database.openCalls, 0);
+    },
+  );
+
+  test(
+    'typed mixed catalogue validation failure propagates unchanged',
+    () async {
+      final validationFailure = _invalidComparisonCatalogueFailure();
+      final h = await _harness(
+        extraOverrides: [
+          comparisonCatalogueProvider.overrideWith(
+            (ref) => throw validationFailure,
+          ),
+        ],
+      );
+      addTearDown(h.close);
+
+      expect(
+        () => h.container.read(comparisonCatalogueRegistryProvider),
+        throwsA(same(validationFailure)),
+      );
+      expect(
+        () => h.container.read(comparisonLearningStoreProvider),
+        throwsA(same(validationFailure)),
       );
       expect(h.database.openCalls, 0);
     },
@@ -1029,6 +1114,63 @@ Future<int?> _scopeRevision(
       )
       .get();
   return rows.isEmpty ? null : rows.single.read<int>('revision');
+}
+
+ComparisonContentValidationException _invalidComparisonCatalogueFailure() {
+  try {
+    ComparisonCatalogue.fromDrafts(
+      activityId: uyDemoComparisonActivityId,
+      sectionId: uyDemoComparisonActivityId,
+      contentRevision: 1,
+      exercises: const <ComparisonExerciseDraft>[],
+      referencePhonemes: const <String, List<String>>{},
+    );
+  } on ComparisonContentValidationException catch (error) {
+    return error;
+  }
+  throw StateError('Expected the invalid catalogue drafts to fail validation.');
+}
+
+Future<String> _comparisonSqlSnapshot(LearningDatabaseHandle handle) async {
+  final db = await handle.open();
+  final scopeRows = await db
+      .customSelect(
+        'SELECT * FROM learning_scopes WHERE family = ?',
+        variables: <Variable<Object>>[const Variable<String>('comparison')],
+      )
+      .get();
+  final result = <String, Object?>{
+    'scopes': [
+      for (final row in scopeRows) Map<String, Object?>.from(row.data),
+    ],
+  };
+  const tables = <String>[
+    'learning_runs',
+    'learning_content_bindings',
+    'learning_command_receipts',
+    'learning_attempts',
+    'learning_attempt_evidence',
+    'learning_attempt_values',
+    'learning_exposure',
+    'learning_best_scores',
+    'supported_sync_outbox',
+    'learning_mistakes',
+    'learning_summaries',
+    'learning_completions',
+  ];
+  for (final table in tables) {
+    final rows = await db
+        .customSelect(
+          'SELECT * FROM $table WHERE scope_id IN '
+          '(SELECT id FROM learning_scopes WHERE family = ?)',
+          variables: <Variable<Object>>[const Variable<String>('comparison')],
+        )
+        .get();
+    result[table] = [
+      for (final row in rows) Map<String, Object?>.from(row.data),
+    ];
+  }
+  return jsonEncode(result);
 }
 
 Future<void> _setSchemaVersion(

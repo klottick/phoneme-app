@@ -162,6 +162,11 @@ final comparisonCatalogueRegistryProvider =
         uyDemoRegistration = ComparisonCatalogueRegistration.available(
           catalogue,
         );
+      } on ComparisonContentValidationException catch (error) {
+        uyDemoRegistration = ComparisonCatalogueRegistration.unavailable(
+          activityId: uyDemoComparisonActivityId,
+          cause: error,
+        );
       } on FormatException catch (error) {
         uyDemoRegistration = ComparisonCatalogueRegistration.unavailable(
           activityId: uyDemoComparisonActivityId,
