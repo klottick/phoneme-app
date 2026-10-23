@@ -136,9 +136,32 @@ void main() {
       courseMapLocation(MapTarget.discovery, MapLaunch.review),
       '/course-lesson/en-fr-u-y?review=true',
     );
+    final dedicatedTarget = MapTarget.values
+        .where((target) => target.name == 'dedicatedComparison')
+        .firstOrNull;
+    expect(dedicatedTarget, isNotNull);
+    if (dedicatedTarget != null) {
+      expect(
+        courseMapLocation(dedicatedTarget, MapLaunch.start),
+        '/course-comparison/en-fr-u-y-comparison',
+      );
+      expect(
+        courseMapLocation(dedicatedTarget, MapLaunch.resume),
+        '/course-comparison/en-fr-u-y-comparison',
+      );
+      expect(
+        courseMapLocation(dedicatedTarget, MapLaunch.review),
+        '/course-comparison/en-fr-u-y-comparison?review=true',
+      );
+      expect(courseMapLocation(dedicatedTarget, MapLaunch.open), isNull);
+    }
     expect(
       courseMapLocation(MapTarget.mixedComparison, MapLaunch.open),
       '/course-comparison/en-fr-phoneme-comparison',
+    );
+    expect(
+      courseMapLocation(MapTarget.mixedComparison, MapLaunch.review),
+      '/course-comparison/en-fr-phoneme-comparison?review=true',
     );
     expect(
       courseMapLocation(MapTarget.sentenceSections, MapLaunch.open),
@@ -283,6 +306,47 @@ void main() {
 
     expect(find.text('Review comparison'), findsOneWidget);
     expect(find.text('Review lesson'), findsNothing);
+  });
+
+  testWidgets('dedicated_planet_uses_activity_specific_action_labels', (
+    tester,
+  ) async {
+    final target = MapTarget.values
+        .where((value) => value.name == 'dedicatedComparison')
+        .firstOrNull;
+    expect(target, isNotNull);
+    if (target == null) return;
+    final comparison = frenchSpaceSystems.first.bodies.firstWhere(
+      (body) => body.id == 'comparison',
+    );
+    for (final (launch, label, progress) in const [
+      (MapLaunch.start, 'Start comparison', MapProgress.notStarted),
+      (MapLaunch.resume, 'Continue comparison', MapProgress.resumable),
+      (MapLaunch.review, 'Review comparison', MapProgress.completed),
+    ]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CourseDestinationPanel(
+              body: MapBodyState(
+                definition: comparison,
+                readiness: MapReadiness.alpha,
+                progress: progress,
+                recommended: false,
+                explanation: comparison.description,
+                launch: launch,
+              ),
+              onLaunch: () {},
+            ),
+          ),
+        ),
+      );
+      expect(find.text(label), findsOneWidget);
+      expect(find.text('Open destination'), findsNothing);
+      expect(find.text('Start lesson'), findsNothing);
+      expect(find.text('Continue lesson'), findsNothing);
+      expect(find.text('Review lesson'), findsNothing);
+    }
   });
 
   testWidgets('integrated_map_footer_and_root_fit_phone_viewport_matrix', (

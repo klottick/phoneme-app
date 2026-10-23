@@ -22,10 +22,59 @@ CourseMapState projectCourseMap({
   required AsyncValue<CourseLearningState> course,
   required AsyncValue<ComparisonLearningState> comparison,
   required AsyncValue<ComparisonCatalogue> comparisonCatalogue,
+  AsyncValue<ComparisonCatalogueRegistry>? comparisonCatalogueRegistry,
   required AsyncValue<SentenceHuntLearningState> sentences,
   required AsyncValue<SentenceHuntCatalogue> sentenceCatalogue,
 }) {
   final bool courseFailurePresent = course.hasError;
+  final bool comparisonRegistryLoading =
+      comparisonCatalogueRegistry != null &&
+      (comparisonCatalogueRegistry.isLoading ||
+          comparisonCatalogueRegistry.isRefreshing);
+  final bool comparisonRegistryFailed =
+      comparisonCatalogueRegistry?.hasError ?? false;
+  final ComparisonCatalogueRegistry? comparisonRegistry =
+      comparisonCatalogueRegistry != null &&
+          _hasCurrentValue(comparisonCatalogueRegistry)
+      ? comparisonCatalogueRegistry.value
+      : null;
+  final ComparisonLearningState? comparisonState = _hasCurrentValue(comparison)
+      ? comparison.value
+      : null;
+  final bool comparisonScopeReady =
+      auth.ready &&
+      comparisonState != null &&
+      comparisonState.scope.courseId == 'en-fr' &&
+      comparisonState.scope.owner == auth.owner;
+  final ComparisonCatalogueRegistration? dedicatedRegistration =
+      comparisonRegistry?.registrationFor(uyDemoComparisonActivityId);
+  final ComparisonCatalogue? dedicatedCatalogue =
+      dedicatedRegistration?.catalogue;
+  final bool dedicatedRegistrationInvalid =
+      comparisonCatalogueRegistry != null &&
+      !comparisonRegistryLoading &&
+      !comparisonRegistryFailed &&
+      comparisonRegistry != null &&
+      (dedicatedRegistration == null ||
+          dedicatedCatalogue == null ||
+          dedicatedCatalogue.activityId != uyDemoComparisonActivityId);
+  final bool dedicatedBindingPersisted =
+      comparisonState?.slots.containsKey(uyDemoComparisonActivityId) ?? false;
+  final ComparisonSlot? dedicatedSlot =
+      comparisonState?.slots[uyDemoComparisonActivityId];
+  final bool dedicatedSlotInvalid =
+      comparisonScopeReady &&
+      dedicatedSlot != null &&
+      dedicatedCatalogue != null &&
+      !_validComparisonSlot(dedicatedSlot, dedicatedCatalogue);
+  final bool comparisonFamilyFailure =
+      comparison.hasError ||
+      comparisonCatalogue.hasError ||
+      comparisonRegistryFailed ||
+      (comparisonScopeReady &&
+          dedicatedRegistrationInvalid &&
+          dedicatedBindingPersisted) ||
+      dedicatedSlotInvalid;
   final bool courseReady =
       auth.ready &&
       _exact(
@@ -136,6 +185,8 @@ CourseMapState projectCourseMap({
           auth.ready &&
           comparisonLoaded &&
           catalogueLoaded &&
+          !comparisonRegistryLoading &&
+          !comparisonFamilyFailure &&
           value != null &&
           cat != null &&
           value.scope.courseId == 'en-fr' &&
@@ -144,7 +195,7 @@ CourseMapState projectCourseMap({
         projected.add(
           _familyUnavailable(
             body,
-            comparison.hasError || comparisonCatalogue.hasError,
+            comparisonFamilyFailure,
             'Mixed comparison practice is unavailable; retry or open its existing recovery route.',
           ),
         );
@@ -178,6 +229,97 @@ CourseMapState projectCourseMap({
             launch: summary.hasCurrentRevisionCompletion
                 ? MapLaunch.review
                 : MapLaunch.open,
+            evidenceLabels: [
+              summary.practiceLabel,
+              summary.pairsLabel,
+              summary.answersLabel,
+              summary.afterDebriefLabel,
+              summary.completionLabel,
+              summary.unresolvedLabel,
+            ],
+          ),
+        );
+      }
+    } else if (body.target == MapTarget.dedicatedComparison) {
+      if (comparisonFamilyFailure) {
+        projected.add(
+          _dedicatedUnavailable(
+            body,
+            'Comparison-family progress is unavailable. Retry or open its recovery route.',
+            retry: true,
+          ),
+        );
+      } else if (!auth.ready ||
+          !comparisonScopeReady ||
+          comparisonRegistryLoading ||
+          (comparisonCatalogueRegistry != null && comparisonRegistry == null)) {
+        projected.add(
+          MapBodyState(
+            definition: body,
+            readiness: MapReadiness.loading,
+            progress: MapProgress.unknown,
+            recommended: false,
+            explanation: 'Dedicated comparison availability is loading.',
+            launch: null,
+          ),
+        );
+      } else if (comparisonCatalogueRegistry == null) {
+        projected.add(
+          _dedicatedUnavailable(
+            body,
+            'Dedicated comparison availability was not supplied.',
+            retry: false,
+          ),
+        );
+      } else if (dedicatedRegistration == null ||
+          dedicatedCatalogue == null ||
+          dedicatedCatalogue.activityId != uyDemoComparisonActivityId) {
+        projected.add(
+          _dedicatedUnavailable(
+            body,
+            'Dedicated /u/–/y/ comparison content is unavailable. Retry validation or open its recovery route.',
+            retry: true,
+          ),
+        );
+      } else {
+        final ComparisonProgressSummary summary;
+        try {
+          summary = ComparisonProgressSummary.fromState(
+            state: comparisonState,
+            catalogue: dedicatedCatalogue,
+          );
+        } on Object catch (error) {
+          projected.add(
+            _dedicatedUnavailable(
+              body,
+              'Dedicated comparison progress is unavailable: $error.',
+              retry: true,
+            ),
+          );
+          continue;
+        }
+        final bool completed = summary.hasCurrentRevisionCompletion;
+        final bool resumable = dedicatedSlot != null && !completed;
+        projected.add(
+          MapBodyState(
+            definition: body,
+            readiness: MapReadiness.alpha,
+            progress: completed
+                ? MapProgress.completed
+                : resumable
+                ? MapProgress.resumable
+                : MapProgress.notStarted,
+            recommended: false,
+            explanation: completed
+                ? 'Current /u/–/y/ comparison completion saved.'
+                : resumable
+                ? 'Continue the saved /u/–/y/ comparison.'
+                : 'Start /u/–/y/ comparison practice.',
+            launch: completed
+                ? MapLaunch.review
+                : resumable
+                ? MapLaunch.resume
+                : MapLaunch.start,
             evidenceLabels: [
               summary.practiceLabel,
               summary.pairsLabel,
@@ -369,6 +511,27 @@ bool _validDiscoverySession(
   }
 }
 
+bool _validComparisonSlot(ComparisonSlot slot, ComparisonCatalogue catalogue) {
+  if (slot.activityId != catalogue.activityId ||
+      slot.checkpoint.contentRevision != catalogue.contentRevision ||
+      slot.scope != slot.checkpoint.scope ||
+      slot.scope != slot.latestReceipt.scope ||
+      slot.activityId != slot.latestReceipt.activityId ||
+      slot.cursor != slot.latestReceipt.after) {
+    return false;
+  }
+  try {
+    LessonSectionSession.fromJson(
+      Map<String, dynamic>.from(slot.checkpoint.sessionJson),
+      itemIds: catalogue.exercises.map((exercise) => exercise.id).toList(),
+      contentRevision: catalogue.contentRevision,
+    );
+    return true;
+  } on Object {
+    return false;
+  }
+}
+
 MapBodyState _familyUnavailable(
   MapBodyDefinition body,
   bool failed,
@@ -391,3 +554,16 @@ MapBodyState _unavailable(MapBodyDefinition body, String reason) =>
       explanation: reason,
       launch: null,
     );
+
+MapBodyState _dedicatedUnavailable(
+  MapBodyDefinition body,
+  String reason, {
+  required bool retry,
+}) => MapBodyState(
+  definition: body,
+  readiness: MapReadiness.unavailable,
+  progress: MapProgress.unknown,
+  recommended: false,
+  explanation: reason,
+  launch: retry ? MapLaunch.start : null,
+);

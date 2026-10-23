@@ -34,13 +34,23 @@ class CourseDestinationPanel extends StatelessWidget {
       MapReadiness.qualificationBlocked => 'View sections',
       MapReadiness.loading || MapReadiness.unavailable => 'Open recovery',
       MapReadiness.alpha => switch (body.launch) {
-        MapLaunch.start => 'Start lesson',
-        MapLaunch.resume => 'Continue lesson',
+        MapLaunch.start =>
+          body.definition.target == MapTarget.dedicatedComparison
+              ? 'Start comparison'
+              : 'Start lesson',
+        MapLaunch.resume =>
+          body.definition.target == MapTarget.dedicatedComparison
+              ? 'Continue comparison'
+              : 'Continue lesson',
         MapLaunch.review =>
-          body.definition.target == MapTarget.mixedComparison
+          body.definition.target == MapTarget.mixedComparison ||
+                  body.definition.target == MapTarget.dedicatedComparison
               ? 'Review comparison'
               : 'Review lesson',
-        MapLaunch.open => 'Open destination',
+        MapLaunch.open =>
+          body.definition.target == MapTarget.dedicatedComparison
+              ? null
+              : 'Open destination',
         null => null,
       },
     };

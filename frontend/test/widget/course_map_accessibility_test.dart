@@ -258,7 +258,9 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.bySemanticsLabel(RegExp('Compare /u/ and /y/.*Coming soon')),
+      find.bySemanticsLabel(
+        RegExp('Compare /u/ and /y/.*planet.*Progress unknown'),
+      ),
       findsWidgets,
     );
   });

@@ -43,11 +43,12 @@ final MapSystemDefinition _frenchUySystem = MapSystemDefinition(
       id: 'comparison',
       title: 'Compare /u/ and /y/',
       description:
-          'Planned system-specific comparison lesson. "Coming soon"; the '
-          'existing mixed comparison practice is not a substitute.',
+          'Demo practice: this authored comparison content has not had qualified French review. It is practice, not an assessment.',
       role: MapBodyRole.planet,
       optional: false,
-      planned: true,
+      planned: false,
+      target: MapTarget.dedicatedComparison,
+      activityId: uyDemoComparisonActivityId,
       x: 0.27,
       y: 0.37,
       orbitRadius: 0.18,
@@ -166,9 +167,9 @@ final MapSystemDefinition _frenchUySystem = MapSystemDefinition(
       orbitRadius: 0.62,
     ),
   ],
-  // Authored recommendation order: the first system has exactly one live
-  // main lesson. Orbital distance and drawing position never contribute.
-  mainOrder: ['discovery'],
+  // Authored recommendation order; orbital distance and drawing position
+  // never contribute.
+  mainOrder: ['discovery', 'comparison'],
 );
 
 /// Planned chart systems: they explain a future sound focus, they do not

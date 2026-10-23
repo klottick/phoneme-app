@@ -8,6 +8,12 @@ String? courseMapLocation(MapTarget target, MapLaunch launch) {
     (MapTarget.discovery, MapLaunch.resume) => '/course-lesson/en-fr-u-y',
     (MapTarget.discovery, MapLaunch.review) =>
       '/course-lesson/en-fr-u-y?review=true',
+    (MapTarget.dedicatedComparison, MapLaunch.start) =>
+      '/course-comparison/en-fr-u-y-comparison',
+    (MapTarget.dedicatedComparison, MapLaunch.resume) =>
+      '/course-comparison/en-fr-u-y-comparison',
+    (MapTarget.dedicatedComparison, MapLaunch.review) =>
+      '/course-comparison/en-fr-u-y-comparison?review=true',
     (MapTarget.mixedComparison, MapLaunch.open) =>
       '/course-comparison/en-fr-phoneme-comparison',
     (MapTarget.mixedComparison, MapLaunch.review) =>

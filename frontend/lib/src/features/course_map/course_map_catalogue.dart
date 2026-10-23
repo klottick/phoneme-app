@@ -12,7 +12,14 @@ enum MapBodyRole { planet, moon, station, asteroidField }
 ///
 /// A target references an existing validated destination; it never invents
 /// routes, content, or completion state.
-enum MapTarget { discovery, mixedComparison, sentenceSections, review, arcade }
+enum MapTarget {
+  discovery,
+  dedicatedComparison,
+  mixedComparison,
+  sentenceSections,
+  review,
+  arcade,
+}
 
 /// Immutable authored metadata for one body on a space map.
 ///
@@ -53,8 +60,9 @@ class MapBodyDefinition {
   final MapTarget? target;
 
   /// The learning activity this body binds, or null: discovery binds its
-  /// registry lesson id, mixed comparison binds its own activity id, and
-  /// route destinations (review, sentences, arcade) bind nothing.
+  /// registry lesson id, dedicated and mixed comparison bind their own
+  /// activity ids, and route destinations (review, sentences, arcade) bind
+  /// nothing.
   final String? activityId;
 
   /// The body this one is a satellite of (for example, a coaching moon of a
@@ -175,6 +183,16 @@ void validateMapSystem(
         if (body.role != MapBodyRole.planet) {
           throw FormatException(
               _detail(systemId, 'discovery body "${body.id}" must be a planet.'));
+        }
+        break;
+      case MapTarget.dedicatedComparison:
+        if (body.role != MapBodyRole.planet) {
+          throw FormatException(
+            _detail(
+              systemId,
+              'dedicated comparison body "${body.id}" must be a planet.',
+            ),
+          );
         }
         break;
       case MapTarget.mixedComparison:
@@ -338,6 +356,16 @@ void _validateBinding(
       if (!covered.contains('u') || !covered.contains('y')) {
         throw FormatException(_detail(
             systemId, 'discovery activity of body "${body.id}" must teach /u/ and /y/.'));
+      }
+      break;
+    case MapTarget.dedicatedComparison:
+      if (activityId != uyDemoComparisonActivityId) {
+        throw FormatException(
+          _detail(
+            systemId,
+            'dedicated comparison body "${body.id}" must bind exactly $uyDemoComparisonActivityId.',
+          ),
+        );
       }
       break;
     case MapTarget.mixedComparison:

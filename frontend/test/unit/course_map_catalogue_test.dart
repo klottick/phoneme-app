@@ -53,16 +53,15 @@ MapSystemDefinition system({
 }
 
 void main() {
-  test('initial_system_has_one_live_main_lesson', () {
+  test('initial_system_has_dedicated_comparison_after_discovery', () {
     final initial = findSpaceSystem('en-fr-u-y-system');
     expect(initial, isNotNull);
     final bodies = initial!.bodies;
     expect(bodies, hasLength(10));
     expect(initial.planned, isFalse);
-    expect(initial.mainOrder, ['discovery']);
-    expect(bodies.where((b) => b.planned).length, 5);
-    // The one live main destination is the discovery planet, bound to the
-    // real discovery activity.
+    expect(initial.mainOrder, ['discovery', 'comparison']);
+    expect(bodies.where((b) => b.planned).length, 4);
+    // Discovery and dedicated comparison are the ordered main planets.
     final discovery = bodies.firstWhere((b) => b.id == 'discovery');
     expect(discovery.role, MapBodyRole.planet);
     expect(discovery.planned, isFalse);
@@ -70,14 +69,87 @@ void main() {
     expect(discovery.target, MapTarget.discovery);
     expect(discovery.activityId, 'lesson:en-fr-u-y');
     expect(discovery.parentId, isNull);
+    final comparison = bodies.firstWhere((b) => b.id == 'comparison');
+    expect(comparison.role, MapBodyRole.planet);
+    expect(comparison.planned, isFalse);
+    expect(comparison.optional, isFalse);
+    expect(comparison.target?.name, 'dedicatedComparison');
+    expect(comparison.activityId, uyDemoComparisonActivityId);
+    expect(
+      comparison.description,
+      contains(
+        'Demo practice: this authored comparison content has not had qualified French review. It is practice, not an assessment.',
+      ),
+    );
+    for (final id in ['context', 'spelling', 'checkpoint']) {
+      final planned = bodies.firstWhere((body) => body.id == id);
+      expect(planned.planned, isTrue, reason: '$id remains planned');
+      expect(planned.description, contains('Coming soon'));
+      expect(planned.target, isNull);
+      expect(planned.activityId, isNull);
+    }
     final liveMains = bodies
         .where((b) => initial.mainOrder.contains(b.id))
         .toList(growable: false);
-    expect(liveMains, hasLength(1));
-    expect(liveMains.single.planned, isFalse);
-    expect(liveMains.single.activityId, isNotNull);
+    expect(liveMains, hasLength(2));
+    expect(liveMains.every((body) => !body.planned), isTrue);
+    expect(liveMains.map((body) => body.activityId), [
+      'lesson:en-fr-u-y',
+      uyDemoComparisonActivityId,
+    ]);
     // The authored initial system validates cleanly against the registry.
     validateMapSystem(initial, registry: LearningRegistry.french());
+  });
+
+  test('dedicated_comparison_target_is_a_planet_bound_to_its_activity', () {
+    final target = MapTarget.values
+        .where((value) => value.name == 'dedicatedComparison')
+        .firstOrNull;
+    expect(target, isNotNull);
+    if (target == null) return;
+
+    final valid = system(
+      bodies: [
+        body(
+          id: 'dedicated',
+          target: target,
+          activityId: uyDemoComparisonActivityId,
+        ),
+      ],
+      mainOrder: ['dedicated'],
+    );
+    expect(
+      () => validateMapSystem(valid, registry: LearningRegistry.french()),
+      returnsNormally,
+    );
+    for (final invalid in [
+      system(
+        bodies: [
+          body(
+            id: 'dedicated',
+            role: MapBodyRole.station,
+            target: target,
+            activityId: uyDemoComparisonActivityId,
+          ),
+        ],
+        mainOrder: ['dedicated'],
+      ),
+      system(
+        bodies: [
+          body(
+            id: 'dedicated',
+            target: target,
+            activityId: comparisonActivityId,
+          ),
+        ],
+        mainOrder: ['dedicated'],
+      ),
+    ]) {
+      expect(
+        () => validateMapSystem(invalid, registry: LearningRegistry.french()),
+        throwsFormatException,
+      );
+    }
   });
 
   test('mixed_practice_is_not_a_system_lesson', () {
@@ -120,7 +192,7 @@ void main() {
     final initial = findSpaceSystem('en-fr-u-y-system');
     final plannedBodies =
         initial!.bodies.where((b) => b.planned).toList(growable: false);
-    expect(plannedBodies, hasLength(5));
+    expect(plannedBodies, hasLength(4));
     for (final body in plannedBodies) {
       expect(body.target, isNull, reason: 'planned ${body.id} must not launch');
       expect(body.activityId, isNull,
@@ -332,7 +404,7 @@ void main() {
       mainOrder: authoredOrder,
     );
     authoredOrder.clear();
-    expect(permuted.mainOrder, ['discovery']);
+    expect(permuted.mainOrder, ['discovery', 'comparison']);
     expect(() => permuted.mainOrder.add('another'), throwsUnsupportedError);
     expect(permuted.mainOrder, authoredSystem.mainOrder);
     // Shuffled presentation metadata still validates against the registry.
