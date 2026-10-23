@@ -139,10 +139,11 @@ String _token(int value) => value.toRadixString(16).padLeft(22, '0');
 /// the real SQL repository.
 final class ComparisonLearningSqlTestHarness {
   ComparisonLearningSqlTestHarness({
-    required this.catalogue,
+    ComparisonCatalogue? catalogue,
+    ComparisonCatalogueRegistry? registry,
     required this.currentAuth,
     required this.backendOwner,
-  }) {
+  }) : registry = _resolveRegistry(catalogue, registry) {
     directory = Directory.systemTemp.createTempSync(
       'comparison-learning-test-',
     );
@@ -154,7 +155,19 @@ final class ComparisonLearningSqlTestHarness {
     addTearDown(dispose);
   }
 
-  final ComparisonCatalogue catalogue;
+  static ComparisonCatalogueRegistry _resolveRegistry(
+    ComparisonCatalogue? catalogue,
+    ComparisonCatalogueRegistry? registry,
+  ) {
+    if ((catalogue == null) == (registry == null)) {
+      throw ArgumentError('Supply exactly one catalogue or registry.');
+    }
+    return registry ?? ComparisonCatalogueRegistry.single(catalogue!);
+  }
+
+  final ComparisonCatalogueRegistry registry;
+  ComparisonCatalogue get catalogue =>
+      registry.requireAvailable(comparisonActivityId);
   final LearningAuthScope Function() currentAuth;
   final LearningOwner Function() backendOwner;
   late final Directory directory;
@@ -175,7 +188,7 @@ final class ComparisonLearningSqlTestHarness {
       authGeneration: generation,
       currentAuth: currentAuth ?? this.currentAuth,
       backendOwner: backendOwner ?? this.backendOwner,
-      transitions: ComparisonLearningTransitionEngine(catalogue: catalogue),
+      transitions: ComparisonLearningTransitionEngine(registry: registry),
       clock: () => DateTime.utc(2026, 10, 17),
       newToken: () => (++_tokenCounter).toString().padLeft(22, '0'),
       onCommitted: onCommitted,

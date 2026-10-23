@@ -143,6 +143,37 @@ final _comparisonLearningStateRevisionProvider = StateProvider<int>((ref) => 0);
 final comparisonCatalogueProvider =
     Provider<ComparisonCatalogue>((ref) => loadFrenchComparisonCatalogue());
 
+final uyDemoComparisonCatalogueProvider = Provider<ComparisonCatalogue>(
+  (ref) => loadFrenchUyDemoComparisonCatalogue(),
+);
+
+final comparisonCatalogueRegistryProvider =
+    Provider<ComparisonCatalogueRegistry>((ref) {
+      final mixed = ref.watch(comparisonCatalogueProvider);
+      late final ComparisonCatalogueRegistration uyDemoRegistration;
+      try {
+        final catalogue = ref.watch(uyDemoComparisonCatalogueProvider);
+        if (catalogue.activityId != uyDemoComparisonActivityId ||
+            catalogue.sectionId != uyDemoComparisonActivityId) {
+          throw const FormatException(
+            'The dedicated comparison catalogue identity is invalid.',
+          );
+        }
+        uyDemoRegistration = ComparisonCatalogueRegistration.available(
+          catalogue,
+        );
+      } on FormatException catch (error) {
+        uyDemoRegistration = ComparisonCatalogueRegistration.unavailable(
+          activityId: uyDemoComparisonActivityId,
+          cause: error,
+        );
+      }
+      return ComparisonCatalogueRegistry([
+        ComparisonCatalogueRegistration.available(mixed),
+        uyDemoRegistration,
+      ]);
+    });
+
 final comparisonLearningStoreProvider =
     Provider<ComparisonLearningStore>((ref) {
   var isAlive = true;
@@ -153,14 +184,14 @@ final comparisonLearningStoreProvider =
   final stateRevision =
       ref.read(_comparisonLearningStateRevisionProvider.notifier);
   final database = ref.watch(learningDatabaseHandleProvider);
-  final catalogue = ref.read(comparisonCatalogueProvider);
+  final registry = ref.read(comparisonCatalogueRegistryProvider);
   return SqliteComparisonLearningRepository(
       database: database,
       scope: ComparisonProfileScope(courseId: 'en-fr', owner: identity.owner),
       authGeneration: identity.generation,
       currentAuth: () => tracker.current,
       backendOwner: _backendOwner,
-      transitions: ComparisonLearningTransitionEngine(catalogue: catalogue),
+      transitions: ComparisonLearningTransitionEngine(registry: registry),
       clock: () => DateTime.now().toUtc(),
       newToken: _newToken,
       onCommitted: () {
@@ -182,6 +213,6 @@ final comparisonLearningStoreProvider =
 final FutureProvider<ComparisonLearningState> comparisonLearningStateProvider =
     FutureProvider<ComparisonLearningState>((ref) {
   ref.watch(_comparisonLearningStateRevisionProvider);
-  ref.watch(comparisonCatalogueProvider);
+  ref.watch(comparisonCatalogueRegistryProvider);
   return ref.watch(comparisonLearningStoreProvider).load();
 });

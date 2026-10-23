@@ -21,6 +21,8 @@ import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/backend.dart';
+import 'package:linguist/src/core/course/sentence_hunt_learning_providers.dart'
+    show sentenceHuntLearningStateProvider;
 import 'package:linguist/src/core/services/auth_service.dart';
 import 'package:linguist/src/core/course/french_comparison_content.dart';
 import 'package:linguist/src/core/course/lesson_policy.dart';
@@ -124,6 +126,124 @@ void main() {
       reason: 'catalogue failure must precede database opening',
     );
   });
+
+  test('invalid dedicated catalogue is local to mixed comparison', () async {
+    final h = await _harness(
+      extraOverrides: [
+        uyDemoComparisonCatalogueProvider.overrideWith(
+          (ref) => loadFrenchComparisonCatalogue(),
+        ),
+      ],
+    );
+    addTearDown(h.close);
+
+    final mixed = h.container.read(comparisonCatalogueProvider);
+    final registry = h.container.read(comparisonCatalogueRegistryProvider);
+    expect(mixed.activityId, comparisonActivityId);
+    expect(registry.requireAvailable(comparisonActivityId), same(mixed));
+    final unavailable = registry.registrationFor(uyDemoComparisonActivityId);
+    expect(unavailable, isNotNull);
+    expect(unavailable!.catalogue, equals(null));
+    expect(unavailable.cause, isA<FormatException>());
+
+    final store =
+        h.container.read(comparisonLearningStoreProvider)
+            as SqliteComparisonLearningRepository;
+    expect(identical(store.transitions.registry, registry), isTrue);
+    expect(h.database.openCalls, 0);
+    final state = await store.load();
+    expect(state.slots, isEmpty);
+    expect(
+      store.prepare(
+        state: state,
+        activityId: comparisonActivityId,
+        action: StartComparisonRun(
+          sessionId: 'mixed-still-available',
+          policy: LessonPolicy(),
+        ),
+      ),
+      isA<ComparisonLearningCommand>(),
+    );
+    expect(
+      () => store.prepare(
+        state: state,
+        activityId: uyDemoComparisonActivityId,
+        action: StartComparisonRun(
+          sessionId: 'dedicated-unavailable',
+          policy: LessonPolicy(),
+        ),
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test(
+    'mixed catalogue failures are not masked by registry fallback',
+    () async {
+      final h = await _harness(
+        extraOverrides: [
+          comparisonCatalogueProvider.overrideWith(
+            (ref) => loadFrenchUyDemoComparisonCatalogue(),
+          ),
+        ],
+      );
+      addTearDown(h.close);
+
+      expect(
+        () => h.container.read(comparisonCatalogueRegistryProvider),
+        throwsA(isA<FormatException>()),
+      );
+      expect(h.database.openCalls, 0);
+    },
+  );
+
+  test(
+    'unknown comparison corruption does not block other family providers',
+    () async {
+      final h = await _harness();
+      addTearDown(h.close);
+      final store = h.container.read(comparisonLearningStoreProvider);
+      final empty = await store.load();
+      await store.submit(
+        store.prepare(
+          state: empty,
+          activityId: comparisonActivityId,
+          action: StartComparisonRun(
+            sessionId: 'independent-families',
+            policy: LessonPolicy(),
+          ),
+        ),
+      );
+
+      final db = await h.database.handle.open();
+      final scopeId =
+          (await db
+                  .customSelect(
+                    "SELECT id FROM learning_scopes WHERE family = 'comparison'",
+                  )
+                  .getSingle())
+              .read<int>('id');
+      await db.customStatement(
+        'INSERT INTO learning_completions '
+        '(scope_id, activity_id, content_revision, policy_kind, '
+        'policy_revision, threshold_percent, committed_at_us) '
+        "VALUES (?, 'unknown-comparison-activity', 1, 'discoveryThreshold', 1, 80, ?)",
+        [scopeId, DateTime.utc(2026, 10, 23).microsecondsSinceEpoch],
+      );
+
+      await expectLater(store.load(), throwsA(isA<LearningCorruptException>()));
+      expect(
+        (await h.container.read(courseLearningStateProvider.future)).revision,
+        0,
+      );
+      expect(
+        (await h.container.read(
+          sentenceHuntLearningStateProvider.future,
+        )).revision,
+        0,
+      );
+    },
+  );
 
   test('comparison commits without constructing cloud transport', () async {
     final h = await _harness(
