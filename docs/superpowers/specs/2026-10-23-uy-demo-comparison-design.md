@@ -46,10 +46,11 @@ licensing/release decision.
    existing owner/course/family scope, transaction coordinator, tables, audio
    owner, session engine, and typed comparison evidence. Extend the domain and
    SQL adapter from one registered catalogue/slot to a validated activity map
-   and activity-keyed slots. The existing `learning_runs` primary key is
-   `(scope_id, activity_id)`; receipts, attempts, mistakes, summaries and
-   completions also carry activity identity. Avoid a SQL rewrite or parallel
-   writer.
+   and activity-keyed slots. `learning_runs` has no composite table primary key;
+   `learning_database.dart` declares the unique index
+   `ux_learning_runs_scope_activity` over `(scope_id, activity_id)` at line 448.
+   Receipts, attempts, mistakes, summaries and completions also carry activity
+   identity. Avoid a SQL rewrite or parallel writer.
    Preserve a legacy `slot` read accessor as the mixed activity's slot where
    compatibility requires it; new callers select `slots[activityId]`.
 2. **Namespaced comparison profile.** Gives the demo a physically separate
@@ -62,14 +63,26 @@ licensing/release decision.
    session/recovery flow. It is not a dedicated persistent planet; not selected.
 
 The selected approach is additive in the existing comparison family, not
-“replace the global catalogue.” It must reject duplicate/unknown activity IDs,
-validate each catalogue against its own content revision, load and validate every
-registered activity row independently, and leave unrecognized/corrupt data
-preserved and unavailable rather than silently dropping it. No SQL table/schema
-change is intended: confirm this against the existing unique activity-keyed run
-constraint during the later plan. If that constraint is absent or cannot safely
-represent independent run cursors, stop and return for a revised written design;
-do not improvise a second profile/writer.
+“replace the global catalogue.” It must reject duplicate/unknown activity IDs
+and validate each registered catalogue against its own content revision. An
+invalid new catalogue/registration is an activity-local unavailable state; it
+must not invalidate the valid mixed catalogue or cause a mixed-profile write.
+
+The current persistence boundary is different: comparison loading validates the
+shared owner/course/family profile as a whole. Corruption or an unrecognized row
+in that shared comparison profile may make **both comparison activities**
+unavailable under the existing family-level retry/reload policy. Preserve its
+stored rows/bytes and the valid mixed state; do not partially skip/discard rows,
+quarantine, migrate, reset, or write through a second path. This comparison-family
+failure must not suppress discovery, sentence, or other independent families.
+Keep this conservative behavior rather than inventing partial recovery.
+
+No SQL table/schema change is intended. The unique index
+`ux_learning_runs_scope_activity` exists in `learning_database.dart:448`; the
+implementation plan must test interleaved activity transactions against the
+actual shared scope revision/receipt behavior. If the approved contract would
+require schema expansion beyond this existing index, stop for a revised written
+design; do not improvise a second profile/writer.
 
 ### Named interfaces and data flow
 
@@ -81,15 +94,16 @@ do not improvise a second profile/writer.
 - Comparison learning domain, command codec, checkpoint codec, storage
   validator, and `comparison_learning_sql_adapter.dart`: accept only the
   registry's explicit activity-to-catalogue mapping; key checkpoint/cursor by
-   activity. Keep the existing mixed command JSON/fingerprint bytes and storage
-   key unchanged. Preserve the scope-wide monotone commit ordinal while
-   validating run cursors and receipt before/after chains per activity; never
-    compare one activity's cursor with another's. A commit in one activity still
-    advances the shared scope revision/ordinal; a concurrent command captured
-    against the prior scope revision must use existing conflict/reload behavior,
-    not overwrite the sibling activity. Comparison profile persistence remains
-    local and owner-isolated. No comparison value enters course discovery state
-    or the cloud outbox.
+  activity. Keep the existing mixed command JSON/fingerprint bytes and storage
+  key unchanged. Preserve the scope-wide monotone commit ordinal while
+  validating run cursors and receipt before/after chains per activity; never
+  compare one activity's cursor with another's. A commit in one activity still
+  advances the shared scope revision/ordinal; a concurrent command captured
+  against the prior scope revision must use existing conflict/reload behavior,
+  not overwrite the sibling activity. This scope fence is carried by the
+  existing command's `expectedScopeRevision`. Comparison profile persistence
+  remains local and owner-isolated. No comparison value enters course discovery
+  state or the cloud outbox.
 - `course_learning_providers.dart`: expose an immutable registered catalogue
   lookup by activity ID; construct the existing comparison repository once
   with that complete registry, not separate repositories/writers. The route
@@ -186,15 +200,23 @@ choice or error.
   mixed. Neither activity transfers attempts, checkpoints, evidence, retry
   state, completion, recommendations, or credit to the other or to discovery.
 - Preserve map loading/error/corruption and guest/account isolation semantics.
-  Failure in the new comparison registration or slot yields a local unavailable
-  body with recovery/retry; it must not erase, empty, or block valid discovery
-  and mixed state. A completed or corrupted sibling activity must not overwrite
-  another activity's checkpoint.
+  Invalid new activity registration/content yields a local unavailable body
+  with recovery/retry; it must not erase, empty, or block valid discovery or
+  invalidate the valid mixed catalogue. Corruption in the shared comparison
+  profile may make both comparison bodies unavailable under existing
+  family-level fail-closed/retry behavior; preserve all profile rows/bytes and
+  valid mixed data, and do not partially skip or rewrite the profile. This must
+  not block discovery, sentence, or other independent families. A completed
+  sibling activity must never overwrite another activity's checkpoint.
 - Preserve discovery IDs/content revision/progress and mixed activity IDs,
   pair IDs, checkpoint, canonical commands, saved history, route and owners.
-  Add no navigation-progress store. Existing route IDs and data remain
-  interpretable after update; older app versions simply do not present the new
-  activity.
+  Add no navigation-progress store. An upgrade must load existing valid mixed
+  data without rewriting it, and the new implementation must preserve existing
+  mixed canonical command bytes so an exact frozen mixed command remains valid
+  for the existing retry path. Do not claim downgrade compatibility: an older
+  binary may fail closed on a comparison profile containing the new activity's
+  rows. Do not automatically delete, migrate, or mutate user data to force an
+  older binary to open it; rollback/downgrade is not guaranteed.
 
 ## 5. Acceptance criteria for the later implementation plan
 
@@ -215,9 +237,13 @@ These are future acceptance requirements, not test results or approval to code.
    continuity is checked only within one activity; stale cross-activity scope
    revisions conflict/reload rather than overwrite.
 3. Existing SQL schema constraints support independent activity-keyed run rows;
-   old mixed SQLite data loads unchanged. Corrupt/unknown new-activity data is
-   preserved and surfaced unavailable, not treated as empty or used to suppress
-   another valid activity. No second persistence writer or table migration.
+   old mixed SQLite data loads unchanged on upgrade. Invalid new catalogue
+   registration is activity-local. Corrupt/unknown persisted data in the shared
+   comparison profile is preserved and makes the comparison family unavailable
+   under the existing conservative fail-closed/retry behavior; it is not treated
+   as empty and is not partially skipped, discarded, or rewritten. Discovery,
+   sentence, and other independent families remain available. No second
+   persistence writer or table migration.
 4. Existing route and query behavior for mixed comparison and `/compare` is
    unchanged. The new exact route launches/resumes/reviews its own activity;
    unknown activity/pair/query values fail locally and cannot fall through to
@@ -225,9 +251,11 @@ These are future acceptance requirements, not test results or approval to code.
 5. The body `comparison` has typed dedicated activity binding, follows
    `discovery` in main order, and uses only its own acknowledged current
    completion. Mixed practice remains an optional separate station. Loading,
-   unavailable, not-started, resumable and completed states are distinct and
-   owner-safe. Remaining context/spelling/checkpoint stay planned; no fake
-   full-course completion or new hard lock.
+   activity-local unavailable, family-level comparison unavailable,
+   not-started, resumable and completed states are distinct and owner-safe.
+   Comparison-family corruption may disable both comparison bodies but must not
+   suppress discovery/sentence state. Remaining context/spelling/checkpoint stay
+   planned; no fake full-course completion or new hard lock.
 6. Audio surfaces retain the exact alpha disclosure and retry/unavailable
    behavior with no covered-word TTS substitution. Both A/B fresh successes,
    cancellation, replay, save ACK/retry, route/background and owner-change
