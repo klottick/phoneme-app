@@ -2,7 +2,7 @@ import 'comparison_content.dart';
 import 'course_exercise.dart';
 import 'french_course.dart';
 
-ComparisonCatalogue loadFrenchComparisonCatalogue() {
+Map<String, List<String>> _frenchWordReferencePhonemes() {
   final referencePhonemes = <String, List<String>>{};
   for (final reference in frenchCurriculum.audioReferences) {
     if (!reference.id.startsWith('fr-word-')) continue;
@@ -11,6 +11,11 @@ ComparisonCatalogue loadFrenchComparisonCatalogue() {
     final phonemes = frenchCitationPhonemes[wordText];
     if (phonemes != null) referencePhonemes[reference.id] = phonemes;
   }
+  return referencePhonemes;
+}
+
+ComparisonCatalogue loadFrenchComparisonCatalogue() {
+  final referencePhonemes = _frenchWordReferencePhonemes();
 
   const rows = <({
     String id,
@@ -173,6 +178,155 @@ ComparisonCatalogue loadFrenchComparisonCatalogue() {
   return ComparisonCatalogue.fromDrafts(
     activityId: comparisonActivityId,
     sectionId: comparisonActivityId,
+    contentRevision: 1,
+    exercises: drafts,
+    referencePhonemes: referencePhonemes,
+  );
+}
+ComparisonCatalogue loadFrenchUyDemoComparisonCatalogue() {
+  final referencePhonemes = _frenchWordReferencePhonemes();
+
+  const rows =
+      <
+        ({
+          String id,
+          String wordA,
+          String phonemeA,
+          String wordB,
+          String phonemeB,
+          PhonemeRelation relation,
+          String note,
+        })
+      >[
+        (
+          id: 'uy-demo-pair-01',
+          wordA: 'tout',
+          phonemeA: 'u',
+          wordB: 'tu',
+          phonemeB: 'y',
+          relation: PhonemeRelation.different,
+          note:
+              'The designated vowels are `/u/` in A and `/y/` in B; they differ.',
+        ),
+        (
+          id: 'uy-demo-pair-02',
+          wordA: 'rouge',
+          phonemeA: 'u',
+          wordB: 'vous',
+          phonemeB: 'u',
+          relation: PhonemeRelation.same,
+          note: 'Both designated vowels are `/u/`.',
+        ),
+        (
+          id: 'uy-demo-pair-03',
+          wordA: 'soupe',
+          phonemeA: 'u',
+          wordB: 'doux',
+          phonemeB: 'u',
+          relation: PhonemeRelation.same,
+          note: 'Both designated vowels are `/u/`.',
+        ),
+        (
+          id: 'uy-demo-pair-04',
+          wordA: 'tu',
+          phonemeA: 'y',
+          wordB: 'loup',
+          phonemeB: 'u',
+          relation: PhonemeRelation.different,
+          note:
+              'The designated vowels are `/y/` in A and `/u/` in B; they differ.',
+        ),
+        (
+          id: 'uy-demo-pair-05',
+          wordA: 'rue',
+          phonemeA: 'y',
+          wordB: 'lune',
+          phonemeB: 'y',
+          relation: PhonemeRelation.same,
+          note: 'Both designated vowels are `/y/`.',
+        ),
+        (
+          id: 'uy-demo-pair-06',
+          wordA: 'jus',
+          phonemeA: 'y',
+          wordB: 'tout',
+          phonemeB: 'u',
+          relation: PhonemeRelation.different,
+          note:
+              'The designated vowels are `/y/` in A and `/u/` in B; they differ.',
+        ),
+        (
+          id: 'uy-demo-pair-07',
+          wordA: 'loup',
+          phonemeA: 'u',
+          wordB: 'soupe',
+          phonemeB: 'u',
+          relation: PhonemeRelation.same,
+          note: 'Both designated vowels are `/u/`.',
+        ),
+        (
+          id: 'uy-demo-pair-08',
+          wordA: 'tu',
+          phonemeA: 'y',
+          wordB: 'jus',
+          phonemeB: 'y',
+          relation: PhonemeRelation.same,
+          note: 'Both designated vowels are `/y/`.',
+        ),
+        (
+          id: 'uy-demo-pair-09',
+          wordA: 'doux',
+          phonemeA: 'u',
+          wordB: 'lune',
+          phonemeB: 'y',
+          relation: PhonemeRelation.different,
+          note:
+              'The designated vowels are `/u/` in A and `/y/` in B; they differ.',
+        ),
+        (
+          id: 'uy-demo-pair-10',
+          wordA: 'vous',
+          phonemeA: 'u',
+          wordB: 'rue',
+          phonemeB: 'y',
+          relation: PhonemeRelation.different,
+          note:
+              'The designated vowels are `/u/` in A and `/y/` in B; they differ.',
+        ),
+      ];
+  final drafts = [
+    for (final row in rows)
+      ComparisonExerciseDraft(
+        id: row.id,
+        activityId: uyDemoComparisonActivityId,
+        sectionId: uyDemoComparisonActivityId,
+        contentRevision: 1,
+        purpose: ContentPurpose.practice,
+        reviewState: ContentReviewState.pending,
+        instruction: 'Compare the vowel in each sample.',
+        sampleA: ComparisonSampleDraft(
+          slot: ComparisonSample.a,
+          referenceId: 'fr-word-${row.wordA}',
+          target: ComparisonTargetDraft(
+            phonemeId: row.phonemeA,
+            phonemeOrdinal: 1,
+          ),
+        ),
+        sampleB: ComparisonSampleDraft(
+          slot: ComparisonSample.b,
+          referenceId: 'fr-word-${row.wordB}',
+          target: ComparisonTargetDraft(
+            phonemeId: row.phonemeB,
+            phonemeOrdinal: 1,
+          ),
+        ),
+        expectedRelation: row.relation,
+        debriefNote: row.note,
+      ),
+  ];
+  return ComparisonCatalogue.fromDrafts(
+    activityId: uyDemoComparisonActivityId,
+    sectionId: uyDemoComparisonActivityId,
     contentRevision: 1,
     exercises: drafts,
     referencePhonemes: referencePhonemes,

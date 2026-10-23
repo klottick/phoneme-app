@@ -3,6 +3,90 @@ import 'course_exercise.dart';
 
 const comparisonActivityId = 'en-fr-phoneme-comparison';
 
+const String uyDemoComparisonActivityId = 'en-fr-u-y-comparison';
+
+final class ComparisonCatalogueRegistration {
+  ComparisonCatalogueRegistration._({
+    required this.activityId,
+    required this.catalogue,
+    this.cause,
+  });
+
+  factory ComparisonCatalogueRegistration.available(
+    ComparisonCatalogue catalogue,
+  ) => ComparisonCatalogueRegistration._(
+    activityId: catalogue.activityId,
+    catalogue: catalogue,
+  );
+
+  factory ComparisonCatalogueRegistration.unavailable({
+    required String activityId,
+    required Object cause,
+  }) {
+    if (activityId.trim().isEmpty) {
+      throw const FormatException(
+        'Registration activity ID must not be blank.',
+      );
+    }
+    return ComparisonCatalogueRegistration._(
+      activityId: activityId,
+      catalogue: null,
+      cause: cause,
+    );
+  }
+
+  final String activityId;
+  final ComparisonCatalogue? catalogue;
+  final Object? cause;
+}
+
+final class ComparisonCatalogueRegistry {
+  ComparisonCatalogueRegistry(
+    Iterable<ComparisonCatalogueRegistration> registrations,
+  ) : byActivityId = _registrationsById(registrations);
+
+  static Map<String, ComparisonCatalogueRegistration> _registrationsById(
+    Iterable<ComparisonCatalogueRegistration> registrations,
+  ) {
+    final result = <String, ComparisonCatalogueRegistration>{};
+    for (final registration in registrations) {
+      if (registration.catalogue != null &&
+          registration.catalogue!.activityId != registration.activityId) {
+        throw const FormatException(
+          'Registration activity ID does not match catalogue.',
+        );
+      }
+      if (result.containsKey(registration.activityId)) {
+        throw const FormatException('Duplicate catalogue registration.');
+      }
+      result[registration.activityId] = registration;
+    }
+    return UnmodifiableMapView(result);
+  }
+
+  final Map<String, ComparisonCatalogueRegistration> byActivityId;
+
+  ComparisonCatalogueRegistration? registrationFor(String activityId) =>
+      byActivityId[activityId];
+
+  ComparisonCatalogue requireAvailable(String activityId) {
+    final registration = registrationFor(activityId);
+    if (registration == null) {
+      throw StateError('Unknown comparison activity: $activityId');
+    }
+    final catalogue = registration.catalogue;
+    if (catalogue == null) {
+      throw StateError('Comparison activity is unavailable: $activityId');
+    }
+    return catalogue;
+  }
+
+  factory ComparisonCatalogueRegistry.single(ComparisonCatalogue catalogue) =>
+      ComparisonCatalogueRegistry([
+        ComparisonCatalogueRegistration.available(catalogue),
+      ]);
+}
+
 enum ComparisonSample { a, b }
 
 enum PhonemeRelation { same, different }

@@ -52,6 +52,100 @@ const _relations = <PhonemeRelation>[
   PhonemeRelation.different,
 ];
 
+const _uyRows =
+    <(String, String, String, String, String, PhonemeRelation, String)>[
+      (
+        'uy-demo-pair-01',
+        'fr-word-tout',
+        'u',
+        'fr-word-tu',
+        'y',
+        PhonemeRelation.different,
+        'The designated vowels are `/u/` in A and `/y/` in B; they differ.',
+      ),
+      (
+        'uy-demo-pair-02',
+        'fr-word-rouge',
+        'u',
+        'fr-word-vous',
+        'u',
+        PhonemeRelation.same,
+        'Both designated vowels are `/u/`.',
+      ),
+      (
+        'uy-demo-pair-03',
+        'fr-word-soupe',
+        'u',
+        'fr-word-doux',
+        'u',
+        PhonemeRelation.same,
+        'Both designated vowels are `/u/`.',
+      ),
+      (
+        'uy-demo-pair-04',
+        'fr-word-tu',
+        'y',
+        'fr-word-loup',
+        'u',
+        PhonemeRelation.different,
+        'The designated vowels are `/y/` in A and `/u/` in B; they differ.',
+      ),
+      (
+        'uy-demo-pair-05',
+        'fr-word-rue',
+        'y',
+        'fr-word-lune',
+        'y',
+        PhonemeRelation.same,
+        'Both designated vowels are `/y/`.',
+      ),
+      (
+        'uy-demo-pair-06',
+        'fr-word-jus',
+        'y',
+        'fr-word-tout',
+        'u',
+        PhonemeRelation.different,
+        'The designated vowels are `/y/` in A and `/u/` in B; they differ.',
+      ),
+      (
+        'uy-demo-pair-07',
+        'fr-word-loup',
+        'u',
+        'fr-word-soupe',
+        'u',
+        PhonemeRelation.same,
+        'Both designated vowels are `/u/`.',
+      ),
+      (
+        'uy-demo-pair-08',
+        'fr-word-tu',
+        'y',
+        'fr-word-jus',
+        'y',
+        PhonemeRelation.same,
+        'Both designated vowels are `/y/`.',
+      ),
+      (
+        'uy-demo-pair-09',
+        'fr-word-doux',
+        'u',
+        'fr-word-lune',
+        'y',
+        PhonemeRelation.different,
+        'The designated vowels are `/u/` in A and `/y/` in B; they differ.',
+      ),
+      (
+        'uy-demo-pair-10',
+        'fr-word-vous',
+        'u',
+        'fr-word-rue',
+        'y',
+        PhonemeRelation.different,
+        'The designated vowels are `/u/` in A and `/y/` in B; they differ.',
+      ),
+    ];
+
 ComparisonExerciseDraft _draft(
   int i, {
   String? id,
@@ -121,7 +215,9 @@ ComparisonExerciseDraft _copyDraft(ComparisonExerciseDraft source,
         ContentPurpose? purpose,
         bool replacePurpose = false,
         ContentReviewState? reviewState,
-        bool replaceReviewState = false}) =>
+        bool replaceReviewState = false,
+        PhonemeRelation? relation,
+        String? note}) =>
     ComparisonExerciseDraft(
       id: source.id,
       activityId: source.activityId,
@@ -132,11 +228,298 @@ ComparisonExerciseDraft _copyDraft(ComparisonExerciseDraft source,
       instruction: source.instruction,
       sampleA: replaceSampleA ? sampleA : source.sampleA,
       sampleB: replaceSampleB ? sampleB : source.sampleB,
-      expectedRelation: source.expectedRelation,
-      debriefNote: source.debriefNote,
+      expectedRelation: relation ?? source.expectedRelation,
+      debriefNote: note ?? source.debriefNote,
     );
 
+({List<ComparisonExerciseDraft> drafts, Map<String, List<String>> phonemes})
+_uyValidationFixture() {
+  final catalogue = loadFrenchUyDemoComparisonCatalogue();
+  return (
+    drafts: [
+      for (final exercise in catalogue.exercises)
+        ComparisonExerciseDraft(
+          id: exercise.id,
+          activityId: exercise.activityId,
+          sectionId: exercise.sectionId,
+          contentRevision: exercise.contentRevision,
+          purpose: exercise.purpose,
+          reviewState: exercise.reviewState,
+          instruction: exercise.instruction,
+          sampleA: ComparisonSampleDraft(
+            slot: ComparisonSample.a,
+            referenceId: exercise.sampleA.referenceId,
+            target: ComparisonTargetDraft(
+              phonemeId: exercise.sampleA.target.phonemeId,
+              phonemeOrdinal: exercise.sampleA.target.phonemeOrdinal,
+            ),
+          ),
+          sampleB: ComparisonSampleDraft(
+            slot: ComparisonSample.b,
+            referenceId: exercise.sampleB.referenceId,
+            target: ComparisonTargetDraft(
+              phonemeId: exercise.sampleB.target.phonemeId,
+              phonemeOrdinal: exercise.sampleB.target.phonemeOrdinal,
+            ),
+          ),
+          expectedRelation: exercise.expectedRelation,
+          debriefNote: exercise.debriefNote,
+        ),
+    ],
+    phonemes: {
+      'fr-word-tout': ['t', 'u'],
+      'fr-word-tu': ['t', 'y'],
+      'fr-word-rouge': ['ʁ', 'u', 'ʒ'],
+      'fr-word-vous': ['v', 'u'],
+      'fr-word-soupe': ['s', 'u', 'p'],
+      'fr-word-doux': ['d', 'u'],
+      'fr-word-loup': ['l', 'u'],
+      'fr-word-rue': ['ʁ', 'y'],
+      'fr-word-lune': ['l', 'y', 'n'],
+      'fr-word-jus': ['ʒ', 'y', 's'],
+    },
+  );
+}
+
+List<String> _uyValidationCodes(
+  List<ComparisonExerciseDraft> drafts,
+  Map<String, List<String>> phonemes,
+) => validateComparisonCatalogue(
+  activityId: uyDemoComparisonActivityId,
+  sectionId: uyDemoComparisonActivityId,
+  contentRevision: 1,
+  exercises: drafts,
+  referencePhonemes: phonemes,
+).map((diagnostic) => diagnostic.code).toList();
+
 void main() {
+  test('uy_demo_catalogue_matches_spec_inventory_and_validates_ordinals', () {
+    final catalogue = loadFrenchUyDemoComparisonCatalogue();
+    expect(catalogue.activityId, uyDemoComparisonActivityId);
+    expect(catalogue.sectionId, uyDemoComparisonActivityId);
+    expect(catalogue.contentRevision, 1);
+    expect(
+      catalogue.exercises.map((e) => e.id),
+      List.generate(
+        10,
+        (i) => 'uy-demo-pair-${(i + 1).toString().padLeft(2, '0')}',
+      ),
+    );
+    expect(
+      catalogue.exercises.map(
+        (e) => (
+          e.id,
+          e.sampleA.referenceId,
+          e.sampleA.target.phonemeId,
+          e.sampleB.referenceId,
+          e.sampleB.target.phonemeId,
+          e.expectedRelation,
+          e.debriefNote,
+        ),
+      ),
+      _uyRows,
+    );
+    expect(
+      catalogue.exercises.every(
+        (e) =>
+            e.sampleA.target.phonemeOrdinal == 1 &&
+            e.sampleB.target.phonemeOrdinal == 1 &&
+            e.purpose == ContentPurpose.practice &&
+            e.reviewState == ContentReviewState.pending,
+      ),
+      isTrue,
+    );
+    expect(catalogue.exercises.map((e) => e.id).toSet(), hasLength(10));
+    expect(
+      catalogue.exercises.where(
+        (e) => e.expectedRelation == PhonemeRelation.same,
+      ),
+      hasLength(5),
+    );
+    expect(
+      catalogue.exercises.where(
+        (e) => e.expectedRelation == PhonemeRelation.different,
+      ),
+      hasLength(5),
+    );
+  });
+
+  test(
+    'uy_demo_relation_key_mismatch_is_rejected_with_balanced_key_counts',
+    () {
+      final fixture = _uyValidationFixture();
+      final drafts = [...fixture.drafts];
+      drafts[0] = _copyDraft(drafts[0], relation: PhonemeRelation.same);
+      drafts[1] = _copyDraft(drafts[1], relation: PhonemeRelation.different);
+
+      expect(
+        drafts.where((draft) => draft.expectedRelation == PhonemeRelation.same),
+        hasLength(5),
+      );
+      expect(
+        drafts.where(
+          (draft) => draft.expectedRelation == PhonemeRelation.different,
+        ),
+        hasLength(5),
+      );
+      expect(_uyValidationCodes(drafts, fixture.phonemes), [
+        'exercise.relation.mismatch',
+        'exercise.relation.mismatch',
+      ]);
+    },
+  );
+
+  test('uy_demo_valid_relations_with_unbalanced_keys_report_balance_only', () {
+    final fixture = _uyValidationFixture();
+    final drafts = [...fixture.drafts];
+    drafts[0] = _copyDraft(
+      drafts[0],
+      sampleB: const ComparisonSampleDraft(
+        slot: ComparisonSample.b,
+        referenceId: 'fr-word-vous',
+        target: ComparisonTargetDraft(phonemeId: 'u', phonemeOrdinal: 1),
+      ),
+      replaceSampleB: true,
+      relation: PhonemeRelation.same,
+      note: 'Both designated vowels are `/u/`.',
+    );
+
+    expect(
+      drafts.where((draft) => draft.expectedRelation == PhonemeRelation.same),
+      hasLength(6),
+    );
+    expect(
+      _uyValidationCodes(drafts, fixture.phonemes),
+      ['catalogue.balance'],
+    );
+  });
+
+  test(
+    'uy_demo_invalid_reference_ordinal_target_duplicate_or_count_rejects_catalogue',
+    () {
+      final catalogue = loadFrenchUyDemoComparisonCatalogue();
+      final phonemes = <String, List<String>>{
+        'fr-word-tout': ['t', 'u'],
+        'fr-word-tu': ['t', 'y'],
+        'fr-word-rouge': ['ʁ', 'u', 'ʒ'],
+        'fr-word-vous': ['v', 'u'],
+        'fr-word-soupe': ['s', 'u', 'p'],
+        'fr-word-doux': ['d', 'u'],
+        'fr-word-loup': ['l', 'u'],
+        'fr-word-rue': ['ʁ', 'y'],
+        'fr-word-lune': ['l', 'y', 'n'],
+        'fr-word-jus': ['ʒ', 'y', 's'],
+      };
+      List<ComparisonExerciseDraft> drafts() => [
+        for (final e in catalogue.exercises)
+          ComparisonExerciseDraft(
+            id: e.id,
+            activityId: e.activityId,
+            sectionId: e.sectionId,
+            contentRevision: e.contentRevision,
+            purpose: e.purpose,
+            reviewState: e.reviewState,
+            instruction: e.instruction,
+            sampleA: ComparisonSampleDraft(
+              slot: ComparisonSample.a,
+              referenceId: e.sampleA.referenceId,
+              target: ComparisonTargetDraft(
+                phonemeId: e.sampleA.target.phonemeId,
+                phonemeOrdinal: e.sampleA.target.phonemeOrdinal,
+              ),
+            ),
+            sampleB: ComparisonSampleDraft(
+              slot: ComparisonSample.b,
+              referenceId: e.sampleB.referenceId,
+              target: ComparisonTargetDraft(
+                phonemeId: e.sampleB.target.phonemeId,
+                phonemeOrdinal: e.sampleB.target.phonemeOrdinal,
+              ),
+            ),
+            expectedRelation: e.expectedRelation,
+            debriefNote: e.debriefNote,
+          ),
+      ];
+      void rejects(
+        List<ComparisonExerciseDraft> rows, [
+        Map<String, List<String>>? refs,
+      ]) {
+        expect(
+          () => ComparisonCatalogue.fromDrafts(
+            activityId: uyDemoComparisonActivityId,
+            sectionId: uyDemoComparisonActivityId,
+            contentRevision: 1,
+            exercises: rows,
+            referencePhonemes: refs ?? phonemes,
+          ),
+          throwsA(isA<ComparisonContentValidationException>()),
+        );
+      }
+
+      var rows = drafts()
+        ..[0] = const ComparisonExerciseDraft(
+          id: 'uy-demo-pair-01',
+          activityId: uyDemoComparisonActivityId,
+          sectionId: uyDemoComparisonActivityId,
+          contentRevision: 1,
+          purpose: ContentPurpose.practice,
+          reviewState: ContentReviewState.pending,
+          instruction: 'Compare the vowel in each sample.',
+          sampleA: ComparisonSampleDraft(
+            slot: ComparisonSample.a,
+            referenceId: 'missing',
+            target: ComparisonTargetDraft(phonemeId: 'u', phonemeOrdinal: 1),
+          ),
+          sampleB: ComparisonSampleDraft(
+            slot: ComparisonSample.b,
+            referenceId: 'fr-word-tu',
+            target: ComparisonTargetDraft(phonemeId: 'y', phonemeOrdinal: 1),
+          ),
+          expectedRelation: PhonemeRelation.different,
+          debriefNote: 'note',
+        );
+      rejects(rows);
+      rows = drafts()
+        ..[0] = _copyDraft(
+          drafts().first,
+          sampleA: const ComparisonSampleDraft(
+            slot: ComparisonSample.a,
+            referenceId: 'fr-word-tout',
+            target: ComparisonTargetDraft(phonemeId: 't', phonemeOrdinal: 1),
+          ),
+          replaceSampleA: true,
+        );
+      rejects(rows);
+      rows = drafts()
+        ..[0] = const ComparisonExerciseDraft(
+          id: 'uy-demo-pair-01',
+          activityId: uyDemoComparisonActivityId,
+          sectionId: uyDemoComparisonActivityId,
+          contentRevision: 1,
+          purpose: ContentPurpose.practice,
+          reviewState: ContentReviewState.pending,
+          instruction: 'Compare the vowel in each sample.',
+          sampleA: ComparisonSampleDraft(
+            slot: ComparisonSample.a,
+            referenceId: 'fr-word-tout',
+            target: ComparisonTargetDraft(phonemeId: 'u', phonemeOrdinal: 9),
+          ),
+          sampleB: ComparisonSampleDraft(
+            slot: ComparisonSample.b,
+            referenceId: 'fr-word-tu',
+            target: ComparisonTargetDraft(phonemeId: 'y', phonemeOrdinal: 1),
+          ),
+          expectedRelation: PhonemeRelation.different,
+          debriefNote: 'note',
+        );
+      rejects(rows);
+      rows = drafts()..[9] = drafts().first;
+      rejects(rows);
+      rejects(drafts().take(9).toList());
+    },
+  );
+
+
   test('french_comparison_inventory_matches_approved_spec', () {
     final catalogue = loadFrenchComparisonCatalogue();
     expect(catalogue.exercises.map((e) => e.id), [
