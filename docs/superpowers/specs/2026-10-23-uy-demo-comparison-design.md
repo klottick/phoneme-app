@@ -1,12 +1,18 @@
 # Dedicated /u/–/y/ comparison planet — demo design
 
-**Status: written specification awaiting user review.** The roadmap and the
-clarification “Just do your best effort for the demo” authorize clearly labeled
+**Status: user-approved specification.** The user approved this written design
+as submitted in [PR #110](https://github.com/klottick/phoneme-app/pull/110),
+reviewed head `e7474fc1a16567c2e865dda96336420937fc9156`; it was merged to
+published `origin/main` as `4739110598d9c3986808f9060f29874fcf8a5a02`. The
+clarification “Just do your best effort for the demo” authorizes clearly labeled
 best-effort practice content without recruiting a qualified French reviewer.
-They do not approve this written spec, an implementation plan, product changes,
-linguistic/rights/playback sign-off, assessment use, or release. Product code is
-out of scope until this spec and a later plan have each been reviewed and
-approved.
+Approval does not approve an implementation plan, product changes, or linguistic,
+rights, playback, assessment, privacy or release sign-off.
+
+**Implementation plan:**
+[2026-10-23-uy-demo-comparison-implementation.md](../plans/2026-10-23-uy-demo-comparison-implementation.md)
+is written and awaits user review. No product implementation is authorized until
+that plan is separately reviewed and approved.
 
 **Baseline inspected:** published `origin/main`
 `e3b6e613c1dbbdeb51cbdeabe7d0830708538e5c`.
@@ -288,8 +294,6 @@ production-qualified content by this spec, an automated test, or the user's
 demo clarification. Existing sentence/context qualification checks remain
 unchanged; later roadmap slices require their own reviewed specs/plans.
 
-Next: user reviews this written spec. If approved, write a separate focused
-implementation plan naming exact files, activity-keyed domain and SQL adaptation,
-test-first sequence, preservation checks and verification commands; obtain plan
-review before any product-code changes. This document's publication is not demo
-implementation or feature delivery.
+Next: user reviews and approves the linked focused implementation plan before
+product-code changes. This document's publication is not demo implementation or
+feature delivery.
