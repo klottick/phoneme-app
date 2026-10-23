@@ -342,14 +342,17 @@ void main() {
     );
   });
 
-  test('live_system_requires_required_bodies_in_main_order', () {
+  test('live_system_requires_nonempty_bodies', () {
     final registry = LearningRegistry.french();
-
     expect(
       () => validateMapSystem(system(), registry: registry),
       throwsFormatException,
-      reason: 'a live system cannot omit its required destinations',
+      reason: 'a live system must contain at least one body',
     );
+  });
+
+  test('every_required_live_body_is_in_main_order', () {
+    final registry = LearningRegistry.french();
     expect(
       () => validateMapSystem(
         system(bodies: [body(id: 'required')]),
