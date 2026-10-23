@@ -38,10 +38,10 @@ none were reported.
 | Approved implementation plan | [#102](https://github.com/klottick/phoneme-app/pull/102) | `e17f448608bbb3eb729417214ea6c1b2efa814ff` | `65e0fcf00b3fc273f62757d9bdac1c9ad698b12e` |
 | Map catalogue and authored destinations | [#103](https://github.com/klottick/phoneme-app/pull/103) | `da93fe1a8082c14de0e16202cc1efa15a073d0a6` | `7c161c4d8bfeaf1c068cb1eddbc41108a22f61aa` |
 | Owner-safe map projection | [#104](https://github.com/klottick/phoneme-app/pull/104) | `498137585e56e65baaf711dad97b34ccf50570ae` | `48e35a8b25982ef7d17624fde1f1243ea75d8695` |
-| Map presentation and motion | [#105](https://github.com/klottick/phoneme-app/pull/105) | `57babd85d371f10a46a4670f2eda066d6bb31789` | `a76aa78bbe5d5063a27ddcc562664555819d00e3` |
-| Home, routes, and legacy recovery | [#106](https://github.com/klottick/phoneme-app/pull/106) | `cb129dc5f37d9b3655f1082cdae8230ee0e2a223` | `daf6b1cae385e8b932f83596e29de3d154ac4973` |
-| Scoped course theme and integration | [#107](https://github.com/klottick/phoneme-app/pull/107) | `6a8413b8ff49aac85bc4886d9314aa38d937ec88` | `ceb3963c75e79098bdfa120d770e08de996ea5ce` |
-| Final integration corrections and acceptance | [#108](https://github.com/klottick/phoneme-app/pull/108) | `672a44673fed34fdd705113995f76c5c9f28411b` | `01740e094b030f3a8f33ae57e33cfc0beff224b6` |
+| Static map, destination, and chart presentation | [#105](https://github.com/klottick/phoneme-app/pull/105) | `57babd85d371f10a46a4670f2eda066d6bb31789` | `a76aa78bbe5d5063a27ddcc562664555819d00e3` |
+| Pausable, lifecycle-safe map motion | [#106](https://github.com/klottick/phoneme-app/pull/106) | `cb129dc5f37d9b3655f1082cdae8230ee0e2a223` | `daf6b1cae385e8b932f83596e29de3d154ac4973` |
+| Home/navigation/recovery and comparison identity/evidence | [#107](https://github.com/klottick/phoneme-app/pull/107) | `6a8413b8ff49aac85bc4886d9314aa38d937ec88` | `ceb3963c75e79098bdfa120d770e08de996ea5ce` |
+| Scoped course appearance and final integration fixes | [#108](https://github.com/klottick/phoneme-app/pull/108) | `672a44673fed34fdd705113995f76c5c9f28411b` | `01740e094b030f3a8f33ae57e33cfc0beff224b6` |
 
 The controller's final acceptance comment is [on PR #108](https://github.com/klottick/phoneme-app/pull/108#issuecomment-6363236021). It records the exact reviewed head, verification, and remaining limits.
 
@@ -79,22 +79,20 @@ and ignored, not GitHub-linked artifacts.
 
 ## Integration rulings and recorded tradeoffs
 
-- The map and recovery footer share one scroll owner. That owner gates the
-  hidden map ticker using viewport visibility, with no polling; the separate
-  optional footer seam avoided nested vertical scrolling.
-- Map-tab activation is a no-op only when already on canonical `/home`. From a
-  chart or explicit system route it returns to `/home`, as the approved spec
-  requires. This reversed an earlier interpretation that treated chart-to-Home
-  as a no-op; the correction is recorded, not hidden.
-- The saved-comparison checkpoint doorway says **Open comparison practice**;
-  it does not promise to start a new run. Review remains separate, and the
-  existing comparison lesson owns the actual “Practise again” action. No new
-  run/reset behavior or hidden session write was introduced.
-- Final review found and corrected three integration defects: offscreen map
-  animation, chart/system Map-tab return, and misleading comparison-practice
-  wording. A further responsive reflow fix preserved explicit pause by keeping
-  the motion ancestor identity stable. These fixes received scoped re-review
-  and final integrated verification; they did not expand curriculum or storage.
+| Ruling | Reason / boundary | Cost if the ruling is wrong |
+| --- | --- | --- |
+| The existing map scroll owner derives viewport visibility and supplies parent-owned `TickerMode`; retained hiding hosts must honor that contract too. | Stops hidden animation without polling or moving ticker lifecycle into learning state. | A new hiding host that omits the signal can waste CPU on offscreen frames. |
+| The optional footer seam stays inside the map's existing single vertical scroll owner. | Keeps recovery and legacy entries reachable without introducing nested scrolling. | A small `CourseSystemView` API/layout seam would need rework. |
+| Preserve the complete existing `ComparisonProgressSummary` evidence labels and comparison review/practice entry metadata in the map projection; do not compute a parallel summary in widgets. | Maintains existing comparison semantics and honest separation from the dedicated discovery lesson; no new persistence, completion policy, or mastery score. | Restore/rework the review/open mapping; this is not a reason to add a new policy. |
+| Map-tab activation is a no-op only on canonical `/home`; from chart or explicit system routes it returns to `/home`. | Follows approved spec §6 and avoids a dead-end root tab. This reverses the earlier chart-to-Home no-op interpretation and is recorded explicitly. | Tapping Map from a subroute would reset the user's subroute position if the no-op interpretation were used instead. |
+| The saved-comparison checkpoint doorway says **Open comparison practice**, not “Practise again” or “start a new run”; the existing comparison lesson owns the actual restart action. | Preserves the saved checkpoint and review separately, without hidden session reset/write or new run behavior. | The learner takes one extra step before starting fresh practice. |
+| Keep the map motion ancestor identity stable across responsive fallback/reflow. | Preserves explicit pause state while retaining the fallback marker and existing owner-reset boundary. | Local render-identity rework would be needed; otherwise responsive reflow could reset pause. |
+
+Final review found and corrected three integration defects: offscreen map
+animation, chart/system Map-tab return, and misleading comparison-practice
+wording. A further responsive reflow fix preserved explicit pause. These fixes
+received scoped re-review and final integrated verification; they did not expand
+curriculum or storage.
 
 ## Scope and evidence provenance
 

@@ -494,9 +494,11 @@ scheduled for Task 6. No native/full accessibility/audio qualification is implie
   summary/checkpoint providers, qualification and test harnesses.
 - [x] Define owned files, shared signatures, sequencing and regression gates.
 - [x] Self-review spec coverage, types, task step precision and Review Focus.
-- [x] User approved this plan before Task 1; approved execution followed the
-  sequential implementer/controller workflow. The user changed the worker
-  choice to GPT-6 Luna before implementation; no further Qwen workers were used.
+- [x] User approved this plan before Task 1; during the Task 1 handoff, Qwen had
+  already been dispatched and left a local catalogue commit. The user then
+  changed the worker choice to GPT-6 Luna; Luna audited/finalized Task 1 and
+  handled all subsequent implementation. No further Qwen dispatch or resume
+  occurred.
 
 Coverage: spec §§1–3 → Tasks 1, 3, 5; §§4–5 → Tasks 1–2, 5; §6 → Task 5;
 §7 → Tasks 3–4; §8 → Tasks 3, 6; §§9–10 → every PR plus final gate.
