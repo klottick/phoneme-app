@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 
+import 'course_map_catalogue.dart';
 import 'course_map_state.dart';
 
 class CourseDestinationPanel extends StatelessWidget {
@@ -35,7 +36,10 @@ class CourseDestinationPanel extends StatelessWidget {
       MapReadiness.alpha => switch (body.launch) {
         MapLaunch.start => 'Start lesson',
         MapLaunch.resume => 'Continue lesson',
-        MapLaunch.review => 'Review lesson',
+        MapLaunch.review =>
+          body.definition.target == MapTarget.mixedComparison
+              ? 'Review comparison'
+              : 'Review lesson',
         MapLaunch.open => 'Open destination',
         null => null,
       },

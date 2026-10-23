@@ -7,6 +7,7 @@ import 'package:linguist/src/core/course/comparison_learning_state.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/french_sentence_package.dart';
+import 'package:linguist/src/core/course/french_course.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_providers.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
 import 'package:linguist/src/features/course/comparison_lesson_screen.dart';
@@ -15,6 +16,8 @@ import 'package:linguist/src/features/course_map/course_map_screen.dart';
 import 'package:linguist/src/features/course_map/course_map_catalogue.dart';
 import 'package:linguist/src/features/course_map/course_map_motion.dart';
 import 'package:linguist/src/features/course_map/course_map_state.dart';
+import 'package:linguist/src/features/course_map/course_destination_panel.dart';
+import 'package:linguist/src/features/course_map/french_space_map.dart';
 import 'package:linguist/src/features/course_map/course_system_view.dart';
 import 'package:linguist/src/routing/app_router.dart';
 import 'package:linguist/src/routing/course_map_navigation.dart';
@@ -209,6 +212,185 @@ void main() {
       isFalse,
       reason: 'reselecting a current root tab must not push another root',
     );
+  });
+
+  testWidgets('reselecting_map_on_chart_keeps_chart_route', (tester) async {
+    final app = await _mountMapApp(tester);
+    addTearDown(() => _unmountMapApp(tester, app));
+
+    app.router.go('/course-chart');
+    await _pumpApp(tester);
+    expect(app.router.state.uri.path, '/course-chart');
+    await tester.tap(find.text('Map').last);
+    await _pumpApp(tester);
+
+    expect(app.router.state.uri.path, '/course-chart');
+  });
+
+  testWidgets('reselecting_map_on_direct_system_keeps_system_route', (
+    tester,
+  ) async {
+    final app = await _mountMapApp(tester);
+    addTearDown(() => _unmountMapApp(tester, app));
+
+    app.router.go('/course-system/en-fr-u-y-system');
+    await _pumpApp(tester);
+    await tester.tap(find.text('Map').last);
+    await _pumpApp(tester);
+
+    expect(app.router.state.uri.path, '/course-system/en-fr-u-y-system');
+  });
+
+  testWidgets('mixed_comparison_review_action_keeps_its_identity', (
+    tester,
+  ) async {
+    final comparison = frenchSpaceSystems.first.bodies.firstWhere(
+      (body) => body.target == MapTarget.mixedComparison,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CourseDestinationPanel(
+            body: MapBodyState(
+              definition: comparison,
+              readiness: MapReadiness.alpha,
+              progress: MapProgress.completed,
+              recommended: false,
+              explanation: comparison.description,
+              launch: MapLaunch.review,
+            ),
+            onLaunch: () {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Review comparison'), findsOneWidget);
+    expect(find.text('Review lesson'), findsNothing);
+  });
+
+  testWidgets('integrated_map_footer_and_root_fit_phone_viewport_matrix', (
+    tester,
+  ) async {
+    final app = await _mountMapApp(tester);
+    addTearDown(() => _unmountMapApp(tester, app));
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+
+    for (final (width, height) in const [(390.0, 844.0), (360.0, 640.0)]) {
+      for (final scale in const [1.0, 2.0, 3.0]) {
+        for (final pixelRatio in const [1.0, 2.0, 3.0]) {
+          tester.view.devicePixelRatio = pixelRatio;
+          tester.view.physicalSize = Size(
+            width * pixelRatio,
+            height * pixelRatio,
+          );
+          tester.platformDispatcher.textScaleFactorTestValue = scale;
+          await tester.pump();
+
+          expect(find.byType(CourseMapScreen), findsOneWidget);
+          expect(find.text('Hear the difference'), findsWidgets);
+          expect(find.text('Start lesson'), findsOneWidget);
+          expect(find.text('Map'), findsWidgets);
+          expect(
+            tester.getSize(find.text('Start lesson').first).height,
+            greaterThan(0),
+          );
+          await tester.ensureVisible(find.text('Start lesson'));
+          final launchButton = find.ancestor(
+            of: find.text('Start lesson'),
+            matching: find.byType(FilledButton),
+          );
+          expect(launchButton.hitTestable(), findsOneWidget);
+          expect(tester.getSize(launchButton).height, greaterThanOrEqualTo(48));
+          for (final target in [
+            ...find
+                .byType(IconButton)
+                .evaluate()
+                .map((element) => element.widget),
+            ...find
+                .byType(NavigationDestination)
+                .evaluate()
+                .map((element) => element.widget),
+          ]) {
+            final targetFinder = find.byWidget(target);
+            final size = tester.getSize(targetFinder);
+            expect(size.width, greaterThanOrEqualTo(48), reason: '$target');
+            expect(size.height, greaterThanOrEqualTo(48), reason: '$target');
+          }
+
+          for (final label in const [
+            'Open discovery recovery',
+            'Open mixed comparison recovery',
+            'View sentence sections',
+            'Retry mixed comparison catalogue',
+            'Retry sentence catalogue',
+            'Retry map content registry',
+          ]) {
+            final control = find.text(label);
+            await tester.ensureVisible(control);
+            expect(control, findsOneWidget);
+            expect(
+              control.hitTestable(),
+              findsOneWidget,
+              reason: '$label at ${width}x$height scale=$scale dpr=$pixelRatio',
+            );
+          }
+
+          final legacyDisclosure = find.text('Legacy practice');
+          await tester.ensureVisible(legacyDisclosure);
+          expect(legacyDisclosure.hitTestable(), findsOneWidget);
+          if (find.text('Keep French vowels steady').evaluate().isEmpty) {
+            await tester.tap(legacyDisclosure);
+            await _pumpApp(tester);
+          }
+          for (final lesson in frenchLessons.where(
+            (lesson) => lesson.id != 'en-fr-u-y',
+          )) {
+            final title = find.text(lesson.title);
+            await tester.ensureVisible(title);
+            await _pumpApp(tester);
+            expect(title.hitTestable(), findsOneWidget, reason: lesson.title);
+          }
+
+          final toolsDisclosure = find.text('Practice tools');
+          await tester.ensureVisible(toolsDisclosure);
+          expect(toolsDisclosure.hitTestable(), findsOneWidget);
+          if (find.text('IPA Explorer').evaluate().isEmpty) {
+            await tester.tap(toolsDisclosure);
+            await _pumpApp(tester);
+          }
+          for (final label in const [
+            'IPA Explorer',
+            'Listening Drill',
+            'Phoneme ID',
+            'Phoneme Test',
+            'Audio Compare',
+            'Profile',
+            'Settings',
+          ]) {
+            final control = find.text(label);
+            await tester.ensureVisible(control);
+            expect(
+              control.hitTestable(),
+              findsOneWidget,
+              reason: '$label at ${width}x$height scale=$scale dpr=$pixelRatio',
+            );
+          }
+
+          final mapTab = find.text('Map').last;
+          await tester.ensureVisible(mapTab);
+          expect(mapTab.hitTestable(), findsOneWidget);
+          final navigationBar = tester.widget<NavigationBar>(
+            find.byType(NavigationBar),
+          );
+          expect(navigationBar.selectedIndex, 0);
+        }
+      }
+    }
   });
 
   testWidgets('invalid_or_planned_system_has_safe_return', (tester) async {

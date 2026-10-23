@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 class CourseRootNavigation extends StatelessWidget {
-  const CourseRootNavigation({super.key, required this.location, required this.child});
+  const CourseRootNavigation({
+    super.key,
+    required this.location,
+    required this.child,
+  });
   final String location;
   final Widget child;
 
@@ -21,9 +25,12 @@ class CourseRootNavigation extends StatelessWidget {
       selectedIndex: _index,
       onDestinationSelected: (index) {
         final route = switch (index) {
-          0 => '/home', 1 => '/course-review', 2 => '/arcade', _ => '/course-progress',
+          0 => '/home',
+          1 => '/course-review',
+          2 => '/arcade',
+          _ => '/course-progress',
         };
-        if (route != location) context.go(route);
+        if (index != _index) context.go(route);
       },
       destinations: const [
         NavigationDestination(icon: Icon(Icons.public), label: 'Map'),

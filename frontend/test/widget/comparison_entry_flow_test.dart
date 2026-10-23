@@ -890,7 +890,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     await _inspectMixedComparison(tester);
-    expect(find.text('Review lesson'), findsOneWidget);
+    expect(find.text('Review comparison'), findsOneWidget);
     expect(find.text('Practise again'), findsOneWidget);
   });
 
@@ -981,15 +981,15 @@ void main() {
     await tester.pump();
     await tester.pump();
     await _inspectMixedComparison(tester);
-    expect(find.text('Review lesson'), findsOneWidget);
+    expect(find.text('Review comparison'), findsOneWidget);
     expect(find.text('Practise again'), findsOneWidget);
     late GoRouter router;
 
     var loadAck = await _runRealAsync(tester, () async => Completer<void>());
     fixture.store.nextLoadAck = loadAck;
     final reviewLoadCalls = fixture.store.loadCalls;
-    await tester.ensureVisible(find.text('Review lesson'));
-    await tester.tap(find.widgetWithText(FilledButton, 'Review lesson'));
+    await tester.ensureVisible(find.text('Review comparison'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Review comparison'));
     await tester.pump();
     await _waitForLoadCall(tester, fixture.store, reviewLoadCalls + 1);
     await tester.runAsync(() => loadAck.future);
@@ -1717,7 +1717,7 @@ void main() {
     await tester.pump();
     await tester.pump();
     await _inspectMixedComparison(tester);
-    expect(find.text('Review lesson'), findsOneWidget);
+    expect(find.text('Review comparison'), findsOneWidget);
     final router = GoRouter.of(tester.element(find.byType(CourseMapScreen)));
     var popCount = 0;
     var previousDepth =
@@ -1735,8 +1735,8 @@ void main() {
       () async => Completer<void>(),
     );
     fixture.store.nextLoadAck = reviewLoadAck;
-    await tester.ensureVisible(find.text('Review lesson'));
-    await tester.tap(find.widgetWithText(FilledButton, 'Review lesson'));
+    await tester.ensureVisible(find.text('Review comparison'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Review comparison'));
     await tester.pump();
     await _waitForLoadCall(tester, fixture.store, 2);
     await tester.runAsync(() => reviewLoadAck.future);
@@ -1770,8 +1770,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(ComparisonLessonScreen), findsNothing);
     await _inspectMixedComparison(tester);
-    await tester.ensureVisible(find.text('Review lesson'));
-    await tester.tap(find.widgetWithText(FilledButton, 'Review lesson'));
+    await tester.ensureVisible(find.text('Review comparison'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Review comparison'));
     await tester.pump();
     await _waitForLoadCall(tester, fixture.store, 3);
     await tester.runAsync(() => resumeAck.future);
@@ -1955,7 +1955,7 @@ void main() {
     await _inspectMixedComparison(tester);
     expect(find.text('Comparison pairs attempted: 10/10'), findsOneWidget);
     expect(find.text('Comparison completion policies: 1'), findsOneWidget);
-    expect(find.text('Review lesson'), findsOneWidget);
+    expect(find.text('Review comparison'), findsOneWidget);
     expect(find.text('Open destination'), findsNothing);
     expect(
       find.textContaining('Discovery lessons:'),
