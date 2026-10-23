@@ -177,6 +177,48 @@ void main() {
     );
   });
 
+  test('comparison store tracks registry availability changes', () async {
+    var dedicatedAvailable = true;
+    final h = await _harness(
+      extraOverrides: [
+        uyDemoComparisonCatalogueProvider.overrideWith((ref) {
+          if (!dedicatedAvailable) {
+            throw const FormatException('dedicated catalogue unavailable');
+          }
+          return loadFrenchUyDemoComparisonCatalogue();
+        }),
+      ],
+    );
+    addTearDown(h.close);
+
+    final availableStore =
+        h.container.read(comparisonLearningStoreProvider)
+            as SqliteComparisonLearningRepository;
+    final availableRegistry = h.container.read(
+      comparisonCatalogueRegistryProvider,
+    );
+    expect(availableStore.transitions.registry, same(availableRegistry));
+
+    dedicatedAvailable = false;
+    h.container.invalidate(uyDemoComparisonCatalogueProvider);
+    final unavailableRegistry = h.container.read(
+      comparisonCatalogueRegistryProvider,
+    );
+    final unavailableStore =
+        h.container.read(comparisonLearningStoreProvider)
+            as SqliteComparisonLearningRepository;
+
+    expect(
+      unavailableRegistry
+          .registrationFor(uyDemoComparisonActivityId)!
+          .catalogue,
+      equals(null),
+    );
+    expect(unavailableStore, isNot(same(availableStore)));
+    expect(unavailableStore.transitions.registry, same(unavailableRegistry));
+    expect(h.database.openCalls, 0);
+  });
+
   test(
     'mixed catalogue failures are not masked by registry fallback',
     () async {

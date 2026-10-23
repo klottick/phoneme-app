@@ -184,7 +184,7 @@ final comparisonLearningStoreProvider =
   final stateRevision =
       ref.read(_comparisonLearningStateRevisionProvider.notifier);
   final database = ref.watch(learningDatabaseHandleProvider);
-  final registry = ref.read(comparisonCatalogueRegistryProvider);
+  final registry = ref.watch(comparisonCatalogueRegistryProvider);
   return SqliteComparisonLearningRepository(
       database: database,
       scope: ComparisonProfileScope(courseId: 'en-fr', owner: identity.owner),
