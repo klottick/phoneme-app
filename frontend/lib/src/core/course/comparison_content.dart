@@ -2,6 +2,7 @@ import 'dart:collection';
 import 'course_exercise.dart';
 
 const comparisonActivityId = 'en-fr-phoneme-comparison';
+
 const String uyDemoComparisonActivityId = 'en-fr-u-y-comparison';
 
 final class ComparisonCatalogueRegistration {
@@ -91,39 +92,33 @@ enum ComparisonSample { a, b }
 enum PhonemeRelation { same, different }
 
 final class ComparisonTarget {
-  const ComparisonTarget({
-    required this.phonemeId,
-    required this.phonemeOrdinal,
-  });
+  const ComparisonTarget(
+      {required this.phonemeId, required this.phonemeOrdinal});
   final String phonemeId;
   final int phonemeOrdinal;
 }
 
 final class ComparisonSampleContent {
-  const ComparisonSampleContent({
-    required this.slot,
-    required this.referenceId,
-    required this.target,
-  });
+  const ComparisonSampleContent(
+      {required this.slot, required this.referenceId, required this.target});
   final ComparisonSample slot;
   final String referenceId;
   final ComparisonTarget target;
 }
 
 final class ComparisonExercise {
-  const ComparisonExercise({
-    required this.id,
-    required this.activityId,
-    required this.sectionId,
-    required this.contentRevision,
-    required this.purpose,
-    required this.reviewState,
-    required this.instruction,
-    required this.sampleA,
-    required this.sampleB,
-    required this.expectedRelation,
-    required this.debriefNote,
-  });
+  const ComparisonExercise(
+      {required this.id,
+      required this.activityId,
+      required this.sectionId,
+      required this.contentRevision,
+      required this.purpose,
+      required this.reviewState,
+      required this.instruction,
+      required this.sampleA,
+      required this.sampleB,
+      required this.expectedRelation,
+      required this.debriefNote});
   final String id, activityId, sectionId, instruction, debriefNote;
   final int contentRevision;
   final ContentPurpose purpose;
@@ -133,39 +128,33 @@ final class ComparisonExercise {
 }
 
 final class ComparisonTargetDraft {
-  const ComparisonTargetDraft({
-    required this.phonemeId,
-    required this.phonemeOrdinal,
-  });
+  const ComparisonTargetDraft(
+      {required this.phonemeId, required this.phonemeOrdinal});
   final String? phonemeId;
   final int? phonemeOrdinal;
 }
 
 final class ComparisonSampleDraft {
-  const ComparisonSampleDraft({
-    required this.slot,
-    required this.referenceId,
-    required this.target,
-  });
+  const ComparisonSampleDraft(
+      {required this.slot, required this.referenceId, required this.target});
   final ComparisonSample? slot;
   final String? referenceId;
   final ComparisonTargetDraft? target;
 }
 
 final class ComparisonExerciseDraft {
-  const ComparisonExerciseDraft({
-    required this.id,
-    required this.activityId,
-    required this.sectionId,
-    required this.contentRevision,
-    required this.purpose,
-    required this.reviewState,
-    required this.instruction,
-    required this.sampleA,
-    required this.sampleB,
-    required this.expectedRelation,
-    required this.debriefNote,
-  });
+  const ComparisonExerciseDraft(
+      {required this.id,
+      required this.activityId,
+      required this.sectionId,
+      required this.contentRevision,
+      required this.purpose,
+      required this.reviewState,
+      required this.instruction,
+      required this.sampleA,
+      required this.sampleB,
+      required this.expectedRelation,
+      required this.debriefNote});
   final String? id, activityId, sectionId, instruction, debriefNote;
   final int? contentRevision;
   final ContentPurpose? purpose;
@@ -175,35 +164,31 @@ final class ComparisonExerciseDraft {
 }
 
 final class ComparisonContentDiagnostic {
-  const ComparisonContentDiagnostic({
-    required this.code,
-    required this.recordId,
-  });
+  const ComparisonContentDiagnostic(
+      {required this.code, required this.recordId});
   final String code, recordId;
 }
 
 final class ComparisonContentValidationException implements Exception {
   ComparisonContentValidationException(
-    List<ComparisonContentDiagnostic> diagnostics,
-  ) : diagnostics = List.unmodifiable(diagnostics);
+      List<ComparisonContentDiagnostic> diagnostics)
+      : diagnostics = List.unmodifiable(diagnostics);
   final List<ComparisonContentDiagnostic> diagnostics;
 }
 
-List<ComparisonContentDiagnostic> validateComparisonCatalogue({
-  required String activityId,
-  required String sectionId,
-  required int contentRevision,
-  required List<ComparisonExerciseDraft> exercises,
-  required Map<String, List<String>> referencePhonemes,
-}) {
+List<ComparisonContentDiagnostic> validateComparisonCatalogue(
+    {required String activityId,
+    required String sectionId,
+    required int contentRevision,
+    required List<ComparisonExerciseDraft> exercises,
+    required Map<String, List<String>> referencePhonemes}) {
   final out = <ComparisonContentDiagnostic>[];
   void add(String code, String id) =>
       out.add(ComparisonContentDiagnostic(code: code, recordId: id));
   if (activityId.trim().isEmpty) add('catalogue.activity', '');
   if (sectionId.trim().isEmpty) add('catalogue.section', '');
   if (contentRevision < 1) add('catalogue.revision', '');
-  final headersValid =
-      activityId.trim().isNotEmpty &&
+  final headersValid = activityId.trim().isNotEmpty &&
       sectionId.trim().isNotEmpty &&
       contentRevision >= 1;
   final ids = <String>{};
@@ -255,7 +240,7 @@ List<ComparisonContentDiagnostic> validateComparisonCatalogue({
     final sampleValid = <bool>[];
     for (final pair in [
       ('sampleA', e.sampleA, ComparisonSample.a),
-      ('sampleB', e.sampleB, ComparisonSample.b),
+      ('sampleB', e.sampleB, ComparisonSample.b)
     ]) {
       final name = pair.$1;
       final s = pair.$2;
@@ -272,9 +257,8 @@ List<ComparisonContentDiagnostic> validateComparisonCatalogue({
         add('exercise.$name.slot', id);
         thisSampleValid = false;
       }
-      final seq = s.referenceId == null
-          ? null
-          : referencePhonemes[s.referenceId];
+      final seq =
+          s.referenceId == null ? null : referencePhonemes[s.referenceId];
       if (s.referenceId == null || seq == null) {
         add('exercise.$name.reference', id);
         thisSampleValid = false;
@@ -293,8 +277,7 @@ List<ComparisonContentDiagnostic> validateComparisonCatalogue({
         add('exercise.$name.target.phoneme', id);
         thisSampleValid = false;
       }
-      final ordinalInvalid =
-          t.phonemeOrdinal == null ||
+      final ordinalInvalid = t.phonemeOrdinal == null ||
           t.phonemeOrdinal! < 0 ||
           (seq != null && t.phonemeOrdinal! >= seq.length);
       if (ordinalInvalid) {
@@ -342,56 +325,47 @@ List<ComparisonContentDiagnostic> validateComparisonCatalogue({
 }
 
 final class ComparisonCatalogue {
-  ComparisonCatalogue._(
-    this.activityId,
-    this.sectionId,
-    this.contentRevision,
-    List<ComparisonExercise> exercises,
-  ) : exercises = List.unmodifiable(exercises),
-      byId = UnmodifiableMapView({for (final e in exercises) e.id: e});
-  factory ComparisonCatalogue.fromDrafts({
-    required String activityId,
-    required String sectionId,
-    required int contentRevision,
-    required List<ComparisonExerciseDraft> exercises,
-    required Map<String, List<String>> referencePhonemes,
-  }) {
+  ComparisonCatalogue._(this.activityId, this.sectionId, this.contentRevision,
+      List<ComparisonExercise> exercises)
+      : exercises = List.unmodifiable(exercises),
+        byId = UnmodifiableMapView({for (final e in exercises) e.id: e});
+  factory ComparisonCatalogue.fromDrafts(
+      {required String activityId,
+      required String sectionId,
+      required int contentRevision,
+      required List<ComparisonExerciseDraft> exercises,
+      required Map<String, List<String>> referencePhonemes}) {
     final errors = validateComparisonCatalogue(
-      activityId: activityId,
-      sectionId: sectionId,
-      contentRevision: contentRevision,
-      exercises: exercises,
-      referencePhonemes: referencePhonemes,
-    );
+        activityId: activityId,
+        sectionId: sectionId,
+        contentRevision: contentRevision,
+        exercises: exercises,
+        referencePhonemes: referencePhonemes);
     if (errors.isNotEmpty) throw ComparisonContentValidationException(errors);
     return ComparisonCatalogue._(activityId, sectionId, contentRevision, [
       for (final e in exercises)
         ComparisonExercise(
-          id: e.id!,
-          activityId: e.activityId!,
-          sectionId: e.sectionId!,
-          contentRevision: e.contentRevision!,
-          purpose: e.purpose!,
-          reviewState: e.reviewState!,
-          instruction: e.instruction!,
-          sampleA: _sample(e.sampleA!, ComparisonSample.a),
-          sampleB: _sample(e.sampleB!, ComparisonSample.b),
-          expectedRelation: e.expectedRelation!,
-          debriefNote: e.debriefNote!,
-        ),
+            id: e.id!,
+            activityId: e.activityId!,
+            sectionId: e.sectionId!,
+            contentRevision: e.contentRevision!,
+            purpose: e.purpose!,
+            reviewState: e.reviewState!,
+            instruction: e.instruction!,
+            sampleA: _sample(e.sampleA!, ComparisonSample.a),
+            sampleB: _sample(e.sampleB!, ComparisonSample.b),
+            expectedRelation: e.expectedRelation!,
+            debriefNote: e.debriefNote!)
     ]);
   }
   static ComparisonSampleContent _sample(
-    ComparisonSampleDraft s,
-    ComparisonSample slot,
-  ) => ComparisonSampleContent(
-    slot: slot,
-    referenceId: s.referenceId!,
-    target: ComparisonTarget(
-      phonemeId: s.target!.phonemeId!,
-      phonemeOrdinal: s.target!.phonemeOrdinal!,
-    ),
-  );
+          ComparisonSampleDraft s, ComparisonSample slot) =>
+      ComparisonSampleContent(
+          slot: slot,
+          referenceId: s.referenceId!,
+          target: ComparisonTarget(
+              phonemeId: s.target!.phonemeId!,
+              phonemeOrdinal: s.target!.phonemeOrdinal!));
   final String activityId, sectionId;
   final int contentRevision;
   final List<ComparisonExercise> exercises;
@@ -407,7 +381,7 @@ final class ComparisonCatalogue {
     }
     return List.unmodifiable([
       for (final e in exercises)
-        if (ids.contains(e.id)) e.debriefNote,
+        if (ids.contains(e.id)) e.debriefNote
     ]);
   }
 }
