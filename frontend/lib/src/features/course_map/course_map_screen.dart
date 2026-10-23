@@ -61,6 +61,20 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
     final completedMain = availableMain
         .where((body) => body.progress == MapProgress.completed)
         .length;
+    final recommendedMain = state.bodies
+        .where(
+          (body) =>
+              body.recommended &&
+              system?.mainOrder.contains(body.definition.id) == true &&
+              body.readiness == MapReadiness.alpha &&
+              body.progress != MapProgress.completed &&
+              body.progress != MapProgress.unknown,
+        )
+        .firstOrNull;
+    final recommendationReason =
+        recommendedMain?.progress == MapProgress.resumable
+        ? 'Continue your saved run.'
+        : 'First available incomplete main lesson.';
     final dedicatedUnavailable = state.bodies.any(
       (body) =>
           body.definition.target == MapTarget.dedicatedComparison &&
@@ -78,6 +92,28 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
     final footer = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (recommendedMain != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Semantics(
+              container: true,
+              label:
+                  'Recommended next: ${recommendedMain.definition.title}. '
+                  '$recommendationReason',
+              child: ExcludeSemantics(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Recommended next: ${recommendedMain.definition.title}',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    Text(recommendationReason),
+                  ],
+                ),
+              ),
+            ),
+          ),
         if (selectedComparison != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),

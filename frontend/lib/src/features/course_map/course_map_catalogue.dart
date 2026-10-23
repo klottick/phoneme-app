@@ -49,10 +49,8 @@ class MapBodyDefinition {
   final String title;
   final String description;
   final MapBodyRole role;
-
   /// Optional detours can never be a prerequisite of required content.
   final bool optional;
-
   /// Planned bodies say “Coming soon” and carry no launch target or
   /// activity binding.
   final bool planned;
@@ -93,8 +91,8 @@ class MapSystemDefinition {
     required this.planned,
     List<MapBodyDefinition> bodies = const [],
     List<String> mainOrder = const [],
-  }) : bodies = List.unmodifiable(bodies),
-       mainOrder = List.unmodifiable(mainOrder);
+  })  : bodies = List.unmodifiable(bodies),
+        mainOrder = List.unmodifiable(mainOrder);
 
   /// Stable presentation identity (for example `en-fr-u-y-system`); it is a
   /// map identity, not a change to curriculum ids.
@@ -117,9 +115,7 @@ String _detail(String systemId, String message) =>
 
 void _requireText(String value, String systemId, String field) {
   if (value.trim().isEmpty) {
-    throw FormatException(
-      _detail(systemId, 'field "$field" must not be blank.'),
-    );
+    throw FormatException(_detail(systemId, 'field "$field" must not be blank.'));
   }
 }
 
@@ -145,18 +141,13 @@ void validateMapSystem(
     // order.
     if (system.bodies.isNotEmpty || system.mainOrder.isNotEmpty) {
       throw FormatException(
-        _detail(
-          systemId,
-          'a planned system must have no bodies or main order.',
-        ),
-      );
+          _detail(systemId, 'a planned system must have no bodies or main order.'));
     }
     return;
   }
   if (system.bodies.isEmpty) {
     throw FormatException(
-      _detail(systemId, 'a live system must have at least one body.'),
-    );
+        _detail(systemId, 'a live system must have at least one body.'));
   }
 
   final bodies = system.bodies;
@@ -164,8 +155,7 @@ void validateMapSystem(
   for (final body in bodies) {
     if (bodyById.containsKey(body.id)) {
       throw FormatException(
-        _detail(systemId, 'duplicate body id "${body.id}".'),
-      );
+          _detail(systemId, 'duplicate body id "${body.id}".'));
     }
     bodyById[body.id] = body;
   }
@@ -180,19 +170,11 @@ void validateMapSystem(
     if (body.planned) {
       if (body.target != null || body.activityId != null) {
         throw FormatException(
-          _detail(
-            systemId,
-            'planned body "${body.id}" must have no target or activity binding.',
-          ),
-        );
+            _detail(systemId, 'planned body "${body.id}" must have no target or activity binding.'));
       }
     } else if (body.target == null) {
       throw FormatException(
-        _detail(
-          systemId,
-          'body "${body.id}" must target an existing destination or stay planned.',
-        ),
-      );
+          _detail(systemId, 'body "${body.id}" must target an existing destination or stay planned.'));
     }
 
     // Target/role consistency.
@@ -200,8 +182,7 @@ void validateMapSystem(
       case MapTarget.discovery:
         if (body.role != MapBodyRole.planet) {
           throw FormatException(
-            _detail(systemId, 'discovery body "${body.id}" must be a planet.'),
-          );
+              _detail(systemId, 'discovery body "${body.id}" must be a planet.'));
         }
         break;
       case MapTarget.dedicatedComparison:
@@ -219,21 +200,13 @@ void validateMapSystem(
       case MapTarget.review:
         if (body.role != MapBodyRole.station) {
           throw FormatException(
-            _detail(
-              systemId,
-              '${body.target} body "${body.id}" must be a station.',
-            ),
-          );
+              _detail(systemId, '${body.target} body "${body.id}" must be a station.'));
         }
         break;
       case MapTarget.arcade:
         if (body.role != MapBodyRole.asteroidField) {
           throw FormatException(
-            _detail(
-              systemId,
-              'arcade body "${body.id}" must be an asteroid field.',
-            ),
-          );
+              _detail(systemId, 'arcade body "${body.id}" must be an asteroid field.'));
         }
         break;
       case null:
@@ -242,8 +215,7 @@ void validateMapSystem(
     // No mandatory moon: coaching is always an optional detour.
     if (body.role == MapBodyRole.moon && !body.optional) {
       throw FormatException(
-        _detail(systemId, 'moon "${body.id}" must be optional.'),
-      );
+          _detail(systemId, 'moon "${body.id}" must be optional.'));
     }
 
     // Authored geometry: finite and normalized to the scene unit square.
@@ -255,35 +227,22 @@ void validateMapSystem(
     if (body.parentId != null && body.parentId != body.id) {
       if (bodyById[body.parentId] == null) {
         throw FormatException(
-          _detail(
-            systemId,
-            'body "${body.id}" has unknown parent "${body.parentId}".',
-          ),
-        );
+            _detail(systemId, 'body "${body.id}" has unknown parent "${body.parentId}".'));
       }
     }
     final prerequisites = <String>{};
     for (final prerequisite in body.prerequisites) {
       if (!prerequisites.add(prerequisite)) {
         throw FormatException(
-          _detail(
-            systemId,
-            'body "${body.id}" lists prerequisite "$prerequisite" twice.',
-          ),
-        );
+            _detail(systemId, 'body "${body.id}" lists prerequisite "$prerequisite" twice.'));
       }
       if (prerequisite == body.id) {
         throw FormatException(
-          _detail(systemId, 'body "${body.id}" is its own prerequisite.'),
-        );
+            _detail(systemId, 'body "${body.id}" is its own prerequisite.'));
       }
       if (bodyById[prerequisite] == null) {
         throw FormatException(
-          _detail(
-            systemId,
-            'body "${body.id}" has unknown prerequisite "$prerequisite".',
-          ),
-        );
+            _detail(systemId, 'body "${body.id}" has unknown prerequisite "$prerequisite".'));
       }
     }
 
@@ -293,17 +252,14 @@ void validateMapSystem(
   // Parent pointers form a forest.
   for (final body in bodies) {
     if (body.parentId == body.id) {
-      throw FormatException(
-        _detail(systemId, 'body "${body.id}" is its own parent.'),
-      );
+      throw FormatException(_detail(systemId, 'body "${body.id}" is its own parent.'));
     }
     final visited = <String>{};
     MapBodyDefinition? cursor = bodyById[body.parentId ?? ''];
     while (cursor != null) {
       if (!visited.add(cursor.id)) {
         throw FormatException(
-          _detail(systemId, 'parent chain cycles at body "${cursor.id}".'),
-        );
+            _detail(systemId, 'parent chain cycles at body "${cursor.id}".'));
       }
       cursor = bodyById[cursor.parentId ?? ''];
     }
@@ -317,8 +273,7 @@ void validateMapSystem(
     if (state == 2) return;
     if (state == 1) {
       throw FormatException(
-        _detail(systemId, 'prerequisite cycle at body "$id".'),
-      );
+          _detail(systemId, 'prerequisite cycle at body "$id".'));
     }
     visitState[id] = 1;
     for (final prerequisite in bodyById[id]!.prerequisites) {
@@ -329,12 +284,8 @@ void validateMapSystem(
     if (!body.optional) {
       for (final prerequisite in body.prerequisites) {
         if (bodyById[prerequisite]!.optional) {
-          throw FormatException(
-            _detail(
-              systemId,
-              'required body "${body.id}" must not require optional body "$prerequisite".',
-            ),
-          );
+          throw FormatException(_detail(
+              systemId, 'required body "${body.id}" must not require optional body "$prerequisite".'));
         }
       }
     }
@@ -349,92 +300,62 @@ void validateMapSystem(
   for (final id in system.mainOrder) {
     final body = bodyById[id];
     if (body == null) {
-      throw FormatException(
-        _detail(systemId, 'main order references unknown body "$id".'),
-      );
+      throw FormatException(_detail(systemId, 'main order references unknown body "$id".'));
     }
     if (!ordered.add(id)) {
-      throw FormatException(
-        _detail(systemId, 'main order duplicates body "$id".'),
-      );
+      throw FormatException(_detail(systemId, 'main order duplicates body "$id".'));
     }
     if (body.optional) {
       throw FormatException(
-        _detail(systemId, 'main order includes optional body "$id".'),
-      );
+          _detail(systemId, 'main order includes optional body "$id".'));
     }
     if (body.planned) {
       throw FormatException(
-        _detail(systemId, 'main order includes planned body "$id".'),
-      );
+          _detail(systemId, 'main order includes planned body "$id".'));
     }
   }
   for (final body in bodies) {
     if (!body.planned && !body.optional && !ordered.contains(body.id)) {
-      throw FormatException(
-        _detail(
-          systemId,
-          'required live body "${body.id}" is missing from main order.',
-        ),
-      );
+      throw FormatException(_detail(
+          systemId, 'required live body "${body.id}" is missing from main order.'));
     }
   }
 }
 
-void _requireUnitValue(double value, MapBodyDefinition body, String field) {
+void _requireUnitValue(
+    double value, MapBodyDefinition body, String field) {
   if (!value.isFinite) {
     throw FormatException('Body "${body.id}", $field: value must be finite.');
   }
   if (value < 0 || value > 1) {
     throw FormatException(
-      'Body "${body.id}", $field: value must be within 0.0 to 1.0.',
-    );
+        'Body "${body.id}", $field: value must be within 0.0 to 1.0.');
   }
 }
 
 void _validateBinding(
-  String systemId,
-  MapBodyDefinition body,
-  LearningRegistry registry,
-) {
+    String systemId, MapBodyDefinition body, LearningRegistry registry) {
   final activityId = body.activityId;
   switch (body.target) {
     case MapTarget.discovery:
-      final bound =
-          activityId ??
+      final bound = activityId ??
           (throw FormatException(
-            _detail(
-              systemId,
-              'discovery body "${body.id}" must bind its lesson activity id.',
-            ),
-          ));
+              _detail(systemId, 'discovery body "${body.id}" must bind its lesson activity id.')));
       final definition = registry.activities.firstWhere(
         (activity) => activity.id == bound,
-        orElse: () => throw FormatException(
-          _detail(
-            systemId,
-            'discovery binding "$bound" of body "${body.id}" is not in the learning registry.',
-          ),
-        ),
+        orElse: () => throw FormatException(_detail(
+            systemId, 'discovery binding "$bound" of body "${body.id}" is not in the learning registry.')),
       );
       if (definition.kind != LearningActivityKind.discovery) {
-        throw FormatException(
-          _detail(
-            systemId,
-            'discovery binding of body "${body.id}" must reference a discovery activity.',
-          ),
-        );
+        throw FormatException(_detail(
+            systemId, 'discovery binding of body "${body.id}" must reference a discovery activity.'));
       }
       final covered = <String>{
-        for (final item in definition.items) ...item.targetSounds,
+        for (final item in definition.items) ...item.targetSounds
       };
       if (!covered.contains('u') || !covered.contains('y')) {
-        throw FormatException(
-          _detail(
-            systemId,
-            'discovery activity of body "${body.id}" must teach /u/ and /y/.',
-          ),
-        );
+        throw FormatException(_detail(
+            systemId, 'discovery activity of body "${body.id}" must teach /u/ and /y/.'));
       }
       break;
     case MapTarget.dedicatedComparison:
@@ -451,12 +372,8 @@ void _validateBinding(
       // The mixed family is bound exactly: the station uses the
       // comparison activity id and nothing else.
       if (activityId != comparisonActivityId) {
-        throw FormatException(
-          _detail(
-            systemId,
-            'mixed practice body "${body.id}" must bind exactly $comparisonActivityId.',
-          ),
-        );
+        throw FormatException(_detail(
+            systemId, 'mixed practice body "${body.id}" must bind exactly $comparisonActivityId.'));
       }
       break;
     case MapTarget.review:
@@ -466,22 +383,14 @@ void _validateBinding(
       // bindings for registry activities, so their evidence and completion
       // are never transferred.
       if (activityId != null) {
-        throw FormatException(
-          _detail(
-            systemId,
-            '${body.target} body "${body.id}" must not carry a registry activity binding.',
-          ),
-        );
+        throw FormatException(_detail(
+            systemId, '${body.target} body "${body.id}" must not carry a registry activity binding.'));
       }
       break;
     case null:
       if (activityId != null) {
-        throw FormatException(
-          _detail(
-            systemId,
-            'activity binding of body "${body.id}" requires a destination target.',
-          ),
-        );
+        throw FormatException(_detail(
+            systemId, 'activity binding of body "${body.id}" requires a destination target.'));
       }
       break;
   }
