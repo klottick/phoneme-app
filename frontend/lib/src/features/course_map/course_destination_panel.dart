@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
-import '../../core/theme/space_course_colors.dart';
 import 'course_map_state.dart';
 
 class CourseDestinationPanel extends StatelessWidget {
@@ -8,9 +8,11 @@ class CourseDestinationPanel extends StatelessWidget {
     super.key,
     required this.body,
     required this.onLaunch,
+    this.focusOrder,
   });
   final MapBodyState body;
   final VoidCallback? onLaunch;
+  final int? focusOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -38,8 +40,24 @@ class CourseDestinationPanel extends StatelessWidget {
         null => null,
       },
     };
+    final launchButton = FilledButton(
+      onPressed: body.readiness == MapReadiness.alpha
+          ? onLaunch
+          : (body.launch == null ? null : onLaunch),
+      style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+      child: Text(action ?? ''),
+    );
+    final launchControl = focusOrder == null
+        ? launchButton
+        : FocusTraversalOrder(
+            order: NumericFocusOrder(focusOrder!.toDouble()),
+            child: Semantics(
+              key: const ValueKey('destination-panel-action-semantics'),
+              sortKey: OrdinalSortKey(focusOrder!.toDouble()),
+              child: launchButton,
+            ),
+          );
     return Card(
-      color: SpaceCourseColors.panel,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -50,10 +68,7 @@ class CourseDestinationPanel extends StatelessWidget {
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 6),
-            Text(
-              '${body.definition.role.name} · $status',
-              style: const TextStyle(color: SpaceCourseColors.textSecondary),
-            ),
+            Text('${body.definition.role.name} · $status'),
             const SizedBox(height: 8),
             Text(body.definition.description),
             if (body.explanation.isNotEmpty &&
@@ -67,19 +82,7 @@ class CourseDestinationPanel extends StatelessWidget {
             ],
             if (action != null) ...[
               const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: body.readiness == MapReadiness.alpha
-                      ? onLaunch
-                      : (body.launch == null ? null : onLaunch),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: SpaceCourseColors.action,
-                    minimumSize: const Size(48, 48),
-                  ),
-                  child: Text(action),
-                ),
-              ),
+              SizedBox(width: double.infinity, child: launchControl),
             ],
           ],
         ),

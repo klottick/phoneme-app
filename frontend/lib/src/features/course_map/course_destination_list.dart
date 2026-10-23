@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
-import '../../core/theme/space_course_colors.dart';
 import 'course_map_state.dart';
 
 class CourseDestinationList extends StatelessWidget {
@@ -9,36 +9,51 @@ class CourseDestinationList extends StatelessWidget {
     required this.state,
     required this.selectedBodyId,
     required this.onInspect,
+    required this.focusOrderOffset,
+    required this.currentBodyId,
   });
   final CourseMapState state;
   final String? selectedBodyId;
   final ValueChanged<String> onInspect;
+  final int focusOrderOffset;
+  final String? currentBodyId;
 
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      for (final body in state.bodies)
-        Semantics(
-          label:
-              '${body.definition.title}, ${body.definition.role.name}, ${_status(body)}',
-          button: true,
-          selected: body.definition.id == selectedBodyId,
-          child: Material(
-            color: Colors.transparent,
-            child: ListTile(
-              minVerticalPadding: 8,
-              selected: body.definition.id == selectedBodyId,
-              selectedTileColor: SpaceCourseColors.selected,
-              leading: ExcludeSemantics(
-                child: Icon(
-                  _statusIcon(body),
-                  color: SpaceCourseColors.textPrimary,
+      for (var index = 0; index < state.bodies.length; index++)
+        FocusTraversalOrder(
+          order: NumericFocusOrder((focusOrderOffset + index).toDouble()),
+          child: Semantics(
+            key: ValueKey(
+              'destination-list-semantics-${state.bodies[index].definition.id}',
+            ),
+            sortKey: OrdinalSortKey((focusOrderOffset + index).toDouble()),
+            label:
+                '${state.bodies[index].definition.title}, ${state.bodies[index].definition.role.name}, ${_status(state.bodies[index])}${state.bodies[index].definition.id == currentBodyId ? ', current location, stationary' : ''}',
+            button: true,
+            selected: state.bodies[index].definition.id == selectedBodyId,
+            child: Material(
+              color: Colors.transparent,
+              child: ListTile(
+                minVerticalPadding: 12,
+                selected: state.bodies[index].definition.id == selectedBodyId,
+                selectedTileColor: Theme.of(
+                  context,
+                ).colorScheme.secondaryContainer,
+                selectedColor: Theme.of(
+                  context,
+                ).colorScheme.onSecondaryContainer,
+                leading: ExcludeSemantics(
+                  child: Icon(_statusIcon(state.bodies[index])),
                 ),
+                title: Text(state.bodies[index].definition.title),
+                subtitle: Text(
+                  '${_status(state.bodies[index])}${state.bodies[index].definition.id == currentBodyId ? ' · Current location (stationary)' : ''}',
+                ),
+                onTap: () => onInspect(state.bodies[index].definition.id),
               ),
-              title: Text(body.definition.title),
-              subtitle: Text(_status(body)),
-              onTap: () => onInspect(body.definition.id),
             ),
           ),
         ),
@@ -50,7 +65,12 @@ class CourseDestinationList extends StatelessWidget {
     MapReadiness.qualificationBlocked => 'Qualification required',
     MapReadiness.loading => 'Availability loading',
     MapReadiness.unavailable => 'Unavailable',
-    MapReadiness.alpha => body.progress.name,
+    MapReadiness.alpha => switch (body.progress) {
+      MapProgress.unknown => 'Progress unknown',
+      MapProgress.notStarted => 'Not started',
+      MapProgress.resumable => 'In progress',
+      MapProgress.completed => 'Completed',
+    },
   };
   static IconData _statusIcon(MapBodyState body) => switch (body.readiness) {
     MapReadiness.planned => Icons.schedule,
