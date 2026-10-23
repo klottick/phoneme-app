@@ -83,7 +83,16 @@ final courseMapStateProvider = Provider.family<CourseMapState, String>((
     }
   }
 
+  AsyncValue<ComparisonCatalogueRegistry> readComparisonCatalogueRegistry() {
+    try {
+      return AsyncData(ref.watch(comparisonCatalogueRegistryProvider));
+    } on Object catch (error) {
+      return AsyncError(error, StackTrace.current);
+    }
+  }
+
   final comparisonContent = readComparisonCatalogue();
+  final comparisonRegistry = readComparisonCatalogueRegistry();
   return projectCourseMap(
     system: system,
     auth: auth,
@@ -91,6 +100,7 @@ final courseMapStateProvider = Provider.family<CourseMapState, String>((
     course: ref.watch(courseLearningStateProvider),
     comparison: ref.watch(comparisonLearningStateProvider),
     comparisonCatalogue: comparisonContent,
+    comparisonCatalogueRegistry: comparisonRegistry,
     sentences: ref.watch(sentenceHuntLearningStateProvider),
     sentenceCatalogue: ref.watch(sentenceHuntCatalogueProvider),
   );

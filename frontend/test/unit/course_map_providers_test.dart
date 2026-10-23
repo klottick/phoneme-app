@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/course_attempt.dart';
+import 'package:linguist/src/core/course/comparison_content.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/course_learning_registry.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/comparison_learning_state.dart';
+import 'package:linguist/src/core/course/french_comparison_content.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_providers.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
 import 'package:linguist/src/core/course/french_sentence_package.dart';
@@ -196,6 +198,73 @@ void main() {
     expect(store.prepareCalls, 0);
     expect(store.submitCalls, 0);
     expect(audioProviderReads, 0);
+    final dedicated = container
+        .read(courseMapStateProvider(frenchUySystemId))
+        .bodies
+        .singleWhere((body) => body.definition.id == 'comparison');
+    expect(dedicated.definition.target?.name, 'dedicatedComparison');
+    expect(dedicated.readiness, MapReadiness.alpha);
+    expect(dedicated.progress, MapProgress.notStarted);
+    expect(dedicated.launch, MapLaunch.start);
+  });
+
+  test('invalid_dedicated_registration_is_local_on_an_empty_profile', () async {
+    final tracker = LearningAuthTracker(owner: guestScope.owner, ready: true);
+    final store = CourseLearningWidgetStore(scope: guestScope);
+    final registry = ComparisonCatalogueRegistry([
+      ComparisonCatalogueRegistration.available(
+        loadFrenchComparisonCatalogue(),
+      ),
+      ComparisonCatalogueRegistration.unavailable(
+        activityId: uyDemoComparisonActivityId,
+        cause: StateError('dedicated catalogue is invalid'),
+      ),
+    ]);
+    final container = ProviderContainer(
+      overrides: [
+        learningAuthScopeProvider.overrideWith((ref) => tracker),
+        courseLearningStoreProvider.overrideWithValue(store),
+        comparisonCatalogueRegistryProvider.overrideWithValue(registry),
+        comparisonLearningStateProvider.overrideWith(
+          (ref) async => ComparisonLearningState.empty(
+            ComparisonProfileScope(
+              courseId: 'en-fr',
+              owner: tracker.state.owner,
+            ),
+          ),
+        ),
+        sentenceHuntLearningStateProvider.overrideWith(
+          (ref) async => SentenceHuntLearningState.empty(
+            SentenceHuntProfileScope(
+              courseId: 'en-fr',
+              owner: tracker.state.owner,
+            ),
+          ),
+        ),
+        sentenceHuntCatalogueProvider.overrideWith(
+          (ref) => Completer<Never>().future,
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    container.listen(courseMapStateProvider(frenchUySystemId), (_, __) {});
+    await container.read(comparisonLearningStateProvider.future);
+    await Future<void>.delayed(Duration.zero);
+
+    final state = container.read(courseMapStateProvider(frenchUySystemId));
+    final dedicated = state.bodies.singleWhere(
+      (body) => body.definition.id == 'comparison',
+    );
+    final mixed = state.bodies.singleWhere(
+      (body) => body.definition.id == 'mixed-comparison',
+    );
+    expect(dedicated.readiness, MapReadiness.unavailable);
+    expect(dedicated.launch, MapLaunch.start);
+    expect(mixed.readiness, MapReadiness.alpha);
+    expect(mixed.launch, MapLaunch.open);
+    expect(store.loadCalls, 1);
+    expect(store.prepareCalls, 0);
+    expect(store.submitCalls, 0);
   });
 
   test('auth_unready_does_not_read_guest_store', () {

@@ -64,12 +64,19 @@ void main() {
   testWidgets('planned_and_unavailable_explain_without_play', (tester) async {
     final state = _state();
     final launched = <MapBodyState>[];
+    const plannedBodyId = 'context';
+    final plannedBody = state.bodies.singleWhere(
+      (body) => body.definition.id == plannedBodyId,
+    );
+    expect(plannedBody.definition.planned, isTrue);
+    expect(plannedBody.readiness, MapReadiness.planned);
+    expect(plannedBody.launch, isNull);
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: CourseSystemView(
             state: state,
-            selectedBodyId: 'comparison',
+            selectedBodyId: plannedBodyId,
             onInspect: (_) {},
             onLaunch: launched.add,
           ),

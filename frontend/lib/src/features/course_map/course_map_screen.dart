@@ -50,6 +50,22 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
     final completedDiscovery = availableDiscovery
         .where((body) => body.progress == MapProgress.completed)
         .length;
+    final availableMain = state.bodies
+        .where(
+          (body) =>
+              system?.mainOrder.contains(body.definition.id) == true &&
+              body.readiness == MapReadiness.alpha &&
+              body.progress != MapProgress.unknown,
+        )
+        .toList(growable: false);
+    final completedMain = availableMain
+        .where((body) => body.progress == MapProgress.completed)
+        .length;
+    final dedicatedUnavailable = state.bodies.any(
+      (body) =>
+          body.definition.target == MapTarget.dedicatedComparison &&
+          body.readiness == MapReadiness.unavailable,
+    );
     final selectedComparison = state.bodies
         .where(
           (body) =>
@@ -75,9 +91,13 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
           Text(
             'Discovery lessons: $completedDiscovery/${availableDiscovery.length} available complete',
           ),
-          if (completedDiscovery == availableDiscovery.length)
-            const Text('All currently available lessons complete.'),
         ],
+        if (availableMain.isNotEmpty)
+          Text(
+            'Available main lessons: $completedMain/${availableMain.length} available complete',
+          ),
+        if (state.allAvailableMainComplete)
+          const Text('All currently available lessons complete.'),
         if (state.bodies.isEmpty ||
             state.bodies.every((body) => body.launch == null))
           TextButton(
@@ -113,6 +133,16 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
           onPressed: () => ref.invalidate(comparisonCatalogueProvider),
           child: const Text('Retry mixed comparison catalogue'),
         ),
+        if (dedicatedUnavailable)
+          TextButton(
+            onPressed: () {
+              ref.invalidate(uyDemoComparisonCatalogueProvider);
+              ref.invalidate(comparisonCatalogueRegistryProvider);
+              ref.invalidate(comparisonLearningStateProvider);
+              ref.invalidate(courseMapStateProvider(widget.systemId));
+            },
+            child: const Text('Retry dedicated comparison'),
+          ),
         TextButton(
           onPressed: () => ref.invalidate(sentenceHuntCatalogueProvider),
           child: const Text('Retry sentence catalogue'),
@@ -201,12 +231,18 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
       launch = MapLaunch.open;
     } else {
       launch = latest.launch;
-      if (launch == null || latest.readiness == MapReadiness.planned) return;
+      if (launch == null || latest.readiness == MapReadiness.planned) {
+        return;
+      }
       final recovery =
           latest.readiness == MapReadiness.loading ||
           latest.readiness == MapReadiness.unavailable ||
           latest.readiness == MapReadiness.qualificationBlocked;
+      final dedicatedRecovery =
+          latest.definition.target == MapTarget.dedicatedComparison &&
+          launch == MapLaunch.start;
       if (recovery &&
+          !dedicatedRecovery &&
           !(launch == MapLaunch.open &&
               (latest.definition.target == MapTarget.mixedComparison ||
                   latest.definition.target == MapTarget.sentenceSections))) {

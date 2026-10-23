@@ -53,16 +53,15 @@ MapSystemDefinition system({
 }
 
 void main() {
-  test('initial_system_has_one_live_main_lesson', () {
+  test('initial_system_has_dedicated_comparison_after_discovery', () {
     final initial = findSpaceSystem('en-fr-u-y-system');
     expect(initial, isNotNull);
     final bodies = initial!.bodies;
     expect(bodies, hasLength(10));
     expect(initial.planned, isFalse);
-    expect(initial.mainOrder, ['discovery']);
-    expect(bodies.where((b) => b.planned).length, 5);
-    // The one live main destination is the discovery planet, bound to the
-    // real discovery activity.
+    expect(initial.mainOrder, ['discovery', 'comparison']);
+    expect(bodies.where((b) => b.planned).length, 4);
+    // Discovery and dedicated comparison are the ordered main planets.
     final discovery = bodies.firstWhere((b) => b.id == 'discovery');
     expect(discovery.role, MapBodyRole.planet);
     expect(discovery.planned, isFalse);
@@ -70,21 +69,93 @@ void main() {
     expect(discovery.target, MapTarget.discovery);
     expect(discovery.activityId, 'lesson:en-fr-u-y');
     expect(discovery.parentId, isNull);
+    final comparison = bodies.firstWhere((b) => b.id == 'comparison');
+    expect(comparison.role, MapBodyRole.planet);
+    expect(comparison.planned, isFalse);
+    expect(comparison.optional, isFalse);
+    expect(comparison.target?.name, 'dedicatedComparison');
+    expect(comparison.activityId, uyDemoComparisonActivityId);
+    expect(
+      comparison.description,
+      contains(
+        'Demo practice: this authored comparison content has not had qualified French review. It is practice, not an assessment.',
+      ),
+    );
+    for (final id in ['context', 'spelling', 'checkpoint']) {
+      final planned = bodies.firstWhere((body) => body.id == id);
+      expect(planned.planned, isTrue, reason: '$id remains planned');
+      expect(planned.description, contains('Coming soon'));
+      expect(planned.target, isNull);
+      expect(planned.activityId, isNull);
+    }
     final liveMains = bodies
         .where((b) => initial.mainOrder.contains(b.id))
         .toList(growable: false);
-    expect(liveMains, hasLength(1));
-    expect(liveMains.single.planned, isFalse);
-    expect(liveMains.single.activityId, isNotNull);
+    expect(liveMains, hasLength(2));
+    expect(liveMains.every((body) => !body.planned), isTrue);
+    expect(liveMains.map((body) => body.activityId), [
+      'lesson:en-fr-u-y',
+      uyDemoComparisonActivityId,
+    ]);
     // The authored initial system validates cleanly against the registry.
     validateMapSystem(initial, registry: LearningRegistry.french());
+  });
+
+  test('dedicated_comparison_target_is_a_planet_bound_to_its_activity', () {
+    final target = MapTarget.values
+        .where((value) => value.name == 'dedicatedComparison')
+        .firstOrNull;
+    expect(target, isNotNull);
+    if (target == null) return;
+
+    final valid = system(
+      bodies: [
+        body(
+          id: 'dedicated',
+          target: target,
+          activityId: uyDemoComparisonActivityId,
+        ),
+      ],
+      mainOrder: ['dedicated'],
+    );
+    expect(
+      () => validateMapSystem(valid, registry: LearningRegistry.french()),
+      returnsNormally,
+    );
+    for (final invalid in [
+      system(
+        bodies: [
+          body(
+            id: 'dedicated',
+            role: MapBodyRole.station,
+            target: target,
+            activityId: uyDemoComparisonActivityId,
+          ),
+        ],
+        mainOrder: ['dedicated'],
+      ),
+      system(
+        bodies: [
+          body(
+            id: 'dedicated',
+            target: target,
+            activityId: comparisonActivityId,
+          ),
+        ],
+        mainOrder: ['dedicated'],
+      ),
+    ]) {
+      expect(
+        () => validateMapSystem(invalid, registry: LearningRegistry.french()),
+        throwsFormatException,
+      );
+    }
   });
 
   test('mixed_practice_is_not_a_system_lesson', () {
     final initial = findSpaceSystem('en-fr-u-y-system');
     expect(initial, isNotNull);
-    final mixed =
-        initial!.bodies.firstWhere((b) => b.id == 'mixed-comparison');
+    final mixed = initial!.bodies.firstWhere((b) => b.id == 'mixed-comparison');
     expect(mixed.role, MapBodyRole.station);
     expect(mixed.planned, isFalse);
     expect(mixed.optional, isTrue);
@@ -107,8 +178,10 @@ void main() {
         .where((s) => s.planned)
         .toList(growable: false);
     expect(planned, hasLength(2));
-    expect(planned.map((s) => s.id).toList(),
-        ['en-fr-nasals-system', 'en-fr-r-system']);
+    expect(planned.map((s) => s.id).toList(), [
+      'en-fr-nasals-system',
+      'en-fr-r-system',
+    ]);
     for (final entry in planned) {
       expect(findSpaceSystem(entry.id), same(entry));
       expect(entry.bodies, isEmpty, reason: '${entry.id} must not launch');
@@ -118,13 +191,17 @@ void main() {
     // Planned bodies inside the live system explain availability; they carry
     // no launch target or activity binding.
     final initial = findSpaceSystem('en-fr-u-y-system');
-    final plannedBodies =
-        initial!.bodies.where((b) => b.planned).toList(growable: false);
-    expect(plannedBodies, hasLength(5));
+    final plannedBodies = initial!.bodies
+        .where((b) => b.planned)
+        .toList(growable: false);
+    expect(plannedBodies, hasLength(4));
     for (final body in plannedBodies) {
       expect(body.target, isNull, reason: 'planned ${body.id} must not launch');
-      expect(body.activityId, isNull,
-          reason: 'planned ${body.id} must not bind');
+      expect(
+        body.activityId,
+        isNull,
+        reason: 'planned ${body.id} must not bind',
+      );
     }
     // The whole chart validates per system without learning state.
     for (final entry in frenchSpaceSystems) {
@@ -145,116 +222,164 @@ void main() {
 
     // Duplicate body ids.
     expectInvalid(
-      system(bodies: [body(id: 'a'), body(id: 'a')], mainOrder: ['a']),
+      system(
+        bodies: [
+          body(id: 'a'),
+          body(id: 'a'),
+        ],
+        mainOrder: ['a'],
+      ),
       'duplicate body id',
     );
     // Unknown prerequisite, parent, and order ids.
     expectInvalid(
       system(
-          bodies: [body(id: 'a', prerequisites: ['missing'])],
-          mainOrder: ['a']),
+        bodies: [
+          body(id: 'a', prerequisites: ['missing']),
+        ],
+        mainOrder: ['a'],
+      ),
       'unknown prerequisite',
     );
     expectInvalid(
-      system(bodies: [body(id: 'a', parentId: 'missing')], mainOrder: ['a']),
+      system(
+        bodies: [body(id: 'a', parentId: 'missing')],
+        mainOrder: ['a'],
+      ),
       'unknown parent',
     );
     expectInvalid(
-      system(bodies: [body(id: 'a')], mainOrder: ['missing']),
+      system(
+        bodies: [body(id: 'a')],
+        mainOrder: ['missing'],
+      ),
       'unknown order id',
     );
     // Cycles in prerequisite and parent graphs.
     expectInvalid(
-      system(bodies: [
-        body(id: 'a', prerequisites: ['b']),
-        body(id: 'b', prerequisites: ['a']),
-      ]),
+      system(
+        bodies: [
+          body(id: 'a', prerequisites: ['b']),
+          body(id: 'b', prerequisites: ['a']),
+        ],
+      ),
       'prerequisite cycle',
     );
     expectInvalid(
-      system(bodies: [
-        body(id: 'a', parentId: 'b'),
-        body(id: 'b', parentId: 'a'),
-      ]),
+      system(
+        bodies: [
+          body(id: 'a', parentId: 'b'),
+          body(id: 'b', parentId: 'a'),
+        ],
+      ),
       'parent cycle',
     );
     expectInvalid(
-      system(bodies: [body(id: 'a', parentId: 'a')], mainOrder: ['a']),
+      system(
+        bodies: [body(id: 'a', parentId: 'a')],
+        mainOrder: ['a'],
+      ),
       'self parent',
     );
     // Required content must never depend on an optional detour.
     expectInvalid(
-      system(bodies: [
-        body(id: 'required'),
-        body(
-          id: 'optional',
-          role: MapBodyRole.station,
-          optional: true,
-          target: MapTarget.review,
-          activityId: null,
-        ),
-        body(id: 'second', prerequisites: ['optional']),
-      ], mainOrder: ['required', 'second']),
+      system(
+        bodies: [
+          body(id: 'required'),
+          body(
+            id: 'optional',
+            role: MapBodyRole.station,
+            optional: true,
+            target: MapTarget.review,
+            activityId: null,
+          ),
+          body(id: 'second', prerequisites: ['optional']),
+        ],
+        mainOrder: ['required', 'second'],
+      ),
       'required body depending on an optional detour',
     );
     // Invalid bindings.
     expectInvalid(
-      system(bodies: [body(id: 'a', activityId: 'drill:minimal-pairs')]),
+      system(
+        bodies: [body(id: 'a', activityId: 'drill:minimal-pairs')],
+      ),
       'discovery destination bound to a non-discovery registry kind',
     );
     expectInvalid(
-      system(bodies: [body(id: 'a', activityId: 'lesson:missing')]),
+      system(
+        bodies: [body(id: 'a', activityId: 'lesson:missing')],
+      ),
       'discovery destination bound to an unknown registry id',
     );
     expectInvalid(
-      system(bodies: [
-        body(
-          id: 'a',
-          role: MapBodyRole.station,
-          optional: true,
-          target: MapTarget.mixedComparison,
-          activityId: 'lesson:en-fr-u-y',
-        ),
-      ]),
+      system(
+        bodies: [
+          body(
+            id: 'a',
+            role: MapBodyRole.station,
+            optional: true,
+            target: MapTarget.mixedComparison,
+            activityId: 'lesson:en-fr-u-y',
+          ),
+        ],
+      ),
       'mixed practice bound to the discovery lesson',
     );
     expectInvalid(
-      system(bodies: [
-        body(
-          id: 'a',
-          role: MapBodyRole.station,
-          optional: true,
-          target: MapTarget.review,
-          activityId: comparisonActivityId,
-        ),
-      ]),
+      system(
+        bodies: [
+          body(
+            id: 'a',
+            role: MapBodyRole.station,
+            optional: true,
+            target: MapTarget.review,
+            activityId: comparisonActivityId,
+          ),
+        ],
+      ),
       'mixed-family binding without the mixed target',
     );
     expectInvalid(
-      system(bodies: [
-        body(
-          id: 'a',
-          role: MapBodyRole.station,
-          optional: true,
-          target: MapTarget.review,
-          activityId: 'lesson:en-fr-u-y',
-        ),
-      ]),
+      system(
+        bodies: [
+          body(
+            id: 'a',
+            role: MapBodyRole.station,
+            optional: true,
+            target: MapTarget.review,
+            activityId: 'lesson:en-fr-u-y',
+          ),
+        ],
+      ),
       'review station bound to a registry lesson',
     );
     // Nonfinite geometry.
-    expectInvalid(system(bodies: [body(id: 'a', x: double.nan)]),
-        'non-finite x');
     expectInvalid(
-        system(bodies: [body(id: 'a', orbitRadius: double.infinity)]),
-        'non-finite orbit radius');
+      system(
+        bodies: [body(id: 'a', x: double.nan)],
+      ),
+      'non-finite x',
+    );
+    expectInvalid(
+      system(
+        bodies: [body(id: 'a', orbitRadius: double.infinity)],
+      ),
+      'non-finite orbit radius',
+    );
     // Out-of-range geometry.
-    expectInvalid(system(bodies: [body(id: 'a', y: 1.5)], mainOrder: ['a']),
-        'out-of-range y');
+    expectInvalid(
+      system(
+        bodies: [body(id: 'a', y: 1.5)],
+        mainOrder: ['a'],
+      ),
+      'out-of-range y',
+    );
     expectInvalid(system(bodies: [body(id: 'a', x: -0.1)]), 'out-of-range x');
     expectInvalid(
-        system(bodies: [body(id: 'a', orbitRadius: -0.01)]),
-        'out-of-range orbit radius');
+      system(bodies: [body(id: 'a', orbitRadius: -0.01)]),
+      'out-of-range orbit radius',
+    );
     // Planned bodies never carry launch metadata; every non-planned body is
     // a real destination.
     expectInvalid(
@@ -266,17 +391,19 @@ void main() {
       'non-planned body without a destination target',
     );
     expectInvalid(
-      system(bodies: [
-        body(id: 'parent'),
-        body(
-          id: 'moon',
-          role: MapBodyRole.moon,
-          optional: false,
-          target: null,
-          activityId: null,
-          parentId: 'parent',
-        ),
-      ]),
+      system(
+        bodies: [
+          body(id: 'parent'),
+          body(
+            id: 'moon',
+            role: MapBodyRole.moon,
+            optional: false,
+            target: null,
+            activityId: null,
+            parentId: 'parent',
+          ),
+        ],
+      ),
       'required moon',
     );
     // A planned chart system carries no bodies, bindings, or main order.
@@ -292,8 +419,12 @@ void main() {
     // A plain valid system still passes.
     expect(
       () => validateMapSystem(
-          system(bodies: [body(id: 'a')], mainOrder: ['a']),
-          registry: registry),
+        system(
+          bodies: [body(id: 'a')],
+          mainOrder: ['a'],
+        ),
+        registry: registry,
+      ),
       returnsNormally,
     );
   });
@@ -332,7 +463,7 @@ void main() {
       mainOrder: authoredOrder,
     );
     authoredOrder.clear();
-    expect(permuted.mainOrder, ['discovery']);
+    expect(permuted.mainOrder, ['discovery', 'comparison']);
     expect(() => permuted.mainOrder.add('another'), throwsUnsupportedError);
     expect(permuted.mainOrder, authoredSystem.mainOrder);
     // Shuffled presentation metadata still validates against the registry.
@@ -380,7 +511,8 @@ void main() {
     expect(
       () => validateMapSystem(complete, registry: registry),
       returnsNormally,
-      reason: 'required bodies are ordered; planned and optional bodies are excluded',
+      reason:
+          'required bodies are ordered; planned and optional bodies are excluded',
     );
     expect(
       () => validateMapSystem(

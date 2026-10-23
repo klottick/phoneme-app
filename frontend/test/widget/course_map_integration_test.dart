@@ -108,7 +108,13 @@ void main() {
     );
     await tester.tap(find.widgetWithText(ListTile, 'Compare /u/ and /y/'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Coming soon'), findsWidgets);
+    expect(find.text('Start comparison'), findsOneWidget);
+    expect(
+      find.text(
+        'Demo practice: this authored comparison content has not had qualified French review. It is practice, not an assessment.',
+      ),
+      findsOneWidget,
+    );
     expect(
       router.state.uri.path,
       '/home',
@@ -199,12 +205,12 @@ void main() {
     expect(router.state.uri.path, '/home');
     await tester.pumpAndSettle();
     expect(
-      find.text('Discovery lessons: 1/1 available complete'),
+      find.text('Available main lessons: 1/2 available complete'),
       findsOneWidget,
     );
     expect(
       find.text('All currently available lessons complete.'),
-      findsOneWidget,
+      findsNothing,
     );
     expect(find.text('Review lesson'), findsOneWidget);
     expect(find.textContaining('%'), findsNothing);

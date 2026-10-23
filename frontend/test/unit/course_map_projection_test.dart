@@ -8,6 +8,9 @@ import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/comparison_content.dart';
 import 'package:linguist/src/core/course/french_comparison_content.dart';
 import 'package:linguist/src/core/course/comparison_learning_state.dart';
+import 'package:linguist/src/core/course/comparison_learning_command.dart';
+import 'package:linguist/src/core/course/comparison_learning_transition.dart';
+import 'package:linguist/src/core/course/lesson_policy.dart';
 import 'package:linguist/src/core/course/sentence_hunt_content.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
 import 'package:linguist/src/core/course/french_sentence_package.dart';
@@ -17,6 +20,121 @@ import 'package:linguist/src/features/course_map/course_map_projection.dart';
 import 'package:linguist/src/features/course_map/course_map_state.dart';
 import 'package:linguist/src/features/course_map/french_space_map.dart';
 import '../support/course_learning_widget_store.dart';
+
+ComparisonCatalogueRegistry _comparisonRegistry({
+  bool dedicatedAvailable = true,
+}) => ComparisonCatalogueRegistry([
+  ComparisonCatalogueRegistration.available(loadFrenchComparisonCatalogue()),
+  if (dedicatedAvailable)
+    ComparisonCatalogueRegistration.available(
+      loadFrenchUyDemoComparisonCatalogue(),
+    )
+  else
+    ComparisonCatalogueRegistration.unavailable(
+      activityId: uyDemoComparisonActivityId,
+      cause: StateError('dedicated catalogue is invalid'),
+    ),
+]);
+
+ComparisonLearningState _comparisonState({
+  required ComparisonCatalogueRegistry registry,
+  List<String> started = const [],
+  Map<String, int> completedRevisions = const {},
+}) {
+  final scope = ComparisonProfileScope(
+    courseId: 'en-fr',
+    owner: LearningOwner.guest(),
+  );
+  final engine = ComparisonLearningTransitionEngine(registry: registry);
+  var state = ComparisonLearningState.empty(scope);
+  var sequence = 0;
+  for (final activityId in started) {
+    final at = DateTime.utc(2026, 10, 23, 0, 0, sequence);
+    final token = (++sequence).toString().padLeft(22, '0');
+    final command = engine.prepare(
+      state: state,
+      activityId: activityId,
+      action: StartComparisonRun(
+        sessionId: 'map-projection-$activityId',
+        policy: LessonPolicy(),
+      ),
+      authGeneration: 0,
+      token: token,
+      submittedAt: at,
+    );
+    state = engine
+        .evaluate(state: state, command: command, committedAt: at)
+        .nextState;
+  }
+  if (completedRevisions.isNotEmpty) {
+    state = ComparisonLearningState(
+      scope: scope,
+      revision: state.revision,
+      commitOrdinal: state.commitOrdinal,
+      slots: state.slots,
+      attempts: state.attempts,
+      receipts: state.receipts,
+      mistakes: state.mistakes,
+      summaries: state.summaries,
+      completions: [
+        ...state.completions,
+        for (final completion in completedRevisions.entries)
+          ComparisonCompletion(
+            scope: scope,
+            activityId: completion.key,
+            contentRevision: completion.value,
+            policyRevision: 1,
+            thresholdPercent: 80,
+            committedAt: DateTime.utc(2026, 10, 23),
+          ),
+      ],
+    );
+  }
+  return state;
+}
+
+CourseMapState _projectWithComparisonRegistry({
+  required AsyncValue<CourseLearningState> course,
+  required AsyncValue<ComparisonLearningState> comparison,
+  required ComparisonCatalogueRegistry? comparisonCatalogueRegistry,
+}) {
+  final named = <Symbol, Object?>{
+    #system: frenchSpaceSystems.first,
+    #auth: LearningAuthScope(
+      owner: LearningOwner.guest(),
+      generation: 0,
+      ready: true,
+    ),
+    #registry: LearningRegistry.french(),
+    #course: course,
+    #comparison: comparison,
+    #comparisonCatalogue: AsyncData(loadFrenchComparisonCatalogue()),
+    #sentences: const AsyncLoading<SentenceHuntLearningState>(),
+    #sentenceCatalogue: const AsyncLoading<SentenceHuntCatalogue>(),
+    if (comparisonCatalogueRegistry != null)
+      #comparisonCatalogueRegistry: AsyncData(comparisonCatalogueRegistry),
+  };
+  try {
+    return Function.apply(projectCourseMap, const [], named) as CourseMapState;
+  } on NoSuchMethodError {
+    // Keep the pre-interface RED behavioral: legacy projection leaves the
+    // dedicated body planned rather than failing compilation on a new name.
+    return projectCourseMap(
+      system: frenchSpaceSystems.first,
+      auth: LearningAuthScope(
+        owner: LearningOwner.guest(),
+        generation: 0,
+        ready: true,
+      ),
+      registry: LearningRegistry.french(),
+      course: course,
+      comparison: comparison,
+      comparisonCatalogue: AsyncData(loadFrenchComparisonCatalogue()),
+      sentences: const AsyncLoading(),
+      sentenceCatalogue: const AsyncLoading(),
+    );
+  }
+}
 
 void main() {
   final registry = LearningRegistry.french();
@@ -140,7 +258,7 @@ void main() {
       wrongIndex: 8,
       finish: true,
     );
-    expect(projectCourseState(previous).allAvailableMainComplete, isTrue);
+    expect(projectCourseState(previous).allAvailableMainComplete, isFalse);
     final state = projectCourseMap(
       system: frenchSpaceSystems.first,
       auth: LearningAuthScope(owner: owner, generation: 1, ready: true),
@@ -225,7 +343,156 @@ void main() {
           .evidenceLabels,
       isEmpty,
     );
+    expect(
+      state.bodies
+          .singleWhere((b) => b.definition.id == 'comparison')
+          .readiness,
+      MapReadiness.unavailable,
+    );
   });
+
+  test(
+    'dedicated_registration_failure_is_local_only_without_a_saved_binding',
+    () {
+      final invalidRegistry = _comparisonRegistry(dedicatedAvailable: false);
+      final empty = ComparisonLearningState.empty(
+        ComparisonProfileScope(courseId: 'en-fr', owner: LearningOwner.guest()),
+      );
+      final state = _projectWithComparisonRegistry(
+        course: AsyncData(
+          CourseLearningState.empty(
+            LearningScope(courseId: 'en-fr', owner: LearningOwner.guest()),
+          ),
+        ),
+        comparison: AsyncData(empty),
+        comparisonCatalogueRegistry: invalidRegistry,
+      );
+      final dedicated = state.bodies.singleWhere(
+        (body) => body.definition.id == 'comparison',
+      );
+      final mixed = state.bodies.singleWhere(
+        (body) => body.definition.id == 'mixed-comparison',
+      );
+      expect(dedicated.readiness, MapReadiness.unavailable);
+      expect(dedicated.launch, MapLaunch.start);
+      expect(mixed.readiness, MapReadiness.alpha);
+      expect(mixed.launch, MapLaunch.open);
+      expect(
+        state.bodies
+            .singleWhere((body) => body.definition.id == 'discovery')
+            .progress,
+        MapProgress.notStarted,
+      );
+
+      final validRegistry = _comparisonRegistry();
+      final persistedBinding = _comparisonState(
+        registry: validRegistry,
+        started: [uyDemoComparisonActivityId],
+      );
+      final failClosed = _projectWithComparisonRegistry(
+        course: AsyncData(
+          CourseLearningState.empty(
+            LearningScope(courseId: 'en-fr', owner: LearningOwner.guest()),
+          ),
+        ),
+        comparison: AsyncData(persistedBinding),
+        comparisonCatalogueRegistry: invalidRegistry,
+      );
+      expect(
+        failClosed.bodies
+            .singleWhere((body) => body.definition.id == 'comparison')
+            .readiness,
+        MapReadiness.unavailable,
+      );
+      expect(
+        failClosed.bodies
+            .singleWhere((body) => body.definition.id == 'mixed-comparison')
+            .readiness,
+        MapReadiness.unavailable,
+        reason: 'an unvalidatable saved binding fails the shared family closed',
+      );
+      expect(
+        failClosed.bodies
+            .singleWhere((body) => body.definition.id == 'discovery')
+            .progress,
+        MapProgress.notStarted,
+      );
+    },
+  );
+
+  test(
+    'dedicated_progress_uses_its_own_slot_and_current_revision_completion',
+    () {
+      final catalogueRegistry = _comparisonRegistry();
+      final course = AsyncData(
+        CourseLearningState.empty(
+          LearningScope(courseId: 'en-fr', owner: LearningOwner.guest()),
+        ),
+      );
+
+      CourseMapState project(ComparisonLearningState comparison) =>
+          _projectWithComparisonRegistry(
+            course: course,
+            comparison: AsyncData(comparison),
+            comparisonCatalogueRegistry: catalogueRegistry,
+          );
+
+      final siblingOnly = _comparisonState(
+        registry: catalogueRegistry,
+        started: [comparisonActivityId],
+        completedRevisions: {comparisonActivityId: 1},
+      );
+      final siblingProjection = project(siblingOnly);
+      final siblingPlanet = siblingProjection.bodies.singleWhere(
+        (body) => body.definition.id == 'comparison',
+      );
+      expect(siblingPlanet.readiness, MapReadiness.alpha);
+      expect(siblingPlanet.progress, MapProgress.notStarted);
+      expect(siblingPlanet.launch, MapLaunch.start);
+      expect(
+        siblingPlanet.evidenceLabels,
+        contains('/u/–/y/ comparison pairs attempted: 0/10'),
+      );
+      expect(
+        siblingProjection.bodies
+            .singleWhere((body) => body.definition.id == 'mixed-comparison')
+            .progress,
+        MapProgress.completed,
+      );
+
+      final resumable = _comparisonState(
+        registry: catalogueRegistry,
+        started: [uyDemoComparisonActivityId],
+      );
+      final resumablePlanet = project(
+        resumable,
+      ).bodies.singleWhere((body) => body.definition.id == 'comparison');
+      expect(resumablePlanet.progress, MapProgress.resumable);
+      expect(resumablePlanet.launch, MapLaunch.resume);
+
+      final historicalCompletion = _comparisonState(
+        registry: catalogueRegistry,
+        started: [uyDemoComparisonActivityId],
+        completedRevisions: {uyDemoComparisonActivityId: 2},
+      );
+      final historicalPlanet = project(
+        historicalCompletion,
+      ).bodies.singleWhere((body) => body.definition.id == 'comparison');
+      expect(historicalPlanet.progress, MapProgress.resumable);
+      expect(historicalPlanet.launch, MapLaunch.resume);
+
+      final completed = _comparisonState(
+        registry: catalogueRegistry,
+        started: [uyDemoComparisonActivityId],
+        completedRevisions: {uyDemoComparisonActivityId: 1},
+      );
+      final completedPlanet = project(
+        completed,
+      ).bodies.singleWhere((body) => body.definition.id == 'comparison');
+      expect(completedPlanet.progress, MapProgress.completed);
+      expect(completedPlanet.launch, MapLaunch.review);
+    },
+  );
 
   test('comparison_refresh_and_foreign_scope_hide_stale_evidence', () {
     final owner = LearningOwner.guest();
@@ -441,7 +708,11 @@ void main() {
       MapLaunch.review,
     );
     expect(completeMap.currentBodyId, 'discovery');
-    expect(completeMap.allAvailableMainComplete, isTrue);
+    expect(
+      completeMap.allAvailableMainComplete,
+      isFalse,
+      reason: 'discovery completion does not complete the dedicated comparison',
+    );
 
     final completion = completed.completions.single;
     final historical = CourseLearningState(
