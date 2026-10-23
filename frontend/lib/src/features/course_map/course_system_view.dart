@@ -14,11 +14,13 @@ class CourseSystemView extends StatefulWidget {
     required this.selectedBodyId,
     required this.onInspect,
     required this.onLaunch,
+    this.footer,
   });
   final CourseMapState state;
   final String? selectedBodyId;
   final ValueChanged<String> onInspect;
   final ValueChanged<MapBodyState> onLaunch;
+  final Widget? footer;
 
   @override
   State<CourseSystemView> createState() => _CourseSystemViewState();
@@ -180,6 +182,7 @@ class _CourseSystemViewState extends State<CourseSystemView> {
                   destinationList(disclosureOrder + 1),
                 if (fallback) mapCanvas(),
                 const SizedBox(height: 20),
+                if (widget.footer != null) widget.footer!,
               ],
             ),
           ),

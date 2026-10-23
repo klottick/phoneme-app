@@ -10,6 +10,9 @@ import '../core/course/sentence_hunt_content.dart';
 import '../features/arcade/arcade_screen.dart';
 import '../features/course/course_lesson_screen.dart';
 import '../features/course/course_progress_screen.dart';
+import '../features/course_map/course_map_screen.dart';
+import '../features/course_map/course_chart_screen.dart';
+import 'course_root_navigation.dart';
 import '../features/course/discovery_lesson_screen.dart';
 import '../features/course/comparison_lesson_screen.dart';
 import '../features/course/exercises/sentence_hunt_lesson_screen.dart';
@@ -18,7 +21,6 @@ import '../core/course/comparison_content.dart';
 import '../core/course/course_learning_providers.dart';
 import '../features/auth/login_screen.dart';
 import '../features/drills/drill_screen.dart';
-import '../features/home/home_screen.dart';
 import '../features/ipa/ipa_explorer_screen.dart';
 import '../features/audio/audio_compare_screen.dart';
 import '../features/content/content_manager_screen.dart';
@@ -64,7 +66,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: <RouteBase>[
-      GoRoute(path: '/arcade', builder: (_, __) => const ArcadeLobby()),
+      GoRoute(path: '/arcade', builder: (_, __) => const CourseRootNavigation(location: '/arcade', child: ArcadeLobby())),
       GoRoute(
           path: '/arcade/sound',
           builder: (_, __) => const ArcadeScreen(silent: false)),
@@ -86,7 +88,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           }),
       GoRoute(
           path: '/course-progress',
-          builder: (_, __) => const CourseProgressScreen()),
+          builder: (_, __) => const CourseRootNavigation(location: '/course-progress', child: CourseProgressScreen())),
+      GoRoute(path: '/course-chart', builder: (_, __) => const CourseChartScreen()),
+      GoRoute(path: '/course-system/:systemId', builder: (_, state) => CourseMapScreen(systemId: state.pathParameters['systemId']!)),
       GoRoute(
           path: '/course-comparison/:activityId',
           builder: (context, state) {
@@ -191,7 +195,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
           path: '/course-review',
-          builder: (_, __) => const CourseProgressScreen(review: true)),
+          builder: (_, __) => const CourseRootNavigation(location: '/course-review', child: CourseProgressScreen(review: true))),
       GoRoute(
         path: '/login',
         builder: (BuildContext context, GoRouterState state) {
@@ -207,7 +211,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/home',
         builder: (BuildContext context, GoRouterState state) {
-          return const HomeScreen();
+          return const CourseMapScreen(systemId: 'en-fr-u-y-system');
         },
       ),
       GoRoute(
