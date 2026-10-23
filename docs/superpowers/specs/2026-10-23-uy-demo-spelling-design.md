@@ -1,8 +1,6 @@
 # Sound → spelling: /u/–/y/ demo design
 
-**Status: written spec proposal awaiting user review.** The conversational scope was approved for specification writing
-only. This is not yet an approved implementation specification, plan, or authorization to change product code. No
-product verification or qualification is claimed here.
+**Status: approved specification (PR #118); [implementation plan](../plans/2026-10-23-uy-demo-spelling-implementation.md) awaiting separate user review.** The specification is approved; implementation is not authorized until the written plan is separately approved. No product verification or qualification is claimed here.
 
 ## Purpose and boundary
 
