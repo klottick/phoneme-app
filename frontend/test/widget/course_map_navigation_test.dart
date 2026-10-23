@@ -818,4 +818,200 @@ void main() {
       expect(tester.getCenter(ship), isNot(resumedShip));
     },
   );
+
+  testWidgets(
+    'responsive_home_reflow_preserves_paused_motion_and_owner_reset',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final app = await _mountMapApp(tester, normalMotion: true);
+      addTearDown(() => _unmountMapApp(tester, app));
+
+      final motion = find.byType(CourseMapMotion);
+      final canvas = find.byType(CourseMapCanvas);
+      final ship = find.byKey(const ValueKey('map-motion-ship'));
+      expect(find.byKey(const ValueKey('map-list-fallback')), findsNothing);
+      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
+
+      var canvasWidget = tester.widget<CourseMapCanvas>(canvas);
+      final currentBodyId = canvasWidget.state.currentBodyId!;
+      final selectedBodyId = canvasWidget.state.bodies
+          .firstWhere((body) => body.definition.id != currentBodyId)
+          .definition
+          .id;
+      final selectableBody = find.byKey(ValueKey('body-art-$selectedBodyId'));
+      await tester.ensureVisible(selectableBody);
+      await tester.tap(selectableBody);
+      await tester.pump();
+      expect(
+        tester.widget<CourseMapCanvas>(canvas).selectedBodyId,
+        selectedBodyId,
+      );
+
+      final pausedMotionState = tester.state(motion);
+      await tester.ensureVisible(find.byTooltip('Pause map motion'));
+      await tester.tap(find.byTooltip('Pause map motion'));
+      await tester.pump();
+      expect(find.byTooltip('Play map motion'), findsOneWidget);
+
+      void expectCurrentAnchorAndSelection() {
+        canvasWidget = tester.widget<CourseMapCanvas>(canvas);
+        expect(canvasWidget.state.currentBodyId, currentBodyId);
+        expect(canvasWidget.selectedBodyId, selectedBodyId);
+        final currentBodyArt = find.byKey(ValueKey('body-art-$currentBodyId'));
+        final currentBodyCenter =
+            tester.getCenter(currentBodyArt) - tester.getTopLeft(canvas);
+        final anchor = tester.widget<CourseMapMotion>(motion).anchor;
+        expect(anchor, isNotNull);
+        expect((anchor! - currentBodyCenter).distance, lessThan(0.1));
+      }
+
+      expectCurrentAnchorAndSelection();
+
+      tester.view.physicalSize = const Size(360, 640);
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('map-list-fallback')), findsOneWidget);
+
+      // Put the fallback map below the viewport, let hidden time pass, then
+      // bring it back onscreen before checking its paused control and identity.
+      await tester.ensureVisible(find.text('SOUND SYSTEM'));
+      await tester.pump();
+      await tester.pump();
+      final viewport = tester.getRect(find.byType(SingleChildScrollView));
+      final hiddenCanvas = tester.getRect(canvas);
+      expect(hiddenCanvas.intersect(viewport).isEmpty, isTrue);
+      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isFalse);
+      final hiddenShipRelative =
+          tester.getCenter(ship) - tester.getTopLeft(canvas);
+      await tester.pump(const Duration(seconds: 5));
+      expect(tester.binding.transientCallbackCount, 0);
+      expect(
+        (tester.getCenter(ship) -
+                tester.getTopLeft(canvas) -
+                hiddenShipRelative)
+            .distance,
+        lessThan(0.1),
+      );
+
+      await tester.ensureVisible(ship);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 120));
+      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
+      expect(find.byTooltip('Play map motion'), findsOneWidget);
+      expect(identical(tester.state(motion), pausedMotionState), isTrue);
+      expectCurrentAnchorAndSelection();
+      final visibleFallbackShipRelative =
+          tester.getCenter(ship) - tester.getTopLeft(canvas);
+      expect(
+        (visibleFallbackShipRelative - hiddenShipRelative).distance,
+        lessThan(0.1),
+      );
+
+      tester.view.physicalSize = const Size(390, 844);
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('map-list-fallback')), findsNothing);
+      await tester.ensureVisible(find.text('SOUND SYSTEM'));
+      await tester.pump();
+      await tester.pump();
+      await tester.ensureVisible(ship);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 120));
+      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
+      expect(find.byTooltip('Play map motion'), findsOneWidget);
+      expect(identical(tester.state(motion), pausedMotionState), isTrue);
+      expectCurrentAnchorAndSelection();
+
+      final stablePausedShipRelative =
+          tester.getCenter(ship) - tester.getTopLeft(canvas);
+      await tester.pump(const Duration(seconds: 5));
+      expect(tester.binding.transientCallbackCount, 0);
+      expect(
+        (tester.getCenter(ship) -
+                tester.getTopLeft(canvas) -
+                stablePausedShipRelative)
+            .distance,
+        lessThan(0.1),
+      );
+
+      await tester.ensureVisible(ship);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 120));
+      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
+      expect(find.byTooltip('Play map motion'), findsOneWidget);
+      expect(identical(tester.state(motion), pausedMotionState), isTrue);
+      await tester.ensureVisible(find.byTooltip('Play map motion'));
+      await tester.tap(find.byTooltip('Play map motion'));
+      await tester.pump();
+      expect(find.byTooltip('Pause map motion'), findsOneWidget);
+      final runningMotionState = tester.state(motion);
+      await tester.ensureVisible(find.text('Open discovery recovery'));
+      await tester.pump();
+      await tester.pump();
+      final runningViewport = tester.getRect(
+        find.byType(SingleChildScrollView),
+      );
+      expect(tester.getRect(canvas).intersect(runningViewport).isEmpty, isTrue);
+      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isFalse);
+      final hiddenRunningShipRelative =
+          tester.getCenter(ship) - tester.getTopLeft(canvas);
+      await tester.pump(const Duration(seconds: 5));
+      expect(tester.binding.transientCallbackCount, 0);
+      expect(
+        (tester.getCenter(ship) -
+                tester.getTopLeft(canvas) -
+                hiddenRunningShipRelative)
+            .distance,
+        lessThan(0.1),
+      );
+
+      await tester.ensureVisible(ship);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 120));
+      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
+      expect(find.byTooltip('Pause map motion'), findsOneWidget);
+      expect(identical(tester.state(motion), runningMotionState), isTrue);
+      final resumedRunningShipRelative =
+          tester.getCenter(ship) - tester.getTopLeft(canvas);
+      expect(
+        (resumedRunningShipRelative - hiddenRunningShipRelative).distance,
+        lessThan(0.1),
+      );
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(
+        (tester.getCenter(ship) -
+                tester.getTopLeft(canvas) -
+                resumedRunningShipRelative)
+            .distance,
+        greaterThan(0.1),
+      );
+      await tester.ensureVisible(find.byTooltip('Pause map motion'));
+      await tester.tap(find.byTooltip('Pause map motion'));
+      await tester.pump();
+      expect(find.byTooltip('Play map motion'), findsOneWidget);
+
+      app.container
+          .read(learningAuthScopeProvider.notifier)
+          .observe(
+            owner: LearningOwner.account('responsive-layout-owner'),
+            ready: true,
+          );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump();
+      expect(find.byType(CourseMapMotion), findsOneWidget);
+      expect(identical(tester.state(motion), pausedMotionState), isFalse);
+      expect(find.byTooltip('Pause map motion'), findsOneWidget);
+      canvasWidget = tester.widget<CourseMapCanvas>(canvas);
+      expect(
+        canvasWidget.selectedBodyId,
+        canvasWidget.state.currentBodyId,
+        reason: 'a new owner resets inspection selection to its current body',
+      );
+    },
+  );
 }
