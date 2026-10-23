@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/providers/app_providers.dart';
+import '../core/theme/space_course_theme.dart';
 import '../core/course/lesson_section.dart';
 import '../core/course/french_sentence_exercises.dart';
 import '../core/course/french_sentence_package.dart';
@@ -66,7 +67,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: <RouteBase>[
-      GoRoute(path: '/arcade', builder: (_, __) => const CourseRootNavigation(location: '/arcade', child: ArcadeLobby())),
+      GoRoute(path: '/arcade', builder: (_, __) => const SpaceCourseTheme(child: CourseRootNavigation(location: '/arcade', child: ArcadeLobby()))),
       GoRoute(
           path: '/arcade/sound',
           builder: (_, __) => const ArcadeScreen(silent: false)),
@@ -82,21 +83,23 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             // lifecycle-aware screen; every other lesson keeps the legacy
             // screen and its behavior.
             if (sectionForLesson(lessonId) != null) {
-              return DiscoveryLessonScreen(lessonId: lessonId, review: review);
+              return SpaceCourseTheme(
+                child: DiscoveryLessonScreen(lessonId: lessonId, review: review),
+              );
             }
             return CourseLessonScreen(lessonId: lessonId, review: review);
           }),
       GoRoute(
           path: '/course-progress',
-          builder: (_, __) => const CourseRootNavigation(location: '/course-progress', child: CourseProgressScreen())),
-      GoRoute(path: '/course-chart', builder: (_, __) => const CourseChartScreen()),
-      GoRoute(path: '/course-system/:systemId', builder: (_, state) => CourseMapScreen(systemId: state.pathParameters['systemId']!)),
+          builder: (_, __) => const SpaceCourseTheme(child: CourseRootNavigation(location: '/course-progress', child: CourseProgressScreen()))),
+      GoRoute(path: '/course-chart', builder: (_, __) => const SpaceCourseTheme(child: CourseChartScreen())),
+      GoRoute(path: '/course-system/:systemId', builder: (_, state) => SpaceCourseTheme(child: CourseMapScreen(systemId: state.pathParameters['systemId']!))),
       GoRoute(
           path: '/course-comparison/:activityId',
           builder: (context, state) {
-            const unavailable = Scaffold(
+            const unavailable = SpaceCourseTheme(child: Scaffold(
                 body: Center(
-                    child: Text('This comparison activity is unavailable.')));
+                    child: Text('This comparison activity is unavailable.'))));
             final activityId = state.pathParameters['activityId'];
             final all = state.uri.queryParametersAll;
             if (activityId != comparisonActivityId ||
@@ -113,10 +116,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 if (pairId != null && !catalogue.byId.containsKey(pairId)) {
                   return unavailable;
                 }
-                return ComparisonLessonScreen(
+                return SpaceCourseTheme(child: ComparisonLessonScreen(
                     activityId: activityId!,
                     review: all['review']?.single == 'true',
-                    pairId: pairId);
+                    pairId: pairId));
               } catch (_) {
                 return unavailable;
               }
@@ -195,7 +198,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
           path: '/course-review',
-          builder: (_, __) => const CourseRootNavigation(location: '/course-review', child: CourseProgressScreen(review: true))),
+          builder: (_, __) => const SpaceCourseTheme(child: CourseRootNavigation(location: '/course-review', child: CourseProgressScreen(review: true)))),
       GoRoute(
         path: '/login',
         builder: (BuildContext context, GoRouterState state) {
@@ -211,7 +214,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/home',
         builder: (BuildContext context, GoRouterState state) {
-          return const CourseMapScreen(systemId: 'en-fr-u-y-system');
+          return const SpaceCourseTheme(child: CourseMapScreen(systemId: 'en-fr-u-y-system'));
         },
       ),
       GoRoute(
