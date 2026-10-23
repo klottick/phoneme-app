@@ -3,6 +3,11 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 /// Decorative motion isolated from the supplied map and its learning state.
+///
+/// A host that retains this subtree while hiding it must pair its visibility
+/// change with `TickerMode(enabled: visible)`. `Offstage` alone intentionally
+/// does not mute descendant tickers; this widget consumes the host's standard
+/// `TickerMode` signal and does not poll the render tree for visibility.
 class CourseMapMotion extends StatefulWidget {
   const CourseMapMotion({super.key, required this.anchor, required this.child});
 
