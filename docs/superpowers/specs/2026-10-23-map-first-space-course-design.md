@@ -1,8 +1,10 @@
 # Map-first space course design
 
-**Status:** proposed written design, awaiting user review. The user approved the
-visual direction and requested this document; that is not yet approval of this
-written specification, an implementation plan, product code, or release.
+**Status:** written design approved by the user on 2026-10-23 and merged through
+[PR #101](https://github.com/klottick/phoneme-app/pull/101). Approval permits
+implementation planning, not product-code execution or release. The separate
+[implementation plan](../plans/2026-10-23-map-first-space-implementation.md)
+awaits its own approval.
 
 **Baseline:** published `origin/main`,
 `b2789cbf356de2144bef82e54f45662fa4fecf80`, fetched on 2026-10-23.
