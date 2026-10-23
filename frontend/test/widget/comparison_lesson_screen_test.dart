@@ -181,6 +181,7 @@ _ComparisonWidgetStore _createComparisonStore({
   required _Persistence persistence,
   required LearningAuthScope auth,
   required Zone asyncZone,
+  ComparisonCatalogueRegistry? registry,
   LearningAuthScope Function()? currentAuth,
   LearningOwner Function()? backendOwner,
 }) => _ComparisonWidgetStore(
@@ -188,6 +189,7 @@ _ComparisonWidgetStore _createComparisonStore({
   persistence,
   auth,
   asyncZone: asyncZone,
+  registry: registry,
   currentAuth: currentAuth,
   backendOwner: backendOwner,
 );
@@ -278,16 +280,24 @@ final class _ComparisonWidgetStore implements ComparisonLearningStore {
     this.persistence,
     this.auth, {
     required Zone asyncZone,
+    ComparisonCatalogueRegistry? registry,
     LearningAuthScope Function()? currentAuth,
     LearningOwner Function()? backendOwner,
   }) : _asyncZone = asyncZone {
     _currentAuth = currentAuth ?? () => auth;
     _backendOwner = backendOwner ?? () => auth.owner;
-    _harness = persistence.sqlHarness ??= ComparisonLearningSqlTestHarness(
-      catalogue: catalogue,
-      currentAuth: _currentAuth,
-      backendOwner: _backendOwner,
-    );
+    _harness = persistence.sqlHarness ??=
+        registry == null
+            ? ComparisonLearningSqlTestHarness(
+                catalogue: catalogue,
+                currentAuth: _currentAuth,
+                backendOwner: _backendOwner,
+              )
+            : ComparisonLearningSqlTestHarness(
+                registry: registry,
+                currentAuth: _currentAuth,
+                backendOwner: _backendOwner,
+              );
     _delegate = _harness.createRepository(
       owner: auth.owner,
       generation: auth.generation,
@@ -379,6 +389,20 @@ final class _ComparisonWidgetStore implements ComparisonLearningStore {
       counts[table] = row.read<int>('row_count');
     }
     return counts;
+  }
+
+  Future<int> attemptCount() async {
+    final scopeId = await _scopeId();
+    if (scopeId == null) return 0;
+    final db = await database.open();
+    final row = await db
+        .customSelect(
+          'SELECT COUNT(*) AS row_count FROM learning_attempts '
+          'WHERE scope_id = ?',
+          variables: [Variable<int>(scopeId)],
+        )
+        .getSingle();
+    return row.read<int>('row_count');
   }
 
   Future<T> _runInStableAsyncZone<T>(Future<T> Function() operation) {
@@ -517,6 +541,7 @@ Future<ProviderContainer> _mountComparison(
   VoidCallback? onAudioFactory,
   GoRouter? router,
   bool pumpInitialReadBarrier = true,
+  ComparisonCatalogueRegistry? registry,
   LearningAuthTracker? authTracker,
   _ComparisonWidgetStore Function(LearningAuthScope auth)? storeForAuth,
   Key? screenKey,
@@ -532,6 +557,8 @@ Future<ProviderContainer> _mountComparison(
         onCatalogueFactory?.call();
         return catalogue;
       }),
+      if (registry != null)
+        comparisonCatalogueRegistryProvider.overrideWithValue(registry),
       comparisonLearningStoreProvider.overrideWith((ref) {
         onStoreFactory?.call();
         if (storeForAuth != null) {
@@ -609,6 +636,7 @@ Future<ComparisonLearningState> _seedFirstPass(
   _ComparisonWidgetStore store, {
   required ComparisonCatalogue catalogue,
   required LessonPolicy policy,
+  String activityId = comparisonActivityId,
   Set<int> wrongIndexes = const {},
 }) => _runRealAsync(
   tester,
@@ -616,6 +644,7 @@ Future<ComparisonLearningState> _seedFirstPass(
     store,
     catalogue: catalogue,
     policy: policy,
+    activityId: activityId,
     wrongIndexes: wrongIndexes,
   ),
 );
@@ -624,17 +653,18 @@ Future<ComparisonLearningState> _seedFirstPassWork(
   _ComparisonWidgetStore store, {
   required ComparisonCatalogue catalogue,
   required LessonPolicy policy,
+  String activityId = comparisonActivityId,
   Set<int> wrongIndexes = const {},
 }) async {
   var state = await store.load();
   var command = store.prepare(
     state: state,
-    activityId: comparisonActivityId,
+    activityId: activityId,
     action: StartComparisonRun(sessionId: 'seeded-finite-run', policy: policy),
   );
   state = (await store.submit(command)).state;
   for (var i = 0; i < catalogue.exercises.length; i++) {
-    final slot = state.slot!;
+    final slot = state.slots[activityId]!;
     final session = LessonSectionSession.fromJson(
       Map<String, dynamic>.from(slot.checkpoint.sessionJson),
       itemIds: catalogue.exercises.map((e) => e.id).toList(),
@@ -654,7 +684,7 @@ Future<ComparisonLearningState> _seedFirstPassWork(
           referenceId: sample.referenceId,
           outcome: CourseAudioOutcome.completed,
           source: CourseAudioSource.unverifiedRecording,
-          activityId: comparisonActivityId,
+          activityId: activityId,
           runGeneration: slot.cursor.generation,
           round: session.round,
           pairId: exercise.id,
@@ -664,7 +694,7 @@ Future<ComparisonLearningState> _seedFirstPassWork(
     ];
     command = store.prepare(
       state: state,
-      activityId: comparisonActivityId,
+      activityId: activityId,
       action: AnswerComparisonPair(
         ComparePhonemesAnswer(
           selectedRelation: selected,
@@ -676,7 +706,7 @@ Future<ComparisonLearningState> _seedFirstPassWork(
     state = (await store.submit(command)).state;
     command = store.prepare(
       state: state,
-      activityId: comparisonActivityId,
+      activityId: activityId,
       action: const AdvanceComparisonPair(),
     );
     state = (await store.submit(command)).state;
@@ -786,6 +816,15 @@ Future<void> _answerVisiblePair(
   await tester.pump();
 }
 
+void _expectNoComparisonCorrectnessFeedback(WidgetTester tester) {
+  expect(find.text('Correct'), findsNothing);
+  expect(find.text('Not yet'), findsNothing);
+  expect(
+    tester.widget<SoundComparison>(find.byType(SoundComparison)).state.feedback,
+    isNull,
+  );
+}
+
 void main() {
   final catalogue = loadFrenchComparisonCatalogue();
   var ownerNumber = 0;
@@ -797,7 +836,11 @@ void main() {
       _ControlledCourseReferenceAudio audio,
     })
   >
-  harness(WidgetTester tester) async {
+  harness(WidgetTester tester, {
+    ComparisonCatalogue? requestedCatalogue,
+    ComparisonCatalogueRegistry? registry,
+  }) async {
+    final selectedCatalogue = requestedCatalogue ?? catalogue;
     late final Zone asyncZone;
     await tester.runAsync(() async {
       asyncZone = Zone.current;
@@ -812,10 +855,11 @@ void main() {
       persistence: persistence,
       auth: auth,
       store: _ComparisonWidgetStore(
-        catalogue,
+        selectedCatalogue,
         persistence,
         auth,
         asyncZone: asyncZone,
+        registry: registry,
       ),
       audio: _ControlledCourseReferenceAudio(),
     );
@@ -838,6 +882,481 @@ void main() {
       await tester.pump();
     }
   }
+
+  testWidgets('uy_demo_active_prompt_hides_authored_answers_until_saved_debrief', (
+    tester,
+  ) async {
+    final demo = loadFrenchUyDemoComparisonCatalogue();
+    final catalogueWithSentinel = _copyCatalogue(
+      demo,
+      firstNote:
+          'The designated vowels are /u/ in A and /y/ in B. HIDDEN-UY-NOTE-6D21',
+    );
+    final registry = ComparisonCatalogueRegistry([
+      ComparisonCatalogueRegistration.available(catalogue),
+      ComparisonCatalogueRegistration.available(catalogueWithSentinel),
+    ]);
+    final h = await harness(
+      tester,
+      requestedCatalogue: catalogueWithSentinel,
+      registry: registry,
+    );
+    ProviderContainer? container;
+    addTearDown(() {
+      final mounted = container;
+      if (mounted != null) cleanup(mounted, h.audio);
+    });
+    container = await _mountComparison(
+      tester,
+      store: h.store,
+      audio: h.audio,
+      catalogue: catalogueWithSentinel,
+      activityId: uyDemoComparisonActivityId,
+      registry: registry,
+    );
+    final exercise = catalogueWithSentinel.exercises.first;
+    expect(
+      find.text(
+        'Demo practice: this authored comparison content has not had qualified French review. It is practice, not an assessment.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.text(
+        'Alpha audio: recordings are unverified; device speech is practice-only.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Compare the vowel in each sample.'), findsOneWidget);
+    for (final hidden in [
+      'HIDDEN-UY-NOTE-6D21',
+      'uy-demo-pair-01',
+      'fr-word-tout',
+      'fr-word-tu',
+      'tout',
+      'tu',
+      '/u/',
+      '/y/',
+    ]) {
+      expect(find.textContaining(hidden), findsNothing, reason: hidden);
+      expect(find.byTooltip(hidden), findsNothing, reason: hidden);
+    }
+
+    await tester.tap(find.text('Listen to sample A'));
+    h.audio.completeNext(
+      CourseAudioResult.completed(
+        referenceId: exercise.sampleA.referenceId,
+        source: CourseAudioSource.unverifiedRecording,
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('Listen to sample B'));
+    h.audio.completeNext(
+      CourseAudioResult.completed(
+        referenceId: exercise.sampleB.referenceId,
+        source: CourseAudioSource.unverifiedRecording,
+      ),
+    );
+    await tester.pump();
+
+    final answerGate = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
+    final answerEntered = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
+    addTearDown(() {
+      if (!answerGate.isCompleted) answerGate.complete();
+    });
+    h.persistence.holdNextWrite = answerGate;
+    h.persistence.writeEntered = answerEntered;
+    await tester.tap(find.text('Same'));
+    await tester.runAsync(() => answerEntered.future);
+    _expectNoComparisonCorrectnessFeedback(tester);
+    expect(find.textContaining('HIDDEN-UY-NOTE-6D21'), findsNothing);
+    answerGate.complete();
+    var saved = await _readSnapshot(tester, h.store);
+    for (
+      var frame = 0;
+      frame < 30 && find.text('Continue').evaluate().isEmpty;
+      frame++
+    ) {
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump();
+    }
+    expect(find.text('Continue'), findsOneWidget);
+    _expectNoComparisonCorrectnessFeedback(tester);
+    expect(saved.attempts, hasLength(1));
+    expect(saved.attempts.single.activityId, uyDemoComparisonActivityId);
+    expect(saved.attempts.single.correct, isFalse);
+
+    var advance = h.store.prepare(
+      state: saved,
+      activityId: uyDemoComparisonActivityId,
+      action: const AdvanceComparisonPair(),
+    );
+    saved = (await _runRealAsync(tester, () => h.store.submit(advance))).state;
+    for (
+      var index = 1;
+      index < catalogueWithSentinel.exercises.length;
+      index++
+    ) {
+      final slot = saved.slots[uyDemoComparisonActivityId]!;
+      final session = LessonSectionSession.fromJson(
+        Map<String, dynamic>.from(slot.checkpoint.sessionJson),
+        itemIds: catalogueWithSentinel.exercises
+            .map((item) => item.id)
+            .toList(),
+        contentRevision: catalogueWithSentinel.contentRevision,
+      );
+      final current = catalogueWithSentinel.exercise(session.currentItemId!);
+      final observations = [
+        for (final sample in [current.sampleA, current.sampleB])
+          ComparisonPlaybackObservation(
+            slot: sample.slot,
+            referenceId: sample.referenceId,
+            outcome: CourseAudioOutcome.completed,
+            source: CourseAudioSource.unverifiedRecording,
+            activityId: uyDemoComparisonActivityId,
+            runGeneration: slot.cursor.generation,
+            round: session.round,
+            pairId: current.id,
+            profile: slot.scope,
+            uiGeneration: 0,
+          ),
+      ];
+      final answer = h.store.prepare(
+        state: saved,
+        activityId: uyDemoComparisonActivityId,
+        action: AnswerComparisonPair(
+          ComparePhonemesAnswer(
+            selectedRelation: current.expectedRelation,
+            expectedRelationSnapshot: current.expectedRelation,
+            observations: observations,
+          ),
+        ),
+      );
+      saved = (await _runRealAsync(tester, () => h.store.submit(answer))).state;
+      advance = h.store.prepare(
+        state: saved,
+        activityId: uyDemoComparisonActivityId,
+        action: const AdvanceComparisonPair(),
+      );
+      saved = (await _runRealAsync(
+        tester,
+        () => h.store.submit(advance),
+      )).state;
+    }
+    final savedSlot = saved.slots[uyDemoComparisonActivityId]!;
+    final savedSession = LessonSectionSession.fromJson(
+      Map<String, dynamic>.from(savedSlot.checkpoint.sessionJson),
+      itemIds: catalogueWithSentinel.exercises.map((item) => item.id).toList(),
+      contentRevision: catalogueWithSentinel.contentRevision,
+    );
+    expect(savedSession.phase, LessonSectionPhase.debrief);
+    expect(savedSession.unresolvedItemIds, ['uy-demo-pair-01']);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    cleanup(container, h.audio);
+    container = await _mountComparison(
+      tester,
+      store: h.store,
+      audio: h.audio,
+      catalogue: catalogueWithSentinel,
+      activityId: uyDemoComparisonActivityId,
+      registry: registry,
+    );
+    expect(find.text('Comparison debrief'), findsOneWidget);
+    expect(
+      find.text(
+        'The designated vowels are /u/ in A and /y/ in B. HIDDEN-UY-NOTE-6D21',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('You got 9 of 10 correct.'), findsOneWidget);
+    expect(find.text('Passing needs 8 of 10 correct.'), findsOneWidget);
+    expect(find.text('Compare the vowel in each sample.'), findsNothing);
+  });
+
+  testWidgets(
+    'uy_demo_correct_answer_hides_feedback_through_ack_and_restore',
+    (tester) async {
+      final demo = loadFrenchUyDemoComparisonCatalogue();
+      final registry = ComparisonCatalogueRegistry([
+        ComparisonCatalogueRegistration.available(catalogue),
+        ComparisonCatalogueRegistration.available(demo),
+      ]);
+      final h = await harness(
+        tester,
+        requestedCatalogue: demo,
+        registry: registry,
+      );
+      ProviderContainer? container;
+      addTearDown(() {
+        final mounted = container;
+        if (mounted != null) cleanup(mounted, h.audio);
+      });
+      container = await _mountComparison(
+        tester,
+        store: h.store,
+        audio: h.audio,
+        catalogue: demo,
+        activityId: uyDemoComparisonActivityId,
+        registry: registry,
+      );
+      final exercise = demo.exercises.first;
+      await tester.tap(find.text('Listen to sample A'));
+      h.audio.completeNext(
+        CourseAudioResult.completed(
+          referenceId: exercise.sampleA.referenceId,
+          source: CourseAudioSource.unverifiedRecording,
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('Listen to sample B'));
+      h.audio.completeNext(
+        CourseAudioResult.completed(
+          referenceId: exercise.sampleB.referenceId,
+          source: CourseAudioSource.unverifiedRecording,
+        ),
+      );
+      await tester.pump();
+
+      final answerGate = await _runRealAsync(
+        tester,
+        () async => Completer<void>(),
+      );
+      final answerEntered = await _runRealAsync(
+        tester,
+        () async => Completer<void>(),
+      );
+      addTearDown(() {
+        if (!answerGate.isCompleted) answerGate.complete();
+      });
+      h.persistence.holdNextWrite = answerGate;
+      h.persistence.writeEntered = answerEntered;
+      await tester.tap(find.text('Different'));
+      await tester.runAsync(() => answerEntered.future);
+      _expectNoComparisonCorrectnessFeedback(tester);
+      final held = await _readSnapshot(tester, h.store);
+      expect(held.attempts, isEmpty);
+      expect(find.text('Continue'), findsNothing);
+
+      answerGate.complete();
+      final saved = await _readSnapshot(tester, h.store);
+      expect(saved.attempts, hasLength(1));
+      expect(saved.attempts.single.correct, isTrue);
+      expect(saved.attempts.single.activityId, uyDemoComparisonActivityId);
+      for (
+        var frame = 0;
+        frame < 30 && find.text('Continue').evaluate().isEmpty;
+        frame++
+      ) {
+        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+        await tester.pump();
+      }
+      expect(find.text('Continue'), findsOneWidget);
+      _expectNoComparisonCorrectnessFeedback(tester);
+      final audioRequestsBeforeRestore = h.audio.requests.length;
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      cleanup(container, h.audio);
+      container = await _mountComparison(
+        tester,
+        store: h.store,
+        audio: h.audio,
+        catalogue: demo,
+        activityId: uyDemoComparisonActivityId,
+        registry: registry,
+      );
+      expect(find.text('Continue'), findsOneWidget);
+      _expectNoComparisonCorrectnessFeedback(tester);
+      expect(h.audio.requests, hasLength(audioRequestsBeforeRestore));
+    },
+  );
+
+  testWidgets(
+    'uy_demo_owner_change_during_sample_b_and_frozen_retry_has_no_stale_submit',
+    (tester) async {
+      final demo = loadFrenchUyDemoComparisonCatalogue();
+      final registry = ComparisonCatalogueRegistry([
+        ComparisonCatalogueRegistration.available(catalogue),
+        ComparisonCatalogueRegistration.available(demo),
+      ]);
+      final h = await harness(
+        tester,
+        requestedCatalogue: demo,
+        registry: registry,
+      );
+      final tracker = LearningAuthTracker(owner: h.auth.owner, ready: true);
+      final stores = <(LearningOwner, int), _ComparisonWidgetStore>{};
+      _ComparisonWidgetStore storeFor(LearningAuthScope auth) =>
+          stores.putIfAbsent(
+            (auth.owner, auth.generation),
+            () => _createComparisonStore(
+              catalogue: demo,
+              persistence: h.persistence,
+              auth: auth,
+              asyncZone: h.store._asyncZone,
+              registry: registry,
+              currentAuth: () => tracker.current,
+              backendOwner: () => tracker.current.owner,
+            ),
+          );
+      final storeA = storeFor(tracker.current);
+      final container = await _mountComparison(
+        tester,
+        store: storeA,
+        audio: h.audio,
+        catalogue: demo,
+        activityId: uyDemoComparisonActivityId,
+        registry: registry,
+        authTracker: tracker,
+        storeForAuth: storeFor,
+      );
+      addTearDown(() => cleanup(container, h.audio));
+      final first = demo.exercises.first;
+      await tester.tap(find.text('Listen to sample A'));
+      h.audio.completeNext(
+        CourseAudioResult.completed(
+          referenceId: first.sampleA.referenceId,
+          source: CourseAudioSource.unverifiedRecording,
+        ),
+      );
+      await tester.pump();
+      expect(
+        tester
+            .widget<SoundComparison>(find.byType(SoundComparison))
+            .heardSamples,
+        {ComparisonSample.a},
+      );
+      await tester.tap(find.text('Listen to sample B'));
+      await tester.pump();
+      expect(h.audio.requests, hasLength(2));
+
+      final ownerB = LearningOwner.account('uy-demo-owner-b-${ownerNumber++}');
+      tracker.observe(owner: ownerB, ready: true);
+      for (var frame = 0; frame < 20; frame++) {
+        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+        await tester.pump();
+      }
+      final storeB = storeFor(tracker.current);
+      h.audio.completeNext(
+        CourseAudioResult.completed(
+          referenceId: first.sampleB.referenceId,
+          source: CourseAudioSource.unverifiedRecording,
+        ),
+      );
+      await tester.pump();
+      for (
+        var frame = 0;
+        frame < 30 &&
+            storeB.submitted
+                .where((command) => command.action is StartComparisonRun)
+                .isEmpty;
+        frame++
+      ) {
+        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+        await tester.pump();
+      }
+      expect(
+        storeA.submitted.where(
+          (command) => command.action is AnswerComparisonPair,
+        ),
+        isEmpty,
+        reason: "late B audio cannot answer the replaced owner's prompt",
+      );
+      expect(
+        storeB.submitted.where(
+          (command) => command.action is AnswerComparisonPair,
+        ),
+        isEmpty,
+      );
+      expect(
+        tester
+            .widget<SoundComparison>(find.byType(SoundComparison))
+            .heardSamples,
+        isEmpty,
+        reason: 'owner replacement retires the old A grant as well as B',
+      );
+
+      await tester.tap(find.text('Listen to sample A'));
+      h.audio.completeNext(
+        CourseAudioResult.completed(
+          referenceId: first.sampleA.referenceId,
+          source: CourseAudioSource.unverifiedRecording,
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('Listen to sample B'));
+      h.audio.completeNext(
+        CourseAudioResult.completed(
+          referenceId: first.sampleB.referenceId,
+          source: CourseAudioSource.unverifiedRecording,
+        ),
+      );
+      await tester.pump();
+      h.persistence.failNextWrite = true;
+      await tester.tap(find.text('Different'));
+      for (
+        var frame = 0;
+        frame < 30 && find.text('Retry saving').evaluate().isEmpty;
+        frame++
+      ) {
+        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+        await tester.pump();
+      }
+      expect(find.text('Retry saving'), findsOneWidget);
+      _expectNoComparisonCorrectnessFeedback(tester);
+      final frozen = storeB.submitted.last;
+      expect(frozen.action, isA<AnswerComparisonPair>());
+      final staleRetry = tester
+          .widget<TextButton>(find.widgetWithText(TextButton, 'Retry saving'))
+          .onPressed!;
+
+      final ownerC = LearningOwner.account('uy-demo-owner-c-${ownerNumber++}');
+      tracker.observe(owner: ownerC, ready: true);
+      for (var frame = 0; frame < 24; frame++) {
+        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+        await tester.pump();
+      }
+      final storeC = storeFor(tracker.current);
+      expect(
+        storeB.submitted.where(
+          (command) => command.action is AnswerComparisonPair,
+        ),
+        hasLength(1),
+      );
+      final attemptsBeforeRetry = await _runRealAsync(
+        tester,
+        storeB.attemptCount,
+      );
+      final countsBeforeRetry = await _runRealAsync(tester, storeB.sqlCounts);
+      staleRetry();
+      await tester.pump();
+      expect(
+        storeB.submitted.where(
+          (command) => command.action is AnswerComparisonPair,
+        ),
+        hasLength(1),
+        reason: 'retired frozen command is not retried after owner replacement',
+      );
+      expect(
+        storeC.submitted.where(
+          (command) => command.action is AnswerComparisonPair,
+        ),
+        isEmpty,
+      );
+      expect(
+        await _runRealAsync(tester, storeB.attemptCount),
+        attemptsBeforeRetry,
+      );
+      expect(await _runRealAsync(tester, storeB.sqlCounts), countsBeforeRetry);
+      expect(identical(storeB.submitted.last, frozen), isTrue);
+    },
+  );
 
   for (final failFirstWrite in [false, true]) {
     testWidgets(
@@ -4392,6 +4911,7 @@ void main() {
       final view = tester.widget<SoundComparison>(find.byType(SoundComparison));
       expect(view.state.answered, isTrue);
       expect(view.state.feedback, ListeningFeedback.correct);
+      expect(find.text('Correct'), findsOneWidget);
       expect(view.selectedRelation, isNull);
       expect(h.audio.requests, isEmpty);
       expect(
@@ -4568,6 +5088,57 @@ void main() {
       expect(find.text('Retry saving'), findsNothing);
     },
   );
+
+  testWidgets('uy_demo_review_finish_never_adds_dedicated_completion', (
+    tester,
+  ) async {
+    final demo = loadFrenchUyDemoComparisonCatalogue();
+    final registry = ComparisonCatalogueRegistry([
+      ComparisonCatalogueRegistration.available(catalogue),
+      ComparisonCatalogueRegistration.available(demo),
+    ]);
+    final h = await harness(
+      tester,
+      requestedCatalogue: demo,
+      registry: registry,
+    );
+    final seeded = await _seedFirstPass(
+      tester,
+      h.store,
+      catalogue: demo,
+      policy: LessonPolicy(),
+      activityId: uyDemoComparisonActivityId,
+    );
+    expect(seeded.slots[uyDemoComparisonActivityId], isNotNull);
+    expect(seeded.completions, isEmpty);
+    final container = await _mountComparison(
+      tester,
+      store: h.store,
+      audio: h.audio,
+      catalogue: demo,
+      activityId: uyDemoComparisonActivityId,
+      registry: registry,
+      review: true,
+    );
+    addTearDown(() => cleanup(container, h.audio));
+
+    expect(find.text('Comparison debrief'), findsOneWidget);
+    await tester.tap(find.text('Finish comparison'));
+    await _readSnapshot(tester, h.store);
+    await tester.pump();
+    await pumpUntil(tester, find.text('Comparison complete.'));
+
+    final finished = await _readSnapshot(tester, h.store);
+    expect(finished.completions, isEmpty);
+    expect(
+      h.store.prepared.last.action,
+      isA<FinishComparisonRun>().having(
+        (action) => action.recordCompletion,
+        'recordCompletion',
+        false,
+      ),
+    );
+  });
 
   testWidgets('route cover and app pause compose without hidden playback', (
     tester,

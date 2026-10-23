@@ -102,22 +102,33 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                     child: Text('This comparison activity is unavailable.'))));
             final activityId = state.pathParameters['activityId'];
             final all = state.uri.queryParametersAll;
-            if (activityId != comparisonActivityId ||
+            if ((activityId != comparisonActivityId &&
+                    activityId != uyDemoComparisonActivityId) ||
                 all.keys.any((key) => key != 'review' && key != 'pairId') ||
                 all.values.any((values) => values.length != 1) ||
                 (all['review'] != null &&
-                    !{'true', 'false'}.contains(all['review']!.single))) {
+                    !{'true', 'false'}.contains(all['review']!.single)) ||
+                (all['pairId'] != null &&
+                    all['pairId']!.single.trim().isEmpty)) {
               return unavailable;
             }
             final pairId = all['pairId']?.single;
             return Consumer(builder: (context, ref, _) {
               try {
-                final catalogue = ref.watch(comparisonCatalogueProvider);
-                if (pairId != null && !catalogue.byId.containsKey(pairId)) {
+                final registry =
+                    ref.watch(comparisonCatalogueRegistryProvider);
+                final registration = registry.registrationFor(activityId!);
+                if (registration == null) {
+                  return unavailable;
+                }
+                final catalogue = registration.catalogue;
+                if (pairId != null &&
+                    catalogue != null &&
+                    !catalogue.byId.containsKey(pairId)) {
                   return unavailable;
                 }
                 return SpaceCourseTheme(child: ComparisonLessonScreen(
-                    activityId: activityId!,
+                    activityId: activityId,
                     review: all['review']?.single == 'true',
                     pairId: pairId));
               } catch (_) {

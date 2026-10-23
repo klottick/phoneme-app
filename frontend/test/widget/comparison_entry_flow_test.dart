@@ -535,6 +535,241 @@ void main() {
     expect(fixture.store.commands.length, commandsBeforeInvalidRoutes);
   });
 
+  testWidgets(
+    'uy_demo_route_uses_exact_catalogue_and_rejects_unknown_or_duplicate_query_before_store',
+    (tester) async {
+      disableMapMotion(tester);
+      final mixed = loadFrenchComparisonCatalogue();
+      final uyDemo = loadFrenchUyDemoComparisonCatalogue();
+      final registry = ComparisonCatalogueRegistry([
+        ComparisonCatalogueRegistration.available(mixed),
+        ComparisonCatalogueRegistration.available(uyDemo),
+      ]);
+      final owner = LearningOwner.guest();
+      final tracker = LearningAuthTracker(owner: owner, ready: true);
+      final scope = ComparisonProfileScope(courseId: 'en-fr', owner: owner);
+      final tempDir = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('uy-demo-route-'),
+      ))!;
+      var databaseOpenCalls = 0;
+      var storeProviderReads = 0;
+      var tokenNumber = 0;
+      final database = LearningDatabaseHandle(
+        open: () async {
+          databaseOpenCalls++;
+          return openFileLearningTestDatabase(
+            File('${tempDir.path}/learning.sqlite'),
+          );
+        },
+      );
+      final repository = SqliteComparisonLearningRepository(
+        database: database,
+        scope: scope,
+        authGeneration: tracker.current.generation,
+        currentAuth: () => tracker.current,
+        backendOwner: () => tracker.current.owner,
+        transitions: ComparisonLearningTransitionEngine(registry: registry),
+        clock: () => DateTime.utc(2026, 10, 23),
+        newToken: () => (++tokenNumber).toString().padLeft(22, '0'),
+      );
+      final store = _RepositoryComparisonStore(
+        repository,
+        _ComparisonStoreControls(),
+        database,
+        Zone.current,
+      );
+      final audio = _EntryReferenceAudio();
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await database.close();
+        await tempDir.delete(recursive: true);
+      });
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            courseLearningStoreProvider.overrideWithValue(
+              CourseLearningWidgetStore(),
+            ),
+            courseLearningStateProvider.overrideWith(
+              (ref) => Completer<CourseLearningState>().future,
+            ),
+            learningAuthScopeProvider.overrideWith((ref) => tracker),
+            learningDatabaseHandleProvider.overrideWithValue(database),
+            comparisonCatalogueProvider.overrideWithValue(mixed),
+            uyDemoComparisonCatalogueProvider.overrideWithValue(uyDemo),
+            comparisonCatalogueRegistryProvider.overrideWithValue(registry),
+            comparisonLearningStateProvider.overrideWith(
+              (ref) => Completer<ComparisonLearningState>().future,
+            ),
+            comparisonLearningStoreProvider.overrideWith((ref) {
+              storeProviderReads++;
+              return store;
+            }),
+            courseReferenceAudioProvider.overrideWithValue(audio),
+          ],
+          child: const LinguistApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(CourseMapScreen), findsOneWidget);
+      final router = GoRouter.of(tester.element(find.byType(CourseMapScreen)));
+      const malformedUris = <String>[
+        '/course-comparison/not-a-comparison',
+        '/course-comparison/en-fr-u-y-comparison?unknown=value',
+        '/course-comparison/en-fr-u-y-comparison?review=maybe',
+        '/course-comparison/en-fr-u-y-comparison?pairId=uy-demo-pair-01&pairId=uy-demo-pair-02',
+        '/course-comparison/en-fr-u-y-comparison?review=true&review=false',
+        '/course-comparison/en-fr-u-y-comparison?pairId=fr07b-pair-01',
+        '/course-comparison/en-fr-u-y-comparison?pairId=',
+      ];
+      for (final uri in malformedUris) {
+        router.go(uri);
+        await tester.pumpAndSettle();
+        expect(
+          find.text('This comparison activity is unavailable.'),
+          findsOneWidget,
+          reason: uri,
+        );
+        expect(storeProviderReads, 0, reason: 'store acquired for $uri');
+        expect(databaseOpenCalls, 0, reason: 'SQLite opened for $uri');
+        expect(audio.requests, isEmpty, reason: 'audio requested for $uri');
+      }
+
+      router.go(
+        '/course-comparison/en-fr-u-y-comparison?pairId=uy-demo-pair-02&review=false',
+      );
+      await _waitForLoadCall(tester, store, 1);
+      for (
+        var frame = 0;
+        frame < 40 && find.text('Listen to sample A').evaluate().isEmpty;
+        frame++
+      ) {
+        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+        await tester.pump();
+      }
+      expect(find.byType(ComparisonLessonScreen), findsOneWidget);
+      var screen = tester.widget<ComparisonLessonScreen>(
+        find.byType(ComparisonLessonScreen),
+      );
+      expect(screen.activityId, uyDemoComparisonActivityId);
+      expect(screen.pairId, 'uy-demo-pair-02');
+      expect(screen.review, isFalse);
+      expect(
+        GoRouterState.of(
+          tester.element(find.byType(ComparisonLessonScreen)),
+        ).uri.path,
+        '/course-comparison/en-fr-u-y-comparison',
+      );
+      expect(storeProviderReads, 1);
+      expect(databaseOpenCalls, greaterThan(0));
+      final started = await _runRealAsync(tester, store.snapshot);
+      expect(started.slots[uyDemoComparisonActivityId], isNotNull);
+      expect(started.slots[comparisonActivityId], isNull);
+      final savedSession = LessonSectionSession.fromJson(
+        Map<String, dynamic>.from(
+          started.slots[uyDemoComparisonActivityId]!.checkpoint.sessionJson,
+        ),
+        itemIds: uyDemo.exercises.map((exercise) => exercise.id).toList(),
+        contentRevision: uyDemo.contentRevision,
+      );
+      expect(savedSession.currentItemId, 'uy-demo-pair-01');
+
+      router.go(
+        '/course-comparison/en-fr-u-y-comparison?pairId=uy-demo-pair-10&review=true',
+      );
+      await tester.pumpAndSettle();
+      screen = tester.widget<ComparisonLessonScreen>(
+        find.byType(ComparisonLessonScreen),
+      );
+      expect(screen.activityId, uyDemoComparisonActivityId);
+      expect(screen.pairId, 'uy-demo-pair-10');
+      expect(screen.review, isTrue);
+      expect(
+        GoRouterState.of(
+          tester.element(find.byType(ComparisonLessonScreen)),
+        ).uri.path,
+        '/course-comparison/en-fr-u-y-comparison',
+      );
+    },
+  );
+
+  testWidgets(
+    'uy_demo_registered_unavailable_shows_local_retry_without_store_acquisition',
+    (tester) async {
+      disableMapMotion(tester);
+      final mixed = loadFrenchComparisonCatalogue();
+      final registry = ComparisonCatalogueRegistry([
+        ComparisonCatalogueRegistration.available(mixed),
+        ComparisonCatalogueRegistration.unavailable(
+          activityId: uyDemoComparisonActivityId,
+          cause: const FormatException('demo content unavailable'),
+        ),
+      ]);
+      var storeProviderReads = 0;
+      var databaseOpenCalls = 0;
+      final tempDir = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('uy-demo-unavailable-'),
+      ))!;
+      final database = LearningDatabaseHandle(
+        open: () async {
+          databaseOpenCalls++;
+          return openFileLearningTestDatabase(
+            File('${tempDir.path}/learning.sqlite'),
+          );
+        },
+      );
+      final tracker = LearningAuthTracker(
+        owner: LearningOwner.guest(),
+        ready: true,
+      );
+      final audio = _EntryReferenceAudio();
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await database.close();
+        await tempDir.delete(recursive: true);
+      });
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            courseLearningStoreProvider.overrideWithValue(
+              CourseLearningWidgetStore(),
+            ),
+            courseLearningStateProvider.overrideWith(
+              (ref) => Completer<CourseLearningState>().future,
+            ),
+            learningAuthScopeProvider.overrideWith((ref) => tracker),
+            learningDatabaseHandleProvider.overrideWithValue(database),
+            comparisonCatalogueProvider.overrideWithValue(mixed),
+            comparisonCatalogueRegistryProvider.overrideWithValue(registry),
+            comparisonLearningStateProvider.overrideWith(
+              (ref) => Completer<ComparisonLearningState>().future,
+            ),
+            comparisonLearningStoreProvider.overrideWith((ref) {
+              storeProviderReads++;
+              throw StateError('unavailable content must not load the store');
+            }),
+            courseReferenceAudioProvider.overrideWithValue(audio),
+          ],
+          child: const LinguistApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final router = GoRouter.of(tester.element(find.byType(CourseMapScreen)));
+      router.go(
+        '/course-comparison/en-fr-u-y-comparison?review=true&pairId=uy-demo-pair-01',
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(ComparisonLessonScreen), findsOneWidget);
+      expect(
+        find.text('This comparison activity is unavailable.'),
+        findsOneWidget,
+      );
+      expect(find.text('Retry validation'), findsOneWidget);
+      expect(storeProviderReads, 0);
+      expect(databaseOpenCalls, 0);
+      expect(audio.requests, isEmpty);
+  });
+
   testWidgets('comparison_home_entry_survives_independent_progress_error', (
     tester,
   ) async {

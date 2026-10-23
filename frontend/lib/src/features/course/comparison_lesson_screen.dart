@@ -44,6 +44,8 @@ class ComparisonLessonScreen extends ConsumerStatefulWidget {
 class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     with WidgetsBindingObserver {
   static const _unavailable = 'This comparison activity is unavailable.';
+  static const _uyDemoDisclosure =
+      'Demo practice: this authored comparison content has not had qualified French review. It is practice, not an assessment.';
   static const _loadError =
       'Your saved comparison progress could not be loaded.';
   static const _saveError =
@@ -151,12 +153,16 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     final operation = ++_loadOperation;
     ComparisonCatalogue catalogue;
     try {
-      if (widget.activityId != comparisonActivityId ||
-          (widget.pairId != null &&
-              !RegExp(r'^fr07b-pair-(0[1-9]|10)$').hasMatch(widget.pairId!))) {
+      if (widget.activityId != comparisonActivityId &&
+          widget.activityId != uyDemoComparisonActivityId) {
         throw const _InvalidComparisonContext();
       }
-      final provided = ref.read(comparisonCatalogueProvider);
+      final registry = ref.read(comparisonCatalogueRegistryProvider);
+      final registration = registry.registrationFor(widget.activityId);
+      if (registration == null || registration.catalogue == null) {
+        throw const _InvalidComparisonContext();
+      }
+      final provided = registration.catalogue!;
       catalogue = widget.catalogueLoader?.call() ?? provided;
       if (!_sameCatalogue(catalogue, provided) ||
           catalogue.activityId != widget.activityId ||
@@ -287,7 +293,7 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
       return;
     }
     _state = loaded;
-    final slot = loaded.slot;
+    final slot = loaded.slots[widget.activityId];
     if (slot == null) {
       final freshPolicy = widget.policy ?? LessonPolicy();
       _busy = false;
@@ -321,7 +327,7 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
   }
 
   void _publish(LessonSectionSession session) {
-    final slot = _state!.slot!;
+    final slot = _state!.slots[widget.activityId]!;
     final identity = _prompt(session, slot.cursor.generation);
     _grants.beginPrompt(identity);
     setState(() {
@@ -458,7 +464,7 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
   }
 
   Future<void> _listen(ComparisonSample sample) async {
-    final session = _session, store = _store, slot = _state?.slot;
+    final session = _session, store = _store, slot = _state?.slots[widget.activityId];
     if (session == null ||
         store == null ||
         slot == null ||
@@ -510,7 +516,7 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
         !identical(_playback, request) ||
         !_ownsOperationContext(
             store, fence, request.lifecycleEpoch, contextRevision) ||
-        !identical(_state?.slot, slot) ||
+        !identical(_state?.slots[widget.activityId], slot) ||
         _session?.currentItemId != request.prompt.itemId) {
       return;
     }
@@ -565,7 +571,7 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     final exercise = _catalogue!.exercise(session.currentItemId!);
     final a = _grants.grantFor(ComparisonSample.a);
     final b = _grants.grantFor(ComparisonSample.b);
-    final slot = state.slot!;
+    final slot = state.slots[widget.activityId]!;
     if (a == null ||
         b == null ||
         a.request.prompt != _prompt(session, slot.cursor.generation) ||
@@ -1016,7 +1022,7 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     final state = _state;
     final active = catalogue != null &&
         session != null &&
-        state?.slot != null &&
+        state?.slots[widget.activityId] != null &&
         session.phase == LessonSectionPhase.exercise &&
         session.currentItemId != null;
     return Scaffold(
@@ -1027,6 +1033,8 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  if (widget.activityId == uyDemoComparisonActivityId)
+                    const Text(_uyDemoDisclosure),
                   if (_contentError != null) ...[
                     Text(_contentError!),
                     TextButton(
@@ -1102,6 +1110,13 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
       LessonSectionSession session, ComparisonLearningState state) {
     final exercise = catalogue.exercise(session.currentItemId!);
     final correct = _localCorrect;
+    final feedback = widget.activityId == uyDemoComparisonActivityId ||
+            !_answered ||
+            correct == null
+        ? null
+        : correct
+            ? ListeningFeedback.correct
+            : ListeningFeedback.notYet;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       SoundComparison(
         prompt: SoundComparisonPrompt(
@@ -1115,11 +1130,7 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
           playing: _playing,
           blocked: !_ownsAuthAndRoute(_store!),
           answered: _answered,
-          feedback: !_answered || correct == null
-              ? null
-              : correct
-                  ? ListeningFeedback.correct
-                  : ListeningFeedback.notYet,
+          feedback: feedback,
         ),
         heardSamples: _grants.heardSamples,
         selectedRelation: _selected,
