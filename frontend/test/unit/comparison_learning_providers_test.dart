@@ -21,6 +21,8 @@ import 'package:linguist/src/core/course/course_learning_error.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/backend.dart';
+import 'package:linguist/src/core/course/sentence_hunt_learning_providers.dart'
+    show sentenceHuntLearningStateProvider;
 import 'package:linguist/src/core/services/auth_service.dart';
 import 'package:linguist/src/core/course/french_comparison_content.dart';
 import 'package:linguist/src/core/course/lesson_policy.dart';
@@ -124,6 +126,251 @@ void main() {
       reason: 'catalogue failure must precede database opening',
     );
   });
+
+  test('invalid dedicated catalogue is local to mixed comparison', () async {
+    final h = await _harness(
+      extraOverrides: [
+        uyDemoComparisonCatalogueProvider.overrideWith(
+          (ref) => loadFrenchComparisonCatalogue(),
+        ),
+      ],
+    );
+    addTearDown(h.close);
+
+    final mixed = h.container.read(comparisonCatalogueProvider);
+    final registry = h.container.read(comparisonCatalogueRegistryProvider);
+    expect(mixed.activityId, comparisonActivityId);
+    expect(registry.requireAvailable(comparisonActivityId), same(mixed));
+    final unavailable = registry.registrationFor(uyDemoComparisonActivityId);
+    expect(unavailable, isNotNull);
+    expect(unavailable!.catalogue, equals(null));
+    expect(unavailable.cause, isA<FormatException>());
+
+    final store =
+        h.container.read(comparisonLearningStoreProvider)
+            as SqliteComparisonLearningRepository;
+    expect(identical(store.transitions.registry, registry), isTrue);
+    expect(h.database.openCalls, 0);
+    final state = await store.load();
+    expect(state.slots, isEmpty);
+    expect(
+      store.prepare(
+        state: state,
+        activityId: comparisonActivityId,
+        action: StartComparisonRun(
+          sessionId: 'mixed-still-available',
+          policy: LessonPolicy(),
+        ),
+      ),
+      isA<ComparisonLearningCommand>(),
+    );
+    expect(
+      () => store.prepare(
+        state: state,
+        activityId: uyDemoComparisonActivityId,
+        action: StartComparisonRun(
+          sessionId: 'dedicated-unavailable',
+          policy: LessonPolicy(),
+        ),
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test(
+    'typed dedicated catalogue validation is local and cannot write SQLite',
+    () async {
+      final validationFailure = _invalidComparisonCatalogueFailure();
+      final h = await _harness(
+        extraOverrides: [
+          uyDemoComparisonCatalogueProvider.overrideWith(
+            (ref) => throw validationFailure,
+          ),
+        ],
+      );
+      addTearDown(h.close);
+
+      final mixed = h.container.read(comparisonCatalogueProvider);
+      final registry = h.container.read(comparisonCatalogueRegistryProvider);
+      final registration = registry.registrationFor(uyDemoComparisonActivityId);
+      expect(registration, isNotNull);
+      expect(registration!.catalogue, equals(null));
+      expect(registration.cause, same(validationFailure));
+      expect(registry.requireAvailable(comparisonActivityId), same(mixed));
+      expect(h.database.openCalls, 0);
+
+      final store =
+          h.container.read(comparisonLearningStoreProvider)
+              as SqliteComparisonLearningRepository;
+      expect(store.transitions.registry, same(registry));
+      expect(h.database.openCalls, 0);
+
+      final state = await store.load();
+      final rowsBeforePrepare = await _comparisonSqlSnapshot(h.database.handle);
+      expect(
+        store.prepare(
+          state: state,
+          activityId: comparisonActivityId,
+          action: StartComparisonRun(
+            sessionId: 'mixed-survives-typed-validation',
+            policy: LessonPolicy(),
+          ),
+        ),
+        isA<ComparisonLearningCommand>(),
+      );
+      expect(
+        () => store.prepare(
+          state: state,
+          activityId: uyDemoComparisonActivityId,
+          action: StartComparisonRun(
+            sessionId: 'dedicated-typed-validation',
+            policy: LessonPolicy(),
+          ),
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(
+        await _comparisonSqlSnapshot(h.database.handle),
+        rowsBeforePrepare,
+        reason: 'failed dedicated prepare must not change any SQLite rows',
+      );
+    },
+  );
+
+  test('comparison store tracks registry availability changes', () async {
+    var dedicatedAvailable = true;
+    final h = await _harness(
+      extraOverrides: [
+        uyDemoComparisonCatalogueProvider.overrideWith((ref) {
+          if (!dedicatedAvailable) {
+            throw const FormatException('dedicated catalogue unavailable');
+          }
+          return loadFrenchUyDemoComparisonCatalogue();
+        }),
+      ],
+    );
+    addTearDown(h.close);
+
+    final availableStore =
+        h.container.read(comparisonLearningStoreProvider)
+            as SqliteComparisonLearningRepository;
+    final availableRegistry = h.container.read(
+      comparisonCatalogueRegistryProvider,
+    );
+    expect(availableStore.transitions.registry, same(availableRegistry));
+
+    dedicatedAvailable = false;
+    h.container.invalidate(uyDemoComparisonCatalogueProvider);
+    final unavailableRegistry = h.container.read(
+      comparisonCatalogueRegistryProvider,
+    );
+    final unavailableStore =
+        h.container.read(comparisonLearningStoreProvider)
+            as SqliteComparisonLearningRepository;
+
+    expect(
+      unavailableRegistry
+          .registrationFor(uyDemoComparisonActivityId)!
+          .catalogue,
+      equals(null),
+    );
+    expect(unavailableStore, isNot(same(availableStore)));
+    expect(unavailableStore.transitions.registry, same(unavailableRegistry));
+    expect(h.database.openCalls, 0);
+  });
+
+  test(
+    'mixed catalogue failures are not masked by registry fallback',
+    () async {
+      final h = await _harness(
+        extraOverrides: [
+          comparisonCatalogueProvider.overrideWith(
+            (ref) => loadFrenchUyDemoComparisonCatalogue(),
+          ),
+        ],
+      );
+      addTearDown(h.close);
+
+      expect(
+        () => h.container.read(comparisonCatalogueRegistryProvider),
+        throwsA(isA<FormatException>()),
+      );
+      expect(h.database.openCalls, 0);
+    },
+  );
+
+  test(
+    'typed mixed catalogue validation failure propagates unchanged',
+    () async {
+      final validationFailure = _invalidComparisonCatalogueFailure();
+      final h = await _harness(
+        extraOverrides: [
+          comparisonCatalogueProvider.overrideWith(
+            (ref) => throw validationFailure,
+          ),
+        ],
+      );
+      addTearDown(h.close);
+
+      expect(
+        () => h.container.read(comparisonCatalogueRegistryProvider),
+        throwsA(same(validationFailure)),
+      );
+      expect(
+        () => h.container.read(comparisonLearningStoreProvider),
+        throwsA(same(validationFailure)),
+      );
+      expect(h.database.openCalls, 0);
+    },
+  );
+
+  test(
+    'unknown comparison corruption does not block other family providers',
+    () async {
+      final h = await _harness();
+      addTearDown(h.close);
+      final store = h.container.read(comparisonLearningStoreProvider);
+      final empty = await store.load();
+      await store.submit(
+        store.prepare(
+          state: empty,
+          activityId: comparisonActivityId,
+          action: StartComparisonRun(
+            sessionId: 'independent-families',
+            policy: LessonPolicy(),
+          ),
+        ),
+      );
+
+      final db = await h.database.handle.open();
+      final scopeId =
+          (await db
+                  .customSelect(
+                    "SELECT id FROM learning_scopes WHERE family = 'comparison'",
+                  )
+                  .getSingle())
+              .read<int>('id');
+      await db.customStatement(
+        'INSERT INTO learning_completions '
+        '(scope_id, activity_id, content_revision, policy_kind, '
+        'policy_revision, threshold_percent, committed_at_us) '
+        "VALUES (?, 'unknown-comparison-activity', 1, 'discoveryThreshold', 1, 80, ?)",
+        [scopeId, DateTime.utc(2026, 10, 23).microsecondsSinceEpoch],
+      );
+
+      await expectLater(store.load(), throwsA(isA<LearningCorruptException>()));
+      expect(
+        (await h.container.read(courseLearningStateProvider.future)).revision,
+        0,
+      );
+      expect(
+        (await h.container.read(
+          sentenceHuntLearningStateProvider.future,
+        )).revision,
+        0,
+      );
+    },
+  );
 
   test('comparison commits without constructing cloud transport', () async {
     final h = await _harness(
@@ -867,6 +1114,63 @@ Future<int?> _scopeRevision(
       )
       .get();
   return rows.isEmpty ? null : rows.single.read<int>('revision');
+}
+
+ComparisonContentValidationException _invalidComparisonCatalogueFailure() {
+  try {
+    ComparisonCatalogue.fromDrafts(
+      activityId: uyDemoComparisonActivityId,
+      sectionId: uyDemoComparisonActivityId,
+      contentRevision: 1,
+      exercises: const <ComparisonExerciseDraft>[],
+      referencePhonemes: const <String, List<String>>{},
+    );
+  } on ComparisonContentValidationException catch (error) {
+    return error;
+  }
+  throw StateError('Expected the invalid catalogue drafts to fail validation.');
+}
+
+Future<String> _comparisonSqlSnapshot(LearningDatabaseHandle handle) async {
+  final db = await handle.open();
+  final scopeRows = await db
+      .customSelect(
+        'SELECT * FROM learning_scopes WHERE family = ?',
+        variables: <Variable<Object>>[const Variable<String>('comparison')],
+      )
+      .get();
+  final result = <String, Object?>{
+    'scopes': [
+      for (final row in scopeRows) Map<String, Object?>.from(row.data),
+    ],
+  };
+  const tables = <String>[
+    'learning_runs',
+    'learning_content_bindings',
+    'learning_command_receipts',
+    'learning_attempts',
+    'learning_attempt_evidence',
+    'learning_attempt_values',
+    'learning_exposure',
+    'learning_best_scores',
+    'supported_sync_outbox',
+    'learning_mistakes',
+    'learning_summaries',
+    'learning_completions',
+  ];
+  for (final table in tables) {
+    final rows = await db
+        .customSelect(
+          'SELECT * FROM $table WHERE scope_id IN '
+          '(SELECT id FROM learning_scopes WHERE family = ?)',
+          variables: <Variable<Object>>[const Variable<String>('comparison')],
+        )
+        .get();
+    result[table] = [
+      for (final row in rows) Map<String, Object?>.from(row.data),
+    ];
+  }
+  return jsonEncode(result);
 }
 
 Future<void> _setSchemaVersion(

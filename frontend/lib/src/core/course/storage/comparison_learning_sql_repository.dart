@@ -85,7 +85,10 @@ final class SqliteComparisonLearningRepository
     _checkAuth();
     if (state.scope != scope) throw const LearningOwnerChangedException();
     try {
-      ComparisonLearningStateValidator.validate(state, transitions.catalogue);
+      ComparisonLearningStateValidator.validateRegistered(
+        state,
+        transitions.registry,
+      );
     } on FormatException catch (error) {
       throw LearningInvalidCommandException(error);
     }

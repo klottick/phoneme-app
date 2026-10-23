@@ -53,7 +53,13 @@ final class ComparisonLearningSqlAdapter
   final ComparisonLearningCheckpointCodec _checkpointCodec =
       const ComparisonLearningCheckpointCodec();
 
-  ComparisonCatalogue get catalogue => transitions.catalogue;
+  ComparisonCatalogueRegistry get registry => transitions.registry;
+
+  ComparisonCatalogue get catalogue =>
+      registry.requireAvailable(comparisonActivityId);
+
+  ComparisonCatalogue _catalogueFor(String activityId) =>
+      registry.requireAvailable(activityId);
 
   @override
   String commandActivityId(domain.ComparisonLearningCommand command) =>
@@ -88,9 +94,9 @@ final class ComparisonLearningSqlAdapter
   LearningCursorPosition? cursorFor(
     ComparisonLearningState state,
     String activityId,
-  ) => state.slot?.activityId == activityId
-      ? _toStorageCursor(state.slot!.cursor)
-      : null;
+  ) => state.slots[activityId] == null
+      ? null
+      : _toStorageCursor(state.slots[activityId]!.cursor);
 
   @override
   Future<ComparisonLearningState> loadState(
@@ -109,6 +115,8 @@ final class ComparisonLearningSqlAdapter
           commitOrdinal > revision) {
         throw const LearningCorruptException();
       }
+
+      await _preflightActivityIdentities(db, scopeId);
 
       final runRows = await db
           .customSelect(
@@ -133,7 +141,6 @@ final class ComparisonLearningSqlAdapter
             variables: <Variable<Object>>[Variable<int>(scopeId)],
           )
           .get();
-      if (runRows.length > 1) throw const LearningCorruptException();
 
       _requireNoRows(
         await db
@@ -174,18 +181,33 @@ final class ComparisonLearningSqlAdapter
         revision: revision,
         commitOrdinal: commitOrdinal,
       );
-      _SqlReceipt? latestReceipt;
-      _PendingSlot? pendingSlot;
-      if (runRows.isNotEmpty) {
+      final pendingSlots = <String, _PendingSlot>{};
+      final latestByActivity = <String, _SqlReceipt>{};
+      for (final row in runRows) {
         final read = _readRunRow(
-          runRows.single,
+          row,
           scopeId,
           revision: revision,
           commitOrdinal: commitOrdinal,
         );
-        latestReceipt = read.latestReceipt;
-        pendingSlot = read.slot;
-      } else if (commitOrdinal != 0 || historyReceipts.isNotEmpty) {
+        if (pendingSlots.containsKey(read.slot.activityId)) {
+          throw const LearningCorruptException();
+        }
+        pendingSlots[read.slot.activityId] = read.slot;
+        latestByActivity[read.slot.activityId] = read.latestReceipt;
+      }
+      if (runRows.isEmpty &&
+          (commitOrdinal != 0 || historyReceipts.isNotEmpty)) {
+        throw const LearningCorruptException();
+      }
+      var latestRunOrdinal = 0;
+      for (final receipt in latestByActivity.values) {
+        if (receipt.stored.commitOrdinal > latestRunOrdinal) {
+          latestRunOrdinal = receipt.stored.commitOrdinal;
+        }
+      }
+      if ((runRows.isEmpty && commitOrdinal != 0) ||
+          (runRows.isNotEmpty && latestRunOrdinal != commitOrdinal)) {
         throw const LearningCorruptException();
       }
 
@@ -195,8 +217,8 @@ final class ComparisonLearningSqlAdapter
       for (final receipt in historyReceipts) {
         _addReceipt(byToken, byCursor, byOrdinal, receipt);
       }
-      if (latestReceipt != null) {
-        _addReceipt(byToken, byCursor, byOrdinal, latestReceipt);
+      for (final receipt in latestByActivity.values) {
+        _addReceipt(byToken, byCursor, byOrdinal, receipt);
       }
 
       final attempts = await _readAttempts(
@@ -210,41 +232,49 @@ final class ComparisonLearningSqlAdapter
       final summaries = await _readSummaries(db, scopeId);
       final completions = await _readCompletions(db, scopeId);
 
-      ComparisonSlot? slot;
-      if (pendingSlot != null && latestReceipt != null) {
-        final run = pendingSlot;
-        slot = ComparisonSlot(
-          scope: _domainScope,
-          activityId: run.activityId,
-          cursor: run.cursor,
-          checkpoint: run.checkpoint,
-          latestReceipt: latestReceipt.domainReceipt,
-        );
+      final slots = <String, ComparisonSlot>{
+        for (final entry in pendingSlots.entries)
+          entry.key: ComparisonSlot(
+            scope: _domainScope,
+            activityId: entry.key,
+            cursor: entry.value.cursor,
+            checkpoint: entry.value.checkpoint,
+            latestReceipt: latestByActivity[entry.key]!.domainReceipt,
+          ),
+      };
+      final latestScopeReceipts = latestByActivity.values
+          .where((receipt) => receipt.stored.commitOrdinal == commitOrdinal)
+          .toList(growable: false);
+      if (latestScopeReceipts.length > 1) {
+        throw const LearningCorruptException();
       }
-
+      final latestScopeReceipt = latestScopeReceipts.isEmpty
+          ? null
+          : latestScopeReceipts.single;
       final latestIsInHistory =
-          latestReceipt != null &&
+          latestScopeReceipt != null &&
           historyReceipts.any(
-            (receipt) => receipt.stored.token == latestReceipt!.stored.token,
+            (receipt) =>
+                receipt.stored.token == latestScopeReceipt.stored.token,
           );
-      final projectedReceipts = latestReceipt == null
+      final projectedReceipts = latestScopeReceipt == null
           ? <ComparisonReceipt>[]
           : _latest(<ComparisonReceipt>[
               ...historyReceipts.map((receipt) => receipt.domainReceipt),
-              if (!latestIsInHistory) latestReceipt.domainReceipt,
+              if (!latestIsInHistory) latestScopeReceipt.domainReceipt,
             ], 2000);
       final state = ComparisonLearningState(
         scope: _domainScope,
         revision: revision,
         commitOrdinal: commitOrdinal,
-        slot: slot,
+        slots: slots,
         attempts: attempts,
         receipts: projectedReceipts,
         mistakes: mistakes,
         summaries: summaries,
         completions: completions,
       );
-      ComparisonLearningStateValidator.validate(state, catalogue);
+      ComparisonLearningStateValidator.validateRegistered(state, registry);
       return state;
     } on LearningContentChangedException {
       rethrow;
@@ -252,6 +282,43 @@ final class ComparisonLearningSqlAdapter
       rethrow;
     } on Object catch (error) {
       throw LearningCorruptException(error);
+    }
+  }
+
+  Future<void> _preflightActivityIdentities(
+    LearningDatabase db,
+    int scopeId,
+  ) async {
+    const queries = <String>[
+      'SELECT activity_id FROM learning_runs WHERE scope_id = ?',
+      'SELECT activity_id FROM learning_content_bindings WHERE scope_id = ?',
+      'SELECT activity_id FROM learning_attempts WHERE scope_id = ?',
+      'SELECT activity_id FROM learning_attempt_evidence WHERE scope_id = ?',
+      'SELECT activity_id FROM learning_command_receipts WHERE scope_id = ?',
+      'SELECT activity_id FROM learning_mistakes WHERE scope_id = ?',
+      'SELECT activity_id FROM learning_summaries WHERE scope_id = ?',
+      'SELECT activity_id FROM learning_completions WHERE scope_id = ?',
+    ];
+    for (final query in queries) {
+      final rows = await db
+          .customSelect(
+            query,
+            variables: <Variable<Object>>[Variable<int>(scopeId)],
+          )
+          .get();
+      for (final row in rows) {
+        final activityId = row.readNullable<String>('activity_id');
+        if (activityId == null || activityId.trim().isEmpty) {
+          throw const LearningCorruptException();
+        }
+        final registration = registry.registrationFor(activityId);
+        if (registration == null) {
+          throw const LearningCorruptException();
+        }
+        if (registration.catalogue == null) {
+          throw LearningContentChangedException(registration.cause);
+        }
+      }
     }
   }
 
@@ -263,6 +330,7 @@ final class ComparisonLearningSqlAdapter
   ) async {
     try {
       final header = await _currentScopeHeader(db, scopeId);
+      await _preflightActivityIdentities(db, scopeId);
       final historyRows = await db
           .customSelect(
             'SELECT activity_id, token, canonical_payload, before_generation, '
@@ -332,9 +400,9 @@ final class ComparisonLearningSqlAdapter
     required DateTime committedAt,
   }) {
     try {
-      ComparisonLearningStateValidator.validate(before, catalogue);
+      ComparisonLearningStateValidator.validateRegistered(before, registry);
       if (command.scope != _domainScope ||
-          command.activityId != catalogue.activityId ||
+          registry.registrationFor(command.activityId)?.catalogue == null ||
           command.expectedScopeRevision != before.revision ||
           nextRevision != before.revision + 1 ||
           nextCommitOrdinal != before.commitOrdinal + 1) {
@@ -362,14 +430,14 @@ final class ComparisonLearningSqlAdapter
         scope: _domainScope,
         revision: nextRevision,
         commitOrdinal: nextCommitOrdinal,
-        slot: transition.slot,
+        slots: raw.slots,
         attempts: attempts,
         receipts: receipts,
         mistakes: raw.mistakes,
         summaries: raw.summaries,
         completions: raw.completions,
       );
-      ComparisonLearningStateValidator.validate(state, catalogue);
+      ComparisonLearningStateValidator.validateRegistered(state, registry);
       return LearningSqlTransition(
         state: state,
         result: ComparisonCommit(
@@ -396,12 +464,12 @@ final class ComparisonLearningSqlAdapter
     ComparisonLearningState after,
   ) async {
     try {
-      ComparisonLearningStateValidator.validate(before, catalogue);
-      ComparisonLearningStateValidator.validate(after, catalogue);
+      ComparisonLearningStateValidator.validateRegistered(before, registry);
+      ComparisonLearningStateValidator.validateRegistered(after, registry);
     } on FormatException catch (error) {
       throw LearningInvalidCommandException(error);
     }
-    final slot = after.slot;
+    final slot = after.slots[command.activityId];
     if (slot == null ||
         slot.activityId != command.activityId ||
         slot.latestReceipt.token != command.token ||
@@ -410,7 +478,7 @@ final class ComparisonLearningSqlAdapter
       throw const LearningInvalidCommandException();
     }
 
-    final bindingId = await _ensureBinding(db, scopeId);
+    final bindingId = await _ensureBinding(db, scopeId, command.activityId);
     await _writeRun(db, scopeId, bindingId, slot, command, after);
     await _writeReceipt(db, scopeId, command, slot, after);
     await _writeAttemptChanges(db, scopeId, before, after, command);
@@ -425,15 +493,20 @@ final class ComparisonLearningSqlAdapter
     required ComparisonLearningState current,
     required domain.ComparisonLearningCommand command,
   }) {
-    ComparisonLearningStateValidator.validate(current, catalogue);
-    final slot = current.slot;
+    ComparisonLearningStateValidator.validateRegistered(current, registry);
+    final slot = current.slots[command.activityId];
     if (slot == null || slot.activityId != command.activityId) {
       throw const LearningCorruptException();
     }
     return ComparisonCommit(state: current, slot: slot, duplicate: true);
   }
 
-  Future<int> _ensureBinding(LearningDatabase db, int scopeId) async {
+  Future<int> _ensureBinding(
+    LearningDatabase db,
+    int scopeId,
+    String activityId,
+  ) async {
+    final catalogue = _catalogueFor(activityId);
     final fingerprint = _catalogueFingerprint(catalogue);
     await db.customStatement(
       'INSERT INTO learning_content_bindings '
@@ -469,6 +542,7 @@ final class ComparisonLearningSqlAdapter
     required int commitOrdinal,
   }) {
     final activityId = _requiredText(row.read<String>('activity_id'));
+    final catalogue = _catalogueFor(activityId);
     if (row.read<int>('scope_id') != scopeId ||
         activityId != catalogue.activityId ||
         row.read<String>('activity_kind') != 'comparison' ||
@@ -507,11 +581,11 @@ final class ComparisonLearningSqlAdapter
     if (utf8.encode(checkpointJson).length > learningMaxCheckpointBytes) {
       throw const LearningCorruptException();
     }
-    final checkpoint = _checkpointCodec.decode(
+    final checkpoint = _checkpointCodec.decodeRegistered(
       checkpointJson,
       scope: _domainScope,
       activityId: activityId,
-      catalogue: catalogue,
+      registry: registry,
       policy: policy,
     );
     if (row.readNullable<String>('session_id') != checkpoint.sessionId) {
@@ -535,8 +609,7 @@ final class ComparisonLearningSqlAdapter
       revision: revision,
       scopeCommitOrdinal: commitOrdinal,
     );
-    if (receipt.domainReceipt.commitOrdinal != commitOrdinal ||
-        receipt.stored.commitOrdinal > commitOrdinal) {
+    if (receipt.stored.commitOrdinal > commitOrdinal) {
       throw const LearningCorruptException();
     }
     return _ReadRun(
@@ -572,6 +645,7 @@ final class ComparisonLearningSqlAdapter
     final tokens = <String>{};
     final cursors = <String>{};
     final ordinals = <int>{};
+    final previousByActivity = <String, _SqlReceipt>{};
     for (final row in rows) {
       final receipt = _readHistoryReceipt(
         row,
@@ -590,11 +664,17 @@ final class ComparisonLearningSqlAdapter
       }
       if (result.isNotEmpty) {
         final previous = result.last.domainReceipt;
-        if (receipt.domainReceipt.commitOrdinal != previous.commitOrdinal + 1 ||
-            receipt.domainReceipt.before != previous.after) {
+        if (receipt.domainReceipt.commitOrdinal != previous.commitOrdinal + 1) {
           throw const LearningCorruptException();
         }
       }
+      final previousForActivity = previousByActivity[receipt.stored.activityId];
+      if (previousForActivity != null &&
+          receipt.domainReceipt.before !=
+              previousForActivity.domainReceipt.after) {
+        throw const LearningCorruptException();
+      }
+      previousByActivity[receipt.stored.activityId] = receipt;
       result.add(receipt);
     }
     return result;
@@ -675,11 +755,12 @@ final class ComparisonLearningSqlAdapter
     required int revision,
     required int scopeCommitOrdinal,
   }) {
-    final command = ComparisonLearningCommandCodec.decodeCanonicalCommand(
-      payload,
-      scope: _domainScope,
-      catalogue: catalogue,
-    );
+    final command =
+        ComparisonLearningCommandCodec.decodeRegisteredCanonicalCommand(
+          payload,
+          scope: _domainScope,
+          registry: registry,
+        );
     if (command.scope != _domainScope ||
         command.activityId != activityId ||
         command.token != token ||
@@ -827,6 +908,7 @@ final class ComparisonLearningSqlAdapter
       final attemptId = _requiredText(row.read<String>('attempt_id'));
       if (!attemptIds.add(attemptId)) throw const LearningCorruptException();
       final activityId = _requiredText(row.read<String>('activity_id'));
+      final catalogue = _catalogueFor(activityId);
       final pairId = _requiredText(row.readNullable<String>('item_id'));
       final generation = row.read<int>('run_generation');
       final sequence = row.read<int>('command_sequence');
@@ -898,6 +980,7 @@ final class ComparisonLearningSqlAdapter
             generation,
             round,
             pairId,
+            catalogue,
           ),
       ];
       attempts.add(
@@ -931,6 +1014,7 @@ final class ComparisonLearningSqlAdapter
     int generation,
     int round,
     String pairId,
+    ComparisonCatalogue catalogue,
   ) {
     final slot = index == 0 ? ComparisonSample.a : ComparisonSample.b;
     if (row.read<int>('evidence_index') != index ||
@@ -1140,8 +1224,9 @@ final class ComparisonLearningSqlAdapter
         .get();
     final result = <ComparisonCompletion>[];
     for (final row in rows) {
-      if (row.read<String>('activity_id') != catalogue.activityId ||
-          row.read<int>('content_revision') != catalogue.contentRevision ||
+      final activityId = _requiredText(row.read<String>('activity_id'));
+      final catalogue = _catalogueFor(activityId);
+      if (row.read<int>('content_revision') != catalogue.contentRevision ||
           row.read<String>('policy_kind') != 'discoveryThreshold' ||
           row.read<int>('policy_revision') != 1) {
         throw const LearningCorruptException();
@@ -1149,7 +1234,7 @@ final class ComparisonLearningSqlAdapter
       result.add(
         ComparisonCompletion(
           scope: _domainScope,
-          activityId: catalogue.activityId,
+          activityId: activityId,
           contentRevision: catalogue.contentRevision,
           policyRevision: 1,
           thresholdPercent: row.read<int>('threshold_percent'),
@@ -1169,6 +1254,7 @@ final class ComparisonLearningSqlAdapter
     domain.ComparisonLearningCommand command,
     ComparisonLearningState after,
   ) async {
+    final catalogue = _catalogueFor(slot.activityId);
     final session = LessonSectionSession.fromJson(
       Map<String, dynamic>.from(slot.checkpoint.sessionJson),
       itemIds: catalogue.exercises.map((exercise) => exercise.id).toList(),
