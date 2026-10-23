@@ -9,10 +9,15 @@ LessonSectionSession _debrief({
   int correct = 10,
   LessonPolicy? policy,
   Set<int> unresolved = const {},
+  List<String>? itemIds,
 }) {
   final session = LessonSectionSession(
-    itemIds: List.generate(
-        10, (i) => 'fr07b-pair-${(i + 1).toString().padLeft(2, '0')}'),
+    itemIds:
+        itemIds ??
+        List.generate(
+          10,
+          (i) => 'fr07b-pair-${(i + 1).toString().padLeft(2, '0')}',
+        ),
     sessionId: 'debrief-test',
     policy: policy,
   );
@@ -63,6 +68,49 @@ void main() {
     expect(finishes, 1);
     expect(reviews, 0);
     expect(session.phase, LessonSectionPhase.debrief);
+  });
+
+  testWidgets('uy_demo_debrief_keeps_saved_threshold_and_authored_note_order', (
+    tester,
+  ) async {
+    final demo = loadFrenchUyDemoComparisonCatalogue();
+    final session = _debrief(
+      correct: 8,
+      policy: LessonPolicy(completionThresholdPercent: 90),
+      unresolved: {0, 3},
+      itemIds: demo.exercises.map((exercise) => exercise.id).toList(),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ComparisonSectionDebrief(
+            catalogue: demo,
+            session: session,
+            busy: false,
+            error: null,
+            conflict: null,
+            canFinish: true,
+            onReview: () {},
+            onFinish: () {},
+            onRetrySave: () {},
+            onReload: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('You got 8 of 10 correct.'), findsOneWidget);
+    expect(find.text('Passing needs 9 of 10 correct.'), findsOneWidget);
+    const firstAuthoredNote =
+        'The designated vowels are `/u/` in A and `/y/` in B; they differ.';
+    const fourthAuthoredNote =
+        'The designated vowels are `/y/` in A and `/u/` in B; they differ.';
+    expect(find.text(firstAuthoredNote), findsOneWidget);
+    expect(find.text(fourthAuthoredNote), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text(firstAuthoredNote)).dy,
+      lessThan(tester.getTopLeft(find.text(fourthAuthoredNote)).dy),
+    );
+    expect(find.text('Comparison practice'), findsNothing);
   });
 
   testWidgets(
