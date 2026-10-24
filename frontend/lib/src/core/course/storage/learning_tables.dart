@@ -3,6 +3,56 @@ import 'package:drift/drift.dart';
 const int learningMaxSafeInteger = 9007199254740991;
 const int learningMaxCheckpointBytes = 1048576;
 
+const String learningSpellingItemIdsSql =
+    "'uy-demo-spelling-01', 'uy-demo-spelling-02', 'uy-demo-spelling-03', "
+    "'uy-demo-spelling-04', 'uy-demo-spelling-05', 'uy-demo-spelling-06', "
+    "'uy-demo-spelling-07', 'uy-demo-spelling-08', 'uy-demo-spelling-09', "
+    "'uy-demo-spelling-10'";
+
+const String learningSpellingReferenceIdsSql =
+    "'fr-word-tout', 'fr-word-tu', 'fr-word-rue', 'fr-word-rouge', "
+    "'fr-word-loup', 'fr-word-lune', 'fr-word-doux', 'fr-word-jus', "
+    "'fr-word-plume', 'fr-word-vous'";
+
+const String learningSpellingTargetSoundCaseSql = '''CASE item_id
+  WHEN 'uy-demo-spelling-01' THEN 'u'
+  WHEN 'uy-demo-spelling-02' THEN 'y'
+  WHEN 'uy-demo-spelling-03' THEN 'y'
+  WHEN 'uy-demo-spelling-04' THEN 'u'
+  WHEN 'uy-demo-spelling-05' THEN 'u'
+  WHEN 'uy-demo-spelling-06' THEN 'y'
+  WHEN 'uy-demo-spelling-07' THEN 'u'
+  WHEN 'uy-demo-spelling-08' THEN 'y'
+  WHEN 'uy-demo-spelling-09' THEN 'y'
+  WHEN 'uy-demo-spelling-10' THEN 'u'
+END''';
+
+const String learningSpellingExpectedOptionCaseSql = '''CASE item_id
+  WHEN 'uy-demo-spelling-01' THEN 'ou'
+  WHEN 'uy-demo-spelling-02' THEN 'u'
+  WHEN 'uy-demo-spelling-03' THEN 'u'
+  WHEN 'uy-demo-spelling-04' THEN 'ou'
+  WHEN 'uy-demo-spelling-05' THEN 'ou'
+  WHEN 'uy-demo-spelling-06' THEN 'u'
+  WHEN 'uy-demo-spelling-07' THEN 'ou'
+  WHEN 'uy-demo-spelling-08' THEN 'u'
+  WHEN 'uy-demo-spelling-09' THEN 'u'
+  WHEN 'uy-demo-spelling-10' THEN 'ou'
+END''';
+
+const String learningSpellingWordIdCaseSql = '''CASE item_id
+  WHEN 'uy-demo-spelling-01' THEN 'tout'
+  WHEN 'uy-demo-spelling-02' THEN 'tu'
+  WHEN 'uy-demo-spelling-03' THEN 'rue'
+  WHEN 'uy-demo-spelling-04' THEN 'rouge'
+  WHEN 'uy-demo-spelling-05' THEN 'loup'
+  WHEN 'uy-demo-spelling-06' THEN 'lune'
+  WHEN 'uy-demo-spelling-07' THEN 'doux'
+  WHEN 'uy-demo-spelling-08' THEN 'jus'
+  WHEN 'uy-demo-spelling-09' THEN 'plume'
+  WHEN 'uy-demo-spelling-10' THEN 'vous'
+END''';
+
 class LearningScopes extends Table {
   @override
   bool get dontWriteConstraints => true;
@@ -28,7 +78,8 @@ class LearningScopes extends Table {
     "CHECK((owner_kind='guest' AND owner_id='') OR "
         "(owner_kind='account' AND length(trim(owner_id))>0))",
     'CHECK(length(trim(course_id)) > 0)',
-    "CHECK(family IN ('course', 'comparison', 'sentence-hunt'))",
+    "CHECK(family IN ('course', 'comparison', 'sentence-hunt', 'spelling'))",
+    "CHECK(family != 'spelling' OR course_id = 'en-fr')",
     'CHECK(schema_version BETWEEN 1 AND 9007199254740991)',
     'CHECK(revision BETWEEN 0 AND 9007199254740991)',
     'CHECK(commit_ordinal BETWEEN 0 AND 9007199254740991)',
@@ -105,7 +156,7 @@ class LearningRuns extends Table {
   List<String> get customConstraints => const <String>[
     "CHECK(typeof(scope_id) = 'integer' AND typeof(activity_id) = 'text' AND typeof(activity_kind) = 'text' AND typeof(run_generation) = 'integer' AND typeof(sequence) = 'integer' AND typeof(cursor_revision) = 'integer' AND typeof(content_binding_id) = 'integer' AND (run_mode IS NULL OR typeof(run_mode) = 'text') AND typeof(finished) = 'integer' AND (session_id IS NULL OR typeof(session_id) = 'text') AND (policy_revision IS NULL OR typeof(policy_revision) = 'integer') AND (threshold_percent IS NULL OR typeof(threshold_percent) = 'integer') AND (run_start_round IS NULL OR typeof(run_start_round) = 'integer') AND typeof(checkpoint_json) = 'text' AND typeof(latest_receipt_token) = 'text' AND typeof(latest_receipt_payload) = 'text' AND typeof(latest_receipt_before_generation) = 'integer' AND typeof(latest_receipt_before_sequence) = 'integer' AND typeof(latest_receipt_before_cursor_revision) = 'integer' AND typeof(latest_receipt_commit_ordinal) = 'integer')",
     'CHECK(length(trim(activity_id)) > 0)',
-    "CHECK(activity_kind IN ('discovery', 'legacyLesson', 'drill', 'soundGame', 'wordGame', 'comparison', 'sentence-hunt'))",
+    "CHECK(activity_kind IN ('discovery', 'legacyLesson', 'drill', 'soundGame', 'wordGame', 'comparison', 'sentence-hunt', 'spelling'))",
     'CHECK(run_generation BETWEEN 1 AND 9007199254740991)',
     'CHECK(sequence BETWEEN 1 AND 9007199254740991)',
     'CHECK(cursor_revision BETWEEN 0 AND 9007199254740991)',
@@ -175,7 +226,7 @@ class LearningAttempts extends Table {
     'CHECK(commit_ordinal BETWEEN 1 AND 9007199254740991)',
     'CHECK(answered_at_us BETWEEN 0 AND 9007199254740991)',
     'CHECK(committed_at_us BETWEEN 0 AND 9007199254740991)',
-    "CHECK(answer_kind IN ('soundChoice', 'drillChoice', 'soundCue', 'wordTile', 'comparisonPair', 'sentenceHunt'))",
+    "CHECK(answer_kind IN ('soundChoice', 'drillChoice', 'soundCue', 'wordTile', 'comparisonPair', 'sentenceHunt', 'spellingChoice'))",
     'CHECK(correct IN (0, 1))',
     "CHECK(skill IS NULL OR skill IN ('listening', 'spelling'))",
     "CHECK(origin IS NULL OR origin IN ('practice', 'game'))",
@@ -214,14 +265,14 @@ class LearningAttemptValues extends Table {
     'FOREIGN KEY (scope_id, attempt_id) REFERENCES learning_attempts(scope_id, attempt_id) ON DELETE RESTRICT',
     "CHECK(typeof(scope_id) = 'integer' AND typeof(attempt_id) = 'text' AND typeof(field) = 'text' AND typeof(ordinal) = 'integer' AND typeof(value_type) = 'text' AND (text_value IS NULL OR typeof(text_value) = 'text') AND (int_value IS NULL OR typeof(int_value) = 'integer') AND (bool_value IS NULL OR typeof(bool_value) = 'integer'))",
     'CHECK(length(trim(attempt_id)) > 0)',
-    "CHECK(field IN ('selected_sound', 'expected_sound', 'choice', 'selected_word', 'expected_word', 'pair_id', 'selected_family', 'expected_family', 'word_id', 'tile_index', 'target_sound', 'expected_membership', 'selected_token_id', 'expected_token_id'))",
+    "CHECK(field IN ('selected_sound', 'expected_sound', 'choice', 'selected_word', 'expected_word', 'pair_id', 'selected_family', 'expected_family', 'word_id', 'tile_index', 'target_sound', 'expected_membership', 'selected_token_id', 'expected_token_id', 'selected_option_id', 'expected_option_id'))",
     'CHECK(ordinal BETWEEN 0 AND 9007199254740991)',
     "CHECK((value_type = 'text' AND text_value IS NOT NULL AND length(trim(text_value)) > 0 AND int_value IS NULL AND bool_value IS NULL) OR "
         "(value_type = 'int' AND text_value IS NULL AND int_value IS NOT NULL AND int_value BETWEEN 0 AND $learningMaxSafeInteger AND bool_value IS NULL) OR "
         "(value_type = 'bool' AND text_value IS NULL AND int_value IS NULL AND bool_value IS NOT NULL AND bool_value IN (0, 1)))",
     "CHECK((field = 'expected_membership' AND value_type = 'bool' AND bool_value IS NOT NULL) OR "
         "(field = 'tile_index' AND value_type = 'int' AND int_value IS NOT NULL AND int_value BETWEEN 0 AND 15) OR "
-        "(field IN ('selected_sound', 'expected_sound', 'choice', 'selected_word', 'expected_word', 'pair_id', 'selected_family', 'expected_family', 'word_id', 'target_sound', 'selected_token_id', 'expected_token_id') AND value_type = 'text' AND text_value IS NOT NULL))",
+        "(field IN ('selected_sound', 'expected_sound', 'choice', 'selected_word', 'expected_word', 'pair_id', 'selected_family', 'expected_family', 'word_id', 'target_sound', 'selected_token_id', 'expected_token_id', 'selected_option_id', 'expected_option_id') AND value_type = 'text' AND text_value IS NOT NULL))",
   ];
 }
 
@@ -256,7 +307,7 @@ class LearningAttemptEvidence extends Table {
     'FOREIGN KEY (scope_id, attempt_id) REFERENCES learning_attempts(scope_id, attempt_id) ON DELETE RESTRICT',
     "CHECK(typeof(scope_id) = 'integer' AND typeof(attempt_id) = 'text' AND typeof(evidence_index) = 'integer' AND typeof(evidence_kind) = 'text' AND (slot IS NULL OR typeof(slot) = 'text') AND (reference_id IS NULL OR typeof(reference_id) = 'text') AND (outcome IS NULL OR typeof(outcome) = 'text') AND (source IS NULL OR typeof(source) = 'text') AND (activity_id IS NULL OR typeof(activity_id) = 'text') AND (run_generation IS NULL OR typeof(run_generation) = 'integer') AND (round IS NULL OR typeof(round) = 'integer') AND (pair_id IS NULL OR typeof(pair_id) = 'text') AND (ui_generation IS NULL OR typeof(ui_generation) = 'integer') AND (section_id IS NULL OR typeof(section_id) = 'text') AND (item_id IS NULL OR typeof(item_id) = 'text') AND (sentence_id IS NULL OR typeof(sentence_id) = 'text') AND (audio_ref_id IS NULL OR typeof(audio_ref_id) = 'text') AND (annotation_hash IS NULL OR typeof(annotation_hash) = 'text') AND (annotation_revision IS NULL OR typeof(annotation_revision) = 'integer') AND (content_revision IS NULL OR typeof(content_revision) = 'integer'))",
     'CHECK(length(trim(attempt_id)) > 0)',
-    "CHECK(evidence_kind IN ('comparisonPlayback', 'sentencePlayback', 'sentenceContent'))",
+    "CHECK(evidence_kind IN ('comparisonPlayback', 'sentencePlayback', 'sentenceContent', 'spellingPlayback'))",
     'CHECK(evidence_index BETWEEN 0 AND 9007199254740991)',
     "CHECK(slot IS NULL OR slot IN ('a', 'b'))",
     'CHECK(reference_id IS NULL OR length(trim(reference_id)) > 0)',
@@ -344,7 +395,7 @@ class LearningMistakes extends Table {
   @override
   List<String> get customConstraints => const <String>[
     "CHECK(typeof(scope_id) = 'integer' AND typeof(family) = 'text' AND (activity_id IS NULL OR typeof(activity_id) = 'text') AND (item_id IS NULL OR typeof(item_id) = 'text') AND (target_sound IS NULL OR typeof(target_sound) = 'text') AND (skill IS NULL OR typeof(skill) = 'text') AND (pair_id IS NULL OR typeof(pair_id) = 'text') AND (section_id IS NULL OR typeof(section_id) = 'text') AND (sentence_id IS NULL OR typeof(sentence_id) = 'text') AND (audio_ref_id IS NULL OR typeof(audio_ref_id) = 'text') AND (annotation_hash IS NULL OR typeof(annotation_hash) = 'text') AND (annotation_revision IS NULL OR typeof(annotation_revision) = 'integer') AND typeof(content_revision) = 'integer' AND (first_wrong_attempt_id IS NULL OR typeof(first_wrong_attempt_id) = 'text') AND (latest_wrong_attempt_id IS NULL OR typeof(latest_wrong_attempt_id) = 'text') AND typeof(first_wrong_at_us) = 'integer' AND typeof(latest_wrong_at_us) = 'integer' AND typeof(failure_count) = 'integer' AND (last_run_generation IS NULL OR typeof(last_run_generation) = 'integer'))",
-    "CHECK(family IN ('course', 'comparison', 'sentence-hunt'))",
+    "CHECK(family IN ('course', 'comparison', 'sentence-hunt', 'spelling'))",
     'CHECK(activity_id IS NULL OR length(trim(activity_id)) > 0)',
     'CHECK(item_id IS NULL OR length(trim(item_id)) > 0)',
     'CHECK(target_sound IS NULL OR length(trim(target_sound)) > 0)',
@@ -362,7 +413,7 @@ class LearningMistakes extends Table {
     'CHECK(latest_wrong_at_us BETWEEN first_wrong_at_us AND 9007199254740991)',
     'CHECK(failure_count BETWEEN 1 AND 9007199254740991)',
     'CHECK(last_run_generation IS NULL OR last_run_generation BETWEEN 1 AND 9007199254740991)',
-    "CHECK((family = 'course' AND activity_id IS NOT NULL AND item_id IS NOT NULL AND target_sound IS NOT NULL AND skill IS NOT NULL AND pair_id IS NULL AND section_id IS NULL AND sentence_id IS NULL AND audio_ref_id IS NULL AND annotation_hash IS NULL AND annotation_revision IS NULL) OR (family = 'comparison' AND activity_id IS NOT NULL AND pair_id IS NOT NULL AND content_revision > 0 AND item_id IS NULL AND target_sound IS NULL AND skill IS NULL AND section_id IS NULL AND sentence_id IS NULL AND audio_ref_id IS NULL AND annotation_hash IS NULL AND annotation_revision IS NULL) OR (family = 'sentence-hunt' AND section_id IS NOT NULL AND item_id IS NOT NULL AND sentence_id IS NOT NULL AND audio_ref_id IS NOT NULL AND annotation_hash IS NOT NULL AND annotation_revision IS NOT NULL AND activity_id IS NULL AND target_sound IS NULL AND skill IS NULL AND pair_id IS NULL))",
+    "CHECK((family = 'course' AND activity_id IS NOT NULL AND item_id IS NOT NULL AND target_sound IS NOT NULL AND skill IS NOT NULL AND pair_id IS NULL AND section_id IS NULL AND sentence_id IS NULL AND audio_ref_id IS NULL AND annotation_hash IS NULL AND annotation_revision IS NULL) OR (family = 'comparison' AND activity_id IS NOT NULL AND pair_id IS NOT NULL AND content_revision > 0 AND item_id IS NULL AND target_sound IS NULL AND skill IS NULL AND section_id IS NULL AND sentence_id IS NULL AND audio_ref_id IS NULL AND annotation_hash IS NULL AND annotation_revision IS NULL) OR (family = 'sentence-hunt' AND section_id IS NOT NULL AND item_id IS NOT NULL AND sentence_id IS NOT NULL AND audio_ref_id IS NOT NULL AND annotation_hash IS NOT NULL AND annotation_revision IS NOT NULL AND activity_id IS NULL AND target_sound IS NULL AND skill IS NULL AND pair_id IS NULL) OR (family = 'spelling' AND activity_id IS 'en-fr-u-y-spelling' AND item_id IS NOT NULL AND item_id IN ($learningSpellingItemIdsSql) AND target_sound IS NOT NULL AND target_sound = ($learningSpellingTargetSoundCaseSql) AND skill IS 'spelling' AND pair_id IS NULL AND section_id IS NULL AND sentence_id IS NULL AND audio_ref_id IS NULL AND annotation_hash IS NULL AND annotation_revision IS NULL AND content_revision = 1))",
   ];
 }
 
@@ -391,7 +442,7 @@ class LearningSummaries extends Table {
   @override
   List<String> get customConstraints => const <String>[
     "CHECK(typeof(scope_id) = 'integer' AND typeof(family) = 'text' AND (activity_id IS NULL OR typeof(activity_id) = 'text') AND (sound IS NULL OR typeof(sound) = 'text') AND (skill IS NULL OR typeof(skill) = 'text') AND (origin IS NULL OR typeof(origin) = 'text') AND (presentation IS NULL OR typeof(presentation) = 'text') AND (assistance_mask IS NULL OR typeof(assistance_mask) = 'integer') AND (pair_id IS NULL OR typeof(pair_id) = 'text') AND (section_id IS NULL OR typeof(section_id) = 'text') AND (item_id IS NULL OR typeof(item_id) = 'text') AND (sentence_id IS NULL OR typeof(sentence_id) = 'text') AND (audio_ref_id IS NULL OR typeof(audio_ref_id) = 'text') AND (annotation_hash IS NULL OR typeof(annotation_hash) = 'text') AND (annotation_revision IS NULL OR typeof(annotation_revision) = 'integer') AND (content_revision IS NULL OR typeof(content_revision) = 'integer') AND typeof(bucket) = 'text' AND typeof(correct) = 'integer' AND typeof(total) = 'integer')",
-    "CHECK(family IN ('course', 'comparison', 'sentence-hunt'))",
+    "CHECK(family IN ('course', 'comparison', 'sentence-hunt', 'spelling'))",
     'CHECK(activity_id IS NULL OR length(trim(activity_id)) > 0)',
     'CHECK(sound IS NULL OR length(trim(sound)) > 0)',
     "CHECK(skill IS NULL OR skill IN ('listening', 'spelling'))",
@@ -408,7 +459,7 @@ class LearningSummaries extends Table {
     'CHECK(content_revision IS NULL OR content_revision BETWEEN 1 AND 9007199254740991)',
     'CHECK(correct BETWEEN 0 AND 9007199254740991)',
     'CHECK(total BETWEEN 0 AND 9007199254740991 AND correct <= total)',
-    "CHECK((family = 'course' AND sound IS NOT NULL AND skill IS NOT NULL AND origin IS NOT NULL AND presentation IS NOT NULL AND assistance_mask IS NOT NULL AND activity_id IS NULL AND content_revision IS NULL AND pair_id IS NULL AND section_id IS NULL AND item_id IS NULL AND sentence_id IS NULL AND audio_ref_id IS NULL AND annotation_hash IS NULL AND annotation_revision IS NULL AND bucket = 'all') OR (family = 'comparison' AND activity_id IS NOT NULL AND pair_id IS NOT NULL AND content_revision IS NOT NULL AND sound IS NULL AND skill IS NULL AND origin IS NULL AND presentation IS NULL AND assistance_mask IS NULL AND section_id IS NULL AND item_id IS NULL AND sentence_id IS NULL AND audio_ref_id IS NULL AND annotation_hash IS NULL AND annotation_revision IS NULL AND bucket IN ('firstInRun', 'repeatInRun', 'afterDebrief')) OR (family = 'sentence-hunt' AND section_id IS NOT NULL AND item_id IS NOT NULL AND sentence_id IS NOT NULL AND audio_ref_id IS NOT NULL AND annotation_hash IS NOT NULL AND annotation_revision IS NOT NULL AND content_revision IS NOT NULL AND activity_id IS NULL AND sound IS NULL AND skill IS NULL AND origin IS NULL AND presentation IS NULL AND assistance_mask IS NULL AND pair_id IS NULL AND bucket IN ('firstInRun', 'repeatInRun', 'firstTeachingExposed', 'repeatTeachingExposed'))) ",
+    "CHECK((family = 'course' AND sound IS NOT NULL AND skill IS NOT NULL AND origin IS NOT NULL AND presentation IS NOT NULL AND assistance_mask IS NOT NULL AND activity_id IS NULL AND content_revision IS NULL AND pair_id IS NULL AND section_id IS NULL AND item_id IS NULL AND sentence_id IS NULL AND audio_ref_id IS NULL AND annotation_hash IS NULL AND annotation_revision IS NULL AND bucket = 'all') OR (family = 'comparison' AND activity_id IS NOT NULL AND pair_id IS NOT NULL AND content_revision IS NOT NULL AND sound IS NULL AND skill IS NULL AND origin IS NULL AND presentation IS NULL AND assistance_mask IS NULL AND section_id IS NULL AND item_id IS NULL AND sentence_id IS NULL AND audio_ref_id IS NULL AND annotation_hash IS NULL AND annotation_revision IS NULL AND bucket IN ('firstInRun', 'repeatInRun', 'afterDebrief')) OR (family = 'sentence-hunt' AND section_id IS NOT NULL AND item_id IS NOT NULL AND sentence_id IS NOT NULL AND audio_ref_id IS NOT NULL AND annotation_hash IS NOT NULL AND annotation_revision IS NOT NULL AND content_revision IS NOT NULL AND activity_id IS NULL AND sound IS NULL AND skill IS NULL AND origin IS NULL AND presentation IS NULL AND assistance_mask IS NULL AND pair_id IS NULL AND bucket IN ('firstInRun', 'repeatInRun', 'firstTeachingExposed', 'repeatTeachingExposed')) OR (family = 'spelling' AND activity_id IS 'en-fr-u-y-spelling' AND item_id IS NOT NULL AND item_id IN ($learningSpellingItemIdsSql) AND sound IS NOT NULL AND sound = ($learningSpellingTargetSoundCaseSql) AND skill IS 'spelling' AND origin IS 'practice' AND presentation IS NULL AND assistance_mask IS NULL AND pair_id IS NULL AND section_id IS NULL AND sentence_id IS NULL AND audio_ref_id IS NULL AND annotation_hash IS NULL AND annotation_revision IS NULL AND content_revision IS 1 AND bucket IN ('firstInRun', 'afterDebrief'))) ",
   ];
 }
 
@@ -450,7 +501,8 @@ class LearningExposure extends Table {
   List<String> get customConstraints => const <String>[
     "CHECK(typeof(scope_id) = 'integer' AND typeof(family) = 'text' AND (activity_id IS NULL OR typeof(activity_id) = 'text') AND (item_id IS NULL OR typeof(item_id) = 'text') AND (target_sound IS NULL OR typeof(target_sound) = 'text') AND (section_id IS NULL OR typeof(section_id) = 'text') AND (content_revision IS NULL OR typeof(content_revision) = 'integer') AND (presentations IS NULL OR typeof(presentations) = 'integer') AND (assistance_mask IS NULL OR typeof(assistance_mask) = 'integer'))",
     "CHECK((family = 'course' AND activity_id IS NOT NULL AND item_id IS NOT NULL AND target_sound IS NOT NULL AND section_id IS NULL AND content_revision IS NULL AND presentations IS NOT NULL AND presentations BETWEEN 0 AND $learningMaxSafeInteger AND assistance_mask IS NOT NULL AND assistance_mask BETWEEN 0 AND 15) OR "
-        "(family = 'sentence-hunt' AND activity_id IS NULL AND item_id IS NULL AND target_sound IS NULL AND section_id IS NOT NULL AND content_revision IS NOT NULL AND content_revision BETWEEN 1 AND $learningMaxSafeInteger AND presentations IS NULL AND assistance_mask IS NULL))",
+        "(family = 'sentence-hunt' AND activity_id IS NULL AND item_id IS NULL AND target_sound IS NULL AND section_id IS NOT NULL AND content_revision IS NOT NULL AND content_revision BETWEEN 1 AND $learningMaxSafeInteger AND presentations IS NULL AND assistance_mask IS NULL) OR "
+        "(family = 'spelling' AND activity_id IS 'en-fr-u-y-spelling' AND item_id IS NOT NULL AND item_id IN ($learningSpellingItemIdsSql) AND target_sound IS NOT NULL AND target_sound = ($learningSpellingTargetSoundCaseSql) AND section_id IS NULL AND content_revision IS 1 AND presentations IS NOT NULL AND presentations BETWEEN 0 AND $learningMaxSafeInteger AND assistance_mask IS NOT NULL AND assistance_mask BETWEEN 0 AND 15))",
     'CHECK(activity_id IS NULL OR length(trim(activity_id)) > 0)',
     'CHECK(item_id IS NULL OR length(trim(item_id)) > 0)',
     'CHECK(target_sound IS NULL OR length(trim(target_sound)) > 0)',
