@@ -4,7 +4,8 @@ import '../course_attempt.dart';
 enum LearningFamily {
   course('course'),
   comparison('comparison'),
-  sentenceHunt('sentence-hunt');
+  sentenceHunt('sentence-hunt'),
+  spelling('spelling');
 
   const LearningFamily(this.databaseValue);
 
