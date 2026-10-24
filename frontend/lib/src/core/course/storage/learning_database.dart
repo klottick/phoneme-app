@@ -1115,7 +1115,7 @@ class LearningDatabase extends _$LearningDatabase {
     }
 
     final existingObjects = await customSelect(
-      "SELECT name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' "
+      "SELECT name FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' "
       "AND type IN ('table', 'index', 'trigger', 'view')",
     ).get();
     if (existingObjects.isNotEmpty) {
@@ -1653,7 +1653,7 @@ class LearningDatabase extends _$LearningDatabase {
 
   Future<List<String>> _schemaNames(String type) async {
     final rows = await customSelect(
-      "SELECT name FROM sqlite_schema WHERE type = ? AND name NOT LIKE 'sqlite_%' "
+      "SELECT name FROM sqlite_schema WHERE type = ? AND name NOT GLOB 'sqlite_*' "
       'ORDER BY name',
       variables: <Variable<Object>>[Variable<String>(type)],
     ).get();
@@ -1663,7 +1663,7 @@ class LearningDatabase extends _$LearningDatabase {
   Future<Map<String, String>> _schemaSqlByName(String type) async {
     final rows = await customSelect(
       'SELECT name, sql FROM sqlite_schema WHERE type = ? '
-      "AND name NOT LIKE 'sqlite_%' ORDER BY name",
+      "AND name NOT GLOB 'sqlite_*' ORDER BY name",
       variables: <Variable<Object>>[Variable<String>(type)],
     ).get();
     return <String, String>{

@@ -9,7 +9,14 @@ import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/course_learning_transition.dart';
 import 'package:linguist/src/core/course/storage/course_learning_sql_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:drift/drift.dart' show DatabaseConnection;
+import 'package:drift/drift.dart'
+    show
+        DatabaseConnection,
+        OpeningDetails,
+        QueryExecutor,
+        QueryExecutorUser,
+        QueryInterceptor,
+        ApplyInterceptorConnection;
 import 'package:drift/native.dart';
 import 'package:linguist/src/core/course/comparison_learning_state.dart';
 import 'package:linguist/src/core/course/course_learning_error.dart';
@@ -33,6 +40,32 @@ import 'package:sqlite3/sqlite3.dart' as sqlite;
 import '../support/learning_v1_fixture.dart';
 import '../support/learning_migration_failure_probe.dart';
 import '../support/sqlite_learning_test_harness.dart';
+
+final class _ObserveNativeOpen extends QueryInterceptor {
+  _ObserveNativeOpen(this.observed);
+
+  final Completer<OpeningDetails> observed;
+
+  @override
+  Future<bool> ensureOpen(QueryExecutor executor, QueryExecutorUser user) =>
+      executor.ensureOpen(_ObservedNativeUser(user, observed));
+}
+
+final class _ObservedNativeUser implements QueryExecutorUser {
+  _ObservedNativeUser(this.original, this.observed);
+
+  final QueryExecutorUser original;
+  final Completer<OpeningDetails> observed;
+
+  @override
+  int get schemaVersion => original.schemaVersion;
+
+  @override
+  Future<void> beforeOpen(QueryExecutor executor, OpeningDetails details) {
+    if (!observed.isCompleted) observed.complete(details);
+    return original.beforeOpen(executor, details);
+  }
+}
 
 const List<String> _indexNames = <String>[
   'ux_learning_scopes_owner_course_family',
@@ -2852,6 +2885,65 @@ void main() {
       },
     );
 
+    for (final version in <int>[0, 1, 2]) {
+      test(
+        'rejects sqliteX user objects at physical version $version',
+        () async {
+          final directory = await Directory.systemTemp.createTemp(
+            'learning-prefix-',
+          );
+          addTearDown(() => directory.delete(recursive: true));
+          final file = version == 1
+              ? await _createVersionOneFile(directory, 'prefix')
+              : File('${directory.path}/prefix.sqlite');
+          if (version == 2) {
+            final fresh = await openFileLearningTestDatabase(file);
+            await fresh.customSelect('SELECT 1').getSingle();
+            await fresh.close();
+          }
+          final raw = sqlite.sqlite3.open(file.path);
+          raw.execute('CREATE TABLE sqliteX_preserved_marker (value TEXT)');
+          raw.execute("INSERT INTO sqliteX_preserved_marker VALUES ('kept')");
+          raw.close();
+          final before = await file.readAsBytes();
+
+          LearningDatabase? unexpected;
+          try {
+            await expectLater(
+              () async {
+                unexpected = await LearningDatabase.openValidated(
+                  DatabaseConnection(NativeDatabase(file)),
+                );
+              },
+              throwsA(
+                version == 0
+                    ? isA<LearningUnsupportedVersionException>()
+                    : isA<LearningCorruptException>(),
+              ),
+            );
+          } finally {
+            await unexpected?.close();
+          }
+          expect(await file.readAsBytes(), orderedEquals(before));
+          final preserved = sqlite.sqlite3.open(file.path);
+          try {
+            expect(
+              preserved.select('PRAGMA user_version').single['user_version'],
+              version,
+            );
+            expect(
+              preserved
+                  .select('SELECT value FROM sqliteX_preserved_marker')
+                  .single['value'],
+              'kept',
+            );
+          } finally {
+            preserved.close();
+          }
+        },
+      );
+    }
+
     test(
       'refuses nonempty version-zero files without overwriting them',
       () async {
@@ -3084,6 +3176,83 @@ void main() {
     });
 
     test(
+      'mixed and dedicated comparison identities survive v1 migration',
+      () async {
+        final directory = await Directory.systemTemp.createTemp(
+          'learning-identities-',
+        );
+        addTearDown(() => directory.delete(recursive: true));
+        final file = await _createVersionOneFile(directory, 'identities');
+
+        void expectComparisonIdentities(sqlite.Database raw) {
+          for (final (scopeId, activityId) in <(int, String)>[
+            (2, 'en-fr-phoneme-comparison'),
+            (3, 'en-fr-u-y-comparison'),
+          ]) {
+            for (final table in <String>[
+              'learning_content_bindings',
+              'learning_runs',
+              'learning_attempts',
+              'learning_attempt_evidence',
+              'learning_command_receipts',
+            ]) {
+              final rows = raw.select(
+                'SELECT activity_id FROM $table WHERE scope_id = ?',
+                <Object?>[scopeId],
+              );
+              expect(rows, isNotEmpty, reason: '$table scope $scopeId');
+              expect(
+                rows.map((row) => row['activity_id']),
+                everyElement(activityId),
+                reason: '$table scope $scopeId',
+              );
+            }
+            for (final (table, column) in <(String, String)>[
+              ('learning_runs', 'latest_receipt_payload'),
+              ('learning_command_receipts', 'canonical_payload'),
+            ]) {
+              final rows = raw.select(
+                'SELECT $column FROM $table WHERE scope_id = ?',
+                <Object?>[scopeId],
+              );
+              for (final row in rows) {
+                final payload = jsonDecode(row[column] as String) as Map;
+                expect(payload['activityId'], activityId);
+              }
+            }
+            expect(
+              raw
+                  .select(
+                    'SELECT result_activity_id FROM learning_command_receipts '
+                    'WHERE scope_id = ?',
+                    <Object?>[scopeId],
+                  )
+                  .map((row) => row['result_activity_id']),
+              everyElement(activityId),
+            );
+          }
+        }
+
+        final before = sqlite.sqlite3.open(file.path);
+        try {
+          expectComparisonIdentities(before);
+        } finally {
+          before.close();
+        }
+        final migrated = await LearningDatabase.openValidated(
+          DatabaseConnection(NativeDatabase(file)),
+        );
+        await migrated.close();
+        final after = sqlite.sqlite3.open(file.path);
+        try {
+          expectComparisonIdentities(after);
+        } finally {
+          after.close();
+        }
+      },
+    );
+
+    test(
       'published_v1_fixture_migrates_to_v2_and_preserves_old_rows',
       () async {
         final directory = await Directory.systemTemp.createTemp(
@@ -3257,12 +3426,28 @@ void main() {
       final scope = LearningScope(courseId: 'en-fr', owner: owner);
       final auth = LearningAuthScope(owner: owner, generation: 9, ready: true);
       final writerOpenStarted = Completer<void>();
+      final nativeOpenObserved = Completer<OpeningDetails>();
       final writerHandle = LearningDatabaseHandle(
-        open: () {
+        open: () async {
           if (!writerOpenStarted.isCompleted) writerOpenStarted.complete();
-          return LearningDatabase.openValidated(
-            DatabaseConnection(NativeDatabase(file)),
+          // Real SQLite work runs on its own isolate, so its busy wait cannot
+          // block the test isolate from committing the paused first migration.
+          // Bypass the process-local validated-open queue, as a second tab does.
+          final database = LearningDatabase(
+            DatabaseConnection(
+              NativeDatabase.createInBackground(
+                file,
+                setup: (raw) => raw.execute('PRAGMA busy_timeout = 10000'),
+              ),
+            ).interceptWith(_ObserveNativeOpen(nativeOpenObserved)),
           );
+          try {
+            await database.customSelect('SELECT 1').getSingle();
+            return database;
+          } on Object {
+            await database.close();
+            rethrow;
+          }
         },
       );
       final repository = SqliteCourseLearningRepository(
@@ -3283,7 +3468,16 @@ void main() {
       );
       final writeFuture = repository.submit(command);
       await writerOpenStarted.future;
-      releaseMigration.complete();
+      OpeningDetails? observedDuringMigration;
+      try {
+        observedDuringMigration = await nativeOpenObserved.future.timeout(
+          const Duration(seconds: 3),
+        );
+      } on TimeoutException {
+        // Release and close all resources before reporting the missing overlap.
+      } finally {
+        releaseMigration.complete();
+      }
 
       final migrated = await migrationFuture;
       final commit = await writeFuture;
@@ -3292,6 +3486,18 @@ void main() {
       expect(commit.state.revision, 1);
       await migrated.close();
       await writerHandle.close();
+      expect(
+        observedDuringMigration,
+        isNotNull,
+        reason:
+            'the second native connection must actually begin opening '
+            'before the first transaction is released',
+      );
+      expect(
+        observedDuringMigration!.versionBefore,
+        1,
+        reason: 'the second opener must observe v1 and recheck under the fence',
+      );
 
       final afterRaw = sqlite.sqlite3.open(file.path);
       final after = _snapshotLearningRows(afterRaw);

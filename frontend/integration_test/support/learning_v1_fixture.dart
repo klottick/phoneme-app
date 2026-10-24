@@ -122,7 +122,7 @@ const List<_FixtureStatement> _publishedV1SeedStatements = <_FixtureStatement>[
     <Object?>[
       301,
       3,
-      'en-fr-phoneme-comparison',
+      'en-fr-u-y-comparison',
       1,
       'discoveryThreshold',
       1,
@@ -225,7 +225,7 @@ const List<_FixtureStatement> _publishedV1SeedStatements = <_FixtureStatement>[
     'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     <Object?>[
       3,
-      'en-fr-phoneme-comparison',
+      'en-fr-u-y-comparison',
       'comparison',
       1,
       2,
@@ -239,7 +239,7 @@ const List<_FixtureStatement> _publishedV1SeedStatements = <_FixtureStatement>[
       null,
       '{"kind":"comparison","sessionId":"dedicated-comparison-session-v1"}',
       'CCCCCCCCCCCCCCCCCCCCCC',
-      '{"activityId":"en-fr-phoneme-comparison","expectedScopeRevision":0}',
+      '{"activityId":"en-fr-u-y-comparison","expectedScopeRevision":0}',
       1,
       1,
       0,
@@ -372,7 +372,7 @@ const List<_FixtureStatement> _publishedV1SeedStatements = <_FixtureStatement>[
     <Object?>[
       3,
       'attempt-comparison-dedicated-v1',
-      'en-fr-phoneme-comparison',
+      'en-fr-u-y-comparison',
       1,
       2,
       0,
@@ -578,7 +578,7 @@ const List<_FixtureStatement> _publishedV1SeedStatements = <_FixtureStatement>[
       'dedicated-reference-a-v1',
       'completed',
       'unverifiedRecording',
-      'en-fr-phoneme-comparison',
+      'en-fr-u-y-comparison',
       1,
       1,
       'pair-dedicated-v1',
@@ -608,7 +608,7 @@ const List<_FixtureStatement> _publishedV1SeedStatements = <_FixtureStatement>[
       'dedicated-reference-b-v1',
       'completed',
       'unverifiedRecording',
-      'en-fr-phoneme-comparison',
+      'en-fr-u-y-comparison',
       1,
       1,
       'pair-dedicated-v1',
@@ -741,9 +741,9 @@ const List<_FixtureStatement> _publishedV1SeedStatements = <_FixtureStatement>[
     'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     <Object?>[
       3,
-      'en-fr-phoneme-comparison',
+      'en-fr-u-y-comparison',
       'CCCCCCCCCCCCCCCCCCCCCC',
-      '{"schemaVersion":1,"activityId":"en-fr-phoneme-comparison","expectedScopeRevision":0,"action":{"kind":"answer","pairId":"pair-dedicated-v1","selectedRelation":"different"}}',
+      '{"schemaVersion":1,"activityId":"en-fr-u-y-comparison","expectedScopeRevision":0,"action":{"kind":"answer","pairId":"pair-dedicated-v1","selectedRelation":"different"}}',
       1,
       1,
       0,
@@ -751,7 +751,7 @@ const List<_FixtureStatement> _publishedV1SeedStatements = <_FixtureStatement>[
       2,
       0,
       2,
-      'en-fr-phoneme-comparison',
+      'en-fr-u-y-comparison',
       1,
       2,
       0,
@@ -1074,7 +1074,7 @@ Future<void> openPublishedLearningV1Fixture(
     const [],
   );
   final schemaRows = await connection.runSelect(
-    "SELECT name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' "
+    "SELECT name FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' "
     "AND type IN ('table', 'index', 'trigger', 'view')",
     const [],
   );
