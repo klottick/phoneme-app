@@ -20,6 +20,7 @@ import 'package:linguist/src/core/course/spelling_learning_state.dart';
 import 'package:linguist/src/core/course/spelling_learning_store.dart';
 import 'package:linguist/src/core/course/spelling_learning_transition.dart';
 import 'package:linguist/src/core/providers/app_providers.dart';
+import 'package:linguist/src/features/course/spelling_lesson_screen.dart';
 import 'package:linguist/src/routing/app_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -360,72 +361,330 @@ void main() {
     expect(find.text('Continue'), findsOneWidget);
   });
 
-  testWidgets('review_inspection_is_read_only_and_review_only_mode_persists', (
+  testWidgets(
+    'canonical_review_url_finishes_review_then_explicitly_starts_practice',
+    (tester) async {
+      final seed = _HeldSpellingStore();
+      await _practiceDebrief(seed, firstItemWrong: true);
+      await seed.perform(const FinishSpellingRun(recordCompletion: true));
+      final reviewState = seed.committedState;
+      final sourceSlot = reviewState.slots[_activityId]!;
+      final sourceFirstAnswers = Map<String, bool>.of(
+        sourceSlot.checkpoint.firstAttemptAnswers,
+      );
+      final completionsBeforeReview = List<SpellingCompletion>.of(
+        reviewState.completions,
+      );
+      expect(completionsBeforeReview, hasLength(1));
+      final store = _HeldSpellingStore(initialState: reviewState);
+      final audio = _ControlledSpellingAudio();
+      final app = await _mountSpelling(
+        tester,
+        store,
+        audio,
+        location: '/course-spelling/$_activityId?review=true',
+      );
+      addTearDown(() => app.dispose(tester));
+
+      expect(store.submissions, isEmpty);
+      expect(audio.requests, isEmpty);
+      expect(find.text('Start review-only'), findsOneWidget);
+      expect(find.text('Finish practice'), findsNothing);
+      expect(find.text('First attempt in this run: 9/10'), findsOneWidget);
+      expect(find.text('Latest practice score: 9/10'), findsOneWidget);
+      expect(
+        app.router.routeInformationProvider.value.uri.queryParameters['review'],
+        'true',
+      );
+
+      await tester.tap(find.text('Start review-only'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Saved spelling progress could not be loaded.'),
+        findsNothing,
+      );
+      expect(store.prepareCalls, 1);
+      expect(store.submissions, hasLength(1));
+      expect(store.submissions.single.action, isA<StartSpellingReviewOnly>());
+      expect(
+        store.committedState.slots[_activityId]!.checkpoint.mode,
+        SpellingRunMode.reviewOnly,
+      );
+      expect(
+        app.router.routeInformationProvider.value.uri.queryParameters['review'],
+        'true',
+      );
+
+      await tester.tap(find.text('Listen to the word'));
+      await tester.pump();
+      audio.requests.last.complete();
+      await tester.pump();
+      await tester.pump();
+      await tester.tap(find.text('ou'));
+      await tester.pumpAndSettle();
+      expect(store.committedState.attempts.length, 11);
+      expect(store.committedState.completions, completionsBeforeReview);
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+      expect(find.text('Section debrief'), findsOneWidget);
+      expect(
+        find.text('Finish review'),
+        findsOneWidget,
+        reason:
+            'an explicitly started review-only run can finish on its canonical review URL',
+      );
+      expect(
+        app.router.routeInformationProvider.value.uri.queryParameters['review'],
+        'true',
+      );
+      await tester.tap(find.text('Finish review'));
+      await tester.pumpAndSettle();
+      expect(store.submissions.last.action, isA<FinishSpellingRun>());
+      expect(
+        (store.submissions.last.action as FinishSpellingRun).recordCompletion,
+        isFalse,
+      );
+      expect(store.committedState.completions, completionsBeforeReview);
+      expect(find.text('Review run complete.'), findsOneWidget);
+      expect(
+        find.text('Start new practice'),
+        findsOneWidget,
+        reason:
+            'a finished review-only generation needs an explicit new-practice action',
+      );
+      expect(
+        store.committedState.slots[_activityId]!.checkpoint.firstAttemptAnswers,
+        sourceFirstAnswers,
+      );
+      final finishedReviewSlot = store.committedState.slots[_activityId]!;
+      final reviewBaseline = finishedReviewSlot.checkpoint.baseline!;
+      expect(reviewBaseline.sourceGeneration, sourceSlot.cursor.generation);
+      expect(reviewBaseline.sourceSessionId, sourceSlot.checkpoint.sessionId);
+      expect(reviewBaseline.firstAttemptAnswers, sourceFirstAnswers);
+      expect(
+        reviewBaseline.latestPracticeAnswers,
+        sourceSlot.checkpoint.firstAttemptAnswers,
+      );
+      final int finishedReviewGeneration = finishedReviewSlot.cursor.generation;
+      final int submissionsBeforeInspection = store.submissions.length;
+
+      app.router.go('/course-spelling/$_activityId');
+      await tester.pumpAndSettle();
+      expect(store.submissions, hasLength(submissionsBeforeInspection));
+      expect(
+        store.committedState.slots[_activityId]!.checkpoint.mode,
+        SpellingRunMode.reviewOnly,
+      );
+      expect(
+        store.committedState.slots[_activityId]!.checkpoint.finished,
+        isTrue,
+      );
+      expect(find.text('Start new practice'), findsOneWidget);
+      expect(audio.requests, hasLength(1));
+
+      await tester.tap(find.text('Start new practice'));
+      await tester.pumpAndSettle();
+      expect(store.submissions, hasLength(submissionsBeforeInspection + 1));
+      expect(store.submissions.last.action, isA<StartSpellingPractice>());
+      final newPracticeSlot = store.committedState.slots[_activityId]!;
+      expect(newPracticeSlot.checkpoint.mode, SpellingRunMode.practice);
+      expect(newPracticeSlot.checkpoint.finished, isFalse);
+      expect(newPracticeSlot.cursor.generation, finishedReviewGeneration + 1);
+      expect(newPracticeSlot.checkpoint.firstAttemptAnswers, isEmpty);
+      expect(store.committedState.attempts, hasLength(11));
+      expect(store.committedState.completions, completionsBeforeReview);
+      expect(
+        audio.requests,
+        hasLength(1),
+        reason: 'new practice must not auto-play audio',
+      );
+    },
+  );
+
+  testWidgets(
+    'finished_review_only_route_requires_explicit_new_practice_action',
+    (tester) async {
+      final seed = _HeldSpellingStore();
+      await _practiceDebrief(seed, firstItemWrong: true);
+      await seed.perform(const FinishSpellingRun(recordCompletion: true));
+      await seed.perform(
+        const StartSpellingReviewOnly(sessionId: 'finished-review-route'),
+      );
+      final row = seed.catalogue.rows.first;
+      await seed.perform(
+        AnswerSpellingChoice(
+          itemId: row.exercise.id,
+          contentRevision: seed.catalogue.contentRevision,
+          selectedOptionId: row.exercise.correctOptionId,
+          expectedOptionIdSnapshot: row.exercise.correctOptionId,
+          playback: _observation(seed, row, promptEpoch: 11, round: 2),
+        ),
+      );
+      await seed.perform(const AdvanceSpellingItem());
+      await seed.perform(const FinishSpellingRun(recordCompletion: false));
+      final int finishedGeneration =
+          seed.committedState.slots[_activityId]!.cursor.generation;
+      final List<SpellingCompletion> completions = List<SpellingCompletion>.of(
+        seed.committedState.completions,
+      );
+      expect(completions, hasLength(1));
+      final store = _HeldSpellingStore(initialState: seed.committedState);
+      final audio = _ControlledSpellingAudio();
+      final app = await _mountSpelling(
+        tester,
+        store,
+        audio,
+        location: '/course-spelling/$_activityId?review=true',
+      );
+      addTearDown(() => app.dispose(tester));
+
+      expect(
+        store.submissions,
+        isEmpty,
+        reason: 'inspection is not a new generation',
+      );
+      expect(audio.requests, isEmpty);
+      expect(find.text('Review run complete.'), findsOneWidget);
+      expect(find.text('Start new practice'), findsOneWidget);
+
+      app.router.go('/course-spelling/$_activityId');
+      await tester.pumpAndSettle();
+      expect(
+        store.submissions,
+        isEmpty,
+        reason: 'query removal is not a new generation',
+      );
+      expect(
+        store.committedState.slots[_activityId]!.checkpoint.mode,
+        SpellingRunMode.reviewOnly,
+      );
+      expect(
+        store.committedState.slots[_activityId]!.checkpoint.finished,
+        isTrue,
+      );
+      expect(store.committedState.completions, completions);
+      expect(find.text('Start new practice'), findsOneWidget);
+
+      await tester.tap(find.text('Start new practice'));
+      await tester.pumpAndSettle();
+      expect(store.submissions, hasLength(1));
+      expect(store.submissions.single.action, isA<StartSpellingPractice>());
+      expect(
+        store.committedState.slots[_activityId]!.cursor.generation,
+        finishedGeneration + 1,
+      );
+      expect(
+        store.committedState.slots[_activityId]!.checkpoint.mode,
+        SpellingRunMode.practice,
+      );
+      expect(store.committedState.completions, completions);
+      expect(audio.requests, isEmpty);
+    },
+  );
+
+  testWidgets('initial_load_completed_while_paused_recovers_on_resume', (
+    tester,
+  ) async {
+    final store = _HeldSpellingStore();
+    final load = Completer<SpellingLearningState>();
+    store.heldLoad = load;
+    final audio = _ControlledSpellingAudio();
+    final auth = LearningAuthTracker(owner: store.scope.owner, ready: true);
+    final container = ProviderContainer(
+      overrides: [
+        spellingCatalogueProvider.overrideWithValue(store.catalogue),
+        spellingLearningStoreProvider.overrideWithValue(store),
+        learningAuthScopeProvider.overrideWith((ref) => auth),
+        courseAudioProvider.overrideWithValue(audio),
+        courseReferenceAudioProvider.overrideWithValue(audio),
+      ],
+    );
+    await _pumpStandaloneSpelling(tester, container);
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      container.dispose();
+    });
+
+    expect(store.loadCalls, 1);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    load.complete(store.committedState);
+    await tester.pump();
+    expect(find.text('Start practice'), findsNothing);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(
+      find.text('Start practice'),
+      findsOneWidget,
+      reason:
+          'a load completed during pause must be installed or reloaded on resume',
+    );
+    expect(store.loadCalls, 2);
+    expect(
+      store.submissions,
+      isEmpty,
+      reason: 'resume must not start practice',
+    );
+    expect(audio.requests, isEmpty, reason: 'resume must not replay audio');
+  });
+
+  testWidgets('paused_initial_load_cannot_restore_a_stale_owner', (
     tester,
   ) async {
     final seed = _HeldSpellingStore();
-    final reviewState = await _practiceDebrief(seed, firstItemWrong: true);
-    final store = _HeldSpellingStore(initialState: reviewState);
+    final staleOwnerState = await _practiceDebrief(seed, firstItemWrong: true);
+    final staleLoad = Completer<SpellingLearningState>();
+    final staleStore = _HeldSpellingStore(initialState: staleOwnerState)
+      ..heldLoad = staleLoad;
+    final currentStore = _HeldSpellingStore(
+      owner: LearningOwner.account('current-owner'),
+    );
     final audio = _ControlledSpellingAudio();
-    final app = await _mountSpelling(
-      tester,
-      store,
-      audio,
-      location: '/course-spelling/$_activityId?review=true',
+    final auth = LearningAuthTracker(
+      owner: staleStore.scope.owner,
+      ready: true,
     );
-    addTearDown(() => app.dispose(tester));
+    final activeStoreProvider = StateProvider<SpellingLearningStore>(
+      (ref) => staleStore,
+    );
+    final container = ProviderContainer(
+      overrides: [
+        spellingCatalogueProvider.overrideWithValue(staleStore.catalogue),
+        spellingLearningStoreProvider.overrideWith(
+          (ref) => ref.watch(activeStoreProvider),
+        ),
+        learningAuthScopeProvider.overrideWith((ref) => auth),
+        courseAudioProvider.overrideWithValue(audio),
+        courseReferenceAudioProvider.overrideWithValue(audio),
+      ],
+    );
+    await _pumpStandaloneSpelling(tester, container);
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      container.dispose();
+    });
 
-    expect(store.submissions, isEmpty);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    auth.observe(owner: currentStore.scope.owner, ready: true);
+    container.read(activeStoreProvider.notifier).state = currentStore;
+    await tester.pump();
+    staleLoad.complete(staleOwnerState);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.text('Start practice'), findsOneWidget);
+    expect(find.text('First attempt in this run: 9/10'), findsNothing);
+    expect(find.text('Start review-only'), findsNothing);
+    expect(staleStore.submissions, isEmpty);
+    expect(currentStore.submissions, isEmpty);
     expect(audio.requests, isEmpty);
-    expect(find.text('Start review-only'), findsOneWidget);
-    expect(find.text('Finish practice'), findsNothing);
-    expect(find.text('First attempt in this run: 9/10'), findsOneWidget);
-    expect(find.text('Latest practice score: 9/10'), findsOneWidget);
-
-    await tester.tap(find.text('Start review-only'));
-    await tester.pumpAndSettle();
-    expect(
-      find.text('Saved spelling progress could not be loaded.'),
-      findsNothing,
-    );
-    expect(store.prepareCalls, 1);
-    expect(store.submissions, hasLength(1));
-    expect(store.submissions.single.action, isA<StartSpellingReviewOnly>());
-    expect(
-      store.committedState.slots[_activityId]!.checkpoint.mode,
-      SpellingRunMode.reviewOnly,
-    );
-
-    app.router.go('/course-spelling/$_activityId');
-    await tester.pumpAndSettle();
-    expect(
-      store.committedState.slots[_activityId]!.checkpoint.mode,
-      SpellingRunMode.reviewOnly,
-    );
-    await tester.tap(find.text('Listen to the word'));
-    await tester.pump();
-    audio.requests.last.complete();
-    await tester.pump();
-    await tester.pump();
-    await tester.tap(find.text('u'));
-    await tester.pumpAndSettle();
-    expect(store.committedState.attempts.length, 11);
-    expect(
-      find.text('Repeat in this run — feedback-assisted review.'),
-      findsOneWidget,
-    );
-    expect(store.committedState.completions, isEmpty);
-    await tester.tap(find.text('Continue'));
-    await tester.pumpAndSettle();
-    expect(find.text('Finish review'), findsOneWidget);
-    await tester.tap(find.text('Finish review'));
-    await tester.pumpAndSettle();
-    expect(store.submissions.last.action, isA<FinishSpellingRun>());
-    expect(
-      (store.submissions.last.action as FinishSpellingRun).recordCompletion,
-      isFalse,
-    );
-    expect(store.committedState.completions, isEmpty);
   });
 
   testWidgets('owner_change_retires_a_pending_recording_completion', (
@@ -630,6 +889,19 @@ Future<_MountedSpellingApp> _mountSpelling(
   return _MountedSpellingApp(container, router, auth);
 }
 
+Future<void> _pumpStandaloneSpelling(
+  WidgetTester tester,
+  ProviderContainer container,
+) async {
+  await tester.pumpWidget(
+    UncontrolledProviderScope(
+      container: container,
+      child: const MaterialApp(home: SpellingLessonScreen(review: false)),
+    ),
+  );
+  await tester.pump();
+}
+
 Future<void> _waitForOnboardingReady(
   WidgetTester tester,
   ProviderContainer container,
@@ -736,20 +1008,22 @@ final class _HeldSubmission {
 }
 
 final class _HeldSpellingStore implements SpellingLearningStore {
-  _HeldSpellingStore({SpellingLearningState? initialState})
-    : catalogue = loadFrenchUyDemoSpellingCatalogue(),
-      scope = SpellingProfileScope(
-        courseId: 'en-fr',
-        owner: LearningOwner.guest(),
-      ),
-      _state =
-          initialState ??
-          SpellingLearningState.empty(
-            SpellingProfileScope(
-              courseId: 'en-fr',
-              owner: LearningOwner.guest(),
-            ),
-          ) {
+  _HeldSpellingStore({
+    SpellingLearningState? initialState,
+    LearningOwner? owner,
+  }) : catalogue = loadFrenchUyDemoSpellingCatalogue(),
+       scope = SpellingProfileScope(
+         courseId: 'en-fr',
+         owner: owner ?? LearningOwner.guest(),
+       ),
+       _state =
+           initialState ??
+           SpellingLearningState.empty(
+             SpellingProfileScope(
+               courseId: 'en-fr',
+               owner: owner ?? LearningOwner.guest(),
+             ),
+           ) {
     _engine = SpellingLearningTransitionEngine(catalogue: catalogue);
     if (_state.scope != scope) throw ArgumentError('seed scope mismatch');
     _tokenCounter = _state.commitOrdinal;
@@ -765,6 +1039,7 @@ final class _HeldSpellingStore implements SpellingLearningStore {
   bool holdNext = false;
   bool loseNextAckAfterCommit = false;
   bool duplicateNextAck = false;
+  Completer<SpellingLearningState>? heldLoad;
   int loadCalls = 0;
   int retryLoadCalls = 0;
   final List<SpellingLearningCommand> submissions = [];
@@ -775,6 +1050,7 @@ final class _HeldSpellingStore implements SpellingLearningStore {
   @override
   Future<SpellingLearningState> load() async {
     loadCalls++;
+    if (heldLoad != null) return heldLoad!.future;
     return _state;
   }
 
