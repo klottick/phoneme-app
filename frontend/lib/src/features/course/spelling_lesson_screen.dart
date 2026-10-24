@@ -867,6 +867,11 @@ class _SpellingLessonScreenState extends ConsumerState<SpellingLessonScreen>
       _appSuspended = false;
       if (_frozenCommand != null && _store != null && !_routeCovered) {
         _recoverPendingCommand();
+      } else if (_state == null &&
+          _frozenCommand == null &&
+          !_routeCovered &&
+          !_authUnready) {
+        unawaited(_acquireAndLoad());
       } else if (mounted) {
         setState(() {});
       }
@@ -1129,7 +1134,17 @@ class _SpellingLessonScreenState extends ConsumerState<SpellingLessonScreen>
             const Text('This saved debrief has no mistakes to review.'),
           const Text('Read-only debrief inspection.'),
         ] else if (widget.review && reviewOnly) ...<Widget>[
-          const Text('Read-only review inspection.'),
+          if (hasMisses)
+            OutlinedButton(
+              onPressed: _busy || _frozenCommand != null
+                  ? null
+                  : _reviewMistakes,
+              child: const Text('Review mistakes'),
+            ),
+          FilledButton(
+            onPressed: _busy || _frozenCommand != null ? null : _finish,
+            child: const Text('Finish review'),
+          ),
         ] else if (reviewOnly) ...<Widget>[
           if (hasMisses)
             OutlinedButton(
@@ -1168,7 +1183,8 @@ class _SpellingLessonScreenState extends ConsumerState<SpellingLessonScreen>
             ? 'Review run complete.'
             : 'Practice run complete.',
       ),
-      if (!widget.review && slot.checkpoint.mode == SpellingRunMode.practice)
+      if (slot.checkpoint.mode == SpellingRunMode.reviewOnly ||
+          (!widget.review && slot.checkpoint.mode == SpellingRunMode.practice))
         FilledButton(
           onPressed: _busy || _frozenCommand != null ? null : _startPractice,
           child: const Text('Start new practice'),
