@@ -46,13 +46,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
   return GoRouter(
     initialLocation: '/onboarding',
-    errorBuilder: (context, state) {
-      if (state.uri.pathSegments.isNotEmpty &&
-          state.uri.pathSegments.first == 'course-spelling') {
-        return const SpaceCourseTheme(child: _SpellingRouteUnavailable());
-      }
-      return _RouterErrorScreen(error: state.error?.toString());
-    },
     redirect: (_, state) {
       if (!onboarding.isReady) {
         return '/onboarding';
@@ -72,6 +65,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       if (hasLanguage && isOnboarding) {
         return '/home';
+      }
+
+      final List<String> pathSegments = state.uri.pathSegments;
+      if (state.fullPath?.isEmpty == true &&
+          pathSegments.isNotEmpty &&
+          pathSegments.first == 'course-spelling') {
+        return '/course-spelling/__unavailable__';
       }
       return null;
     },
@@ -432,28 +432,5 @@ class _SpellingRouteUnavailable extends StatelessWidget {
   @override
   Widget build(BuildContext context) => const Scaffold(
         body: Center(child: Text('This spelling activity is unavailable.')),
-      );
-}
-
-class _RouterErrorScreen extends StatelessWidget {
-  const _RouterErrorScreen({required this.error});
-
-  final String? error;
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Page Not Found')),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              SelectableText(error ?? 'page not found'),
-              TextButton(
-                onPressed: () => context.go('/'),
-                child: const Text('Home'),
-              ),
-            ],
-          ),
-        ),
       );
 }

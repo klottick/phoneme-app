@@ -49,6 +49,28 @@ void main() {
     );
   });
 
+  testWidgets('non_spelling_unmatched_route_uses_go_router_default_fallback', (
+    tester,
+  ) async {
+    final app = await _mountRouteProbe(tester);
+    addTearDown(() => app.dispose(tester));
+
+    app.router.go('/arbitrary-unmatched-route');
+    await tester.pumpAndSettle();
+
+    expect(find.text('Page Not Found'), findsOneWidget);
+    expect(find.text('Home'), findsOneWidget);
+    // GoRouter 14.8.1's MaterialApp default is a MaterialErrorScreen. This
+    // distinguishes the actual fallback from the app's visually similar copy.
+    expect(
+      find.byWidgetPredicate(
+        (Widget widget) =>
+            widget.runtimeType.toString() == 'MaterialErrorScreen',
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('route_guards_precede_store_sqlite_audio', (tester) async {
     final app = await _mountRouteProbe(tester);
     addTearDown(() => app.dispose(tester));
