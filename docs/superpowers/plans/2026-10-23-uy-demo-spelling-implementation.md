@@ -338,4 +338,4 @@ test "$STATUS" -eq 0
 
 ---
 
-Implementation remains blocked until the user separately approves this written plan. Plan approval will not close independent qualification gates or authorize a destructive downgrade. The task PRs and final controller review must preserve the approved specification unchanged except for its status/plan pointer.
+**Execution status:** the user separately approved this plan before implementation. All six task PRs (#120–125), the whole-feature review fixes (#126), and the controller's best-effort demo publication are recorded in the [delivery and verification record](../status/2026-10-24-uy-demo-spelling.md). Independent qualification gates remain open; no destructive downgrade is authorized. The approved specification is unchanged except for its status/plan pointer.

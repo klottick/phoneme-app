@@ -1,6 +1,6 @@
 # Sound → spelling: /u/–/y/ demo design
 
-**Status: approved specification (PR #118); [implementation plan](../plans/2026-10-23-uy-demo-spelling-implementation.md) awaiting separate user review.** The specification is approved; implementation is not authorized until the written plan is separately approved. No product verification or qualification is claimed here.
+**Status: approved specification (PR #118) and separately approved [implementation plan](../plans/2026-10-23-uy-demo-spelling-implementation.md) (PR #119); best-effort demo delivered through PRs #120–126.** See the [delivery and verification record](../status/2026-10-24-uy-demo-spelling.md). Qualification gates remain open; this specification's requirements are unchanged.
 
 ## Purpose and boundary
 
