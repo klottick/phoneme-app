@@ -10,15 +10,22 @@ import 'package:linguist/src/core/course/french_comparison_content.dart';
 import 'package:linguist/src/core/course/comparison_learning_state.dart';
 import 'package:linguist/src/core/course/comparison_learning_command.dart';
 import 'package:linguist/src/core/course/comparison_learning_transition.dart';
+import 'package:linguist/src/core/course/course_audio_contract.dart';
 import 'package:linguist/src/core/course/lesson_policy.dart';
+import 'package:linguist/src/core/course/lesson_section_session.dart';
 import 'package:linguist/src/core/course/sentence_hunt_content.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
 import 'package:linguist/src/core/course/french_sentence_package.dart';
 import 'package:linguist/src/core/course/course_learning_command.dart';
 import 'package:linguist/src/core/course/course_learning_checkpoint.dart';
+import 'package:linguist/src/core/course/french_uy_demo_spelling_content.dart';
+import 'package:linguist/src/core/course/spelling_learning_command.dart';
+import 'package:linguist/src/core/course/spelling_learning_state.dart';
+import 'package:linguist/src/core/course/spelling_learning_transition.dart';
 import 'package:linguist/src/features/course_map/course_map_projection.dart';
 import 'package:linguist/src/features/course_map/course_map_state.dart';
 import 'package:linguist/src/features/course_map/french_space_map.dart';
+
 import '../support/course_learning_widget_store.dart';
 
 ComparisonCatalogueRegistry _comparisonRegistry({
@@ -130,6 +137,130 @@ CourseMapState _projectWithComparisonRegistry({
       course: course,
       comparison: comparison,
       comparisonCatalogue: AsyncData(loadFrenchComparisonCatalogue()),
+      sentences: const AsyncLoading(),
+      sentenceCatalogue: const AsyncLoading(),
+    );
+  }
+}
+
+SpellingLearningState _spellingState({
+  required LearningOwner owner,
+  bool started = false,
+  bool completed = false,
+}) {
+  final FrenchUyDemoSpellingCatalogue catalogue =
+      loadFrenchUyDemoSpellingCatalogue();
+  final SpellingProfileScope scope = SpellingProfileScope(
+    courseId: 'en-fr',
+    owner: owner,
+  );
+  final SpellingLearningTransitionEngine engine =
+      SpellingLearningTransitionEngine(catalogue: catalogue);
+  SpellingLearningState state = SpellingLearningState.empty(scope);
+  var commandNumber = 0;
+
+  void dispatch(SpellingAction action) {
+    final DateTime now = DateTime.utc(
+      2026,
+      10,
+      24,
+    ).add(Duration(seconds: commandNumber));
+    final String token = 'map${commandNumber.toString().padLeft(19, '0')}';
+    final SpellingLearningCommand command = engine.prepare(
+      state: state,
+      action: action,
+      authGeneration: 0,
+      token: token,
+      submittedAt: now,
+    );
+    commandNumber++;
+    state = engine
+        .evaluate(state: state, command: command, committedAt: now)
+        .nextState;
+  }
+
+  if (!started && !completed) return state;
+  dispatch(
+    StartSpellingPractice(
+      sessionId: 'map-spelling-run',
+      policy: LessonPolicy(),
+    ),
+  );
+  if (completed) {
+    for (var index = 0; index < catalogue.rows.length; index++) {
+      final UyDemoSpellingRow row = catalogue.rows[index];
+      final SpellingSlot slot = state.slots[catalogue.activityId]!;
+      final LessonSectionSession session = LessonSectionSession.fromJson(
+        Map<String, dynamic>.from(slot.checkpoint.sessionJson),
+        itemIds: catalogue.rows
+            .map((UyDemoSpellingRow item) => item.exercise.id)
+            .toList(growable: false),
+        contentRevision: catalogue.contentRevision,
+      );
+      dispatch(
+        AnswerSpellingChoice(
+          itemId: row.exercise.id,
+          contentRevision: catalogue.contentRevision,
+          selectedOptionId: row.exercise.correctOptionId,
+          expectedOptionIdSnapshot: row.exercise.correctOptionId,
+          playback: SpellingPlaybackObservation(
+            profile: scope,
+            authGeneration: 0,
+            activityId: catalogue.activityId,
+            contentRevision: catalogue.contentRevision,
+            runGeneration: slot.cursor.generation,
+            round: session.round,
+            itemId: row.exercise.id,
+            referenceId: row.exercise.audioRefId,
+            promptEpoch: index + 1,
+            outcome: CourseAudioOutcome.completed,
+            source: CourseAudioSource.unverifiedRecording,
+          ),
+        ),
+      );
+      dispatch(const AdvanceSpellingItem());
+    }
+    dispatch(const FinishSpellingRun(recordCompletion: true));
+  }
+  return state;
+}
+
+CourseMapState _projectWithSpelling({
+  required LearningAuthScope auth,
+  required AsyncValue<CourseLearningState> course,
+  required AsyncValue<ComparisonLearningState> comparison,
+  required AsyncValue<ComparisonCatalogue> comparisonCatalogue,
+  ComparisonCatalogueRegistry? comparisonCatalogueRegistry,
+  required AsyncValue<SpellingLearningState> spelling,
+  required AsyncValue<FrenchUyDemoSpellingCatalogue> spellingCatalogue,
+}) {
+  final Map<Symbol, Object?> named = <Symbol, Object?>{
+    #system: frenchSpaceSystems.first,
+    #auth: auth,
+    #registry: LearningRegistry.french(),
+    #course: course,
+    #comparison: comparison,
+    #comparisonCatalogue: comparisonCatalogue,
+    if (comparisonCatalogueRegistry != null)
+      #comparisonCatalogueRegistry: AsyncData(comparisonCatalogueRegistry),
+    #sentences: const AsyncLoading<SentenceHuntLearningState>(),
+    #sentenceCatalogue: const AsyncLoading<SentenceHuntCatalogue>(),
+    #spelling: spelling,
+    #spellingCatalogue: spellingCatalogue,
+  };
+  try {
+    return Function.apply(projectCourseMap, const <Object?>[], named)
+        as CourseMapState;
+  } on NoSuchMethodError {
+    // Keep the pre-interface RED behavioral: the old projection leaves the
+    // spelling body planned instead of failing on a new named argument.
+    return projectCourseMap(
+      system: frenchSpaceSystems.first,
+      auth: auth,
+      registry: LearningRegistry.french(),
+      course: course,
+      comparison: comparison,
+      comparisonCatalogue: comparisonCatalogue,
       sentences: const AsyncLoading(),
       sentenceCatalogue: const AsyncLoading(),
     );
@@ -841,5 +972,146 @@ void main() {
       isEmpty,
     );
     expect(state.currentBodyId, 'discovery');
+  });
+
+  test(
+    'spelling_projects_its_own_current_completion_and_authored_order',
+    () async {
+      final LearningOwner owner = LearningOwner.guest();
+      final ComparisonCatalogueRegistry comparisonRegistry =
+          _comparisonRegistry();
+      final ComparisonLearningState comparisonState = _comparisonState(
+        registry: comparisonRegistry,
+        started: <String>[uyDemoComparisonActivityId],
+        completedRevisions: <String, int>{uyDemoComparisonActivityId: 1},
+      );
+      final CourseLearningState discoveryState = await runDiscovery(
+        finish: true,
+      );
+      final FrenchUyDemoSpellingCatalogue spellingCatalogue =
+          loadFrenchUyDemoSpellingCatalogue();
+      final SpellingLearningState completedSpelling = _spellingState(
+        owner: owner,
+        completed: true,
+      );
+
+      CourseMapState project(SpellingLearningState spelling) =>
+          _projectWithSpelling(
+            auth: LearningAuthScope(owner: owner, generation: 0, ready: true),
+            course: AsyncData(discoveryState),
+            comparison: AsyncData(comparisonState),
+            comparisonCatalogue: AsyncData(loadFrenchComparisonCatalogue()),
+            comparisonCatalogueRegistry: comparisonRegistry,
+            spelling: AsyncData(spelling),
+            spellingCatalogue: AsyncData(spellingCatalogue),
+          );
+
+      final CourseMapState allThree = project(completedSpelling);
+      final MapBodyState spellingBody = allThree.bodies.singleWhere(
+        (MapBodyState body) => body.definition.id == 'spelling',
+      );
+      expect(spellingBody.readiness, MapReadiness.alpha);
+      expect(spellingBody.progress, MapProgress.completed);
+      expect(spellingBody.launch, MapLaunch.review);
+      expect(spellingBody.recommended, isFalse);
+      expect(
+        allThree.bodies.where((MapBodyState body) => body.recommended),
+        isEmpty,
+      );
+      expect(allThree.allAvailableMainComplete, isTrue);
+
+      final CourseMapState partial = project(
+        _spellingState(owner: owner, started: true),
+      );
+      final MapBodyState recommended = partial.bodies.singleWhere(
+        (MapBodyState body) => body.recommended,
+      );
+      expect(recommended.definition.id, 'spelling');
+      expect(recommended.progress, MapProgress.resumable);
+      expect(recommended.launch, MapLaunch.resume);
+      expect(partial.allAvailableMainComplete, isFalse);
+
+      final CourseMapState unavailable = _projectWithSpelling(
+        auth: LearningAuthScope(owner: owner, generation: 0, ready: true),
+        course: AsyncData(discoveryState),
+        comparison: AsyncData(comparisonState),
+        comparisonCatalogue: AsyncData(loadFrenchComparisonCatalogue()),
+        comparisonCatalogueRegistry: comparisonRegistry,
+        spelling: AsyncError<SpellingLearningState>(
+          StateError('saved spelling state is corrupt'),
+          StackTrace.current,
+        ).copyWithPrevious(AsyncData(completedSpelling)),
+        spellingCatalogue: AsyncData(spellingCatalogue),
+      );
+      final MapBodyState unavailableBody = unavailable.bodies.singleWhere(
+        (MapBodyState body) => body.definition.id == 'spelling',
+      );
+      expect(unavailableBody.readiness, MapReadiness.unavailable);
+      expect(unavailableBody.progress, MapProgress.unknown);
+      expect(unavailableBody.recommended, isFalse);
+      expect(unavailable.allAvailableMainComplete, isFalse);
+
+      final SpellingLearningState foreignSpelling = _spellingState(
+        owner: LearningOwner.account('another-learner'),
+        completed: true,
+      );
+      final CourseMapState foreign = _projectWithSpelling(
+        auth: LearningAuthScope(owner: owner, generation: 1, ready: true),
+        course: AsyncData(discoveryState),
+        comparison: AsyncData(comparisonState),
+        comparisonCatalogue: AsyncData(loadFrenchComparisonCatalogue()),
+        comparisonCatalogueRegistry: comparisonRegistry,
+        spelling: AsyncData(foreignSpelling),
+        spellingCatalogue: AsyncData(spellingCatalogue),
+      );
+      final MapBodyState foreignBody = foreign.bodies.singleWhere(
+        (MapBodyState body) => body.definition.id == 'spelling',
+      );
+      expect(foreignBody.progress, MapProgress.unknown);
+      expect(foreignBody.recommended, isFalse);
+      expect(foreign.allAvailableMainComplete, isFalse);
+    },
+  );
+
+  test('spelling_refresh_does_not_retain_a_previous_completion', () async {
+    final LearningOwner owner = LearningOwner.guest();
+    final ComparisonCatalogueRegistry comparisonRegistry =
+        _comparisonRegistry();
+    final CourseLearningState discoveryState = await runDiscovery(finish: true);
+    final ComparisonLearningState comparisonState = _comparisonState(
+      registry: comparisonRegistry,
+      started: <String>[uyDemoComparisonActivityId],
+      completedRevisions: <String, int>{uyDemoComparisonActivityId: 1},
+    );
+    final FrenchUyDemoSpellingCatalogue spellingCatalogue =
+        loadFrenchUyDemoSpellingCatalogue();
+    final SpellingLearningState previousCompletion = _spellingState(
+      owner: owner,
+      completed: true,
+    );
+
+    final CourseMapState state = _projectWithSpelling(
+      auth: LearningAuthScope(owner: owner, generation: 1, ready: true),
+      course: AsyncData(discoveryState),
+      comparison: AsyncData(comparisonState),
+      comparisonCatalogue: AsyncData(loadFrenchComparisonCatalogue()),
+      comparisonCatalogueRegistry: comparisonRegistry,
+      spelling: const AsyncLoading<SpellingLearningState>().copyWithPrevious(
+        AsyncData(previousCompletion),
+      ),
+      spellingCatalogue: AsyncData(spellingCatalogue),
+    );
+    final MapBodyState spelling = state.bodies.singleWhere(
+      (MapBodyState body) => body.definition.id == 'spelling',
+    );
+
+    expect(spelling.readiness, MapReadiness.loading);
+    expect(spelling.progress, MapProgress.unknown);
+    expect(spelling.recommended, isFalse);
+    expect(
+      state.bodies.where((MapBodyState body) => body.recommended),
+      isEmpty,
+    );
+    expect(state.allAvailableMainComplete, isFalse);
   });
 }

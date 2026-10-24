@@ -35,20 +35,27 @@ class CourseDestinationPanel extends StatelessWidget {
       MapReadiness.loading || MapReadiness.unavailable => 'Open recovery',
       MapReadiness.alpha => switch (body.launch) {
         MapLaunch.start =>
-          body.definition.target == MapTarget.dedicatedComparison
+          body.definition.target == MapTarget.dedicatedSpelling
+              ? 'Start spelling'
+              : body.definition.target == MapTarget.dedicatedComparison
               ? 'Start comparison'
               : 'Start lesson',
         MapLaunch.resume =>
-          body.definition.target == MapTarget.dedicatedComparison
+          body.definition.target == MapTarget.dedicatedSpelling
+              ? 'Continue spelling'
+              : body.definition.target == MapTarget.dedicatedComparison
               ? 'Continue comparison'
               : 'Continue lesson',
         MapLaunch.review =>
-          body.definition.target == MapTarget.mixedComparison ||
-                  body.definition.target == MapTarget.dedicatedComparison
+          body.definition.target == MapTarget.dedicatedSpelling
+              ? 'Review spelling'
+              : body.definition.target == MapTarget.mixedComparison ||
+                    body.definition.target == MapTarget.dedicatedComparison
               ? 'Review comparison'
               : 'Review lesson',
         MapLaunch.open =>
-          body.definition.target == MapTarget.dedicatedComparison
+          body.definition.target == MapTarget.dedicatedComparison ||
+                  body.definition.target == MapTarget.dedicatedSpelling
               ? null
               : 'Open destination',
         null => null,

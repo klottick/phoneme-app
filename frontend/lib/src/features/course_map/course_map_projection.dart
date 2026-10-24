@@ -6,9 +6,12 @@ import '../../core/course/course_attempt.dart';
 import '../../core/course/course_learning_registry.dart';
 import '../../core/course/course_learning_checkpoint.dart';
 import '../../core/course/course_learning_state.dart';
+import '../../core/course/french_uy_demo_spelling_content.dart';
 import '../../core/course/lesson_section_session.dart';
 import '../../core/course/sentence_hunt_content.dart';
 import '../../core/course/sentence_hunt_learning_state.dart';
+import '../../core/course/spelling_learning_state.dart';
+import '../../core/course/spelling_learning_validator.dart';
 import '../course/comparison_progress_summary.dart';
 import '../course/course_completion_summary.dart';
 import '../course/sentence_hunt_progress_summary.dart';
@@ -25,8 +28,28 @@ CourseMapState projectCourseMap({
   AsyncValue<ComparisonCatalogueRegistry>? comparisonCatalogueRegistry,
   required AsyncValue<SentenceHuntLearningState> sentences,
   required AsyncValue<SentenceHuntCatalogue> sentenceCatalogue,
+  AsyncValue<SpellingLearningState> spelling =
+      const AsyncLoading<SpellingLearningState>(),
+  AsyncValue<FrenchUyDemoSpellingCatalogue> spellingCatalogue =
+      const AsyncLoading<FrenchUyDemoSpellingCatalogue>(),
 }) {
   final bool courseFailurePresent = course.hasError;
+  final bool spellingLoading =
+      spelling.isLoading ||
+      spelling.isRefreshing ||
+      spellingCatalogue.isLoading ||
+      spellingCatalogue.isRefreshing;
+  final bool spellingFailure = spelling.hasError || spellingCatalogue.hasError;
+  final SpellingLearningState? spellingValue = _hasCurrentValue(spelling)
+      ? spelling.value
+      : null;
+  final FrenchUyDemoSpellingCatalogue? spellingContent =
+      _hasCurrentValue(spellingCatalogue) ? spellingCatalogue.value : null;
+  final bool spellingScopeReady =
+      auth.ready &&
+      spellingValue != null &&
+      spellingValue.scope.courseId == 'en-fr' &&
+      spellingValue.scope.owner == auth.owner;
   final bool comparisonRegistryLoading =
       comparisonCatalogueRegistry != null &&
       (comparisonCatalogueRegistry.isLoading ||
@@ -175,6 +198,80 @@ CourseMapState projectCourseMap({
           ),
         );
         mainUnknown = false;
+      }
+    } else if (body.target == MapTarget.dedicatedSpelling) {
+      if (spellingFailure) {
+        projected.add(
+          _spellingUnavailable(
+            body,
+            'Spelling progress or content is unavailable. Retry validation or open its recovery route.',
+          ),
+        );
+      } else if (!auth.ready ||
+          spellingLoading ||
+          !spellingScopeReady ||
+          spellingContent == null) {
+        projected.add(
+          MapBodyState(
+            definition: body,
+            readiness: MapReadiness.loading,
+            progress: MapProgress.unknown,
+            recommended: false,
+            explanation: 'Spelling availability is loading.',
+            launch: null,
+          ),
+        );
+      } else {
+        try {
+          validateFrenchUyDemoSpellingCatalogue(spellingContent);
+          if (body.activityId != uyDemoSpellingActivityId ||
+              spellingContent.activityId != body.activityId) {
+            throw const FormatException(
+              'Spelling activity binding does not match its catalogue.',
+            );
+          }
+          SpellingLearningStateValidator.validate(
+            spellingValue,
+            spellingContent,
+          );
+          final SpellingSlot? slot = spellingValue.slots[body.activityId];
+          final bool completed = spellingValue.completions.any(
+            (completion) =>
+                completion.scope == spellingValue.scope &&
+                completion.activityId == body.activityId &&
+                completion.contentRevision == spellingContent.contentRevision,
+          );
+          final bool resumable = slot != null && !completed;
+          projected.add(
+            MapBodyState(
+              definition: body,
+              readiness: MapReadiness.alpha,
+              progress: completed
+                  ? MapProgress.completed
+                  : resumable
+                  ? MapProgress.resumable
+                  : MapProgress.notStarted,
+              recommended: false,
+              explanation: completed
+                  ? 'Current spelling completion saved.'
+                  : resumable
+                  ? 'Continue the saved spelling practice.'
+                  : 'Start spelling practice.',
+              launch: completed
+                  ? MapLaunch.review
+                  : resumable
+                  ? MapLaunch.resume
+                  : MapLaunch.start,
+            ),
+          );
+        } on Object catch (error) {
+          projected.add(
+            _spellingUnavailable(
+              body,
+              'Spelling progress is unavailable: $error. Retry validation or open its recovery route.',
+            ),
+          );
+        }
       }
     } else if (body.target == MapTarget.mixedComparison) {
       final bool comparisonLoaded = _hasCurrentValue(comparison);
@@ -567,3 +664,13 @@ MapBodyState _dedicatedUnavailable(
   explanation: reason,
   launch: retry ? MapLaunch.start : null,
 );
+
+MapBodyState _spellingUnavailable(MapBodyDefinition body, String reason) =>
+    MapBodyState(
+      definition: body,
+      readiness: MapReadiness.unavailable,
+      progress: MapProgress.unknown,
+      recommended: false,
+      explanation: reason,
+      launch: MapLaunch.start,
+    );

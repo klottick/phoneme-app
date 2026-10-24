@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/course/course_learning_providers.dart';
 import '../../core/course/course_attempt.dart';
 import '../../core/course/french_sentence_package.dart';
+import '../../core/course/spelling_learning_providers.dart';
 import '../../routing/course_map_navigation.dart';
 import '../../routing/course_root_navigation.dart';
 import 'course_legacy_entries.dart';
@@ -78,6 +79,11 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
     final dedicatedUnavailable = state.bodies.any(
       (body) =>
           body.definition.target == MapTarget.dedicatedComparison &&
+          body.readiness == MapReadiness.unavailable,
+    );
+    final spellingUnavailable = state.bodies.any(
+      (body) =>
+          body.definition.target == MapTarget.dedicatedSpelling &&
           body.readiness == MapReadiness.unavailable,
     );
     final selectedComparison = state.bodies
@@ -179,6 +185,16 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
             },
             child: const Text('Retry dedicated comparison'),
           ),
+        if (spellingUnavailable)
+          TextButton(
+            onPressed: () {
+              ref.invalidate(spellingCatalogueProvider);
+              ref.invalidate(spellingLearningStoreProvider);
+              ref.invalidate(spellingLearningStateProvider);
+              ref.invalidate(courseMapStateProvider(widget.systemId));
+            },
+            child: const Text('Retry spelling progress'),
+          ),
         TextButton(
           onPressed: () => ref.invalidate(sentenceHuntCatalogueProvider),
           child: const Text('Retry sentence catalogue'),
@@ -277,8 +293,12 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
       final dedicatedRecovery =
           latest.definition.target == MapTarget.dedicatedComparison &&
           launch == MapLaunch.start;
+      final spellingRecovery =
+          latest.definition.target == MapTarget.dedicatedSpelling &&
+          launch == MapLaunch.start;
       if (recovery &&
           !dedicatedRecovery &&
+          !spellingRecovery &&
           !(launch == MapLaunch.open &&
               (latest.definition.target == MapTarget.mixedComparison ||
                   latest.definition.target == MapTarget.sentenceSections))) {

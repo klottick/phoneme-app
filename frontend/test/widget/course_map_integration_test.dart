@@ -21,16 +21,23 @@ import 'package:linguist/src/core/course/course_learning_state.dart';
 import 'package:linguist/src/core/course/french_comparison_content.dart';
 import 'package:linguist/src/core/course/french_sentence_exercises.dart';
 import 'package:linguist/src/core/course/french_sentence_package.dart';
+import 'package:linguist/src/core/course/french_uy_demo_spelling_content.dart';
 import 'package:linguist/src/core/course/lesson_policy.dart';
 import 'package:linguist/src/core/course/lesson_section.dart';
 import 'package:linguist/src/core/course/lesson_section_session.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_providers.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
+import 'package:linguist/src/core/course/spelling_learning_command.dart';
+import 'package:linguist/src/core/course/spelling_learning_providers.dart';
+import 'package:linguist/src/core/course/spelling_learning_state.dart';
+import 'package:linguist/src/core/course/spelling_learning_transition.dart';
 import 'package:linguist/src/features/course/course_completion_summary.dart';
 import 'package:linguist/src/features/course/discovery_lesson_screen.dart';
 import 'package:linguist/src/features/course_map/course_map_screen.dart';
 import 'package:linguist/src/features/course_map/course_map_providers.dart';
 import 'package:linguist/src/features/course_map/course_map_state.dart';
+import 'package:linguist/src/features/course_map/course_map_catalogue.dart';
+import 'package:linguist/src/routing/course_map_navigation.dart';
 import 'package:linguist/src/routing/app_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -43,6 +50,87 @@ final class _ComparisonMapFixture {
 
   final ComparisonCatalogueRegistry registry;
   final ComparisonLearningState state;
+}
+
+SpellingLearningState _spellingMapState({
+  bool started = false,
+  bool completed = false,
+}) {
+  final FrenchUyDemoSpellingCatalogue catalogue =
+      loadFrenchUyDemoSpellingCatalogue();
+  final SpellingProfileScope scope = SpellingProfileScope(
+    courseId: 'en-fr',
+    owner: LearningOwner.guest(),
+  );
+  final SpellingLearningTransitionEngine engine =
+      SpellingLearningTransitionEngine(catalogue: catalogue);
+  SpellingLearningState state = SpellingLearningState.empty(scope);
+  var commandNumber = 0;
+
+  void dispatch(SpellingAction action) {
+    final DateTime now = DateTime.utc(
+      2026,
+      10,
+      24,
+    ).add(Duration(seconds: commandNumber));
+    final String token = 'map${commandNumber.toString().padLeft(19, '0')}';
+    final command = engine.prepare(
+      state: state,
+      action: action,
+      authGeneration: 0,
+      token: token,
+      submittedAt: now,
+    );
+    commandNumber++;
+    state = engine
+        .evaluate(state: state, command: command, committedAt: now)
+        .nextState;
+  }
+
+  if (!started && !completed) return state;
+  dispatch(
+    StartSpellingPractice(
+      sessionId: 'map-spelling-run',
+      policy: LessonPolicy(),
+    ),
+  );
+  if (completed) {
+    for (var index = 0; index < catalogue.rows.length; index++) {
+      final UyDemoSpellingRow row = catalogue.rows[index];
+      final SpellingSlot slot = state.slots[catalogue.activityId]!;
+      final LessonSectionSession session = LessonSectionSession.fromJson(
+        Map<String, dynamic>.from(slot.checkpoint.sessionJson),
+        itemIds: catalogue.rows
+            .map((UyDemoSpellingRow item) => item.exercise.id)
+            .toList(growable: false),
+        contentRevision: catalogue.contentRevision,
+      );
+      dispatch(
+        AnswerSpellingChoice(
+          itemId: row.exercise.id,
+          contentRevision: catalogue.contentRevision,
+          selectedOptionId: row.exercise.correctOptionId,
+          expectedOptionIdSnapshot: row.exercise.correctOptionId,
+          playback: SpellingPlaybackObservation(
+            profile: scope,
+            authGeneration: 0,
+            activityId: catalogue.activityId,
+            contentRevision: catalogue.contentRevision,
+            runGeneration: slot.cursor.generation,
+            round: session.round,
+            itemId: row.exercise.id,
+            referenceId: row.exercise.audioRefId,
+            promptEpoch: index + 1,
+            outcome: CourseAudioOutcome.completed,
+            source: CourseAudioSource.unverifiedRecording,
+          ),
+        ),
+      );
+      dispatch(const AdvanceSpellingItem());
+    }
+    dispatch(const FinishSpellingRun(recordCompletion: true));
+  }
+  return state;
 }
 
 final class _RecommendationMapApp {
@@ -202,6 +290,8 @@ Future<_RecommendationMapApp> _mountRecommendationMap(
   required Map<String, String> sentenceAssets,
   required CourseLearningState courseState,
   required _ComparisonMapFixture comparison,
+  SpellingLearningState? spellingState,
+  bool spellingAvailable = true,
 }) async {
   disableMapMotion(tester);
   final owner = LearningOwner.guest();
@@ -222,6 +312,18 @@ Future<_RecommendationMapApp> _mountRecommendationMap(
       comparisonLearningStateProvider.overrideWith(
         (ref) async => comparison.state,
       ),
+      spellingCatalogueProvider.overrideWith((ref) {
+        if (!spellingAvailable) {
+          throw StateError('Test fixture keeps spelling content unavailable.');
+        }
+        return loadFrenchUyDemoSpellingCatalogue();
+      }),
+      spellingLearningStateProvider.overrideWith((ref) async {
+        if (!spellingAvailable) {
+          throw StateError('Test fixture keeps spelling progress unavailable.');
+        }
+        return spellingState ?? _spellingMapState();
+      }),
       sentencePackageLoaderProvider.overrideWithValue(
         FrenchSentencePackageLoader(
           bundle: _RepositoryAssetBundle(sentenceAssets),
@@ -289,6 +391,76 @@ void main() {
     () =>
         SharedPreferences.setMockInitialValues({'selected_course_id': 'en-fr'}),
   );
+
+  testWidgets('spelling_is_the_third_authored_main_destination', (
+    tester,
+  ) async {
+    final app = await _mountRecommendationMap(
+      tester,
+      sentenceAssets: sentenceAssets,
+      courseState: await _discoveryMapState(),
+      comparison: _comparisonMapFixture(),
+    );
+    addTearDown(() => _unmountRecommendationMap(tester, app));
+
+    final SpellingLearningState before = await app.container.read(
+      spellingLearningStateProvider.future,
+    );
+    await _inspectMapBody(tester, 'Sound → spelling');
+    expect(find.text('Start spelling'), findsOneWidget);
+    expect(app.router.state.uri.path, '/home');
+    expect(app.courseStore.submitted, isEmpty);
+    expect(app.audio.requests, isEmpty);
+    final SpellingLearningState after = await app.container.read(
+      spellingLearningStateProvider.future,
+    );
+    expect(after.revision, before.revision);
+    expect(after.commitOrdinal, before.commitOrdinal);
+    expect(after.receipts, isEmpty);
+  });
+
+  testWidgets('resumable_spelling_uses_dedicated_copy_and_route', (
+    tester,
+  ) async {
+    final MapTarget? spellingTarget = MapTarget.values
+        .where((MapTarget target) => target.name == 'dedicatedSpelling')
+        .firstOrNull;
+    expect(spellingTarget?.name, 'dedicatedSpelling');
+    if (spellingTarget == null) return;
+    expect(
+      courseMapLocation(spellingTarget, MapLaunch.start),
+      '/course-spelling/en-fr-u-y-spelling',
+    );
+    expect(
+      courseMapLocation(spellingTarget, MapLaunch.resume),
+      '/course-spelling/en-fr-u-y-spelling',
+    );
+    expect(
+      courseMapLocation(spellingTarget, MapLaunch.review),
+      '/course-spelling/en-fr-u-y-spelling?review=true',
+    );
+
+    final SpellingLearningState started = _spellingMapState(started: true);
+    final app = await _mountRecommendationMap(
+      tester,
+      sentenceAssets: sentenceAssets,
+      courseState: await _discoveryMapState(),
+      comparison: _comparisonMapFixture(),
+      spellingState: started,
+    );
+    addTearDown(() => _unmountRecommendationMap(tester, app));
+
+    await _inspectMapBody(tester, 'Sound → spelling');
+    expect(find.text('Continue spelling'), findsOneWidget);
+    expect(app.router.state.uri.path, '/home');
+    expect(app.courseStore.submitted, isEmpty);
+    expect(app.audio.requests, isEmpty);
+    final SpellingLearningState after = await app.container.read(
+      spellingLearningStateProvider.future,
+    );
+    expect(after.revision, started.revision);
+    expect(after.commitOrdinal, started.commitOrdinal);
+  });
 
   testWidgets(
     'authored recommendation stays visible while inspecting another body',
@@ -417,6 +589,7 @@ void main() {
         sentenceAssets: sentenceAssets,
         courseState: courseState,
         comparison: comparison,
+        spellingAvailable: false,
       );
       addTearDown(() => _unmountRecommendationMap(tester, app));
 
@@ -448,10 +621,13 @@ void main() {
   );
 
   testWidgets(
-    'both current main completions show positive available-complete status',
+    'all three current main completions show positive available-complete status',
     (tester) async {
       final courseState = await _discoveryMapState(completed: true);
       final comparison = _comparisonMapFixture(dedicatedCompleted: true);
+      final SpellingLearningState spellingState = _spellingMapState(
+        completed: true,
+      );
       expect(courseState.completions, hasLength(1));
       expect(courseState.completions.single.lessonId, frenchUySection.lessonId);
       expect(
@@ -467,12 +643,22 @@ void main() {
         comparison.state.completions.single.contentRevision,
         loadFrenchUyDemoComparisonCatalogue().contentRevision,
       );
+      expect(spellingState.completions, hasLength(1));
+      expect(
+        spellingState.completions.single.activityId,
+        uyDemoSpellingActivityId,
+      );
+      expect(
+        spellingState.completions.single.contentRevision,
+        loadFrenchUyDemoSpellingCatalogue().contentRevision,
+      );
 
       final app = await _mountRecommendationMap(
         tester,
         sentenceAssets: sentenceAssets,
         courseState: courseState,
         comparison: comparison,
+        spellingState: spellingState,
       );
       addTearDown(() => _unmountRecommendationMap(tester, app));
 
@@ -482,7 +668,7 @@ void main() {
       expect(projected.allAvailableMainComplete, isTrue);
       expect(projected.bodies.where((body) => body.recommended), isEmpty);
       expect(
-        find.text('Available main lessons: 2/2 available complete'),
+        find.text('Available main lessons: 3/3 available complete'),
         findsOneWidget,
       );
       expect(
@@ -498,12 +684,6 @@ void main() {
           'Planned listening lesson: find /u/ and /y/ in context. '
               '"Coming soon"; the existing mixed sentence-hunt group is not '
               'remapped into this planet.',
-        ),
-        (
-          'spelling',
-          'Sound → spelling',
-          'Planned spelling lesson. "Coming soon"; existing game hints are '
-              'not a substitute.',
         ),
         (
           'checkpoint',
@@ -523,6 +703,20 @@ void main() {
         await tester.ensureVisible(plannedDisclosure);
         expect(plannedDisclosure, findsOneWidget);
       }
+      final SpellingLearningState beforeInspection = await app.container.read(
+        spellingLearningStateProvider.future,
+      );
+      await _inspectMapBody(tester, 'Sound → spelling');
+      expect(find.text('Review spelling'), findsOneWidget);
+      expect(app.router.state.uri.path, '/home');
+      expect(app.courseStore.submitted, isEmpty);
+      expect(app.audio.requests, isEmpty);
+      final SpellingLearningState afterInspection = await app.container.read(
+        spellingLearningStateProvider.future,
+      );
+      expect(afterInspection.revision, beforeInspection.revision);
+      expect(afterInspection.commitOrdinal, beforeInspection.commitOrdinal);
+      expect(afterInspection.receipts, beforeInspection.receipts);
     },
   );
 
@@ -548,6 +742,12 @@ void main() {
               owner: LearningOwner.guest(),
             ),
           ),
+        ),
+        spellingCatalogueProvider.overrideWithValue(
+          loadFrenchUyDemoSpellingCatalogue(),
+        ),
+        spellingLearningStateProvider.overrideWith(
+          (ref) async => _spellingMapState(),
         ),
       ],
     );
@@ -685,7 +885,7 @@ void main() {
     expect(router.state.uri.path, '/home');
     await tester.pumpAndSettle();
     expect(
-      find.text('Available main lessons: 1/2 available complete'),
+      find.text('Available main lessons: 1/3 available complete'),
       findsOneWidget,
     );
     expect(

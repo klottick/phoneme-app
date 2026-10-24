@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/course_attempt.dart';
+import 'package:linguist/src/core/course/course_audio.dart';
 import 'package:linguist/src/core/course/comparison_content.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/course_learning_registry.dart';
@@ -12,6 +13,9 @@ import 'package:linguist/src/core/course/french_comparison_content.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_providers.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
 import 'package:linguist/src/core/course/french_sentence_package.dart';
+import 'package:linguist/src/core/course/french_uy_demo_spelling_content.dart';
+import 'package:linguist/src/core/course/spelling_learning_providers.dart';
+import 'package:linguist/src/core/course/spelling_learning_state.dart';
 import 'package:linguist/src/core/services/audio_service.dart';
 import 'package:linguist/src/features/course_map/course_map_providers.dart';
 import 'package:linguist/src/features/course_map/course_map_state.dart';
@@ -47,6 +51,21 @@ CourseLearningState _completionState(LearningScope scope, bool completed) =>
       pending: const [],
     );
 
+SpellingLearningState _emptySpellingState(LearningOwner owner) =>
+    SpellingLearningState.empty(
+      SpellingProfileScope(courseId: 'en-fr', owner: owner),
+    );
+
+List<Override> _spellingProviderOverrides() => <Override>[
+  spellingCatalogueProvider.overrideWithValue(
+    loadFrenchUyDemoSpellingCatalogue(),
+  ),
+  spellingLearningStateProvider.overrideWith((ref) async {
+    final LearningOwner owner = ref.watch(learningAuthScopeProvider).owner;
+    return _emptySpellingState(owner);
+  }),
+];
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -56,6 +75,7 @@ void main() {
     final pending = <int, Completer<CourseLearningState>>{};
     final container = ProviderContainer(
       overrides: [
+        ..._spellingProviderOverrides(),
         learningAuthScopeProvider.overrideWith((ref) => tracker),
         courseLearningStoreProvider.overrideWith((ref) {
           final auth = ref.watch(learningAuthScopeProvider);
@@ -107,6 +127,7 @@ void main() {
             .progress,
         MapProgress.unknown,
       );
+
       expect(changing.currentBodyId, isNull);
       expect(changing.completedLegacyLessonIds, isNull);
     }
@@ -160,8 +181,11 @@ void main() {
     final tracker = LearningAuthTracker(owner: guestScope.owner, ready: true);
     final store = CourseLearningWidgetStore(scope: guestScope);
     var audioProviderReads = 0;
+    var spellingStoreAcquisitions = 0;
+    var spellingAudioReads = 0;
     final container = ProviderContainer(
       overrides: [
+        ..._spellingProviderOverrides(),
         learningAuthScopeProvider.overrideWith((ref) => tracker),
         courseLearningStoreProvider.overrideWith((ref) => store),
         comparisonLearningStateProvider.overrideWith(
@@ -183,6 +207,14 @@ void main() {
         sentenceHuntCatalogueProvider.overrideWith(
           (ref) => Completer<Never>().future,
         ),
+        spellingLearningStoreProvider.overrideWith((ref) {
+          spellingStoreAcquisitions++;
+          throw StateError('map projection must not acquire a spelling store');
+        }),
+        courseReferenceAudioProvider.overrideWith((ref) {
+          spellingAudioReads++;
+          throw StateError('map projection must not initialize spelling audio');
+        }),
         audioServiceProvider.overrideWith((ref) {
           audioProviderReads++;
           throw StateError('projection must not initialize audio');
@@ -198,6 +230,8 @@ void main() {
     expect(store.prepareCalls, 0);
     expect(store.submitCalls, 0);
     expect(audioProviderReads, 0);
+    expect(spellingStoreAcquisitions, 0);
+    expect(spellingAudioReads, 0);
     final dedicated = container
         .read(courseMapStateProvider(frenchUySystemId))
         .bodies
@@ -222,6 +256,7 @@ void main() {
     ]);
     final container = ProviderContainer(
       overrides: [
+        ..._spellingProviderOverrides(),
         learningAuthScopeProvider.overrideWith((ref) => tracker),
         courseLearningStoreProvider.overrideWithValue(store),
         comparisonCatalogueRegistryProvider.overrideWithValue(registry),
@@ -270,8 +305,21 @@ void main() {
   test('auth_unready_does_not_read_guest_store', () {
     final tracker = LearningAuthTracker(owner: guestScope.owner, ready: false);
     var storeReads = 0;
+    var spellingStateReads = 0;
+    var spellingStoreReads = 0;
     final container = ProviderContainer(
       overrides: [
+        spellingCatalogueProvider.overrideWithValue(
+          loadFrenchUyDemoSpellingCatalogue(),
+        ),
+        spellingLearningStateProvider.overrideWith((ref) async {
+          spellingStateReads++;
+          return _emptySpellingState(guestScope.owner);
+        }),
+        spellingLearningStoreProvider.overrideWith((ref) {
+          spellingStoreReads++;
+          throw StateError('unready auth must not acquire spelling storage');
+        }),
         learningAuthScopeProvider.overrideWith((ref) => tracker),
         courseLearningStoreProvider.overrideWith((ref) {
           storeReads++;
@@ -289,12 +337,15 @@ void main() {
     );
     expect(state.currentBodyId, isNull);
     expect(storeReads, 0);
+    expect(spellingStateReads, 0);
+    expect(spellingStoreReads, 0);
   });
 
   test('registry_failure_is_explanatory_unavailable', () {
     final tracker = LearningAuthTracker(owner: guestScope.owner, ready: true);
     final container = ProviderContainer(
       overrides: [
+        ..._spellingProviderOverrides(),
         learningAuthScopeProvider.overrideWith((ref) => tracker),
         learningRegistryProvider.overrideWith(
           (ref) => throw StateError('registry corrupt'),
@@ -316,6 +367,7 @@ void main() {
     final store = CourseLearningWidgetStore(scope: guestScope);
     final container = ProviderContainer(
       overrides: [
+        ..._spellingProviderOverrides(),
         learningAuthScopeProvider.overrideWith((ref) => tracker),
         courseLearningStoreProvider.overrideWith((ref) => store),
         comparisonCatalogueProvider.overrideWith(
