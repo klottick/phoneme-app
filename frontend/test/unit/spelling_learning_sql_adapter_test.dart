@@ -923,6 +923,43 @@ void main() {
       },
     );
 
+    test('orphan spelling binding corruption stays local to spelling', () async {
+      final spelling = fixture.repository();
+      await spelling.load();
+      final db = await fixture.handle.open();
+      final scopeId = await fixture.scopeId(db);
+      await db.customStatement(
+        'INSERT INTO learning_content_bindings '
+        '(scope_id, activity_id, content_revision, policy_kind, policy_revision, '
+        'catalogue_fingerprint, section_fingerprint, annotation_hash, annotation_revision) '
+        "VALUES (?, ?, 1, 'discoveryThreshold', 1, 'uy-demo-spelling-v0', NULL, NULL, NULL)",
+        [scopeId, _activityId],
+      );
+
+      await expectLater(
+        spelling.load(),
+        throwsA(isA<LearningContentChangedException>()),
+      );
+
+      final auth = LearningAuthScope(
+        owner: fixture.scope.owner,
+        generation: fixture.authGeneration,
+        ready: true,
+      );
+      final course = SqliteCourseLearningRepository(
+        database: fixture.handle,
+        scope: LearningScope(courseId: 'en-fr', owner: fixture.scope.owner),
+        authGeneration: fixture.authGeneration,
+        currentAuth: () => auth,
+        backendOwner: () => fixture.scope.owner,
+        transitions: LearningTransitionEngine(LearningRegistry.french()),
+        clock: fixture.clock,
+        newToken: fixture.nextToken,
+        random: Random(3),
+      );
+      expect((await course.load()).activities, isEmpty);
+    });
+
     test(
       'spelling corruption is local; physical migration failure is global',
       () async {

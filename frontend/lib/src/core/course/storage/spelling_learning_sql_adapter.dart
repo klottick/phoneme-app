@@ -148,7 +148,11 @@ final class SpellingLearningSqlAdapter
         'SELECT 1 AS present FROM supported_sync_outbox WHERE scope_id = ? LIMIT 1',
         scopeId,
       );
-      await _requireOnlyActivityBinding(db, scopeId);
+      await _requireOnlyActivityBinding(
+        db,
+        scopeId,
+        hasRun: runRows.isNotEmpty,
+      );
 
       final history = await _readHistoryReceipts(
         db,
@@ -394,8 +398,9 @@ final class SpellingLearningSqlAdapter
 
   Future<void> _requireOnlyActivityBinding(
     LearningDatabase db,
-    int scopeId,
-  ) async {
+    int scopeId, {
+    required bool hasRun,
+  }) async {
     final rows = await db
         .customSelect(
           'SELECT activity_id FROM learning_content_bindings WHERE scope_id = ?',
@@ -407,6 +412,9 @@ final class SpellingLearningSqlAdapter
         ) ||
         rows.length > 1) {
       throw const LearningCorruptException();
+    }
+    if (rows.length != (hasRun ? 1 : 0)) {
+      throw const LearningContentChangedException();
     }
   }
 
