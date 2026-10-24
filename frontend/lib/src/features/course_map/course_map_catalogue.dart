@@ -1,6 +1,7 @@
 import '../../core/course/comparison_content.dart';
 import '../../core/course/course_attempt.dart';
 import '../../core/course/course_learning_registry.dart';
+import '../../core/course/french_uy_demo_spelling_content.dart';
 
 /// Presentation roles for the bodies a space map draws.
 ///
@@ -15,6 +16,7 @@ enum MapBodyRole { planet, moon, station, asteroidField }
 enum MapTarget {
   discovery,
   dedicatedComparison,
+  dedicatedSpelling,
   mixedComparison,
   sentenceSections,
   review,
@@ -195,6 +197,16 @@ void validateMapSystem(
           );
         }
         break;
+      case MapTarget.dedicatedSpelling:
+        if (body.role != MapBodyRole.planet) {
+          throw FormatException(
+            _detail(
+              systemId,
+              'dedicated spelling body "${body.id}" must be a planet.',
+            ),
+          );
+        }
+        break;
       case MapTarget.mixedComparison:
       case MapTarget.sentenceSections:
       case MapTarget.review:
@@ -364,6 +376,16 @@ void _validateBinding(
           _detail(
             systemId,
             'dedicated comparison body "${body.id}" must bind exactly $uyDemoComparisonActivityId.',
+          ),
+        );
+      }
+      break;
+    case MapTarget.dedicatedSpelling:
+      if (activityId != uyDemoSpellingActivityId) {
+        throw FormatException(
+          _detail(
+            systemId,
+            'dedicated spelling body "${body.id}" must bind exactly $uyDemoSpellingActivityId.',
           ),
         );
       }

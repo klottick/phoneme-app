@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/core/course/comparison_content.dart';
 import 'package:linguist/src/core/course/course_learning_registry.dart';
+import 'package:linguist/src/core/course/french_uy_demo_spelling_content.dart';
 import 'package:linguist/src/features/course_map/course_map_catalogue.dart';
 import 'package:linguist/src/features/course_map/french_space_map.dart';
 
@@ -53,15 +54,15 @@ MapSystemDefinition system({
 }
 
 void main() {
-  test('initial_system_has_dedicated_comparison_after_discovery', () {
+  test('initial_system_has_three_authored_main_destinations', () {
     final initial = findSpaceSystem('en-fr-u-y-system');
     expect(initial, isNotNull);
     final bodies = initial!.bodies;
     expect(bodies, hasLength(10));
     expect(initial.planned, isFalse);
-    expect(initial.mainOrder, ['discovery', 'comparison']);
-    expect(bodies.where((b) => b.planned).length, 4);
-    // Discovery and dedicated comparison are the ordered main planets.
+    expect(initial.mainOrder, ['discovery', 'comparison', 'spelling']);
+    expect(bodies.where((b) => b.planned).length, 3);
+    // Discovery, dedicated comparison, and spelling are ordered main planets.
     final discovery = bodies.firstWhere((b) => b.id == 'discovery');
     expect(discovery.role, MapBodyRole.planet);
     expect(discovery.planned, isFalse);
@@ -81,7 +82,7 @@ void main() {
         'Demo practice: this authored comparison content has not had qualified French review. It is practice, not an assessment.',
       ),
     );
-    for (final id in ['context', 'spelling', 'checkpoint']) {
+    for (final id in ['context', 'checkpoint']) {
       final planned = bodies.firstWhere((body) => body.id == id);
       expect(planned.planned, isTrue, reason: '$id remains planned');
       expect(planned.description, contains('Coming soon'));
@@ -91,14 +92,101 @@ void main() {
     final liveMains = bodies
         .where((b) => initial.mainOrder.contains(b.id))
         .toList(growable: false);
-    expect(liveMains, hasLength(2));
+    expect(liveMains, hasLength(3));
     expect(liveMains.every((body) => !body.planned), isTrue);
     expect(liveMains.map((body) => body.activityId), [
       'lesson:en-fr-u-y',
       uyDemoComparisonActivityId,
+      uyDemoSpellingActivityId,
     ]);
     // The authored initial system validates cleanly against the registry.
     validateMapSystem(initial, registry: LearningRegistry.french());
+  });
+
+  test('spelling_body_keeps_its_authored_position_and_exact_binding', () {
+    final MapSystemDefinition initial = findSpaceSystem('en-fr-u-y-system')!;
+    expect(
+      initial.bodies
+          .map((body) => (body.id, body.x, body.y, body.orbitRadius))
+          .toList(),
+      <(String, double, double, double)>[
+        ('discovery', 0.5, 0.24, 0.1),
+        ('comparison', 0.27, 0.37, 0.18),
+        ('context', 0.73, 0.4, 0.26),
+        ('spelling', 0.31, 0.56, 0.34),
+        ('checkpoint', 0.69, 0.6, 0.42),
+        ('coaching', 0.57, 0.16, 0.13),
+        ('review', 0.18, 0.73, 0.5),
+        ('mixed-comparison', 0.5, 0.79, 0.55),
+        ('sentence-practice', 0.82, 0.72, 0.52),
+        ('arcade', 0.63, 0.9, 0.62),
+      ],
+    );
+    expect(initial.mainOrder, ['discovery', 'comparison', 'spelling']);
+    final MapBodyDefinition spelling = initial.bodies[3];
+    expect(spelling.id, 'spelling');
+    expect(spelling.title, 'Sound → spelling');
+    expect(spelling.role, MapBodyRole.planet);
+    expect(spelling.optional, isFalse);
+    expect(spelling.planned, isFalse);
+    expect(spelling.target?.name, 'dedicatedSpelling');
+    expect(spelling.activityId, 'en-fr-u-y-spelling');
+    expect(
+      spelling.description,
+      'Demo practice: this authored spelling content has not had qualified French review. It is practice, not an assessment.',
+    );
+    expect(spelling.prerequisites, isEmpty);
+  });
+
+  test('dedicated_spelling_target_is_a_planet_bound_to_its_activity', () {
+    final MapTarget? target = MapTarget.values
+        .where((MapTarget value) => value.name == 'dedicatedSpelling')
+        .firstOrNull;
+    expect(target?.name, 'dedicatedSpelling');
+    if (target == null) return;
+
+    final MapSystemDefinition valid = system(
+      bodies: <MapBodyDefinition>[
+        body(
+          id: 'spelling',
+          target: target,
+          activityId: uyDemoSpellingActivityId,
+        ),
+      ],
+      mainOrder: const <String>['spelling'],
+    );
+    expect(
+      () => validateMapSystem(valid, registry: LearningRegistry.french()),
+      returnsNormally,
+    );
+    for (final MapSystemDefinition invalid in <MapSystemDefinition>[
+      system(
+        bodies: <MapBodyDefinition>[
+          body(
+            id: 'spelling',
+            role: MapBodyRole.station,
+            target: target,
+            activityId: uyDemoSpellingActivityId,
+          ),
+        ],
+        mainOrder: const <String>['spelling'],
+      ),
+      system(
+        bodies: <MapBodyDefinition>[
+          body(
+            id: 'spelling',
+            target: target,
+            activityId: uyDemoComparisonActivityId,
+          ),
+        ],
+        mainOrder: const <String>['spelling'],
+      ),
+    ]) {
+      expect(
+        () => validateMapSystem(invalid, registry: LearningRegistry.french()),
+        throwsFormatException,
+      );
+    }
   });
 
   test('dedicated_comparison_target_is_a_planet_bound_to_its_activity', () {
@@ -192,7 +280,7 @@ void main() {
     final initial = findSpaceSystem('en-fr-u-y-system');
     final plannedBodies =
         initial!.bodies.where((b) => b.planned).toList(growable: false);
-    expect(plannedBodies, hasLength(4));
+    expect(plannedBodies, hasLength(3));
     for (final body in plannedBodies) {
       expect(body.target, isNull, reason: 'planned ${body.id} must not launch');
       expect(body.activityId, isNull,
@@ -404,7 +492,7 @@ void main() {
       mainOrder: authoredOrder,
     );
     authoredOrder.clear();
-    expect(permuted.mainOrder, ['discovery', 'comparison']);
+    expect(permuted.mainOrder, ['discovery', 'comparison', 'spelling']);
     expect(() => permuted.mainOrder.add('another'), throwsUnsupportedError);
     expect(permuted.mainOrder, authoredSystem.mainOrder);
     // Shuffled presentation metadata still validates against the registry.

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,6 +18,7 @@ import 'package:linguist/src/core/course/spelling_learning_store.dart';
 import 'package:linguist/src/core/course/french_uy_demo_spelling_content.dart';
 import 'package:linguist/src/core/course/storage/learning_database.dart'
     show LearningDatabaseHandle;
+import 'package:linguist/src/core/providers/app_providers.dart';
 import 'package:linguist/src/core/theme/space_course_theme.dart';
 import 'package:linguist/src/routing/app_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -33,7 +36,10 @@ void main() {
   });
 
   testWidgets('exact_spelling_route_opens_the_authored_prompt', (tester) async {
-    final app = await _mountRouteProbe(tester);
+    final app = await _mountRouteProbe(
+      tester,
+      initialLocation: '/course-spelling/$_activityId',
+    );
     final router = app.router;
     addTearDown(() async {
       await app.dispose(tester);
@@ -52,7 +58,10 @@ void main() {
   testWidgets('non_spelling_unmatched_route_uses_go_router_default_fallback', (
     tester,
   ) async {
-    final app = await _mountRouteProbe(tester);
+    final app = await _mountRouteProbe(
+      tester,
+      initialLocation: '/arbitrary-unmatched-route',
+    );
     addTearDown(() => app.dispose(tester));
 
     app.router.go('/arbitrary-unmatched-route');
@@ -72,7 +81,10 @@ void main() {
   });
 
   testWidgets('route_guards_precede_store_sqlite_audio', (tester) async {
-    final app = await _mountRouteProbe(tester);
+    final app = await _mountRouteProbe(
+      tester,
+      initialLocation: '/course-spelling/not-spelling',
+    );
     addTearDown(() => app.dispose(tester));
 
     const invalidLocations = <String>[
@@ -104,7 +116,10 @@ void main() {
   });
 
   testWidgets('valid_spelling_route_query_shapes_are_accepted', (tester) async {
-    final app = await _mountRouteProbe(tester);
+    final app = await _mountRouteProbe(
+      tester,
+      initialLocation: '/course-spelling/$_activityId',
+    );
     addTearDown(() => app.dispose(tester));
 
     for (final location in <String>[
@@ -140,7 +155,10 @@ final class _MountedRouteProbe {
   }
 }
 
-Future<_MountedRouteProbe> _mountRouteProbe(WidgetTester tester) async {
+Future<_MountedRouteProbe> _mountRouteProbe(
+  WidgetTester tester, {
+  required String initialLocation,
+}) async {
   disableMapMotion(tester);
   final counters = _RouteCounters();
   final owner = LearningOwner.guest();
@@ -195,12 +213,37 @@ Future<_MountedRouteProbe> _mountRouteProbe(WidgetTester tester) async {
       }),
     ],
   );
+  await _waitForOnboardingReady(tester, container);
+  expect(container.read(onboardingControllerProvider).isReady, isTrue);
+  expect(container.read(onboardingControllerProvider).courseId, 'en-fr');
+  expect(auth.current.ready, isTrue);
+  final router = container.read(appRouterProvider);
+  router.go(initialLocation);
   await tester.pumpWidget(
     UncontrolledProviderScope(container: container, child: const LinguistApp()),
   );
   await tester.pumpAndSettle();
-  final router = container.read(appRouterProvider);
   return _MountedRouteProbe(container, router, counters);
+}
+
+Future<void> _waitForOnboardingReady(
+  WidgetTester tester,
+  ProviderContainer container,
+) async {
+  final ready = Completer<void>();
+  final subscription = container.listen(onboardingControllerProvider, (
+    _,
+    state,
+  ) {
+    if (state.isReady && !ready.isCompleted) ready.complete();
+  }, fireImmediately: true);
+  try {
+    await tester.runAsync(
+      () => ready.future.timeout(const Duration(seconds: 5)),
+    );
+  } finally {
+    subscription.close();
+  }
 }
 
 final class _ProbeStore implements SpellingLearningStore {

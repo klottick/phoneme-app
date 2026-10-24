@@ -19,6 +19,7 @@ import 'package:linguist/src/core/course/spelling_learning_providers.dart';
 import 'package:linguist/src/core/course/spelling_learning_state.dart';
 import 'package:linguist/src/core/course/spelling_learning_store.dart';
 import 'package:linguist/src/core/course/spelling_learning_transition.dart';
+import 'package:linguist/src/core/providers/app_providers.dart';
 import 'package:linguist/src/routing/app_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -616,14 +617,37 @@ Future<_MountedSpellingApp> _mountSpelling(
       courseReferenceAudioProvider.overrideWithValue(audio),
     ],
   );
+  await _waitForOnboardingReady(tester, container);
+  expect(container.read(onboardingControllerProvider).isReady, isTrue);
+  expect(container.read(onboardingControllerProvider).courseId, 'en-fr');
+  expect(auth.current.ready, isTrue);
+  final router = container.read(appRouterProvider);
+  router.go(location);
   await tester.pumpWidget(
     UncontrolledProviderScope(container: container, child: const LinguistApp()),
   );
   await tester.pumpAndSettle();
-  final router = container.read(appRouterProvider);
-  router.go(location);
-  await tester.pumpAndSettle();
   return _MountedSpellingApp(container, router, auth);
+}
+
+Future<void> _waitForOnboardingReady(
+  WidgetTester tester,
+  ProviderContainer container,
+) async {
+  final ready = Completer<void>();
+  final subscription = container.listen(onboardingControllerProvider, (
+    _,
+    state,
+  ) {
+    if (state.isReady && !ready.isCompleted) ready.complete();
+  }, fireImmediately: true);
+  try {
+    await tester.runAsync(
+      () => ready.future.timeout(const Duration(seconds: 5)),
+    );
+  } finally {
+    subscription.close();
+  }
 }
 
 OutlinedButton _option(WidgetTester tester, String option) =>

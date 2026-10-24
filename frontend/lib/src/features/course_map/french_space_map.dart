@@ -1,4 +1,5 @@
 import 'package:linguist/src/core/course/comparison_content.dart';
+import 'package:linguist/src/core/course/french_uy_demo_spelling_content.dart';
 
 import 'course_map_catalogue.dart';
 
@@ -10,8 +11,9 @@ const String frenchUySystemId = 'en-fr-u-y-system';
 /// learning registry.
 const String frenchDiscoveryActivityId = 'lesson:en-fr-u-y';
 
-/// The live initial system: one real discovery destination, optional
-/// practice and review destinations, and honestly labeled planned lessons.
+/// The live initial system: the authored discovery, comparison, and spelling
+/// destinations, optional practice and review destinations, and honestly
+/// labeled planned lessons.
 final MapSystemDefinition _frenchUySystem = MapSystemDefinition(
   id: frenchUySystemId,
   title: 'Tu or tout? /u/–/y/',
@@ -71,11 +73,12 @@ final MapSystemDefinition _frenchUySystem = MapSystemDefinition(
       id: 'spelling',
       title: 'Sound → spelling',
       description:
-          'Planned spelling lesson. "Coming soon"; existing game hints are '
-          'not a substitute.',
+          'Demo practice: this authored spelling content has not had qualified French review. It is practice, not an assessment.',
       role: MapBodyRole.planet,
       optional: false,
-      planned: true,
+      planned: false,
+      target: MapTarget.dedicatedSpelling,
+      activityId: uyDemoSpellingActivityId,
       x: 0.31,
       y: 0.56,
       orbitRadius: 0.34,
@@ -169,7 +172,7 @@ final MapSystemDefinition _frenchUySystem = MapSystemDefinition(
   ],
   // Authored recommendation order; orbital distance and drawing position
   // never contribute.
-  mainOrder: ['discovery', 'comparison'],
+  mainOrder: ['discovery', 'comparison', 'spelling'],
 );
 
 /// Planned chart systems: they explain a future sound focus, they do not

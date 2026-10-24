@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/course/comparison_content.dart';
 import '../../core/course/course_learning_providers.dart';
 import '../../core/course/course_learning_registry.dart';
+import '../../core/course/french_uy_demo_spelling_content.dart';
 import '../../core/course/sentence_hunt_learning_providers.dart';
 import '../../core/course/french_sentence_package.dart';
+import '../../core/course/spelling_learning_providers.dart';
 import 'course_map_catalogue.dart';
 import 'course_map_projection.dart';
 import 'course_map_state.dart';
@@ -91,6 +93,14 @@ final courseMapStateProvider = Provider.family<CourseMapState, String>((
     }
   }
 
+  AsyncValue<FrenchUyDemoSpellingCatalogue> readSpellingCatalogue() {
+    try {
+      return AsyncData(ref.watch(spellingCatalogueProvider));
+    } on Object catch (error) {
+      return AsyncError(error, StackTrace.current);
+    }
+  }
+
   final comparisonContent = readComparisonCatalogue();
   final comparisonRegistry = readComparisonCatalogueRegistry();
   return projectCourseMap(
@@ -103,5 +113,7 @@ final courseMapStateProvider = Provider.family<CourseMapState, String>((
     comparisonCatalogueRegistry: comparisonRegistry,
     sentences: ref.watch(sentenceHuntLearningStateProvider),
     sentenceCatalogue: ref.watch(sentenceHuntCatalogueProvider),
+    spelling: ref.watch(spellingLearningStateProvider),
+    spellingCatalogue: readSpellingCatalogue(),
   );
 });

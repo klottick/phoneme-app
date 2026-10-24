@@ -19,8 +19,11 @@ import 'package:linguist/src/core/course/course_skill_summary.dart';
 import 'package:linguist/src/core/course/course_learning_registry.dart';
 import 'package:linguist/src/core/course/course_attempt.dart';
 import 'package:linguist/src/core/course/french_comparison_content.dart';
+import 'package:linguist/src/core/course/french_uy_demo_spelling_content.dart';
 import 'package:linguist/src/core/course/lesson_policy.dart';
 import 'package:linguist/src/core/course/lesson_section_session.dart';
+import 'package:linguist/src/core/course/spelling_learning_providers.dart';
+import 'package:linguist/src/core/course/spelling_learning_state.dart';
 import 'package:linguist/src/core/course/storage/comparison_learning_sql_repository.dart';
 import 'package:linguist/src/core/course/storage/learning_database.dart'
     show LearningDatabaseHandle;
@@ -78,6 +81,17 @@ void main() {
           courseLearningStoreProvider.overrideWithValue(v2Store),
           courseLearningStateProvider.overrideWith((ref) async => v2State),
           learningAuthScopeProvider.overrideWith((ref) => tracker),
+          spellingCatalogueProvider.overrideWithValue(
+            loadFrenchUyDemoSpellingCatalogue(),
+          ),
+          spellingLearningStateProvider.overrideWith(
+            (ref) async => SpellingLearningState.empty(
+              SpellingProfileScope(
+                courseId: 'en-fr',
+                owner: tracker.current.owner,
+              ),
+            ),
+          ),
           learningDatabaseHandleProvider.overrideWithValue(trackedHandle),
           comparisonCatalogueProvider.overrideWith(
             (ref) => throw const ComparisonUnavailableException(
@@ -594,6 +608,17 @@ void main() {
               (ref) => Completer<CourseLearningState>().future,
             ),
             learningAuthScopeProvider.overrideWith((ref) => tracker),
+            spellingCatalogueProvider.overrideWithValue(
+              loadFrenchUyDemoSpellingCatalogue(),
+            ),
+            spellingLearningStateProvider.overrideWith(
+              (ref) async => SpellingLearningState.empty(
+                SpellingProfileScope(
+                  courseId: 'en-fr',
+                  owner: tracker.current.owner,
+                ),
+              ),
+            ),
             learningDatabaseHandleProvider.overrideWithValue(database),
             comparisonCatalogueProvider.overrideWithValue(mixed),
             uyDemoComparisonCatalogueProvider.overrideWithValue(uyDemo),
@@ -738,6 +763,17 @@ void main() {
               (ref) => Completer<CourseLearningState>().future,
             ),
             learningAuthScopeProvider.overrideWith((ref) => tracker),
+            spellingCatalogueProvider.overrideWithValue(
+              loadFrenchUyDemoSpellingCatalogue(),
+            ),
+            spellingLearningStateProvider.overrideWith(
+              (ref) async => SpellingLearningState.empty(
+                SpellingProfileScope(
+                  courseId: 'en-fr',
+                  owner: tracker.current.owner,
+                ),
+              ),
+            ),
             learningDatabaseHandleProvider.overrideWithValue(database),
             comparisonCatalogueProvider.overrideWithValue(mixed),
             comparisonCatalogueRegistryProvider.overrideWithValue(registry),

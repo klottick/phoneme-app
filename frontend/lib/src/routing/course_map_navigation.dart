@@ -1,6 +1,7 @@
 import '../features/course_map/course_map_catalogue.dart';
 import '../features/course_map/course_map_state.dart';
 import '../features/course_map/french_space_map.dart';
+import '../core/course/french_uy_demo_spelling_content.dart';
 
 String? courseMapLocation(MapTarget target, MapLaunch launch) {
   return switch ((target, launch)) {
@@ -14,6 +15,12 @@ String? courseMapLocation(MapTarget target, MapLaunch launch) {
       '/course-comparison/en-fr-u-y-comparison',
     (MapTarget.dedicatedComparison, MapLaunch.review) =>
       '/course-comparison/en-fr-u-y-comparison?review=true',
+    (MapTarget.dedicatedSpelling, MapLaunch.start) =>
+      '/course-spelling/$uyDemoSpellingActivityId',
+    (MapTarget.dedicatedSpelling, MapLaunch.resume) =>
+      '/course-spelling/$uyDemoSpellingActivityId',
+    (MapTarget.dedicatedSpelling, MapLaunch.review) =>
+      '/course-spelling/$uyDemoSpellingActivityId?review=true',
     (MapTarget.mixedComparison, MapLaunch.open) =>
       '/course-comparison/en-fr-phoneme-comparison',
     (MapTarget.mixedComparison, MapLaunch.review) =>
