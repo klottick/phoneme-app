@@ -20,6 +20,8 @@ import '../features/course/exercises/sentence_hunt_lesson_screen.dart';
 import '../features/course/sentence_hunt_sections_screen.dart';
 import '../core/course/comparison_content.dart';
 import '../core/course/course_learning_providers.dart';
+import '../core/course/french_uy_demo_spelling_content.dart';
+import '../features/course/spelling_lesson_screen.dart';
 import '../features/auth/login_screen.dart';
 import '../features/drills/drill_screen.dart';
 import '../features/ipa/ipa_explorer_screen.dart';
@@ -44,6 +46,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
   return GoRouter(
     initialLocation: '/onboarding',
+    errorBuilder: (context, state) {
+      if (state.uri.pathSegments.isNotEmpty &&
+          state.uri.pathSegments.first == 'course-spelling') {
+        return const SpaceCourseTheme(child: _SpellingRouteUnavailable());
+      }
+      return _RouterErrorScreen(error: state.error?.toString());
+    },
     redirect: (_, state) {
       if (!onboarding.isReady) {
         return '/onboarding';
@@ -89,6 +98,26 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             }
             return CourseLessonScreen(lessonId: lessonId, review: review);
           }),
+      GoRoute(
+        path: '/course-spelling/:activityId',
+        builder: (context, state) {
+          final String? activityId = state.pathParameters['activityId'];
+          final Map<String, List<String>> all =
+              state.uri.queryParametersAll;
+          if (activityId != uyDemoSpellingActivityId ||
+              all.keys.any((String key) => key != 'review') ||
+              all.values.any((List<String> values) => values.length != 1) ||
+              (all['review'] != null &&
+                  !<String>{'true', 'false'}.contains(all['review']!.single))) {
+            return const SpaceCourseTheme(child: _SpellingRouteUnavailable());
+          }
+          return SpaceCourseTheme(
+            child: SpellingLessonScreen(
+              review: all['review']?.single == 'true',
+            ),
+          );
+        },
+      ),
       GoRoute(
           path: '/course-progress',
           builder: (_, __) => const SpaceCourseTheme(child: CourseRootNavigation(location: '/course-progress', child: CourseProgressScreen()))),
@@ -392,6 +421,38 @@ class _SentenceHuntContentUnavailable extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+        ),
+      );
+}
+
+class _SpellingRouteUnavailable extends StatelessWidget {
+  const _SpellingRouteUnavailable();
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(
+        body: Center(child: Text('This spelling activity is unavailable.')),
+      );
+}
+
+class _RouterErrorScreen extends StatelessWidget {
+  const _RouterErrorScreen({required this.error});
+
+  final String? error;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Page Not Found')),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              SelectableText(error ?? 'page not found'),
+              TextButton(
+                onPressed: () => context.go('/'),
+                child: const Text('Home'),
+              ),
+            ],
           ),
         ),
       );
