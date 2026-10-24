@@ -185,7 +185,11 @@ class CourseMapCanvas extends StatelessWidget {
                               ]
                             : null,
                       ),
-                      child: _bodyIllustration(body.definition.id, 40),
+                      child: _bodyIllustration(
+                        body.definition.id,
+                        body.definition.role,
+                        40,
+                      ),
                     ),
                   ),
                   Positioned(
@@ -224,7 +228,11 @@ class CourseMapCanvas extends StatelessWidget {
           child: Opacity(
             key: ValueKey('body-art-${body.definition.id}'),
             opacity: _artOpacity(body.readiness),
-            child: _bodyIllustration(body.definition.id, size),
+            child: _bodyIllustration(
+              body.definition.id,
+              body.definition.role,
+              size,
+            ),
           ),
         ),
       ),
@@ -238,7 +246,7 @@ class CourseMapCanvas extends StatelessWidget {
     MapBodyRole.asteroidField => 'arcade',
   };
 
-  static Widget _bodyIllustration(String id, double size) {
+  static Widget _bodyIllustration(String id, MapBodyRole role, double size) {
     final asset = switch (id) {
       'discovery' => 'planet_discovery.png',
       'comparison' => 'planet_comparison.png',
@@ -252,6 +260,9 @@ class CourseMapCanvas extends StatelessWidget {
       'arcade' => null,
       _ => null,
     };
+    if (asset == null && role != MapBodyRole.asteroidField) {
+      return _roleFallback(role, size, key: ValueKey('body-art-image-$id'));
+    }
     if (asset != null) {
       return Image.asset(
         'assets/images/course_map/art/$asset',
@@ -260,11 +271,8 @@ class CourseMapCanvas extends StatelessWidget {
         height: size,
         fit: BoxFit.contain,
         excludeFromSemantics: true,
-        errorBuilder: (context, error, stackTrace) => Icon(
-          id == 'coaching' ? Icons.circle : Icons.public,
-          size: size * .55,
-          color: Colors.white,
-        ),
+        errorBuilder: (context, error, stackTrace) =>
+            _roleFallback(role, size, key: ValueKey('body-art-fallback-$id')),
       );
     }
     return SizedBox(
@@ -275,23 +283,40 @@ class CourseMapCanvas extends StatelessWidget {
         alignment: Alignment.center,
         children: [
           Positioned(
-            left: size * .12,
-            top: size * .16,
+            key: const ValueKey('asteroid-cluster-a'),
+            left: size * .05,
+            top: size * .08,
             child: Image.asset(
               'assets/images/course_map/art/asteroid_small.png',
-              width: size * .62,
-              height: size * .62,
+              key: const ValueKey('asteroid-image-small-a'),
+              width: size * .46,
+              height: size * .46,
               fit: BoxFit.contain,
               excludeFromSemantics: true,
             ),
           ),
           Positioned(
-            right: size * .12,
-            bottom: size * .12,
+            key: const ValueKey('asteroid-cluster-b'),
+            right: size * .05,
+            top: size * .13,
             child: Image.asset(
               'assets/images/course_map/art/asteroid_large.png',
-              width: size * .62,
-              height: size * .62,
+              key: const ValueKey('asteroid-image-large'),
+              width: size * .46,
+              height: size * .46,
+              fit: BoxFit.contain,
+              excludeFromSemantics: true,
+            ),
+          ),
+          Positioned(
+            key: const ValueKey('asteroid-cluster-c'),
+            left: size * .12,
+            bottom: size * .08,
+            child: Image.asset(
+              'assets/images/course_map/art/asteroid_small.png',
+              key: const ValueKey('asteroid-image-small-b'),
+              width: size * .46,
+              height: size * .46,
               fit: BoxFit.contain,
               excludeFromSemantics: true,
             ),
@@ -300,6 +325,32 @@ class CourseMapCanvas extends StatelessWidget {
       ),
     );
   }
+
+  static Widget _roleFallback(MapBodyRole role, double size, {Key? key}) =>
+      Container(
+        key: key,
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: _bodyColor(role),
+        ),
+        child: Icon(_icon(role), size: size * .55, color: Colors.white),
+      );
+
+  static Color _bodyColor(MapBodyRole role) => switch (role) {
+    MapBodyRole.planet => const Color(0xFF91A7A5),
+    MapBodyRole.moon => const Color(0xFFAAB5C5),
+    MapBodyRole.station => const Color(0xFF8799B6),
+    MapBodyRole.asteroidField => const Color(0xFFB7A58B),
+  };
+
+  static IconData _icon(MapBodyRole role) => switch (role) {
+    MapBodyRole.planet => Icons.public,
+    MapBodyRole.moon => Icons.circle,
+    MapBodyRole.station => Icons.dns,
+    MapBodyRole.asteroidField => Icons.scatter_plot,
+  };
 
   static double _artOpacity(MapReadiness readiness) => switch (readiness) {
     MapReadiness.alpha => 1,

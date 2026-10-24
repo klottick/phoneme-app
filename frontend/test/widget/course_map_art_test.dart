@@ -1,5 +1,9 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:linguist/src/features/course_map/course_map_catalogue.dart';
 import 'package:linguist/src/features/course_map/course_map_canvas.dart';
 import 'package:linguist/src/features/course_map/course_map_state.dart';
 import 'package:linguist/src/features/course_map/french_space_map.dart';
@@ -44,28 +48,13 @@ void main() {
           ),
         ),
       );
-      await tester.runAsync(() async {
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      });
-      await tester.pump();
     }
 
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await pumpAt(const Size(800, 900));
 
-    final bodyArtworkPaths = <String>{};
-    for (final body in state.bodies) {
-      final art = find.byKey(ValueKey('body-art-image-${body.definition.id}'));
-      expect(art, findsOneWidget);
-      if (body.definition.id != 'arcade') {
-        final image = tester.widget<Image>(art);
-        final provider = image.image as AssetImage;
-        expect(provider.assetName, startsWith('assets/images/course_map/art/'));
-        bodyArtworkPaths.add(provider.assetName);
-      }
-    }
-    expect(bodyArtworkPaths, hasLength(state.bodies.length - 1));
+    await _verifyRenderedArtwork(tester, state);
     final selectedFrame = tester.widget<Container>(
       find.byKey(const ValueKey('body-art-frame-comparison')),
     );
@@ -74,17 +63,6 @@ void main() {
       find.byKey(const ValueKey('body-art-frame-discovery')),
     );
     expect((currentFrame.decoration! as BoxDecoration).border, isNotNull);
-    expect(find.byKey(const ValueKey('course-map-sun-art')), findsOneWidget);
-    expect(
-      (tester
-                  .widget<Image>(
-                    find.byKey(const ValueKey('course-map-sun-art')),
-                  )
-                  .image
-              as AssetImage)
-          .assetName,
-      'assets/images/course_map/art/sun.png',
-    );
     expect(tester.takeException(), isNull);
     expect(
       find.byKey(const ValueKey('destination-semantics-discovery')),
@@ -92,15 +70,11 @@ void main() {
     );
 
     await pumpAt(const Size(360, 640));
-    expect(
-      find.byKey(const ValueKey('body-art-image-discovery')),
-      findsOneWidget,
-    );
+    await _verifyRenderedArtwork(tester, state);
     expect(
       find.byKey(const ValueKey('destination-semantics-discovery')),
       findsNothing,
     );
-    expect(find.byKey(const ValueKey('course-map-sun-art')), findsOneWidget);
     expect(
       tester
           .widget<Opacity>(find.byKey(const ValueKey('body-art-context')))
@@ -110,4 +84,152 @@ void main() {
     expect(find.byIcon(Icons.schedule), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('unknown body IDs retain a role-appropriate fallback', (
+    tester,
+  ) async {
+    final definition = MapBodyDefinition(
+      id: 'unmapped-station',
+      title: 'Unmapped station',
+      description: 'Test-only renderer fallback.',
+      role: MapBodyRole.station,
+      optional: true,
+      planned: true,
+      x: .5,
+      y: .5,
+      orbitRadius: .3,
+    );
+    final state = CourseMapState(
+      systemId: 'test-system',
+      bodies: [
+        MapBodyState(
+          definition: definition,
+          readiness: MapReadiness.planned,
+          progress: MapProgress.unknown,
+          recommended: false,
+          explanation: definition.description,
+          launch: null,
+        ),
+      ],
+      currentBodyId: null,
+      allAvailableMainComplete: false,
+      completedLegacyLessonIds: null,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CourseMapCanvas(
+            state: state,
+            selectedBodyId: null,
+            onInspect: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('body-art-image-unmapped-station')),
+      findsOneWidget,
+    );
+    expect(find.byIcon(Icons.dns), findsOneWidget);
+    expect(find.byKey(const ValueKey('asteroid-image-small-a')), findsNothing);
+    expect(find.byKey(const ValueKey('asteroid-image-large')), findsNothing);
+    expect(find.byKey(const ValueKey('asteroid-image-small-b')), findsNothing);
+  });
 }
+
+const _bodyAssets = <String, String>{
+  'discovery': 'planet_discovery.png',
+  'comparison': 'planet_comparison.png',
+  'context': 'planet_context.png',
+  'spelling': 'planet_spelling.png',
+  'checkpoint': 'planet_checkpoint.png',
+  'coaching': 'moon.png',
+  'review': 'station_review.png',
+  'mixed-comparison': 'station_mixed.png',
+  'sentence-practice': 'station_sentences.png',
+};
+
+Future<void> _verifyRenderedArtwork(
+  WidgetTester tester,
+  CourseMapState state,
+) async {
+  final renderedPaths = tester
+      .widgetList<Image>(find.byType(Image))
+      .map(_assetPath)
+      .toList();
+  expect(renderedPaths, hasLength(13));
+  final decodedPaths = await tester.runAsync(() async {
+    final decoded = <String>[];
+    for (final path in renderedPaths) {
+      final data = await rootBundle.load(path);
+      final bytes = data.buffer.asUint8List(
+        data.offsetInBytes,
+        data.lengthInBytes,
+      );
+      final codec = await ui.instantiateImageCodec(bytes);
+      try {
+        final frame = await codec.getNextFrame();
+        frame.image.dispose();
+        decoded.add(path);
+      } finally {
+        codec.dispose();
+      }
+    }
+    return decoded;
+  });
+  expect(decodedPaths, isNotNull);
+  expect(decodedPaths, unorderedEquals(renderedPaths));
+
+  final expectedPaths = <String>[];
+  for (final body in state.bodies) {
+    if (body.definition.id == 'arcade') {
+      final asteroidFinder = find.descendant(
+        of: find.byKey(const ValueKey('body-art-image-arcade')),
+        matching: find.byType(Image),
+      );
+      final widgets = tester.widgetList<Image>(asteroidFinder).toList();
+      expect(widgets, hasLength(3));
+      final paths = widgets.map(_assetPath).toList();
+      expect(paths.toSet(), {
+        'assets/images/course_map/art/asteroid_small.png',
+        'assets/images/course_map/art/asteroid_large.png',
+      });
+      final rects = [
+        tester.getRect(find.byKey(const ValueKey('asteroid-image-small-a'))),
+        tester.getRect(find.byKey(const ValueKey('asteroid-image-large'))),
+        tester.getRect(find.byKey(const ValueKey('asteroid-image-small-b'))),
+      ];
+      for (var first = 0; first < rects.length; first++) {
+        expect(rects[first].width, lessThanOrEqualTo(21));
+        for (var second = first + 1; second < rects.length; second++) {
+          expect(
+            (rects[first].center - rects[second].center).distance,
+            greaterThan(11),
+          );
+        }
+      }
+      expectedPaths.addAll(paths);
+    } else {
+      final id = body.definition.id;
+      final image = tester.widget<Image>(
+        find.byKey(ValueKey('body-art-image-$id')),
+      );
+      final path = _assetPath(image);
+      expect(
+        path,
+        'assets/images/course_map/art/${_bodyAssets[id]}',
+        reason: '$id is pinned to its unique authored artwork',
+      );
+      expectedPaths.add(path);
+    }
+  }
+  final sun = tester.widget<Image>(
+    find.byKey(const ValueKey('course-map-sun-art')),
+  );
+  expect(_assetPath(sun), 'assets/images/course_map/art/sun.png');
+  expectedPaths.add(_assetPath(sun));
+  expect(renderedPaths, unorderedEquals(expectedPaths));
+}
+
+String _assetPath(Image image) => (image.image as AssetImage).assetName;
