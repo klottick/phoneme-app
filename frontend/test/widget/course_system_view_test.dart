@@ -200,6 +200,20 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('retained_picker_opener_after_unmount_is_a_noop', (tester) async {
+    await tester.pumpWidget(_view(_state(), selectedId: 'discovery'));
+    final retainedOpener = tester
+        .widget<IconButton>(find.byKey(const ValueKey('destination-picker')))
+        .onPressed!;
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    retainedOpener();
+    await tester.pump();
+
+    expect(find.byType(ModalBarrier), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('inspection_is_not_launch_or_travel', (tester) async {
     final state = _state();
     final inspected = <String>[];

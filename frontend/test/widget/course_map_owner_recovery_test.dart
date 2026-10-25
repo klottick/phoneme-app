@@ -397,6 +397,117 @@ void main() {
     );
   });
 
+  testWidgets('picker_opener_is_single_flight_across_auth_owner_change', (
+    tester,
+  ) async {
+    disableMapMotion(tester);
+    final ownerA = LearningOwner.account('double-picker-A');
+    final ownerB = LearningOwner.account('double-picker-B');
+    final tracker = LearningAuthTracker(owner: ownerA, ready: true);
+    final container = ProviderContainer(
+      overrides: [
+        ..._ownerFixture(tracker),
+        courseMapStateProvider.overrideWith((ref, systemId) {
+          final auth = ref.watch(learningAuthScopeProvider);
+          return _pickerStateForScope(systemId, auth, 0);
+        }),
+      ],
+    );
+    final router = container.read(appRouterProvider);
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      router.dispose();
+      container.dispose();
+    });
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const LinguistApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final baselineBarrierCount = find.byType(ModalBarrier).evaluate().length;
+    final openPicker = tester
+        .widget<IconButton>(find.byKey(const ValueKey('destination-picker')))
+        .onPressed!;
+    openPicker();
+    openPicker();
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('destination-picker-heading')),
+      findsOneWidget,
+      reason: 'synchronous repeated presses create only one picker route',
+    );
+    expect(
+      find.byType(ModalBarrier),
+      findsNWidgets(baselineBarrierCount + 1),
+      reason: 'only one modal barrier is added for the picker',
+    );
+
+    tracker.observe(owner: ownerB, ready: false);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('destination-picker-heading')),
+      findsNothing,
+      reason: 'neither duplicate sheet survives owner/auth invalidation',
+    );
+    expect(
+      find.byKey(const ValueKey('destination-list-semantics-discovery')),
+      findsNothing,
+      reason: 'no picker exposes owner A destination state',
+    );
+    expect(
+      find.byType(ModalBarrier),
+      findsNWidgets(baselineBarrierCount),
+      reason: 'all picker barriers are removed; pre-existing route is intact',
+    );
+    expect(tester.takeException(), isNull);
+
+    tracker.observe(owner: ownerB, ready: true);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('destination-picker')));
+    await tester.pumpAndSettle();
+
+    final comparison = tester.widget<Semantics>(
+      find.byKey(const ValueKey('destination-list-semantics-comparison')),
+    );
+    final discovery = tester.widget<Semantics>(
+      find.byKey(const ValueKey('destination-list-semantics-discovery')),
+    );
+    expect(comparison.properties.selected, isTrue);
+    expect(comparison.properties.label, contains('current location'));
+    expect(comparison.properties.label, contains('Not started'));
+    expect(discovery.properties.selected, isFalse);
+    expect(discovery.properties.label, isNot(contains('current location')));
+    expect(discovery.properties.label, contains('Not started'));
+    expect(find.byType(ModalBarrier), findsNWidgets(baselineBarrierCount + 1));
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byTooltip('Close destinations'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ModalBarrier), findsNWidgets(baselineBarrierCount));
+
+    final openBeforeFirstFrame = tester
+        .widget<IconButton>(find.byKey(const ValueKey('destination-picker')))
+        .onPressed!;
+    openBeforeFirstFrame();
+    tracker.observe(owner: ownerB, ready: false);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('destination-picker-heading')),
+      findsNothing,
+      reason: 'invalidated pre-frame builder must not leave an empty sheet',
+    );
+    expect(
+      find.byType(ModalBarrier),
+      findsNWidgets(baselineBarrierCount),
+      reason: 'invalid pre-frame picker leaves no extra modal barrier',
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('launch_rechecks_current_owner_and_readiness', (tester) async {
     disableMapMotion(tester);
     final tracker = LearningAuthTracker(

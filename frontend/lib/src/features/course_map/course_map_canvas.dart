@@ -89,29 +89,31 @@ class CourseMapCanvas extends StatelessWidget {
               Positioned(
                 left: width * .46,
                 top: height * .44,
-                child: ExcludeSemantics(
-                  child: DecoratedBox(
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Color(0x66F7B84B),
-                          blurRadius: 14,
-                          spreadRadius: 2,
-                        ),
-                      ],
-                    ),
-                    child: ColorFiltered(
-                      colorFilter: const ColorFilter.mode(
-                        Color(0xFFFFB640),
-                        BlendMode.modulate,
+                child: IgnorePointer(
+                  child: ExcludeSemantics(
+                    child: DecoratedBox(
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Color(0x66F7B84B),
+                            blurRadius: 14,
+                            spreadRadius: 2,
+                          ),
+                        ],
                       ),
-                      child: Image.asset(
-                        'assets/images/course_map/art/sun.png',
-                        key: const ValueKey('course-map-sun-art'),
-                        width: 38,
-                        height: 38,
-                        fit: BoxFit.contain,
+                      child: ColorFiltered(
+                        colorFilter: const ColorFilter.mode(
+                          Color(0xFFFFB640),
+                          BlendMode.modulate,
+                        ),
+                        child: Image.asset(
+                          'assets/images/course_map/art/sun.png',
+                          key: const ValueKey('course-map-sun-art'),
+                          width: 38,
+                          height: 38,
+                          fit: BoxFit.contain,
+                        ),
                       ),
                     ),
                   ),

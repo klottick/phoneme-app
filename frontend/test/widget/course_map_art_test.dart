@@ -88,6 +88,78 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('sun_art_cannot_intercept_overlapping_destination_targets', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(500, 300);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final system = frenchSpaceSystems.first;
+    final state = CourseMapState(
+      systemId: system.id,
+      bodies: system.bodies
+          .map(
+            (definition) => MapBodyState(
+              definition: definition,
+              readiness: definition.planned
+                  ? MapReadiness.planned
+                  : MapReadiness.alpha,
+              progress: MapProgress.unknown,
+              recommended: false,
+              explanation: definition.description,
+              launch: definition.planned ? null : MapLaunch.open,
+            ),
+          )
+          .toList(),
+      currentBodyId: 'discovery',
+      allAvailableMainComplete: false,
+      completedLegacyLessonIds: null,
+    );
+    final inspected = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 336,
+              height: 150,
+              child: CourseMapCanvas(
+                state: state,
+                selectedBodyId: 'discovery',
+                onInspect: inspected.add,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final canvasRect = tester.getRect(find.byType(CourseMapCanvas));
+    expect(canvasRect.size, const Size(336, 150));
+    final sunRect = tester.getRect(
+      find.byKey(const ValueKey('course-map-sun-art')),
+    );
+    for (final (id, localPoint) in const <(String, Offset)>[
+      ('sentence-practice', Offset(160, 96)),
+      ('arcade', Offset(180, 96)),
+    ]) {
+      final point = canvasRect.topLeft + localPoint;
+      final targetRect = tester.getRect(
+        find.byKey(ValueKey('destination-semantics-$id')),
+      );
+      expect(targetRect.contains(point), isTrue, reason: '$id target overlap');
+      expect(sunRect.contains(point), isTrue, reason: '$id sun overlap');
+
+      await tester.tapAt(point);
+      await tester.pump();
+      expect(inspected.lastOrNull, id, reason: '$id must receive the tap');
+    }
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('unknown body IDs retain a role-appropriate fallback', (
     tester,
   ) async {

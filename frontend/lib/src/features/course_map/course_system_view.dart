@@ -227,13 +227,19 @@ class _DestinationPickerButtonState extends State<_DestinationPickerButton> {
     _pickerToken = null;
     if (route == null || navigator == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (navigator.mounted && route.isActive) {
-        navigator.removeRoute<void>(route);
-      }
+      _removeOwnedRoute(navigator, route);
     });
   }
 
+  void _removeOwnedRoute(NavigatorState navigator, Route<void>? route) {
+    if (route != null && navigator.mounted && route.isActive) {
+      navigator.removeRoute<void>(route);
+    }
+  }
+
   void _openPicker() {
+    if (!mounted || _pickerToken != null) return;
+
     final openingState = widget.state;
     final openingSelection = widget.selectedBodyId;
     final openingCurrentBody = widget.currentBodyId;
@@ -246,9 +252,16 @@ class _DestinationPickerButtonState extends State<_DestinationPickerButton> {
       useSafeArea: true,
       showDragHandle: true,
       builder: (sheetContext) {
-        if (!mounted) return const SizedBox.shrink();
-        _pickerRoute = ModalRoute.of<void>(sheetContext);
-        _pickerNavigator = Navigator.of(sheetContext);
+        final route = ModalRoute.of<void>(sheetContext);
+        final navigator = Navigator.of(sheetContext);
+        if (!mounted || !identical(_pickerToken, token)) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _removeOwnedRoute(navigator, route);
+          });
+          return const SizedBox.shrink();
+        }
+        _pickerRoute = route;
+        _pickerNavigator = navigator;
         final height = MediaQuery.sizeOf(sheetContext).height * .84;
         return SizedBox(
           height: height,
