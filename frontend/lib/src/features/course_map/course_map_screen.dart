@@ -41,7 +41,6 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
     }
     final system = findSpaceSystem(widget.systemId);
     final state = ref.watch(courseMapStateProvider(widget.systemId));
-    final profile = ref.watch(courseLearningStateProvider);
     final availableDiscovery = state.bodies.where(
       (body) =>
           body.definition.target == MapTarget.discovery &&
@@ -72,142 +71,195 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
               body.progress != MapProgress.unknown,
         )
         .firstOrNull;
-    final recommendationReason =
-        recommendedMain?.progress == MapProgress.resumable
-        ? 'Continue your saved run.'
-        : 'First available incomplete main lesson.';
-    final dedicatedUnavailable = state.bodies.any(
-      (body) =>
-          body.definition.target == MapTarget.dedicatedComparison &&
-          body.readiness == MapReadiness.unavailable,
-    );
-    final spellingUnavailable = state.bodies.any(
-      (body) =>
-          body.definition.target == MapTarget.dedicatedSpelling &&
-          body.readiness == MapReadiness.unavailable,
-    );
-    final selectedComparison = state.bodies
-        .where(
-          (body) =>
-              body.definition.id == (selected ?? state.currentBodyId) &&
-              body.definition.target == MapTarget.mixedComparison &&
-              body.readiness == MapReadiness.alpha &&
-              body.progress == MapProgress.completed,
-        )
-        .firstOrNull;
-    final footer = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (recommendedMain != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Semantics(
-              container: true,
-              label:
-                  'Recommended next: ${recommendedMain.definition.title}. '
-                  '$recommendationReason',
-              child: ExcludeSemantics(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+    final selectedBodyId =
+        selected ?? recommendedMain?.definition.id ?? state.currentBodyId;
+    final summaryLabels = <String>[
+      if (availableDiscovery.isNotEmpty)
+        'Discovery lessons: $completedDiscovery of ${availableDiscovery.length} complete, ${availableDiscovery.length - completedDiscovery} remaining',
+      if (availableMain.isNotEmpty)
+        'Available main lessons: $completedMain of ${availableMain.length} complete, ${availableMain.length - completedMain} remaining',
+      if (recommendedMain != null &&
+          selectedBodyId != recommendedMain.definition.id)
+        'Recommended next: ${recommendedMain.definition.title}',
+    ];
+    final progressSummary = summaryLabels.isEmpty
+        ? null
+        : Semantics(
+            container: true,
+            label: summaryLabels.join('. '),
+            child: ExcludeSemantics(
+              child: Wrap(
+                spacing: 12,
+                runSpacing: 2,
+                children: [
+                  if (availableDiscovery.isNotEmpty)
                     Text(
-                      'Recommended next: ${recommendedMain.definition.title}',
-                      style: Theme.of(context).textTheme.titleSmall,
+                      'Discovery $completedDiscovery/${availableDiscovery.length} complete · ${availableDiscovery.length - completedDiscovery} remaining',
                     ),
-                    Text(recommendationReason),
-                  ],
-                ),
+                  if (availableMain.isNotEmpty)
+                    Text(
+                      'Lessons $completedMain/${availableMain.length} complete · ${availableMain.length - completedMain} remaining',
+                    ),
+                  if (recommendedMain != null &&
+                      selectedBodyId != recommendedMain.definition.id)
+                    Text('Next · ${recommendedMain.definition.title}'),
+                ],
               ),
             ),
-          ),
-        if (selectedComparison != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: OutlinedButton(
-              onPressed: () =>
-                  _launch(selectedComparison, auth, openSavedCheckpoint: true),
-              child: const Text('Open comparison practice'),
+          );
+
+    Widget secondaryTools(
+      StateSetter setSheetState,
+      BuildContext sheetContext,
+    ) => Consumer(
+      builder: (context, sheetRef, _) {
+        final toolsState = sheetRef.watch(
+          courseMapStateProvider(widget.systemId),
+        );
+        final toolsProfile = sheetRef.watch(courseLearningStateProvider);
+        final toolsAuth = sheetRef.watch(learningAuthScopeProvider);
+        final toolsSystem = findSpaceSystem(widget.systemId);
+        final toolsRecommendation = toolsState.bodies
+            .where(
+              (body) =>
+                  body.recommended &&
+                  toolsSystem?.mainOrder.contains(body.definition.id) == true &&
+                  body.readiness == MapReadiness.alpha &&
+                  body.progress != MapProgress.completed &&
+                  body.progress != MapProgress.unknown,
+            )
+            .firstOrNull;
+        final toolsSelectedId =
+            selected ??
+            toolsRecommendation?.definition.id ??
+            toolsState.currentBodyId;
+        final toolsSelectedComparison = toolsState.bodies
+            .where(
+              (body) =>
+                  body.definition.id == toolsSelectedId &&
+                  body.definition.target == MapTarget.mixedComparison &&
+                  body.readiness == MapReadiness.alpha &&
+                  body.progress == MapProgress.completed,
+            )
+            .firstOrNull;
+        final toolsDedicatedUnavailable = toolsState.bodies.any(
+          (body) =>
+              body.definition.target == MapTarget.dedicatedComparison &&
+              body.readiness == MapReadiness.unavailable,
+        );
+        final toolsSpellingUnavailable = toolsState.bodies.any(
+          (body) =>
+              body.definition.target == MapTarget.dedicatedSpelling &&
+              body.readiness == MapReadiness.unavailable,
+        );
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (toolsSelectedComparison != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: OutlinedButton.icon(
+                  onPressed: () => _launch(
+                    toolsSelectedComparison,
+                    toolsAuth,
+                    openSavedCheckpoint: true,
+                  ),
+                  icon: const Icon(Icons.open_in_new),
+                  label: const Text('Open comparison practice'),
+                ),
+              ),
+            if (toolsState.bodies.isEmpty ||
+                toolsState.bodies.every((body) => body.launch == null))
+              TextButton(
+                onPressed: () => context.go('/course-chart'),
+                child: const Text('Open course chart'),
+              ),
+            if (toolsProfile.hasError)
+              TextButton.icon(
+                onPressed: retrying
+                    ? null
+                    : () async {
+                        final retry = _retryProgress();
+                        if (sheetContext.mounted) setSheetState(() {});
+                        await retry;
+                        if (sheetContext.mounted) {
+                          setSheetState(() {});
+                        }
+                      },
+                icon: const Icon(Icons.refresh),
+                label: Text(retrying ? 'Retrying…' : 'Retry loading progress'),
+              ),
+            const Divider(),
+            const ListTile(
+              title: Text('Recovery and other practice'),
+              subtitle: Text(
+                'Separate access remains available when a map family is unavailable.',
+              ),
             ),
-          ),
-        if (availableDiscovery.isNotEmpty) ...[
-          Text(
-            'Discovery lessons: $completedDiscovery/${availableDiscovery.length} available complete',
-          ),
-        ],
-        if (availableMain.isNotEmpty)
-          Text(
-            'Available main lessons: $completedMain/${availableMain.length} available complete',
-          ),
-        if (state.allAvailableMainComplete)
-          const Text('All currently available lessons complete.'),
-        if (state.bodies.isEmpty ||
-            state.bodies.every((body) => body.launch == null))
-          TextButton(
-            onPressed: () => context.go('/course-chart'),
-            child: const Text('Open course chart'),
-          ),
-        if (profile.hasError)
-          TextButton(
-            onPressed: retrying ? null : _retryProgress,
-            child: Text(retrying ? 'Retrying…' : 'Retry loading progress'),
-          ),
-        const Divider(),
-        const ListTile(
-          title: Text('Recovery and other practice'),
-          subtitle: Text(
-            'Separate access remains available when a map family is unavailable.',
-          ),
-        ),
-        TextButton(
-          onPressed: () => context.push('/course-lesson/en-fr-u-y'),
-          child: const Text('Open discovery recovery'),
-        ),
-        TextButton(
-          onPressed: () =>
-              context.push('/course-comparison/en-fr-phoneme-comparison'),
-          child: const Text('Open mixed comparison recovery'),
-        ),
-        TextButton(
-          onPressed: () => context.push('/course-sentence-hunt'),
-          child: const Text('View sentence sections'),
-        ),
-        TextButton(
-          onPressed: () => ref.invalidate(comparisonCatalogueProvider),
-          child: const Text('Retry mixed comparison catalogue'),
-        ),
-        if (dedicatedUnavailable)
-          TextButton(
-            onPressed: () {
-              ref.invalidate(uyDemoComparisonCatalogueProvider);
-              ref.invalidate(comparisonCatalogueRegistryProvider);
-              ref.invalidate(comparisonLearningStateProvider);
-              ref.invalidate(courseMapStateProvider(widget.systemId));
-            },
-            child: const Text('Retry dedicated comparison'),
-          ),
-        if (spellingUnavailable)
-          TextButton(
-            onPressed: () {
-              ref.invalidate(spellingCatalogueProvider);
-              ref.invalidate(spellingLearningStoreProvider);
-              ref.invalidate(spellingLearningStateProvider);
-              ref.invalidate(courseMapStateProvider(widget.systemId));
-            },
-            child: const Text('Retry spelling progress'),
-          ),
-        TextButton(
-          onPressed: () => ref.invalidate(sentenceHuntCatalogueProvider),
-          child: const Text('Retry sentence catalogue'),
-        ),
-        TextButton(
-          onPressed: () {
-            ref.invalidate(learningRegistryProvider);
-            ref.invalidate(courseMapStateProvider(widget.systemId));
-          },
-          child: const Text('Retry map content registry'),
-        ),
-        CourseLegacyEntries(completedLessonIds: state.completedLegacyLessonIds),
-      ],
+            TextButton.icon(
+              onPressed: () => context.push('/course-lesson/en-fr-u-y'),
+              icon: const Icon(Icons.hearing),
+              label: const Text('Open discovery recovery'),
+            ),
+            TextButton.icon(
+              onPressed: () =>
+                  context.push('/course-comparison/en-fr-phoneme-comparison'),
+              icon: const Icon(Icons.compare_arrows),
+              label: const Text('Open mixed comparison recovery'),
+            ),
+            TextButton.icon(
+              onPressed: () => context.push('/course-sentence-hunt'),
+              icon: const Icon(Icons.segment),
+              label: const Text('View sentence sections'),
+            ),
+            TextButton.icon(
+              onPressed: () => sheetRef.invalidate(comparisonCatalogueProvider),
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry mixed comparison catalogue'),
+            ),
+            if (toolsDedicatedUnavailable)
+              TextButton.icon(
+                onPressed: () {
+                  sheetRef.invalidate(uyDemoComparisonCatalogueProvider);
+                  sheetRef.invalidate(comparisonCatalogueRegistryProvider);
+                  sheetRef.invalidate(comparisonLearningStateProvider);
+                  sheetRef.invalidate(courseMapStateProvider(widget.systemId));
+                },
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry dedicated comparison'),
+              ),
+            if (toolsSpellingUnavailable)
+              TextButton.icon(
+                onPressed: () {
+                  sheetRef.invalidate(spellingCatalogueProvider);
+                  sheetRef.invalidate(spellingLearningStoreProvider);
+                  sheetRef.invalidate(spellingLearningStateProvider);
+                  sheetRef.invalidate(courseMapStateProvider(widget.systemId));
+                },
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry spelling progress'),
+              ),
+            TextButton.icon(
+              onPressed: () =>
+                  sheetRef.invalidate(sentenceHuntCatalogueProvider),
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry sentence catalogue'),
+            ),
+            TextButton.icon(
+              onPressed: () {
+                sheetRef.invalidate(learningRegistryProvider);
+                sheetRef.invalidate(courseMapStateProvider(widget.systemId));
+              },
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry map content registry'),
+            ),
+            CourseLegacyEntries(
+              completedLessonIds: toolsState.completedLegacyLessonIds,
+            ),
+          ],
+        );
+      },
     );
 
     return CourseRootNavigation(
@@ -216,6 +268,15 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
         appBar: AppBar(
           title: const Text('Linguist'),
           actions: [
+            IconButton(
+              tooltip: 'More learning tools',
+              icon: const Icon(Icons.more_horiz),
+              onPressed: () => _showMapTools(
+                context,
+                (setSheetState, sheetContext) =>
+                    secondaryTools(setSheetState, sheetContext),
+              ),
+            ),
             IconButton(
               tooltip: 'Star chart',
               icon: const Icon(Icons.auto_awesome),
@@ -247,10 +308,11 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
             : CourseSystemView(
                 key: ValueKey(freshKey),
                 state: state,
-                selectedBodyId: selected ?? state.currentBodyId,
+                selectedBodyId: selectedBodyId,
                 onInspect: (id) => setState(() => selected = id),
                 onLaunch: (body) => _launch(body, auth),
-                footer: footer,
+                progressSummary: progressSummary,
+                pickerRevision: (auth.owner, auth.generation, auth.ready),
               ),
       ),
     );
@@ -333,4 +395,64 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
       if (isCurrentOperation()) setState(() => retrying = false);
     }
   }
+}
+
+void _showMapTools(
+  BuildContext context,
+  Widget Function(StateSetter setSheetState, BuildContext sheetContext)
+  buildTools,
+) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    showDragHandle: true,
+    builder: (sheetContext) => StatefulBuilder(
+      builder: (sheetContext, setSheetState) {
+        final height = (MediaQuery.sizeOf(sheetContext).height * .84)
+            .clamp(300.0, 720.0)
+            .toDouble();
+        return SizedBox(
+          height: height,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 12, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Semantics(
+                        key: const ValueKey('map-tools-heading'),
+                        header: true,
+                        label: 'More learning tools',
+                        child: ExcludeSemantics(
+                          child: Text(
+                            'Learning tools',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(sheetContext).textTheme.titleMedium,
+                          ),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close tools',
+                      onPressed: () => Navigator.of(sheetContext).pop(),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: buildTools(setSheetState, sheetContext),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    ),
+  );
 }

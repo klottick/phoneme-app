@@ -171,6 +171,7 @@ void main() {
     ]) {
       app.$2.go('/home');
       await tester.pumpAndSettle();
+      await openMapTools(tester);
       if (find.text(title).evaluate().isEmpty) {
         final legacyDisclosure = find.text('Legacy practice');
         await tester.ensureVisible(legacyDisclosure);
@@ -275,6 +276,7 @@ void main() {
       ('en-fr-r', 'Meet the French R'),
       ('en-fr-mix', 'Mix your new sounds'),
     ]) {
+      await openMapTools(tester);
       if (find.text(title).evaluate().isEmpty) {
         final legacyDisclosure = find.text('Legacy practice');
         await tester.ensureVisible(legacyDisclosure);
@@ -304,6 +306,7 @@ void main() {
     final failedStore = CourseLearningWidgetStore()..failLoad = true;
     final failedApp = await mountApp(tester, failedStore);
     await tester.pumpAndSettle();
+    await openMapTools(tester);
     await tester.ensureVisible(find.text('Retry loading progress'));
     expect(find.text('Retry loading progress'), findsOneWidget);
     expect(find.text('Continue lesson'), findsNothing);
@@ -461,10 +464,8 @@ void main() {
     expect(app.$2.state.uri.path, '/home');
     expect(homeNavigationCount, 1);
     await tester.pumpAndSettle();
-    expect(
-      find.text('Discovery lessons: 1/1 available complete'),
-      findsOneWidget,
-    );
+    expect(find.text('Discovery 1/1 complete · 0 remaining'), findsOneWidget);
+    await selectMapDestination(tester, 'Hear the difference');
     expect(find.text('Review lesson'), findsOneWidget);
     expect(
       store.submitted.where(
@@ -539,10 +540,8 @@ void main() {
       await audio.dispose();
     });
     await tester.pumpAndSettle();
-    expect(
-      find.text('Discovery lessons: 1/1 available complete'),
-      findsOneWidget,
-    );
+    expect(find.text('Discovery 1/1 complete · 0 remaining'), findsOneWidget);
+    await selectMapDestination(tester, 'Hear the difference');
     expect(find.text('Review lesson'), findsOneWidget);
     await _expectLegacyCompletionIcon(
       tester,
@@ -560,10 +559,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
     await _scrollHomeToDiscoverySummary(tester);
-    expect(
-      find.text('Discovery lessons: 1/1 available complete'),
-      findsNothing,
-    );
+    expect(find.text('Discovery 1/1 complete · 0 remaining'), findsNothing);
     expect(find.text('Review lesson'), findsNothing);
     expect(find.text('Start lesson'), findsNothing);
     await _expectLegacyCompletionIcon(
@@ -577,19 +573,13 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
     await tester.pumpAndSettle();
-    expect(
-      find.text('Discovery lessons: 0/1 available complete'),
-      findsOneWidget,
-    );
+    expect(find.text('Discovery 0/1 complete · 1 remaining'), findsOneWidget);
     expect(find.text('Start lesson'), findsOneWidget);
     staleALoad.complete();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
     await _scrollHomeToDiscoverySummary(tester);
-    expect(
-      find.text('Discovery lessons: 0/1 available complete'),
-      findsOneWidget,
-    );
+    expect(find.text('Discovery 0/1 complete · 1 remaining'), findsOneWidget);
     expect(find.text('Review lesson'), findsNothing);
     await _expectLegacyCompletionIcon(
       tester,
@@ -602,10 +592,8 @@ void main() {
     tracker.observe(owner: accountA.scope.owner, ready: true);
     await tester.pumpAndSettle();
     await _scrollHomeToDiscoverySummary(tester);
-    expect(
-      find.text('Discovery lessons: 1/1 available complete'),
-      findsOneWidget,
-    );
+    expect(find.text('Discovery 1/1 complete · 0 remaining'), findsOneWidget);
+    await selectMapDestination(tester, 'Hear the difference');
     expect(find.text('Review lesson'), findsOneWidget);
     await _expectLegacyCompletionIcon(
       tester,
@@ -664,10 +652,8 @@ void main() {
     });
     await tester.pumpAndSettle();
     expect(loads, 1);
-    expect(
-      find.text('Discovery lessons: 1/1 available complete'),
-      findsOneWidget,
-    );
+    expect(find.text('Discovery 1/1 complete · 0 remaining'), findsOneWidget);
+    await selectMapDestination(tester, 'Hear the difference');
     expect(find.text('Review lesson'), findsOneWidget);
     await _expectLegacyCompletionIcon(
       tester,
@@ -833,6 +819,7 @@ Future<void> _expectLegacyCompletionIcon(
   String title,
   bool completed,
 ) async {
+  await openMapTools(tester);
   if (find.text(title).evaluate().isEmpty) {
     final disclosure = find.text('Legacy practice');
     await tester.ensureVisible(disclosure);
@@ -849,6 +836,8 @@ Future<void> _expectLegacyCompletionIcon(
     find.descendant(of: tile, matching: find.byIcon(Icons.check)),
     completed ? findsOneWidget : findsNothing,
   );
+  await tester.tap(find.byTooltip('Close tools'));
+  await tester.pumpAndSettle();
 }
 
 Future<void> _activateUsingKeyboard(WidgetTester tester, Finder control) async {
