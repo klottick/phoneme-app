@@ -15,8 +15,12 @@ import 'package:linguist/src/core/course/french_sentence_package.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_providers.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
 import 'package:linguist/src/features/course/discovery_lesson_screen.dart';
+import 'package:linguist/src/features/course_map/course_map_canvas.dart';
+import 'package:linguist/src/features/course_map/course_map_providers.dart';
 import 'package:linguist/src/features/course_map/course_system_view.dart';
 import 'package:linguist/src/features/course_map/course_map_state.dart';
+import 'package:linguist/src/features/course_map/french_space_map.dart';
+import 'package:linguist/src/routing/app_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../support/course_learning_widget_store.dart';
@@ -67,6 +71,64 @@ List<Override> _ownerFixture(LearningAuthTracker tracker) => [
     );
   }),
 ];
+
+CourseMapState _pickerStateForScope(
+  String systemId,
+  LearningAuthScope auth,
+  int availabilityRevision,
+) {
+  final system = frenchSpaceSystems.singleWhere((item) => item.id == systemId);
+  final ownerA = auth.owner.userId == 'picker-A';
+  final currentBodyId = !auth.ready
+      ? null
+      : ownerA
+      ? 'discovery'
+      : 'comparison';
+  return CourseMapState(
+    systemId: systemId,
+    bodies: [
+      for (final definition in system.bodies)
+        MapBodyState(
+          definition: definition,
+          readiness: definition.planned
+              ? MapReadiness.planned
+              : !auth.ready
+              ? MapReadiness.loading
+              : availabilityRevision > 0 &&
+                    ownerA &&
+                    definition.id == 'comparison'
+              ? MapReadiness.unavailable
+              : MapReadiness.alpha,
+          progress: !auth.ready
+              ? MapProgress.unknown
+              : ownerA && definition.id == 'discovery'
+              ? MapProgress.completed
+              : MapProgress.notStarted,
+          recommended: auth.ready && !ownerA && definition.id == 'comparison',
+          explanation: !auth.ready
+              ? 'Authentication is loading.'
+              : availabilityRevision > 0 &&
+                    ownerA &&
+                    definition.id == 'comparison'
+              ? 'Comparison availability changed.'
+              : 'Test map state.',
+          launch:
+              !auth.ready ||
+                  definition.planned ||
+                  (availabilityRevision > 0 &&
+                      ownerA &&
+                      definition.id == 'comparison')
+              ? null
+              : ownerA && definition.id == 'discovery'
+              ? MapLaunch.review
+              : MapLaunch.start,
+        ),
+    ],
+    currentBodyId: currentBodyId,
+    allAvailableMainComplete: false,
+    completedLegacyLessonIds: null,
+  );
+}
 
 void main() {
   setUp(
@@ -138,6 +200,201 @@ void main() {
     );
     expect(find.text('Progress unknown'), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('open_picker_dismisses_on_availability_owner_and_auth_changes', (
+    tester,
+  ) async {
+    disableMapMotion(tester);
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final ownerA = LearningOwner.account('picker-A');
+    final ownerB = LearningOwner.account('picker-B');
+    final tracker = LearningAuthTracker(owner: ownerA, ready: true);
+    final availabilityRevision = StateProvider<int>((ref) => 0);
+    final container = ProviderContainer(
+      overrides: [
+        ..._ownerFixture(tracker),
+        courseMapStateProvider.overrideWith((ref, systemId) {
+          final auth = ref.watch(learningAuthScopeProvider);
+          final revision = ref.watch(availabilityRevision);
+          return _pickerStateForScope(systemId, auth, revision);
+        }),
+      ],
+    );
+    final router = container.read(appRouterProvider);
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      router.dispose();
+      container.dispose();
+    });
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const LinguistApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    tester
+        .widget<IconButton>(find.byKey(const ValueKey('destination-picker')))
+        .onPressed!
+        .call();
+    tracker.observe(owner: ownerA, ready: false);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('destination-list-semantics-discovery')),
+      findsNothing,
+      reason: 'auth loading before the first sheet frame cannot reveal A data',
+    );
+    tracker.observe(owner: ownerA, ready: true);
+    await tester.pumpAndSettle();
+
+    Future<void> openPicker() async {
+      await tester.tap(find.byKey(const ValueKey('destination-picker')));
+      await tester.pumpAndSettle();
+    }
+
+    void expectMarker(
+      String id, {
+      required String status,
+      required bool selected,
+      required bool current,
+    }) {
+      final semantics = tester.widget<Semantics>(
+        find.byKey(ValueKey('destination-list-semantics-$id')),
+      );
+      expect(semantics.properties.label, contains(status));
+      expect(semantics.properties.selected, selected);
+      expect(semantics.properties.label!.contains('current location'), current);
+    }
+
+    await openPicker();
+    expectMarker(
+      'discovery',
+      status: 'Completed',
+      selected: true,
+      current: true,
+    );
+    final staleAvailabilityInspection = tester
+        .widget<ListTile>(find.widgetWithText(ListTile, 'Compare /u/ and /y/'))
+        .onTap;
+    expect(staleAvailabilityInspection, isNotNull);
+
+    container.read(availabilityRevision.notifier).state++;
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('destination-list-semantics-discovery')),
+      findsNothing,
+      reason: 'the old availability snapshot must not remain open',
+    );
+    staleAvailabilityInspection!();
+    await tester.pump();
+    expect(
+      tester
+          .widget<CourseSystemView>(find.byType(CourseSystemView))
+          .selectedBodyId,
+      'discovery',
+      reason: 'a stale picker callback cannot change the current selection',
+    );
+    expect(tester.takeException(), isNull);
+
+    await openPicker();
+    final staleOwnerInspection = tester
+        .widget<ListTile>(find.widgetWithText(ListTile, 'Hear the difference'))
+        .onTap;
+    tracker.observe(owner: ownerB, ready: true);
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('destination-list-semantics-discovery')),
+      findsNothing,
+      reason: 'owner replacement dismisses A’s exact picker route',
+    );
+    final ownerBView = tester.widget<CourseSystemView>(
+      find.byType(CourseSystemView),
+    );
+    expect(ownerBView.selectedBodyId, 'comparison');
+    expect(
+      tester
+          .widget<CourseMapCanvas>(find.byType(CourseMapCanvas))
+          .state
+          .currentBodyId,
+      'comparison',
+    );
+    staleOwnerInspection!();
+    await tester.pump();
+    expect(
+      tester
+          .widget<CourseSystemView>(find.byType(CourseSystemView))
+          .selectedBodyId,
+      'comparison',
+      reason: 'A’s late inspection cannot change B’s selected destination',
+    );
+    expect(tester.takeException(), isNull);
+
+    await openPicker();
+    expectMarker(
+      'comparison',
+      status: 'Not started',
+      selected: true,
+      current: true,
+    );
+    expectMarker(
+      'discovery',
+      status: 'Not started',
+      selected: false,
+      current: false,
+    );
+    final staleAuthInspection = tester
+        .widget<ListTile>(find.widgetWithText(ListTile, 'Hear the difference'))
+        .onTap;
+
+    tracker.observe(owner: ownerB, ready: false);
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('destination-list-semantics-discovery')),
+      findsNothing,
+      reason: 'authentication loading dismisses B’s exact picker route',
+    );
+    final loadingView = tester.widget<CourseSystemView>(
+      find.byType(CourseSystemView),
+    );
+    expect(loadingView.selectedBodyId, isNull);
+    expect(
+      loadingView.state.bodies
+          .where((body) => !body.definition.planned)
+          .every((body) => body.readiness == MapReadiness.loading),
+      isTrue,
+    );
+    staleAuthInspection!();
+    await tester.pump();
+    expect(
+      tester
+          .widget<CourseSystemView>(find.byType(CourseSystemView))
+          .selectedBodyId,
+      isNull,
+      reason: 'B’s late inspection cannot write selection during auth load',
+    );
+    expect(tester.takeException(), isNull);
+
+    await openPicker();
+    expectMarker(
+      'discovery',
+      status: 'Availability loading',
+      selected: true,
+      current: false,
+    );
+    expect(
+      find.textContaining('Completed · Current location'),
+      findsNothing,
+      reason: 'the newly opened loading picker exposes no A markers',
+    );
   });
 
   testWidgets('launch_rechecks_current_owner_and_readiness', (tester) async {

@@ -312,6 +312,7 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
                 onInspect: (id) => setState(() => selected = id),
                 onLaunch: (body) => _launch(body, auth),
                 progressSummary: progressSummary,
+                pickerRevision: (auth.owner, auth.generation, auth.ready),
               ),
       ),
     );

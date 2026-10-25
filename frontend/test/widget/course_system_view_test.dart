@@ -134,6 +134,72 @@ void main() {
     expect(find.text('Start comparison'), findsOneWidget);
   });
 
+  testWidgets('picker_selection_matches_the_resolved_inspector_fallback', (
+    tester,
+  ) async {
+    final state = _state();
+    await tester.pumpWidget(_view(state, selectedId: null));
+    expect(
+      tester
+          .widget<CourseMapCanvas>(find.byType(CourseMapCanvas))
+          .selectedBodyId,
+      'discovery',
+    );
+
+    await tester.tap(find.byKey(const ValueKey('destination-picker')));
+    await tester.pumpAndSettle();
+    final discoverySemantics = tester.widget<Semantics>(
+      find.byKey(const ValueKey('destination-list-semantics-discovery')),
+    );
+    expect(
+      discoverySemantics.properties.selected,
+      isTrue,
+      reason: 'the picker must highlight the same fallback body as the map',
+    );
+    expect(
+      tester
+          .widget<ListTile>(
+            find.widgetWithText(ListTile, 'Hear the difference'),
+          )
+          .selected,
+      isTrue,
+    );
+  });
+
+  testWidgets('dismissed_picker_callbacks_cannot_change_selection', (
+    tester,
+  ) async {
+    final state = _state();
+    final inspections = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CourseSystemView(
+            state: state,
+            selectedBodyId: 'discovery',
+            onInspect: inspections.add,
+            onLaunch: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('destination-picker')));
+    await tester.pumpAndSettle();
+    final staleInspection = tester
+        .widget<ListTile>(find.widgetWithText(ListTile, 'Compare /u/ and /y/'))
+        .onTap;
+    expect(staleInspection, isNotNull);
+
+    await tester.tap(find.byTooltip('Close destinations'));
+    await tester.pumpAndSettle();
+    staleInspection!();
+    await tester.pump();
+
+    expect(inspections, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('inspection_is_not_launch_or_travel', (tester) async {
     final state = _state();
     final inspected = <String>[];
@@ -278,7 +344,7 @@ CourseMapState _stateWithReadiness(
 
 Widget _view(
   CourseMapState state, {
-  required String selectedId,
+  required String? selectedId,
   List<MapBodyState>? launched,
 }) => MaterialApp(
   home: Scaffold(

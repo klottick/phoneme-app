@@ -128,9 +128,7 @@ class CourseDestinationPanel extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(_mapDescription(body)),
-        if (body.readiness != MapReadiness.alpha &&
-            body.explanation.isNotEmpty &&
-            body.explanation != body.definition.description) ...[
+        if (_shouldShowExplanation(body)) ...[
           const SizedBox(height: 6),
           Text(body.explanation),
         ],
@@ -176,6 +174,20 @@ class CourseDestinationPanel extends StatelessWidget {
     MapBodyRole.station => 'Station',
     MapBodyRole.asteroidField => 'Arcade',
   };
+
+  static bool _shouldShowExplanation(MapBodyState body) {
+    if (body.explanation.isEmpty ||
+        body.explanation == body.definition.description) {
+      return false;
+    }
+    if (body.readiness != MapReadiness.alpha) return true;
+    return switch ((body.progress, body.launch)) {
+      (MapProgress.notStarted, MapLaunch.start) ||
+      (MapProgress.resumable, MapLaunch.resume) ||
+      (MapProgress.completed, MapLaunch.review) => false,
+      _ => true,
+    };
+  }
 
   static String _mapDescription(MapBodyState body) =>
       switch (body.definition.id) {

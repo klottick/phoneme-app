@@ -422,6 +422,56 @@ void main() {
     }
   });
 
+  testWidgets('alpha_recovery_explanation_is_not_hidden_with_routine_status', (
+    tester,
+  ) async {
+    final discovery = frenchSpaceSystems.first.bodies.firstWhere(
+      (body) => body.id == 'discovery',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CourseDestinationPanel(
+            body: MapBodyState(
+              definition: discovery,
+              readiness: MapReadiness.alpha,
+              progress: MapProgress.notStarted,
+              recommended: false,
+              explanation: 'Start discovery.',
+              launch: MapLaunch.start,
+            ),
+            onLaunch: () {},
+          ),
+        ),
+      ),
+    );
+    expect(
+      find.text('Start discovery.'),
+      findsNothing,
+      reason: 'the routine progress prompt duplicates the primary action',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CourseDestinationPanel(
+            body: MapBodyState(
+              definition: discovery,
+              readiness: MapReadiness.alpha,
+              progress: MapProgress.unknown,
+              recommended: false,
+              explanation: 'Saved session needs recovery.',
+              launch: null,
+            ),
+            onLaunch: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Saved session needs recovery.'), findsOneWidget);
+  });
+
   testWidgets('integrated_phone_map_fits_without_page_scrolling', (
     tester,
   ) async {
@@ -520,6 +570,132 @@ void main() {
           );
           expect(navigationBar.selectedIndex, 0);
         }
+      }
+    }
+  });
+
+  testWidgets('integrated_phone_targets_are_safe_or_picker_only', (
+    tester,
+  ) async {
+    final app = await _mountMapApp(tester);
+    addTearDown(() => _unmountMapApp(tester, app));
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+
+    for (final size in const [Size(390, 844), Size(360, 640)]) {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = size;
+      for (final scale in const [1.0, 2.0, 3.0]) {
+        tester.platformDispatcher.textScaleFactorTestValue = scale;
+        await tester.pump();
+
+        final canvasFinder = find.byType(CourseMapCanvas);
+        final canvas = tester.widget<CourseMapCanvas>(canvasFinder);
+        final mapRect = tester.getRect(canvasFinder);
+        final bodyIds = canvas.state.bodies
+            .map((body) => body.definition.id)
+            .toList(growable: false);
+        final activeIds = bodyIds
+            .where(
+              (id) => find
+                  .byKey(ValueKey('destination-semantics-$id'))
+                  .evaluate()
+                  .isNotEmpty,
+            )
+            .toList(growable: false);
+
+        expect(
+          activeIds.isEmpty || activeIds.length == bodyIds.length,
+          isTrue,
+          reason:
+              'all map targets are active together or all are absent at '
+              '${size.width}x${size.height}, text=$scale',
+        );
+        if (activeIds.isNotEmpty) {
+          final targetRects = <Rect>[];
+          for (final id in activeIds) {
+            final target = find.byKey(ValueKey('destination-semantics-$id'));
+            expect(
+              target.hitTestable(),
+              findsOneWidget,
+              reason: '$id must be tappable at $size, text=$scale',
+            );
+            final targetSize = tester.getSize(target);
+            final rect = tester.getRect(target);
+            expect(targetSize.width, greaterThanOrEqualTo(48), reason: id);
+            expect(targetSize.height, greaterThanOrEqualTo(48), reason: id);
+            expect(rect.left, greaterThanOrEqualTo(mapRect.left), reason: id);
+            expect(rect.top, greaterThanOrEqualTo(mapRect.top), reason: id);
+            expect(rect.right, lessThanOrEqualTo(mapRect.right), reason: id);
+            expect(rect.bottom, lessThanOrEqualTo(mapRect.bottom), reason: id);
+            for (final placed in targetRects) {
+              expect(
+                placed.overlaps(rect),
+                isFalse,
+                reason:
+                    '$id overlaps another active map target at $size, '
+                    'text=$scale',
+              );
+            }
+            targetRects.add(rect);
+          }
+          for (final id in bodyIds) {
+            await tester.tap(find.byKey(ValueKey('destination-semantics-$id')));
+            await tester.pump();
+            expect(
+              tester.widget<CourseMapCanvas>(canvasFinder).selectedBodyId,
+              id,
+              reason: '$id inspection must work through its map target',
+            );
+          }
+        } else {
+          expect(
+            find.descendant(of: canvasFinder, matching: find.byType(InkWell)),
+            findsNothing,
+            reason: 'a cramped decorative map has no focusable tap targets',
+          );
+          expect(
+            find.descendant(
+              of: canvasFinder,
+              matching: find.byType(FocusTraversalOrder),
+            ),
+            findsNothing,
+            reason: 'decorative bodies are absent from map focus traversal',
+          );
+          for (final id in bodyIds) {
+            expect(
+              find.byKey(ValueKey('destination-semantics-$id')),
+              findsNothing,
+            );
+          }
+          await tester.tap(find.byKey(const ValueKey('destination-picker')));
+          await tester.pumpAndSettle();
+          for (final body in canvas.state.bodies) {
+            final row = find.widgetWithText(ListTile, body.definition.title);
+            await tester.ensureVisible(row);
+            expect(
+              row.hitTestable(),
+              findsOneWidget,
+              reason: '${body.definition.id} remains reachable in the picker',
+            );
+          }
+          final lastBody = canvas.state.bodies.last;
+          final lastRow = find.widgetWithText(
+            ListTile,
+            lastBody.definition.title,
+          );
+          await tester.tap(lastRow);
+          await tester.pumpAndSettle();
+          expect(
+            tester.widget<CourseMapCanvas>(canvasFinder).selectedBodyId,
+            lastBody.definition.id,
+            reason: 'the picker remains an actionable alternative',
+          );
+        }
+        expect(tester.takeException(), isNull, reason: '$size text=$scale');
       }
     }
   });

@@ -29,7 +29,10 @@ class CourseMapCanvas extends StatelessWidget {
       final height = constraints.hasBoundedHeight
           ? constraints.maxHeight
           : (width / .94).clamp(260.0, 520.0).toDouble();
-      final placements = _authoredPlacements(state.bodies, width, height);
+      final activePlacements = _authoredPlacements(state.bodies, width, height);
+      final placements =
+          activePlacements ??
+          _decorativePlacements(state.bodies, width, height);
       final current = state.currentBodyId;
       final hasCurrentBody =
           current != null &&
@@ -40,7 +43,7 @@ class CourseMapCanvas extends StatelessWidget {
         child: CourseMapMotion(
           anchor: currentRect?.center,
           child: Stack(
-            clipBehavior: Clip.none,
+            clipBehavior: Clip.hardEdge,
             fit: StackFit.expand,
             children: [
               Positioned.fill(
@@ -53,13 +56,19 @@ class CourseMapCanvas extends StatelessWidget {
                         ..sort(),
                 ),
               ),
-              for (final body in state.bodies)
-                _interactiveBody(
-                  body,
-                  placements[body.definition.id]!.center,
-                  state.bodies.indexOf(body),
-                  focusOrderOffset,
-                ),
+              for (var index = 0; index < state.bodies.length; index++)
+                if (activePlacements != null)
+                  _interactiveBody(
+                    state.bodies[index],
+                    placements[state.bodies[index].definition.id]!.center,
+                    index,
+                    focusOrderOffset,
+                  )
+                else
+                  _decorativeBody(
+                    state.bodies[index],
+                    placements[state.bodies[index].definition.id]!.center,
+                  ),
               if (state.currentBodyId case final currentId?)
                 if (state.bodies.any((body) => body.definition.id == currentId))
                   Positioned.fromRect(
@@ -221,6 +230,67 @@ class CourseMapCanvas extends StatelessWidget {
     );
   }
 
+  Widget _decorativeBody(MapBodyState body, Offset center) {
+    final current = body.definition.id == state.currentBodyId;
+    final selected = body.definition.id == selectedBodyId;
+    return Positioned(
+      left: center.dx - 20,
+      top: center.dy - 20,
+      width: 40,
+      height: 40,
+      child: IgnorePointer(
+        child: ExcludeSemantics(
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Container(
+                key: ValueKey('body-art-frame-${body.definition.id}'),
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: current
+                      ? Border.all(
+                          color: SpaceCourseColors.currentRing,
+                          width: 3,
+                        )
+                      : null,
+                  boxShadow: selected
+                      ? [
+                          const BoxShadow(
+                            color: SpaceCourseColors.currentRing,
+                            blurRadius: 10,
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Opacity(
+                  key: ValueKey('body-art-${body.definition.id}'),
+                  opacity: _artOpacity(body.readiness),
+                  child: _bodyIllustration(
+                    body.definition.id,
+                    body.definition.role,
+                    40,
+                  ),
+                ),
+              ),
+              if (body.recommended)
+                const Positioned(
+                  left: 0,
+                  top: 0,
+                  child: Icon(
+                    Icons.star,
+                    size: 12,
+                    color: SpaceCourseColors.ship,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   static String _role(MapBodyRole role) => switch (role) {
     MapBodyRole.planet => 'planet',
     MapBodyRole.moon => 'moon',
@@ -367,7 +437,7 @@ class CourseMapCanvas extends StatelessWidget {
   };
 }
 
-Map<String, Rect> _authoredPlacements(
+Map<String, Rect>? _authoredPlacements(
   List<MapBodyState> bodies,
   double width,
   double height,
@@ -387,16 +457,20 @@ Map<String, Rect> _authoredPlacements(
         );
       }
     }
-    final chosen = candidates.firstWhere((center) {
-      if (center.dx < 24 ||
-          center.dx > width - 24 ||
-          center.dy < 24 ||
-          center.dy > height - 24) {
-        return false;
-      }
+    Offset? chosen;
+    for (final center in candidates) {
       final candidate = Rect.fromCenter(center: center, width: 48, height: 48);
-      return result.values.every((placed) => !placed.overlaps(candidate));
-    }, orElse: () => authored);
+      if (candidate.left < 0 ||
+          candidate.top < 0 ||
+          candidate.right > width ||
+          candidate.bottom > height ||
+          result.values.any((placed) => placed.overlaps(candidate))) {
+        continue;
+      }
+      chosen = center;
+      break;
+    }
+    if (chosen == null) return _gridPlacements(bodies, width, height);
     result[body.definition.id] = Rect.fromCenter(
       center: chosen,
       width: 48,
@@ -404,6 +478,78 @@ Map<String, Rect> _authoredPlacements(
     );
   }
   return result;
+}
+
+Map<String, Rect>? _gridPlacements(
+  List<MapBodyState> bodies,
+  double width,
+  double height,
+) {
+  if (bodies.isEmpty) return {};
+  const targetSize = 48.0;
+  const gap = 8.0;
+  final columns = math.min(
+    bodies.length,
+    ((width + gap) / (targetSize + gap)).floor(),
+  );
+  if (columns < 1) return null;
+  final rows = (bodies.length + columns - 1) ~/ columns;
+  final availableRows = ((height + gap) / (targetSize + gap)).floor();
+  if (rows > availableRows) return null;
+
+  final cellWidth = width / columns;
+  final cellHeight = height / rows;
+  if (cellWidth < targetSize || cellHeight < targetSize) return null;
+
+  final placements = <String, Rect>{};
+  for (var index = 0; index < bodies.length; index++) {
+    final center = Offset(
+      (index % columns + .5) * cellWidth,
+      (index ~/ columns + .5) * cellHeight,
+    );
+    final rect = Rect.fromCenter(
+      center: center,
+      width: targetSize,
+      height: targetSize,
+    );
+    if (rect.left < 0 ||
+        rect.top < 0 ||
+        rect.right > width ||
+        rect.bottom > height ||
+        placements.values.any((placed) => placed.overlaps(rect))) {
+      return null;
+    }
+    placements[bodies[index].definition.id] = rect;
+  }
+  return placements;
+}
+
+Map<String, Rect> _decorativePlacements(
+  List<MapBodyState> bodies,
+  double width,
+  double height,
+) {
+  if (bodies.isEmpty) return {};
+  final size = math.min(40.0, math.min(width, height));
+  final halfSize = size / 2;
+
+  double boundedCoordinate(double value, double extent) {
+    final lower = math.min(halfSize, extent / 2);
+    final upper = math.max(extent - halfSize, extent / 2);
+    return value.clamp(lower, upper).toDouble();
+  }
+
+  return {
+    for (final body in bodies)
+      body.definition.id: Rect.fromCenter(
+        center: Offset(
+          boundedCoordinate(body.definition.x * width, width),
+          boundedCoordinate(body.definition.y * height, height),
+        ),
+        width: size,
+        height: size,
+      ),
+  };
 }
 
 class _OrbitalArt extends StatelessWidget {
