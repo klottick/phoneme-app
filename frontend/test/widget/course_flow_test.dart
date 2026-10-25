@@ -110,7 +110,7 @@ void main() {
     expect(find.text('I speak English'), findsOneWidget);
     await tester.tap(find.text('Start English → French'));
     await tester.pumpAndSettle();
-    expect(find.text('All destinations'), findsOneWidget);
+    expect(find.byKey(const ValueKey('destination-picker')), findsOneWidget);
     await tester.tap(find.text('Games').last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Word Match'));

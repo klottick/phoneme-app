@@ -73,7 +73,7 @@ void main() {
     await _verifyRenderedArtwork(tester, state);
     expect(
       find.byKey(const ValueKey('destination-semantics-discovery')),
-      findsNothing,
+      findsOneWidget,
     );
     expect(
       tester
@@ -81,7 +81,10 @@ void main() {
           .opacity,
       .55,
     );
-    expect(find.byIcon(Icons.schedule), findsNothing);
+    expect(
+      find.byIcon(Icons.schedule),
+      findsNWidgets(system.bodies.where((body) => body.planned).length),
+    );
     expect(tester.takeException(), isNull);
   });
 

@@ -144,6 +144,7 @@ void main() {
     );
     router.go('/home');
     await tester.pumpAndSettle();
+    await openMapTools(tester);
     await tester.ensureVisible(find.text('Open discovery recovery'));
     await tester.tap(find.text('Open discovery recovery'));
     await tester.pumpAndSettle();
@@ -804,7 +805,8 @@ void main() {
       expect(storeProviderReads, 0);
       expect(databaseOpenCalls, 0);
       expect(audio.requests, isEmpty);
-  });
+    },
+  );
 
   testWidgets('comparison_home_entry_survives_independent_progress_error', (
     tester,
@@ -828,6 +830,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byType(CourseMapScreen), findsOneWidget);
+    await openMapTools(tester);
     expect(find.text('Retry loading progress'), findsOneWidget);
   });
 
@@ -1058,6 +1061,7 @@ void main() {
     expect(find.byType(CourseMapScreen), findsOneWidget);
     await _inspectMixedComparison(tester);
     expect(find.textContaining('Destination unavailable'), findsOneWidget);
+    await openMapTools(tester);
     await tester.ensureVisible(find.text('Open mixed comparison recovery'));
     final retryAck = await _runRealAsync(tester, () async => Completer<void>());
     fixture.store.nextLoadAck = retryAck;
@@ -1116,6 +1120,7 @@ void main() {
     expect(find.byType(CourseMapScreen), findsOneWidget);
     await _inspectMixedComparison(tester);
     expect(find.text('Open destination'), findsOneWidget);
+    await openMapTools(tester);
     expect(find.text('Retry loading progress'), findsOneWidget);
   });
 
@@ -1162,7 +1167,10 @@ void main() {
     await tester.pumpAndSettle();
     await _inspectMixedComparison(tester);
     expect(find.text('Review comparison'), findsOneWidget);
+    await openMapTools(tester);
     expect(find.text('Open comparison practice'), findsOneWidget);
+    await tester.tap(find.byTooltip('Close tools'));
+    await tester.pumpAndSettle();
     expect(find.text('Practise again'), findsNothing);
   });
 
@@ -1254,7 +1262,10 @@ void main() {
     await tester.pump();
     await _inspectMixedComparison(tester);
     expect(find.text('Review comparison'), findsOneWidget);
+    await openMapTools(tester);
     expect(find.text('Open comparison practice'), findsOneWidget);
+    await tester.tap(find.byTooltip('Close tools'));
+    await tester.pumpAndSettle();
     expect(find.text('Practise again'), findsNothing);
     late GoRouter router;
 
@@ -1298,6 +1309,7 @@ void main() {
     loadAck = await _runRealAsync(tester, () async => Completer<void>());
     fixture.store.nextLoadAck = loadAck;
     final practiceDoorwayLoadCalls = fixture.store.loadCalls;
+    await openMapTools(tester);
     await tester.ensureVisible(find.text('Open comparison practice'));
     await tester.tap(find.text('Open comparison practice'));
     await tester.pump();
@@ -1465,6 +1477,7 @@ void main() {
     for (final (title, id) in legacy) {
       router.pop();
       await tester.pumpAndSettle();
+      await openMapTools(tester);
       final legacyDisclosure = find.text('Legacy practice');
       if (find.text(title).evaluate().isEmpty) {
         await tester.ensureVisible(legacyDisclosure);
@@ -2355,6 +2368,7 @@ void main() {
     await tester.runAsync(() => failedLoadAck.future);
     await tester.pumpAndSettle();
     await _inspectMixedComparison(tester);
+    await openMapTools(tester);
     expect(find.text('Open mixed comparison recovery'), findsOneWidget);
     expect(find.text('Comparison pairs attempted: 10/10'), findsNothing);
     expect(find.text('Comparison pairs attempted: 1/10'), findsNothing);
@@ -2824,13 +2838,12 @@ void main() {
 
 Future<void> _inspectMixedComparison(WidgetTester tester) async {
   await tester.pumpAndSettle();
-  final disclosure = find.byKey(const ValueKey('destination-list-disclosure'));
-  if (disclosure.evaluate().isNotEmpty) {
-    await tester.ensureVisible(disclosure);
-    await tester.tap(disclosure);
-    await tester.pumpAndSettle();
-  }
-  final destination = find.text('Mixed comparison practice');
+  await tester.tap(find.byKey(const ValueKey('destination-picker')));
+  await tester.pumpAndSettle();
+  final destination = find.widgetWithText(
+    ListTile,
+    'Mixed comparison practice',
+  );
   await tester.ensureVisible(destination);
   await tester.tap(destination);
   await tester.pumpAndSettle();

@@ -9,28 +9,38 @@ import '../support/course_learning_widget_store.dart';
 import '../support/map_motion_test_support.dart';
 
 Override _comparisonStateOverride() =>
-    comparisonLearningStateProvider.overrideWith((ref) async =>
-        ComparisonLearningState.empty(ComparisonProfileScope(
-            courseId: 'en-fr', owner: LearningOwner.guest())));
+    comparisonLearningStateProvider.overrideWith(
+      (ref) async => ComparisonLearningState.empty(
+        ComparisonProfileScope(courseId: 'en-fr', owner: LearningOwner.guest()),
+      ),
+    );
 
 void main() {
-  setUp(() =>
-      SharedPreferences.setMockInitialValues({'selected_course_id': 'en-fr'}));
-  testWidgets('course home opens discovery before legacy practice',
-      (tester) async {
+  setUp(
+    () =>
+        SharedPreferences.setMockInitialValues({'selected_course_id': 'en-fr'}),
+  );
+  testWidgets('course home opens discovery before legacy practice', (
+    tester,
+  ) async {
     disableMapMotion(tester);
-    await tester.pumpWidget(ProviderScope(overrides: [
-      courseLearningStoreProvider
-          .overrideWithValue(CourseLearningWidgetStore()),
-      _comparisonStateOverride(),
-    ], child: const LinguistApp()));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(
+            CourseLearningWidgetStore(),
+          ),
+          _comparisonStateOverride(),
+        ],
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
-    final disclosure = find.text('All destinations');
-    await tester.ensureVisible(disclosure);
-    await tester.tap(disclosure);
+    final picker = find.byKey(const ValueKey('destination-picker'));
+    await tester.tap(picker);
     await tester.pumpAndSettle();
     final discoveryEntry = find.widgetWithText(ListTile, 'Hear the difference');
-    await tester.ensureVisible(discoveryEntry);
+    expect(discoveryEntry.hitTestable(), findsOneWidget);
     await tester.tap(discoveryEntry);
     await tester.pumpAndSettle();
     final discover = find.text('Start lesson');
@@ -42,11 +52,17 @@ void main() {
   });
   testWidgets('course progress and settings remain accessible', (tester) async {
     disableMapMotion(tester);
-    await tester.pumpWidget(ProviderScope(overrides: [
-      courseLearningStoreProvider
-          .overrideWithValue(CourseLearningWidgetStore()),
-      _comparisonStateOverride(),
-    ], child: const LinguistApp()));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          courseLearningStoreProvider.overrideWithValue(
+            CourseLearningWidgetStore(),
+          ),
+          _comparisonStateOverride(),
+        ],
+        child: const LinguistApp(),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
@@ -57,7 +73,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Discovery lessons: 0/1 complete'), findsOneWidget);
     expect(
-        find.text('Existing lessons (includes discovery pilot): 0/5 complete'),
-        findsOneWidget);
+      find.text('Existing lessons (includes discovery pilot): 0/5 complete'),
+      findsOneWidget,
+    );
   });
 }

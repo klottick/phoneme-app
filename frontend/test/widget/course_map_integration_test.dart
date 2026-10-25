@@ -362,9 +362,7 @@ Future<void> _unmountRecommendationMap(
 Future<void> _inspectMapBody(WidgetTester tester, String title) async {
   final body = find.widgetWithText(ListTile, title);
   if (body.evaluate().isEmpty) {
-    final disclosure = find.text('All destinations');
-    await tester.ensureVisible(disclosure);
-    await tester.tap(disclosure);
+    await tester.tap(find.byKey(const ValueKey('destination-picker')));
     await tester.pumpAndSettle();
   }
   await tester.ensureVisible(body);
@@ -493,18 +491,8 @@ void main() {
       expect(recommendation.definition.id, 'discovery');
       expect(recommendation.progress, MapProgress.resumable);
       expect(
-        find.text('Recommended next: Hear the difference'),
-        findsOneWidget,
-      );
-      expect(find.text('Continue your saved run.'), findsOneWidget);
-      expect(
-        find.bySemanticsLabel(
-          'Recommended next: Hear the difference. Continue your saved run.',
-        ),
-        findsOneWidget,
-      );
-      await tester.ensureVisible(
-        find.text('Recommended next: Hear the difference'),
+        find.bySemanticsLabel(RegExp('Hear the difference.*recommended next')),
+        findsWidgets,
       );
 
       final currentBodyId = projected.currentBodyId;
@@ -515,13 +503,7 @@ void main() {
           comparisonBefore.slots[uyDemoComparisonActivityId]!;
       await _inspectMapBody(tester, 'Compare /u/ and /y/');
       expect(find.text('Continue comparison'), findsOneWidget);
-      expect(
-        find.text('Recommended next: Hear the difference'),
-        findsOneWidget,
-      );
-      await tester.ensureVisible(
-        find.text('Recommended next: Hear the difference'),
-      );
+      expect(find.text('Next · Hear the difference'), findsOneWidget);
       expect(
         app.container
             .read(courseMapStateProvider('en-fr-u-y-system'))
@@ -568,13 +550,10 @@ void main() {
       );
       expect(recommendation.definition.id, 'comparison');
       expect(recommendation.progress, MapProgress.notStarted);
+      expect(find.text('Recommended'), findsOneWidget);
       expect(
-        find.text('Recommended next: Compare /u/ and /y/'),
-        findsOneWidget,
-      );
-      expect(
-        find.text('First available incomplete main lesson.'),
-        findsOneWidget,
+        find.bySemanticsLabel(RegExp('Compare /u/ and /y/.*recommended next')),
+        findsWidgets,
       );
     },
   );
@@ -667,13 +646,11 @@ void main() {
       );
       expect(projected.allAvailableMainComplete, isTrue);
       expect(projected.bodies.where((body) => body.recommended), isEmpty);
-      expect(
-        find.text('Available main lessons: 3/3 available complete'),
-        findsOneWidget,
-      );
+      expect(find.text('Lessons 3/3 complete · 0 remaining'), findsOneWidget);
+      expect(find.text('Discovery 1/1 complete · 0 remaining'), findsOneWidget);
       expect(
         find.text('All currently available lessons complete.'),
-        findsOneWidget,
+        findsNothing,
       );
       expect(find.textContaining('Recommended next:'), findsNothing);
       expect(find.textContaining('%'), findsNothing);
@@ -681,15 +658,12 @@ void main() {
         (
           'context',
           'Find sounds in context',
-          'Planned listening lesson: find /u/ and /y/ in context. '
-              '"Coming soon"; the existing mixed sentence-hunt group is not '
-              'remapped into this planet.',
+          'Find /u/ and /y/ in listening contexts.',
         ),
         (
           'checkpoint',
           'Checkpoint',
-          'Planned assessment. "Coming soon"; no unassessed zero score is '
-              'offered.',
+          'Assessment checkpoint for this sound contrast.',
         ),
       ]) {
         expect(
@@ -779,8 +753,7 @@ void main() {
 
     final planned = find.widgetWithText(ListTile, 'Compare /u/ and /y/');
     if (planned.evaluate().isEmpty) {
-      await tester.ensureVisible(find.text('All destinations'));
-      await tester.tap(find.text('All destinations'));
+      await tester.tap(find.byKey(const ValueKey('destination-picker')));
       await tester.pumpAndSettle();
     }
     await tester.ensureVisible(
@@ -789,12 +762,7 @@ void main() {
     await tester.tap(find.widgetWithText(ListTile, 'Compare /u/ and /y/'));
     await tester.pumpAndSettle();
     expect(find.text('Start comparison'), findsOneWidget);
-    expect(
-      find.text(
-        'Demo practice: this authored comparison content has not had qualified French review. It is practice, not an assessment.',
-      ),
-      findsOneWidget,
-    );
+    expect(find.text('Practice comparing /u/ and /y/.'), findsOneWidget);
     expect(
       router.state.uri.path,
       '/home',
@@ -807,11 +775,7 @@ void main() {
           'inspection and optional practice do not move the ship or write learning',
     );
 
-    await tester.ensureVisible(
-      find.widgetWithText(ListTile, 'Hear the difference'),
-    );
-    await tester.tap(find.widgetWithText(ListTile, 'Hear the difference'));
-    await tester.pumpAndSettle();
+    await _inspectMapBody(tester, 'Hear the difference');
     final launch = find.text('Start lesson');
     await tester.ensureVisible(launch);
     await tester.tap(launch);
@@ -884,10 +848,7 @@ void main() {
     expect(store.committedState.completions, hasLength(1));
     expect(router.state.uri.path, '/home');
     await tester.pumpAndSettle();
-    expect(
-      find.text('Available main lessons: 1/3 available complete'),
-      findsOneWidget,
-    );
+    expect(find.text('Lessons 1/3 complete · 2 remaining'), findsOneWidget);
     expect(
       find.text('All currently available lessons complete.'),
       findsNothing,
@@ -898,10 +859,9 @@ void main() {
     final currentBody = container
         .read(courseMapStateProvider('en-fr-u-y-system'))
         .currentBodyId;
-    final destinationDisclosure = find.text('All destinations');
-    if (destinationDisclosure.evaluate().isNotEmpty) {
-      await tester.ensureVisible(destinationDisclosure);
-      await tester.tap(destinationDisclosure);
+    final destinationPicker = find.byKey(const ValueKey('destination-picker'));
+    if (destinationPicker.evaluate().isNotEmpty) {
+      await tester.tap(destinationPicker);
       await tester.pumpAndSettle();
     }
     final optionalPractice = find.widgetWithText(

@@ -455,7 +455,6 @@ void main() {
             );
             await expectTarget(starChart, 'Star chart');
             await expectTarget(settings, 'Settings');
-            await expectTarget(recovery, 'Open discovery recovery');
 
             Future<void> focusByKeyboard(Finder control, String label) async {
               bool hasKeyboardFocus() =>
@@ -478,6 +477,8 @@ void main() {
             }
 
             await focusByKeyboard(starChart, 'Star chart');
+            await openMapTools(tester);
+            await expectTarget(recovery, 'Open discovery recovery');
             await focusByKeyboard(recovery, 'Open discovery recovery');
           } finally {
             await tester.pumpWidget(const SizedBox.shrink());

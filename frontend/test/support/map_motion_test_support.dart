@@ -20,19 +20,36 @@ Future<void> openMapDiscoveryAction(
   await tester.pumpAndSettle();
   final actionButton = find.widgetWithText(FilledButton, action);
   if (actionButton.evaluate().isEmpty) {
-    final disclosure = find.text('All destinations');
-    if (disclosure.evaluate().isNotEmpty) {
-      await tester.ensureVisible(disclosure);
-      await tester.tap(disclosure);
-      await tester.pumpAndSettle();
-    }
-    final entry = find.widgetWithText(ListTile, 'Hear the difference');
-    await tester.ensureVisible(entry);
-    await tester.tap(entry);
-    await tester.pumpAndSettle();
+    await selectMapDestination(tester, 'Hear the difference');
   }
   final launch = find.widgetWithText(FilledButton, action);
   await tester.ensureVisible(launch);
   await tester.tap(launch);
+  await tester.pumpAndSettle();
+}
+
+/// Selects a destination without launching its primary action.
+Future<void> selectMapDestination(WidgetTester tester, String title) async {
+  await tester.pumpAndSettle();
+  final pickerHeading = find.byKey(
+    const ValueKey('destination-picker-heading'),
+  );
+  if (pickerHeading.evaluate().isEmpty) {
+    await tester.tap(find.byKey(const ValueKey('destination-picker')));
+    await tester.pumpAndSettle();
+  }
+  final entry = find.widgetWithText(ListTile, title);
+  await tester.ensureVisible(entry);
+  await tester.tap(entry);
+  await tester.pumpAndSettle();
+}
+
+/// Opens the secondary tools sheet when a test needs recovery controls.
+Future<void> openMapTools(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  if (find.byKey(const ValueKey('map-tools-heading')).evaluate().isNotEmpty) {
+    return;
+  }
+  await tester.tap(find.byTooltip('More learning tools'));
   await tester.pumpAndSettle();
 }

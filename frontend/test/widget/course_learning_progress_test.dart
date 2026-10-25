@@ -30,6 +30,7 @@ import 'package:linguist/src/features/home/home_screen.dart';
 import '../support/sentence_hunt_fixtures.dart';
 import '../support/sqlite_learning_test_harness.dart';
 import '../support/course_learning_widget_store.dart';
+import '../support/map_motion_test_support.dart';
 
 class _UnexpectedSyncStore extends CourseLearningWidgetStore {
   _UnexpectedSyncStore({required super.scope});
@@ -548,10 +549,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(
-      find.text('Discovery lessons: 0/1 available complete'),
-      findsOneWidget,
-    );
+    expect(find.text('Discovery 0/1 complete · 1 remaining'), findsOneWidget);
     expect(find.text('Start lesson'), findsOneWidget);
   });
 
@@ -569,6 +567,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await openMapTools(tester);
     expect(find.text('Retry loading progress'), findsOneWidget);
     await tester.ensureVisible(find.text('Retry loading progress'));
     await tester.tap(find.text('Retry loading progress'));
@@ -645,6 +644,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
+        if (surface == 'home') await openMapTools(tester);
         await tester.ensureVisible(find.text('Retry loading progress'));
         await tester.tap(find.text('Retry loading progress'));
         await tester.pump();

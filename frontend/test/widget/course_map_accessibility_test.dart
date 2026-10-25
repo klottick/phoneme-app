@@ -4,6 +4,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/features/course_map/course_map_catalogue.dart';
 import 'package:linguist/src/features/course_map/course_map_canvas.dart';
+import 'package:linguist/src/features/course_map/course_destination_list.dart';
 import 'package:linguist/src/features/course_map/course_map_state.dart';
 import 'package:linguist/src/features/course_map/course_system_view.dart';
 import 'package:linguist/src/features/course_map/french_space_map.dart';
@@ -75,61 +76,87 @@ void main() {
           ),
         );
         expect(tester.takeException(), isNull, reason: '$size at scale $scale');
-        final fallback =
-            size.width < 370 ||
-            scale > 1.2 ||
-            frenchSpaceSystems.first.bodies.any(
-              (body) => body.title.length > 32,
+        final picker = find.byKey(const ValueKey('destination-picker'));
+        expect(
+          picker.hitTestable(),
+          findsOneWidget,
+          reason: '$size scale $scale',
+        );
+        expect(tester.getSize(picker).shortestSide, greaterThanOrEqualTo(48));
+        final targets = [
+          for (final id in frenchSpaceSystems.first.bodies.map(
+            (body) => body.id,
+          ))
+            find.byKey(ValueKey('destination-semantics-$id')),
+        ];
+        final canvas = tester.getRect(find.byType(CourseMapCanvas));
+        final rects = targets.map(tester.getRect).toList();
+        expect(rects.length, 10);
+        for (var left = 0; left < rects.length; left++) {
+          expect(rects[left].width, greaterThanOrEqualTo(47.9));
+          expect(rects[left].height, greaterThanOrEqualTo(47.9));
+          final body = frenchSpaceSystems.first.bodies[left];
+          final authored = Offset(
+            body.x * canvas.width,
+            body.y * canvas.height,
+          );
+          expect(
+            (rects[left].center - canvas.topLeft - authored).distance,
+            lessThanOrEqualTo(32),
+            reason: '${body.id} remains near its authored location at $size',
+          );
+          for (var right = left + 1; right < rects.length; right++) {
+            expect(
+              rects[left].overlaps(rects[right]),
+              isFalse,
+              reason:
+                  '$size scale $scale targets $left ${rects[left]} and $right ${rects[right]}',
             );
-        if (!fallback) {
-          final listButton = find.text('All destinations');
-          await tester.ensureVisible(listButton);
-          expect(listButton, findsOneWidget, reason: '$size at scale $scale');
-          final button = tester.widget<OutlinedButton>(
-            find.ancestor(
-              of: listButton,
-              matching: find.byType(OutlinedButton),
-            ),
-          );
-          expect(
-            button.style?.minimumSize?.resolve({})?.height ?? 0,
-            greaterThanOrEqualTo(48),
-          );
-        }
-        if (size.width == 390 && scale == 1) {
-          final targets = [
-            for (final id in frenchSpaceSystems.first.bodies.map(
-              (body) => body.id,
-            ))
-              find.byKey(ValueKey('destination-semantics-$id')),
-          ];
-          final rects = targets.map(tester.getRect).toList();
-          expect(rects.length, 10);
-          for (var left = 0; left < rects.length; left++) {
-            expect(rects[left].width, greaterThanOrEqualTo(48));
-            expect(rects[left].height, greaterThanOrEqualTo(48));
-            for (var right = left + 1; right < rects.length; right++) {
-              expect(rects[left].overlaps(rects[right]), isFalse);
-            }
           }
-        } else {
-          expect(
-            find.byKey(const ValueKey('destination-semantics-discovery')),
-            findsNothing,
-          );
-          expect(
-            find.byKey(const ValueKey('destination-list-semantics-discovery')),
-            findsOneWidget,
-            reason: 'linear fallback visible at $size scale $scale',
-          );
         }
         final launch = find.text('Open destination');
-        await tester.ensureVisible(launch);
         expect(
-          launch,
+          launch.hitTestable(),
           findsOneWidget,
           reason: 'launch reachable at $size scale $scale',
         );
+        final launchButton = find.ancestor(
+          of: launch,
+          matching: find.byType(FilledButton),
+        );
+        expect(tester.getSize(launchButton).height, greaterThanOrEqualTo(48));
+
+        await tester.tap(picker);
+        await tester.pumpAndSettle();
+        expect(find.byType(CourseDestinationList), findsOneWidget);
+        final pickerHeading = tester.widget<Semantics>(
+          find.byKey(const ValueKey('destination-picker-heading')),
+        );
+        expect(pickerHeading.properties.label, 'Choose a destination');
+        expect(pickerHeading.properties.header, isTrue);
+        final comparison = find.widgetWithText(ListTile, 'Compare /u/ and /y/');
+        final listScrollViewport = tester.getRect(
+          find.ancestor(
+            of: find.byType(CourseDestinationList),
+            matching: find.byType(SingleChildScrollView),
+          ),
+        );
+        if (size == const Size(360, 640) && scale == 3) {
+          expect(
+            listScrollViewport.height,
+            greaterThanOrEqualTo(200),
+            reason: 'the large-text title must not starve the destination list',
+          );
+        }
+        await tester.ensureVisible(comparison);
+        expect(
+          comparison.hitTestable(),
+          findsOneWidget,
+          reason:
+              '$size scale $scale list ${tester.getRect(comparison)} viewport $listScrollViewport',
+        );
+        await tester.tap(find.byTooltip('Close destinations'));
+        await tester.pumpAndSettle();
       }
     }
   });
@@ -175,14 +202,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.tab);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    expect(inspected.last, 'discovery');
-    expect(launches, 1);
-    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    expect(inspected.last, 'comparison');
-    expect(launches, 1);
+    expect(find.byType(CourseDestinationList), findsOneWidget);
 
     for (var index = 0; index < authoredOrder.length; index++) {
       final semantics = tester.widget<Semantics>(
@@ -197,25 +217,11 @@ void main() {
       find.byKey(const ValueKey('destination-panel-action-semantics')),
     );
     expect((actionSemantics.properties.sortKey as OrdinalSortKey).order, 10);
-    final disclosureSemantics = tester.widget<Semantics>(
-      find.byKey(const ValueKey('destination-list-disclosure-semantics')),
-    );
-    expect(
-      (disclosureSemantics.properties.sortKey as OrdinalSortKey).order,
-      11,
-    );
-    for (var index = 0; index < authoredOrder.length; index++) {
-      final semantics = tester.widget<Semantics>(
-        find.byKey(
-          ValueKey('destination-list-semantics-${authoredOrder[index]}'),
-        ),
-      );
-      expect(
-        (semantics.properties.sortKey as OrdinalSortKey).order,
-        (12 + index).toDouble(),
-      );
-    }
     expect(inspected, containsAllInOrder(['discovery', 'comparison']));
+    final pickerSemantics = tester.widget<Semantics>(
+      find.byKey(const ValueKey('destination-picker-semantics')),
+    );
+    expect((pickerSemantics.properties.sortKey as OrdinalSortKey).order, 11);
   });
 
   testWidgets('destinations_announce_state_and_role', (tester) async {
@@ -265,7 +271,7 @@ void main() {
     );
   });
 
-  testWidgets('long_authored_title_uses_linear_list_without_map_overlap', (
+  testWidgets('long_authored_title_is_available_in_explicit_picker', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -280,19 +286,16 @@ void main() {
         ),
       ),
     );
-    expect(
-      find.byKey(const ValueKey('destination-list-semantics-discovery')),
-      findsOneWidget,
-    );
     const title =
         'Hear the difference with this intentionally long destination name';
-    await tester.ensureVisible(find.text(title).last);
-    expect(find.text(title), findsNWidgets(2));
-    expect(find.byKey(const ValueKey('map-list-fallback')), findsOneWidget);
     expect(
       find.byKey(const ValueKey('destination-semantics-discovery')),
-      findsNothing,
+      findsOneWidget,
     );
+    await tester.tap(find.byKey(const ValueKey('destination-picker')));
+    await tester.pumpAndSettle();
+    expect(find.text(title), findsWidgets);
+    expect(find.widgetWithText(ListTile, title).hitTestable(), findsOneWidget);
   });
 
   testWidgets('orbital_controls_follow_authored_positions_and_stay_stable', (
@@ -408,11 +411,11 @@ void main() {
     );
     final fullHeight = await heightFor(full);
     final oneBodyHeight = await heightFor(oneBody);
-    expect(fullHeight, lessThanOrEqualTo(420));
+    expect(fullHeight, lessThanOrEqualTo(520));
     expect(fullHeight, oneBodyHeight);
   });
 
-  testWidgets('linear_fallback_precedes_compact_noninteractive_scene', (
+  testWidgets('large_text_keeps_map_action_and_explicit_picker_available', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(360, 640);
@@ -439,16 +442,21 @@ void main() {
     );
     final canvas = tester.getRect(find.byType(CourseMapCanvas));
     final action = tester.getRect(find.text('Open destination'));
-    final firstLinearEntry = tester.getRect(
-      find.byKey(const ValueKey('destination-list-semantics-discovery')),
+    expect(action.top, greaterThanOrEqualTo(0));
+    expect(action.bottom, lessThanOrEqualTo(640));
+    expect(canvas.top, greaterThanOrEqualTo(0));
+    expect(canvas.bottom, lessThanOrEqualTo(640));
+    expect(
+      find.byKey(const ValueKey('destination-picker')).hitTestable(),
+      findsOneWidget,
     );
-    expect(action.bottom, lessThan(canvas.top));
-    expect(firstLinearEntry.top, lessThan(canvas.top));
-    expect(canvas.height, lessThanOrEqualTo(240));
     expect(
       find.byKey(const ValueKey('destination-semantics-discovery')),
-      findsNothing,
+      findsOneWidget,
     );
+    await tester.tap(find.byKey(const ValueKey('destination-picker')));
+    await tester.pumpAndSettle();
+    expect(find.byType(CourseDestinationList), findsOneWidget);
   });
 
   testWidgets('light_and_dark_controls_use_theme_readable_surfaces', (
@@ -486,11 +494,8 @@ void main() {
       expect(_contrast(panelColor, surface), greaterThanOrEqualTo(4.5));
       expect(find.byType(CustomPaint), findsWidgets);
       if (find.byType(ListTile).evaluate().isEmpty) {
-        final disclosure = find.byKey(
-          const ValueKey('destination-list-disclosure'),
-        );
-        await tester.ensureVisible(disclosure);
-        await tester.tap(disclosure);
+        final picker = find.byKey(const ValueKey('destination-picker'));
+        await tester.tap(picker);
         await tester.pumpAndSettle();
       }
       final selectedTile = tester.widget<ListTile>(find.byType(ListTile).first);

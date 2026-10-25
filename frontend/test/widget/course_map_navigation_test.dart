@@ -7,7 +7,6 @@ import 'package:linguist/src/core/course/comparison_learning_state.dart';
 import 'package:linguist/src/core/course/course_audio.dart';
 import 'package:linguist/src/core/course/course_learning_providers.dart';
 import 'package:linguist/src/core/course/french_sentence_package.dart';
-import 'package:linguist/src/core/course/french_course.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_providers.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
 import 'package:linguist/src/features/course/comparison_lesson_screen.dart';
@@ -16,6 +15,7 @@ import 'package:linguist/src/features/course_map/course_map_screen.dart';
 import 'package:linguist/src/features/course_map/course_map_catalogue.dart';
 import 'package:linguist/src/features/course_map/course_map_canvas.dart';
 import 'package:linguist/src/features/course_map/course_map_motion.dart';
+import 'package:linguist/src/features/course_map/course_map_providers.dart';
 import 'package:linguist/src/features/course_map/course_map_state.dart';
 import 'package:linguist/src/features/course_map/course_destination_panel.dart';
 import 'package:linguist/src/features/course_map/french_space_map.dart';
@@ -111,9 +111,7 @@ Future<void> _pumpApp(WidgetTester tester) async {
 Future<void> _inspectDiscovery(WidgetTester tester) async {
   final tile = find.widgetWithText(ListTile, 'Hear the difference');
   if (tile.evaluate().isEmpty) {
-    final disclosure = find.text('All destinations');
-    await tester.ensureVisible(disclosure);
-    await tester.tap(disclosure);
+    await tester.tap(find.byKey(const ValueKey('destination-picker')));
     await _pumpApp(tester);
   }
   await tester.ensureVisible(tile);
@@ -126,6 +124,80 @@ void main() {
     () =>
         SharedPreferences.setMockInitialValues({'selected_course_id': 'en-fr'}),
   );
+
+  testWidgets('healthy_map_and_primary_action_fit_every_approved_viewport', (
+    tester,
+  ) async {
+    final app = await _mountMapApp(tester);
+    addTearDown(() => _unmountMapApp(tester, app));
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+
+    for (final size in const [
+      Size(1280, 800),
+      Size(390, 844),
+      Size(360, 640),
+    ]) {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 1;
+      await tester.pump();
+
+      final appBar = tester.getRect(find.byType(AppBar));
+      final navigation = tester.getRect(find.byType(NavigationBar));
+      final map = tester.getRect(find.byType(CourseMapCanvas));
+      final action = tester.getRect(
+        find.ancestor(
+          of: find.text('Start lesson'),
+          matching: find.byType(FilledButton),
+        ),
+      );
+      expect(
+        map.top,
+        greaterThanOrEqualTo(appBar.bottom),
+        reason: '$size map top',
+      );
+      expect(
+        map.bottom,
+        lessThanOrEqualTo(navigation.top),
+        reason: '$size map bottom',
+      );
+      expect(
+        action.top,
+        greaterThanOrEqualTo(appBar.bottom),
+        reason: '$size action top',
+      );
+      expect(
+        action.bottom,
+        lessThanOrEqualTo(navigation.top),
+        reason: '$size action bottom',
+      );
+      expect(
+        find.byKey(const ValueKey('destination-semantics-discovery')),
+        findsOneWidget,
+        reason: 'active destinations at $size',
+      );
+      expect(
+        find.byTooltip('More learning tools'),
+        findsOneWidget,
+        reason: 'secondary tools entry at $size',
+      );
+      expect(find.text('Open discovery recovery'), findsNothing);
+      expect(find.text('Legacy practice'), findsNothing);
+      expect(tester.takeException(), isNull, reason: '$size layout');
+    }
+
+    await tester.tap(find.byTooltip('More learning tools'));
+    await _pumpApp(tester);
+    expect(find.text('Open discovery recovery'), findsOneWidget);
+    expect(find.text('Legacy practice'), findsOneWidget);
+    expect(find.text('Start lesson'), findsOneWidget);
+    await tester.tap(find.byTooltip('Close tools'));
+    await _pumpApp(tester);
+  });
 
   test('routes only validated typed targets', () {
     expect(
@@ -171,31 +243,32 @@ void main() {
     expect(courseMapLocation(MapTarget.arcade, MapLaunch.review), isNull);
   });
 
-  testWidgets('system view composes recovery footer in its scroll surface', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: CourseSystemView(
-            state: CourseMapState(
-              systemId: 'en-fr-u-y-system',
-              bodies: const [],
-              currentBodyId: null,
-              allAvailableMainComplete: false,
-              completedLegacyLessonIds: null,
+  testWidgets(
+    'system view omits recovery footer and offers destination picker',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CourseSystemView(
+              state: CourseMapState(
+                systemId: 'en-fr-u-y-system',
+                bodies: const [],
+                currentBodyId: null,
+                allAvailableMainComplete: false,
+                completedLegacyLessonIds: null,
+              ),
+              selectedBodyId: null,
+              onInspect: (_) {},
+              onLaunch: (_) {},
             ),
-            selectedBodyId: null,
-            onInspect: (_) {},
-            onLaunch: (_) {},
-            footer: const Text('Recovery and legacy access'),
           ),
         ),
-      ),
-    );
-    expect(find.text('Recovery and legacy access'), findsOneWidget);
-    expect(find.byType(SingleChildScrollView), findsOneWidget);
-  });
+      );
+      expect(find.byKey(const ValueKey('destination-picker')), findsOneWidget);
+      expect(find.text('Recovery and legacy access'), findsNothing);
+      expect(find.byType(SingleChildScrollView), findsNothing);
+    },
+  );
 
   testWidgets('onboarding_enters_live_map', (tester) async {
     final app = await _mountMapApp(tester);
@@ -349,7 +422,7 @@ void main() {
     }
   });
 
-  testWidgets('integrated_map_footer_and_root_fit_phone_viewport_matrix', (
+  testWidgets('integrated_phone_map_fits_without_page_scrolling', (
     tester,
   ) async {
     final app = await _mountMapApp(tester);
@@ -372,20 +445,61 @@ void main() {
           await tester.pump();
 
           expect(find.byType(CourseMapScreen), findsOneWidget);
-          expect(find.text('Hear the difference'), findsWidgets);
           expect(find.text('Start lesson'), findsOneWidget);
           expect(find.text('Map'), findsWidgets);
-          expect(
-            tester.getSize(find.text('Start lesson').first).height,
-            greaterThan(0),
-          );
-          await tester.ensureVisible(find.text('Start lesson'));
+          final appBar = tester.getRect(find.byType(AppBar));
+          final navigation = tester.getRect(find.byType(NavigationBar));
+          final map = tester.getRect(find.byType(CourseMapCanvas));
           final launchButton = find.ancestor(
             of: find.text('Start lesson'),
             matching: find.byType(FilledButton),
           );
           expect(launchButton.hitTestable(), findsOneWidget);
-          expect(tester.getSize(launchButton).height, greaterThanOrEqualTo(48));
+          final launchRect = tester.getRect(launchButton);
+          expect(launchRect.top, greaterThanOrEqualTo(appBar.bottom));
+          expect(launchRect.bottom, lessThanOrEqualTo(navigation.top));
+          expect(map.top, greaterThanOrEqualTo(appBar.bottom));
+          expect(map.bottom, lessThanOrEqualTo(navigation.top));
+          expect(
+            find.ancestor(
+              of: find.byType(CourseMapCanvas),
+              matching: find.byType(SingleChildScrollView),
+            ),
+            findsNothing,
+            reason: 'the map itself is not inside a scrolling page',
+          );
+          expect(
+            tester
+                .getSize(find.byKey(const ValueKey('destination-picker')))
+                .shortestSide,
+            greaterThanOrEqualTo(48),
+          );
+          expect(
+            find.byKey(const ValueKey('destination-picker')).hitTestable(),
+            findsOneWidget,
+          );
+          if (scale == 1) {
+            expect(
+              find
+                  .byKey(const ValueKey('destination-semantics-discovery'))
+                  .hitTestable(),
+              findsOneWidget,
+              reason:
+                  'map destination at ${width}x$height scale=$scale dpr=$pixelRatio map=$map',
+            );
+          } else {
+            expect(
+              find.byKey(const ValueKey('destination-picker')).hitTestable(),
+              findsOneWidget,
+              reason:
+                  'large-text destination picker at ${width}x$height scale=$scale dpr=$pixelRatio map=$map',
+            );
+          }
+          expect(find.text('Open discovery recovery'), findsNothing);
+          expect(find.text('Legacy practice'), findsNothing);
+          expect(find.byTooltip('Star chart'), findsOneWidget);
+          expect(find.byTooltip('Settings'), findsOneWidget);
+          expect(tester.takeException(), isNull);
           for (final target in [
             ...find
                 .byType(IconButton)
@@ -401,69 +515,6 @@ void main() {
             expect(size.width, greaterThanOrEqualTo(48), reason: '$target');
             expect(size.height, greaterThanOrEqualTo(48), reason: '$target');
           }
-
-          for (final label in const [
-            'Open discovery recovery',
-            'Open mixed comparison recovery',
-            'View sentence sections',
-            'Retry mixed comparison catalogue',
-            'Retry sentence catalogue',
-            'Retry map content registry',
-          ]) {
-            final control = find.text(label);
-            await tester.ensureVisible(control);
-            expect(control, findsOneWidget);
-            expect(
-              control.hitTestable(),
-              findsOneWidget,
-              reason: '$label at ${width}x$height scale=$scale dpr=$pixelRatio',
-            );
-          }
-
-          final legacyDisclosure = find.text('Legacy practice');
-          await tester.ensureVisible(legacyDisclosure);
-          expect(legacyDisclosure.hitTestable(), findsOneWidget);
-          if (find.text('Keep French vowels steady').evaluate().isEmpty) {
-            await tester.tap(legacyDisclosure);
-            await _pumpApp(tester);
-          }
-          for (final lesson in frenchLessons.where(
-            (lesson) => lesson.id != 'en-fr-u-y',
-          )) {
-            final title = find.text(lesson.title);
-            await tester.ensureVisible(title);
-            await _pumpApp(tester);
-            expect(title.hitTestable(), findsOneWidget, reason: lesson.title);
-          }
-
-          final toolsDisclosure = find.text('Practice tools');
-          await tester.ensureVisible(toolsDisclosure);
-          expect(toolsDisclosure.hitTestable(), findsOneWidget);
-          if (find.text('IPA Explorer').evaluate().isEmpty) {
-            await tester.tap(toolsDisclosure);
-            await _pumpApp(tester);
-          }
-          for (final label in const [
-            'IPA Explorer',
-            'Listening Drill',
-            'Phoneme ID',
-            'Phoneme Test',
-            'Audio Compare',
-            'Profile',
-            'Settings',
-          ]) {
-            final control = find.text(label);
-            await tester.ensureVisible(control);
-            expect(
-              control.hitTestable(),
-              findsOneWidget,
-              reason: '$label at ${width}x$height scale=$scale dpr=$pixelRatio',
-            );
-          }
-
-          final mapTab = find.text('Map').last;
-          await tester.ensureVisible(mapTab);
-          expect(mapTab.hitTestable(), findsOneWidget);
           final navigationBar = tester.widget<NavigationBar>(
             find.byType(NavigationBar),
           );
@@ -520,7 +571,9 @@ void main() {
     final app = await _mountMapApp(tester);
     addTearDown(() => _unmountMapApp(tester, app));
 
-    await tester.ensureVisible(find.text('Legacy practice'));
+    await tester.tap(find.byTooltip('More learning tools'));
+    await _pumpApp(tester);
+    expect(find.text('Open discovery recovery'), findsOneWidget);
     await tester.tap(find.text('Legacy practice'));
     await _pumpApp(tester);
     final legacyLesson = find.widgetWithText(
@@ -535,6 +588,11 @@ void main() {
     expect(find.byType(NavigationBar), findsNothing);
     app.router.pop();
     await _pumpApp(tester);
+
+    if (find.text('Practice tools').evaluate().isEmpty) {
+      await tester.tap(find.byTooltip('More learning tools'));
+      await _pumpApp(tester);
+    }
 
     final tools = find.ancestor(
       of: find.text('Practice tools'),
@@ -561,7 +619,13 @@ void main() {
       expect(find.byType(NavigationBar), findsNothing);
       app.router.pop();
       await _pumpApp(tester);
+      if (find.text('Practice tools').evaluate().isEmpty) {
+        await tester.tap(find.byTooltip('More learning tools'));
+        await _pumpApp(tester);
+      }
     }
+    await tester.tap(find.byTooltip('Close tools'));
+    await _pumpApp(tester);
     await tester.tap(find.byTooltip('Settings'));
     await _pumpApp(tester);
     expect(app.router.state.uri.path, '/settings');
@@ -636,18 +700,23 @@ void main() {
     expect(app.audio.requests, isEmpty);
   });
 
-  testWidgets('actual_router_covers_and_disposes_normal_motion_map', (
+  testWidgets('actual_router_covers_static_map_without_background_tickers', (
     tester,
   ) async {
     final app = await _mountMapApp(tester, normalMotion: true);
     addTearDown(() => _unmountMapApp(tester, app));
-    final ship = find.byKey(
-      const ValueKey('map-motion-ship'),
-      skipOffstage: false,
+
+    expect(find.byType(CourseMapScreen), findsOneWidget);
+    expect(find.byType(CourseMapMotion), findsOneWidget);
+    expect(find.byKey(const ValueKey('map-motion-toggle')), findsNothing);
+    expect(
+      find.bySemanticsLabel(
+        RegExp('Current location: Hear the difference, stationary'),
+      ),
+      findsOneWidget,
     );
-    expect(ship, findsOneWidget);
-    await tester.pump(const Duration(seconds: 2));
-    final beforeLesson = tester.getCenter(ship);
+    await tester.pump(const Duration(seconds: 90));
+    expect(tester.binding.transientCallbackCount, 0);
 
     app.router.push('/course-lesson/en-fr-u-y');
     await _pumpApp(tester);
@@ -655,427 +724,136 @@ void main() {
     expect(find.byType(CourseMapScreen, skipOffstage: false), findsOneWidget);
     expect(find.byType(CourseMapMotion, skipOffstage: false), findsOneWidget);
     expect(tester.binding.transientCallbackCount, 0);
-    await tester.pump(const Duration(seconds: 3));
-    expect(tester.binding.transientCallbackCount, 0);
 
     app.router.pop();
     await _pumpApp(tester);
-    await tester.pump(const Duration(seconds: 2));
-    expect(ship, findsOneWidget);
-    final resumed = tester.getCenter(ship);
-    expect(resumed, isNot(beforeLesson));
-
-    final mapContext = tester.element(find.byType(CourseMapScreen));
-    showDialog<void>(
-      context: mapContext,
-      builder: (context) => AlertDialog(
-        title: const Text('Motion cover'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close cover'),
-          ),
-        ],
-      ),
-    );
-    await _pumpApp(tester);
-    final modalCovered = tester.getCenter(ship);
-    await tester.pump(const Duration(seconds: 3));
-    expect(tester.getCenter(ship), modalCovered);
+    expect(app.router.state.uri.path, '/home');
+    expect(find.byType(CourseMapScreen), findsOneWidget);
+    expect(find.byKey(const ValueKey('map-motion-toggle')), findsNothing);
     expect(tester.binding.transientCallbackCount, 0);
-    await tester.tap(find.text('Close cover'));
-    await _pumpApp(tester);
-    await tester.pump(const Duration(seconds: 2));
-    expect(tester.getCenter(ship), isNot(modalCovered));
 
     app.router.go('/arcade');
     await _pumpApp(tester);
     expect(app.router.state.uri.path, '/arcade');
     expect(find.byType(CourseMapScreen, skipOffstage: false), findsNothing);
-    expect(
-      find.byKey(const ValueKey('map-motion-ship'), skipOffstage: false),
-      findsNothing,
-    );
+    expect(find.byType(CourseMapMotion, skipOffstage: false), findsNothing);
     expect(tester.binding.transientCallbackCount, 0);
   });
 
-  testWidgets(
-    'production_home_scroll_stops_offscreen_map_motion_and_resumes_in_place',
-    (tester) async {
-      tester.view.physicalSize = const Size(390, 844);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      addTearDown(
-        () => tester.platformDispatcher.clearTextScaleFactorTestValue(),
-      );
+  testWidgets('map_has_no_page_scroll_and_inspection_only_changes_selection', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
 
-      final app = await _mountMapApp(tester, normalMotion: true);
-      addTearDown(() => _unmountMapApp(tester, app));
-      expect(app.router.state.uri.path, '/home');
+    final app = await _mountMapApp(tester);
+    addTearDown(() => _unmountMapApp(tester, app));
+    final map = find.byType(CourseMapCanvas);
+    final mapBeforeDrag = tester.getRect(map);
+    await tester.drag(map, const Offset(0, -180));
+    await tester.pump();
+    expect(tester.getRect(map), mapBeforeDrag);
 
-      final motion = find.byType(CourseMapMotion);
-      final ship = find.byKey(const ValueKey('map-motion-ship'));
-      expect(motion, findsOneWidget);
-      await tester.pump(const Duration(milliseconds: 600));
-      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
+    final currentBodyId = app.container
+        .read(courseMapStateProvider('en-fr-u-y-system'))
+        .currentBodyId;
+    final comparison = find.byKey(
+      const ValueKey('destination-semantics-comparison'),
+    );
+    expect(comparison.hitTestable(), findsOneWidget);
+    await tester.tap(comparison);
+    await _pumpApp(tester);
 
-      await tester.ensureVisible(find.text('Open discovery recovery'));
-      await tester.pump();
-      await tester.pump();
+    final canvas = tester.widget<CourseMapCanvas>(map);
+    expect(canvas.selectedBodyId, 'comparison');
+    expect(canvas.state.currentBodyId, currentBodyId);
+    expect(app.router.state.uri.path, '/home');
+    expect(app.store.submitted, isEmpty);
+    expect(app.audio.requests, isEmpty);
+    expect(find.text('Start comparison').hitTestable(), findsOneWidget);
+    expect(find.byKey(const ValueKey('map-motion-toggle')), findsNothing);
+  });
 
-      final scrollViewport = tester.getRect(find.byType(SingleChildScrollView));
-      final hiddenMap = tester.getRect(find.byType(CourseMapCanvas));
-      expect(
-        hiddenMap.intersect(scrollViewport).isEmpty,
-        isTrue,
-        reason: 'the production map canvas must be outside its scroll viewport',
-      );
-      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isFalse);
-      final hiddenShip = tester.getCenter(ship);
-      final hiddenRelative =
-          hiddenShip - tester.getTopLeft(find.byType(CourseMapCanvas));
+  testWidgets('large_text_picker_preserves_selection_and_owner_reset', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(
+      () => tester.platformDispatcher.clearTextScaleFactorTestValue(),
+    );
 
-      await tester.pump(const Duration(milliseconds: 600));
-      expect(tester.getCenter(ship), hiddenShip);
-      expect(tester.binding.transientCallbackCount, 0);
+    final app = await _mountMapApp(tester);
+    addTearDown(() => _unmountMapApp(tester, app));
+    expect(
+      tester.takeException(),
+      isNull,
+      reason:
+          'large text keeps the compact inspector and action from overflowing',
+    );
+    final mapBefore = tester.getRect(find.byType(CourseMapCanvas));
+    final action = find.text('Start lesson');
+    expect(action.hitTestable(), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('destination-picker')).hitTestable(),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('map-motion-toggle')), findsNothing);
 
-      await tester.ensureVisible(ship);
-      await tester.pump();
-      await tester.pump();
-      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
-      final resumedRelative =
-          tester.getCenter(ship) -
-          tester.getTopLeft(find.byType(CourseMapCanvas));
-      expect((resumedRelative - hiddenRelative).distance, lessThan(0.1));
-
-      await tester.pump(const Duration(milliseconds: 600));
-      expect(
-        tester.getCenter(ship) -
-            tester.getTopLeft(find.byType(CourseMapCanvas)),
-        isNot(hiddenRelative),
-      );
-
-      await tester.ensureVisible(find.byTooltip('Pause map motion'));
-      await tester.pump();
-      await tester.tap(find.byTooltip('Pause map motion'));
-      await tester.pump();
-      expect(find.byTooltip('Play map motion'), findsOneWidget);
-      final pausedRelative =
-          tester.getCenter(ship) -
-          tester.getTopLeft(find.byType(CourseMapCanvas));
-
-      final disclosure = find.text('All destinations');
-      await tester.ensureVisible(disclosure);
-      await tester.tap(disclosure);
-      await tester.pump();
-      final comparison = find.widgetWithText(ListTile, 'Compare /u/ and /y/');
-      await tester.ensureVisible(comparison);
-      await tester.tap(comparison);
-      await tester.pump();
-      await tester.ensureVisible(find.text('SOUND SYSTEM'));
-      await tester.pump();
-      await tester.pump();
-      expect(find.byTooltip('Play map motion'), findsOneWidget);
-      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
-      final selectedPausedRelative =
-          tester.getCenter(ship) -
-          tester.getTopLeft(find.byType(CourseMapCanvas));
-      expect((selectedPausedRelative - pausedRelative).distance, lessThan(0.1));
-
-      await tester.ensureVisible(find.text('Open discovery recovery'));
-      await tester.pump();
-      await tester.pump();
-      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isFalse);
-      final hiddenPausedShip = tester.getCenter(ship);
-      await tester.pump(const Duration(milliseconds: 600));
-      expect(tester.getCenter(ship), hiddenPausedShip);
-
-      await tester.ensureVisible(ship);
-      await tester.pump();
-      await tester.pump();
-      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
-      expect(find.byTooltip('Play map motion'), findsOneWidget);
-      final stillPausedRelative =
-          tester.getCenter(ship) -
-          tester.getTopLeft(find.byType(CourseMapCanvas));
-      expect((stillPausedRelative - pausedRelative).distance, lessThan(0.1));
-
-      await tester.ensureVisible(find.byTooltip('Play map motion'));
-      await tester.pump();
-      await tester.tap(find.byTooltip('Play map motion'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 600));
-      expect(
-        tester.getCenter(ship) -
-            tester.getTopLeft(find.byType(CourseMapCanvas)),
-        isNot(stillPausedRelative),
-      );
-    },
-  );
-
-  testWidgets(
-    'initial_fallback_below_fold_remeasures_when_viewport_and_text_scale_change',
-    (tester) async {
-      tester.view.physicalSize = const Size(360, 640);
-      tester.view.devicePixelRatio = 1;
-      tester.platformDispatcher.textScaleFactorTestValue = 2;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      addTearDown(
-        () => tester.platformDispatcher.clearTextScaleFactorTestValue(),
-      );
-
-      final app = await _mountMapApp(tester, normalMotion: true);
-      addTearDown(() => _unmountMapApp(tester, app));
-
-      final motion = find.byType(CourseMapMotion);
-      final ship = find.byKey(const ValueKey('map-motion-ship'));
-      expect(find.byKey(const ValueKey('map-list-fallback')), findsOneWidget);
-      expect(motion, findsOneWidget);
-      final scrollViewport = tester.getRect(find.byType(SingleChildScrollView));
-      final hiddenMap = tester.getRect(find.byType(CourseMapCanvas));
-      expect(hiddenMap.intersect(scrollViewport).isEmpty, isTrue);
-      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isFalse);
-      expect(tester.binding.transientCallbackCount, 0);
-      final initialShip = tester.getCenter(ship);
-
-      await tester.pump(const Duration(milliseconds: 600));
-      expect(tester.getCenter(ship), initialShip);
-      expect(tester.binding.transientCallbackCount, 0);
-
-      tester.view.physicalSize = const Size(390, 844);
-      tester.platformDispatcher.textScaleFactorTestValue = 1;
-      await tester.pump();
-      await tester.pump();
-      expect(find.byKey(const ValueKey('map-list-fallback')), findsNothing);
-      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
-      final normalShip = tester.getCenter(ship);
-      await tester.pump(const Duration(milliseconds: 600));
-      expect(tester.getCenter(ship), isNot(normalShip));
-
-      tester.view.physicalSize = const Size(360, 640);
-      tester.platformDispatcher.textScaleFactorTestValue = 2;
-      await tester.pump();
-      await tester.pump();
-      await tester.ensureVisible(find.text('SOUND SYSTEM'));
-      await tester.pump();
-      await tester.pump();
-      expect(find.byKey(const ValueKey('map-list-fallback')), findsOneWidget);
-      final fallbackScrollViewport = tester.getRect(
-        find.byType(SingleChildScrollView),
-      );
-      final fallbackMap = tester.getRect(find.byType(CourseMapCanvas));
-      expect(fallbackMap.intersect(fallbackScrollViewport).isEmpty, isTrue);
-      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isFalse);
-      final resizedFallbackShip = tester.getCenter(ship);
-      await tester.pump(const Duration(milliseconds: 600));
-      expect(tester.getCenter(ship), resizedFallbackShip);
-      expect(tester.binding.transientCallbackCount, 0);
-
-      await tester.ensureVisible(ship);
-      await tester.pump();
-      await tester.pump();
-      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
-      final resumedShip = tester.getCenter(ship);
-      await tester.pump(const Duration(milliseconds: 600));
-      expect(tester.getCenter(ship), isNot(resumedShip));
-    },
-  );
-
-  testWidgets(
-    'responsive_home_reflow_preserves_paused_motion_and_owner_reset',
-    (tester) async {
-      tester.view.physicalSize = const Size(390, 844);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-
-      final app = await _mountMapApp(tester, normalMotion: true);
-      addTearDown(() => _unmountMapApp(tester, app));
-
-      final motion = find.byType(CourseMapMotion);
-      final canvas = find.byType(CourseMapCanvas);
-      final ship = find.byKey(const ValueKey('map-motion-ship'));
-      expect(find.byKey(const ValueKey('map-list-fallback')), findsNothing);
-      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
-
-      var canvasWidget = tester.widget<CourseMapCanvas>(canvas);
-      final currentBodyId = canvasWidget.state.currentBodyId!;
-      final selectedBodyId = canvasWidget.state.bodies
-          .firstWhere((body) => body.definition.id != currentBodyId)
-          .definition
-          .id;
-      final selectableBody = find.byKey(ValueKey('body-art-$selectedBodyId'));
-      await tester.ensureVisible(selectableBody);
-      await tester.tap(selectableBody);
-      await tester.pump();
-      expect(
-        tester.widget<CourseMapCanvas>(canvas).selectedBodyId,
-        selectedBodyId,
-      );
-
-      final pausedMotionState = tester.state(motion);
-      await tester.ensureVisible(find.byTooltip('Pause map motion'));
-      await tester.tap(find.byTooltip('Pause map motion'));
-      await tester.pump();
-      expect(find.byTooltip('Play map motion'), findsOneWidget);
-
-      void expectCurrentAnchorAndSelection() {
-        canvasWidget = tester.widget<CourseMapCanvas>(canvas);
-        expect(canvasWidget.state.currentBodyId, currentBodyId);
-        expect(canvasWidget.selectedBodyId, selectedBodyId);
-        final currentBodyArt = find.byKey(ValueKey('body-art-$currentBodyId'));
-        final currentBodyCenter =
-            tester.getCenter(currentBodyArt) - tester.getTopLeft(canvas);
-        final anchor = tester.widget<CourseMapMotion>(motion).anchor;
-        expect(anchor, isNotNull);
-        expect((anchor! - currentBodyCenter).distance, lessThan(0.1));
-      }
-
-      expectCurrentAnchorAndSelection();
-
-      tester.view.physicalSize = const Size(360, 640);
-      await tester.pump();
-      await tester.pump();
-      expect(find.byKey(const ValueKey('map-list-fallback')), findsOneWidget);
-
-      // Put the fallback map below the viewport, let hidden time pass, then
-      // bring it back onscreen before checking its paused control and identity.
-      await tester.ensureVisible(find.text('SOUND SYSTEM'));
-      await tester.pump();
-      await tester.pump();
-      final viewport = tester.getRect(find.byType(SingleChildScrollView));
-      final hiddenCanvas = tester.getRect(canvas);
-      expect(hiddenCanvas.intersect(viewport).isEmpty, isTrue);
-      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isFalse);
-      final hiddenShipRelative =
-          tester.getCenter(ship) - tester.getTopLeft(canvas);
-      await tester.pump(const Duration(seconds: 5));
-      expect(tester.binding.transientCallbackCount, 0);
-      expect(
-        (tester.getCenter(ship) -
-                tester.getTopLeft(canvas) -
-                hiddenShipRelative)
-            .distance,
-        lessThan(0.1),
-      );
-
-      await tester.ensureVisible(ship);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 120));
-      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
-      expect(find.byTooltip('Play map motion'), findsOneWidget);
-      expect(identical(tester.state(motion), pausedMotionState), isTrue);
-      expectCurrentAnchorAndSelection();
-      final visibleFallbackShipRelative =
-          tester.getCenter(ship) - tester.getTopLeft(canvas);
-      expect(
-        (visibleFallbackShipRelative - hiddenShipRelative).distance,
-        lessThan(0.1),
-      );
-
-      tester.view.physicalSize = const Size(390, 844);
-      await tester.pump();
-      await tester.pump();
-      expect(find.byKey(const ValueKey('map-list-fallback')), findsNothing);
-      await tester.ensureVisible(find.text('SOUND SYSTEM'));
-      await tester.pump();
-      await tester.pump();
-      await tester.ensureVisible(ship);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 120));
-      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
-      expect(find.byTooltip('Play map motion'), findsOneWidget);
-      expect(identical(tester.state(motion), pausedMotionState), isTrue);
-      expectCurrentAnchorAndSelection();
-
-      final stablePausedShipRelative =
-          tester.getCenter(ship) - tester.getTopLeft(canvas);
-      await tester.pump(const Duration(seconds: 5));
-      expect(tester.binding.transientCallbackCount, 0);
-      expect(
-        (tester.getCenter(ship) -
-                tester.getTopLeft(canvas) -
-                stablePausedShipRelative)
-            .distance,
-        lessThan(0.1),
-      );
-
-      await tester.ensureVisible(ship);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 120));
-      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
-      expect(find.byTooltip('Play map motion'), findsOneWidget);
-      expect(identical(tester.state(motion), pausedMotionState), isTrue);
-      await tester.ensureVisible(find.byTooltip('Play map motion'));
-      await tester.tap(find.byTooltip('Play map motion'));
-      await tester.pump();
-      expect(find.byTooltip('Pause map motion'), findsOneWidget);
-      final runningMotionState = tester.state(motion);
-      await tester.ensureVisible(find.text('Open discovery recovery'));
-      await tester.pump();
-      await tester.pump();
-      final runningViewport = tester.getRect(
-        find.byType(SingleChildScrollView),
-      );
-      expect(tester.getRect(canvas).intersect(runningViewport).isEmpty, isTrue);
-      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isFalse);
-      final hiddenRunningShipRelative =
-          tester.getCenter(ship) - tester.getTopLeft(canvas);
-      await tester.pump(const Duration(seconds: 5));
-      expect(tester.binding.transientCallbackCount, 0);
-      expect(
-        (tester.getCenter(ship) -
-                tester.getTopLeft(canvas) -
-                hiddenRunningShipRelative)
-            .distance,
-        lessThan(0.1),
-      );
-
-      await tester.ensureVisible(ship);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 120));
-      expect(TickerMode.valuesOf(tester.element(motion)).enabled, isTrue);
-      expect(find.byTooltip('Pause map motion'), findsOneWidget);
-      expect(identical(tester.state(motion), runningMotionState), isTrue);
-      final resumedRunningShipRelative =
-          tester.getCenter(ship) - tester.getTopLeft(canvas);
-      expect(
-        (resumedRunningShipRelative - hiddenRunningShipRelative).distance,
-        lessThan(0.1),
-      );
-      await tester.pump(const Duration(milliseconds: 600));
-      expect(
-        (tester.getCenter(ship) -
-                tester.getTopLeft(canvas) -
-                resumedRunningShipRelative)
-            .distance,
-        greaterThan(0.1),
-      );
-      await tester.ensureVisible(find.byTooltip('Pause map motion'));
-      await tester.tap(find.byTooltip('Pause map motion'));
-      await tester.pump();
-      expect(find.byTooltip('Play map motion'), findsOneWidget);
-
+    await tester.tap(find.byKey(const ValueKey('destination-picker')));
+    await _pumpApp(tester);
+    final comparison = find.widgetWithText(ListTile, 'Compare /u/ and /y/');
+    await tester.ensureVisible(comparison);
+    expect(comparison.hitTestable(), findsOneWidget);
+    await tester.tap(comparison);
+    await _pumpApp(tester);
+    expect(find.text('Start comparison').hitTestable(), findsOneWidget);
+    expect(tester.getRect(find.byType(CourseMapCanvas)), mapBefore);
+    expect(
       app.container
-          .read(learningAuthScopeProvider.notifier)
-          .observe(
-            owner: LearningOwner.account('responsive-layout-owner'),
-            ready: true,
-          );
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
-      await tester.pump();
-      expect(find.byType(CourseMapMotion), findsOneWidget);
-      expect(identical(tester.state(motion), pausedMotionState), isFalse);
-      expect(find.byTooltip('Pause map motion'), findsOneWidget);
-      canvasWidget = tester.widget<CourseMapCanvas>(canvas);
-      expect(
-        canvasWidget.selectedBodyId,
-        canvasWidget.state.currentBodyId,
-        reason: 'a new owner resets inspection selection to its current body',
-      );
-    },
-  );
+          .read(courseMapStateProvider('en-fr-u-y-system'))
+          .currentBodyId,
+      'discovery',
+    );
+
+    app.container
+        .read(learningAuthScopeProvider.notifier)
+        .observe(
+          owner: LearningOwner.account('responsive-layout-owner'),
+          ready: true,
+        );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
+    final canvas = tester.widget<CourseMapCanvas>(find.byType(CourseMapCanvas));
+    expect(canvas.selectedBodyId, 'discovery');
+    expect(canvas.selectedBodyId, isNot('comparison'));
+    expect(canvas.state.currentBodyId, isNull);
+    expect(tester.binding.transientCallbackCount, 0);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byTooltip('More learning tools'));
+    await _pumpApp(tester);
+    final toolsHeading = tester.widget<Semantics>(
+      find.byKey(const ValueKey('map-tools-heading')),
+    );
+    expect(toolsHeading.properties.label, 'More learning tools');
+    expect(toolsHeading.properties.header, isTrue);
+    final recovery = find.text('Open discovery recovery');
+    final toolsViewport = tester.getRect(
+      find.ancestor(of: recovery, matching: find.byType(SingleChildScrollView)),
+    );
+    expect(
+      toolsViewport.height,
+      greaterThanOrEqualTo(200),
+      reason: 'large-text tools title must leave recovery actions usable',
+    );
+    await tester.ensureVisible(recovery);
+    expect(recovery.hitTestable(), findsOneWidget);
+  });
 }

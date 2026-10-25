@@ -278,14 +278,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(CourseMapScreen), findsOneWidget);
-    final disclosure = find.text('All destinations');
-    if (disclosure.evaluate().isNotEmpty) {
-      await tester.ensureVisible(disclosure);
-      await tester.pumpAndSettle();
-      expect(disclosure.hitTestable(), findsOneWidget);
-      await tester.tap(disclosure);
-      await tester.pumpAndSettle();
-    }
+    await tester.tap(find.byKey(const ValueKey('destination-picker')));
+    await tester.pumpAndSettle();
     final sentenceStation = find.widgetWithText(ListTile, 'Sentence practice');
     expect(sentenceStation, findsOneWidget);
     await tester.ensureVisible(sentenceStation);
@@ -678,11 +672,9 @@ void main() {
     await tester.tap(find.byTooltip('Progress'));
     await tester.pumpAndSettle();
     expect(
-      GoRouter.of(tester.element(find.byType(NavigationBar)))
-          .routeInformationProvider
-          .value
-          .uri
-          .path,
+      GoRouter.of(
+        tester.element(find.byType(NavigationBar)),
+      ).routeInformationProvider.value.uri.path,
       '/course-progress',
       reason: 'the retry is exercised in the real Progress root route',
     );
@@ -1169,13 +1161,8 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byType(CourseMapScreen), findsOneWidget);
-    final destinations = find.text('All destinations');
-    if (destinations.evaluate().isNotEmpty) {
-      await tester.ensureVisible(destinations);
-      await tester.pumpAndSettle();
-      await tester.tap(destinations);
-      await tester.pumpAndSettle();
-    }
+    await tester.tap(find.byKey(const ValueKey('destination-picker')));
+    await tester.pumpAndSettle();
     final sentenceStation = find.widgetWithText(ListTile, 'Sentence practice');
     expect(sentenceStation, findsOneWidget);
     await tester.ensureVisible(sentenceStation);

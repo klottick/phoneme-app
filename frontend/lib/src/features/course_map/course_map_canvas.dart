@@ -26,32 +26,20 @@ class CourseMapCanvas extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       final width = constraints.maxWidth;
-      final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.2;
-      final longTitle = state.bodies.any(
-        (body) => body.definition.title.length > 32,
-      );
-      final fallback = width < 370 || largeText || longTitle;
-      final height = fallback
-          ? math.min(width * .6, 240.0).toDouble()
-          : (width / .94).clamp(320.0, 520.0).toDouble();
-      final placements = fallback
-          ? const <String, Rect>{}
-          : _authoredPlacements(state.bodies, width, height);
+      final height = constraints.hasBoundedHeight
+          ? constraints.maxHeight
+          : (width / .94).clamp(260.0, 520.0).toDouble();
+      final placements = _authoredPlacements(state.bodies, width, height);
       final current = state.currentBodyId;
       final hasCurrentBody =
           current != null &&
           state.bodies.any((body) => body.definition.id == current);
-      final currentRect = !hasCurrentBody
-          ? null
-          : fallback
-          ? _authoredMarkerRect(state, current, width, height)
-          : placements[current];
+      final currentRect = hasCurrentBody ? placements[current] : null;
       return SizedBox(
         height: height,
         child: CourseMapMotion(
           anchor: currentRect?.center,
           child: Stack(
-            key: fallback ? const ValueKey('map-list-fallback') : null,
             clipBehavior: Clip.none,
             fit: StackFit.expand,
             children: [
@@ -66,21 +54,16 @@ class CourseMapCanvas extends StatelessWidget {
                 ),
               ),
               for (final body in state.bodies)
-                if (fallback)
-                  _decorativeBody(body, width, height)
-                else
-                  _interactiveBody(
-                    body,
-                    placements[body.definition.id]!.center,
-                    state.bodies.indexOf(body),
-                    focusOrderOffset,
-                  ),
+                _interactiveBody(
+                  body,
+                  placements[body.definition.id]!.center,
+                  state.bodies.indexOf(body),
+                  focusOrderOffset,
+                ),
               if (state.currentBodyId case final currentId?)
                 if (state.bodies.any((body) => body.definition.id == currentId))
                   Positioned.fromRect(
-                    rect: fallback
-                        ? _authoredMarkerRect(state, currentId, width, height)
-                        : placements[currentId]!,
+                    rect: placements[currentId]!,
                     child: const IgnorePointer(
                       child: ExcludeSemantics(
                         child: Align(
@@ -150,7 +133,7 @@ class CourseMapCanvas extends StatelessWidget {
           key: ValueKey('destination-semantics-${body.definition.id}'),
           sortKey: OrdinalSortKey((offset + index).toDouble()),
           label:
-              '${body.definition.title}, ${_role(body.definition.role)}, ${_availability(body)}${current ? ', current location, stationary' : ''}',
+              '${body.definition.title}, ${_role(body.definition.role)}, ${_availability(body)}${current ? ', current location, stationary' : ''}${body.recommended ? ', recommended next' : ''}',
           button: true,
           selected: body.definition.id == selectedBodyId,
           child: Tooltip(
@@ -210,28 +193,27 @@ class CourseMapCanvas extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (body.recommended)
+                    const Positioned(
+                      left: 0,
+                      top: 0,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: SpaceCourseColors.canvas,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Padding(
+                          padding: EdgeInsets.all(1),
+                          child: Icon(
+                            Icons.star,
+                            size: 12,
+                            color: SpaceCourseColors.ship,
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _decorativeBody(MapBodyState body, double width, double height) {
-    const size = 44.0;
-    return Positioned.fromRect(
-      rect: _authoredMarkerRect(state, body.definition.id, width, height),
-      child: IgnorePointer(
-        child: ExcludeSemantics(
-          child: Opacity(
-            key: ValueKey('body-art-${body.definition.id}'),
-            opacity: _artOpacity(body.readiness),
-            child: _bodyIllustration(
-              body.definition.id,
-              body.definition.role,
-              size,
             ),
           ),
         ),
@@ -397,7 +379,7 @@ Map<String, Rect> _authoredPlacements(
       body.definition.y * height,
     );
     final candidates = <Offset>[authored];
-    for (var radius = 4.0; radius <= 20; radius += 4) {
+    for (var radius = 4.0; radius <= 32; radius += 4) {
       for (var step = 0; step < 32; step++) {
         final angle = step * math.pi / 16;
         candidates.add(
@@ -422,23 +404,6 @@ Map<String, Rect> _authoredPlacements(
     );
   }
   return result;
-}
-
-Rect _authoredMarkerRect(
-  CourseMapState state,
-  String id,
-  double width,
-  double height,
-) {
-  final definition = state.bodies
-      .firstWhere((body) => body.definition.id == id)
-      .definition;
-  const markerSize = 44.0;
-  return Rect.fromCenter(
-    center: Offset(definition.x * width, definition.y * height),
-    width: markerSize,
-    height: markerSize,
-  );
 }
 
 class _OrbitalArt extends StatelessWidget {

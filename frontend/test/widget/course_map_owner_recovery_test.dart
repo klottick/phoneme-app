@@ -240,8 +240,9 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('More learning tools'));
+      await tester.pumpAndSettle();
       final retry = find.text('Retry loading progress');
-      await tester.ensureVisible(retry);
       await tester.tap(retry);
       await tester.pump();
       await storeA.entered.future;
@@ -251,7 +252,6 @@ void main() {
       container.read(epoch.notifier).state++;
       await tester.pumpAndSettle();
       final replacementRetry = find.text('Retry loading progress');
-      await tester.ensureVisible(replacementRetry);
       await tester.tap(replacementRetry);
       await tester.pump();
       await storeB.entered.future;
@@ -298,12 +298,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Hear the difference'), findsWidgets);
+    await tester.tap(find.byTooltip('More learning tools'));
+    await tester.pumpAndSettle();
     expect(find.text('Open mixed comparison recovery'), findsOneWidget);
     expect(find.text('View sentence sections'), findsOneWidget);
     expect(find.text('Retry sentence catalogue'), findsOneWidget);
-    final disclosure = find.text('All destinations');
-    await tester.ensureVisible(disclosure);
-    await tester.tap(disclosure);
+    await tester.tap(find.byTooltip('Close tools'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('destination-picker')));
     await tester.pumpAndSettle();
     final mixedEntry = find.widgetWithText(
       ListTile,
@@ -320,6 +322,8 @@ void main() {
     expect(find.text('Sound comparison practice'), findsOneWidget);
     await tester.pageBack();
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('destination-picker')));
+    await tester.pumpAndSettle();
     final sentenceEntry = find.widgetWithText(ListTile, 'Sentence practice');
     await tester.ensureVisible(sentenceEntry);
     await tester.tap(sentenceEntry);
@@ -331,17 +335,22 @@ void main() {
     expect(find.text('Sentence sound hunt'), findsWidgets);
     await tester.pageBack();
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('View sentence sections'));
+    await tester.tap(find.byTooltip('More learning tools'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('View sentence sections'));
     await tester.pumpAndSettle();
     expect(find.text('Sentence sound hunt'), findsWidgets);
     await tester.pageBack();
     await tester.pumpAndSettle();
+    if (find.text('Practice tools').evaluate().isEmpty) {
+      await tester.tap(find.byTooltip('More learning tools'));
+      await tester.pumpAndSettle();
+    }
     await tester.ensureVisible(find.text('Practice tools'));
-    await tester.pumpAndSettle();
     await tester.tap(find.text('Practice tools'));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('IPA Explorer'), 220);
+    await tester.ensureVisible(find.text('IPA Explorer'));
+    await tester.pumpAndSettle();
     expect(find.text('IPA Explorer'), findsOneWidget);
     expect(find.text('Settings'), findsWidgets);
     expect(tester.takeException(), isNull);
@@ -385,6 +394,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('More learning tools'));
+    await tester.pumpAndSettle();
     expect(find.text('Retry loading progress'), findsOneWidget);
     final failedMap = tester.widget<CourseSystemView>(
       find.byType(CourseSystemView),
@@ -394,7 +405,6 @@ void main() {
     );
     expect(unknownDiscovery.progress, MapProgress.unknown);
     expect(unknownDiscovery.launch, isNull);
-    await tester.ensureVisible(find.text('Retry loading progress'));
     await tester.tap(find.text('Retry loading progress'));
     await tester.pump();
     expect(oldStore.retryLoadCalls, 1);
