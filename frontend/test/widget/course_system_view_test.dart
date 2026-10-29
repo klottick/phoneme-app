@@ -156,26 +156,6 @@ void main() {
         ),
       );
 
-      final oldFocus = Focus.of(tester.element(find.text('Start lesson')));
-      tester.binding.focusManager.primaryFocus?.unfocus();
-      for (
-        var tab = 0;
-        tab < state.bodies.length + 4 && !oldFocus.hasPrimaryFocus;
-        tab++
-      ) {
-        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-        await tester.pump();
-      }
-      expect(
-        oldFocus.hasPrimaryFocus,
-        isTrue,
-        reason: 'Tab reaches the action',
-      );
-      expect(_primaryFocusContainsText(tester, 'Start lesson'), isTrue);
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      expect(launched.map((body) => body.definition.id), ['discovery']);
-      launched.clear();
-
       // Use the real map target to replace the inspector while its outgoing
       // button remains painted during AnimatedSwitcher’s exit.
       final comparisonTarget = find.ancestor(
@@ -195,20 +175,36 @@ void main() {
       expect(oldPanel, findsOneWidget);
       expect(currentPanel, findsOneWidget);
 
-      final retiringFocus = Focus.of(tester.element(find.text('Start lesson')));
       expect(
-        retiringFocus.canRequestFocus,
-        isFalse,
-        reason: 'retiring controls must leave keyboard traversal',
+        find.text('Start lesson', skipOffstage: false),
+        findsOneWidget,
+        reason: 'the outgoing action remains painted during the transition',
       );
-      retiringFocus.requestFocus();
-      await tester.pump();
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      expect(retiringFocus.hasPrimaryFocus, isFalse);
+      expect(
+        find.text('Start comparison', skipOffstage: false),
+        findsOneWidget,
+      );
+      tester.binding.focusManager.primaryFocus?.unfocus();
+      var retiringActionFocused = false;
+      for (var tab = 0; tab < state.bodies.length + 8; tab++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        if (_primaryFocusContainsText(tester, 'Start lesson')) {
+          retiringActionFocused = true;
+          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+          await tester.pump();
+          break;
+        }
+      }
       expect(
         launched,
         isEmpty,
-        reason: 'the old destination cannot be launched',
+        reason: 'keyboard activation cannot launch the retiring destination',
+      );
+      expect(
+        retiringActionFocused,
+        isFalse,
+        reason: 'keyboard traversal skips the retiring action',
       );
 
       // The current action stays interactive while both transition children
