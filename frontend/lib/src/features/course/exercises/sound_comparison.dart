@@ -10,6 +10,7 @@ class SoundComparison extends StatelessWidget {
     required Set<ComparisonSample> heardSamples,
     this.playingSample,
     this.selectedRelation,
+    this.answerAcknowledged = false,
     required this.onListen,
     required this.onAnswer,
   }) : heardSamples = Set.unmodifiable(heardSamples);
@@ -18,6 +19,7 @@ class SoundComparison extends StatelessWidget {
   final Set<ComparisonSample> heardSamples;
   final ComparisonSample? playingSample;
   final PhonemeRelation? selectedRelation;
+  final bool answerAcknowledged;
   final ValueChanged<ComparisonSample> onListen;
   final ValueChanged<PhonemeRelation> onAnswer;
 
@@ -86,7 +88,9 @@ class SoundComparison extends StatelessWidget {
     final String label = sample == ComparisonSample.a
         ? 'Listen to sample A'
         : 'Listen to sample B';
-    final String status = playing
+    final String status = answerAcknowledged
+        ? 'Answered'
+        : playing
         ? 'Playing'
         : heard
         ? 'Heard'
@@ -117,11 +121,14 @@ class SoundComparison extends StatelessWidget {
             const SizedBox(height: 8),
             Text(label, textAlign: TextAlign.center),
             const SizedBox(height: 4),
-            ExcludeSemantics(
-              child: Text(
-                status,
-                style: Theme.of(context).textTheme.labelMedium,
-                textAlign: TextAlign.center,
+            Semantics(
+              value: status,
+              child: ExcludeSemantics(
+                child: Text(
+                  status,
+                  style: Theme.of(context).textTheme.labelMedium,
+                  textAlign: TextAlign.center,
+                ),
               ),
             ),
           ],

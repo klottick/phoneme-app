@@ -394,6 +394,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     _currentPlaybackRequest = null;
     _selectedSound = null;
     _store = next;
+    _learningState = null;
     _fence = ExerciseLifecycleFence();
     _hearingGrants = ExerciseAudioGrants<AttemptAudioSource>(
       requiredSamples: {null},

@@ -2007,6 +2007,58 @@ void main() {
       },
     );
 
+    testWidgets(
+      'failed same-scope store replacements never show retired progress',
+      (tester) async {
+        final ownerA = CourseLearningWidgetStore();
+        final savedA = LessonSectionSession(
+          itemIds: discoveryItemIds,
+          sessionId: 'owner-a-failed-replacement',
+        );
+        savedA.submit(true);
+        savedA.advance();
+        savedA.submit(false);
+        savedA.advance();
+        savedA.submit(true);
+        savedA.advance();
+        seedStoreSession(ownerA, savedA);
+
+        final ownerB = CourseLearningWidgetStore()..failLoad = true;
+        expect(ownerA.scope, ownerB.scope);
+        Widget app(CourseLearningWidgetStore owner) => ProviderScope(
+          overrides: [courseLearningStoreProvider.overrideWithValue(owner)],
+          child: const MaterialApp(
+            home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
+          ),
+        );
+
+        await tester.pumpWidget(app(ownerA));
+        await tester.pumpAndSettle();
+        expect(find.text('3/10 completed · 7 remaining'), findsOneWidget);
+
+        await tester.pumpWidget(app(ownerB));
+        await tester.pumpAndSettle();
+        expect(find.text('Retry loading'), findsOneWidget);
+        expect(
+          find.text('3/10 completed · 7 remaining'),
+          findsNothing,
+          reason: 'same-scope replacement load failure has no current ACK',
+        );
+        expect(find.textContaining('/10 completed'), findsNothing);
+
+        ownerA.failLoad = true;
+        await tester.pumpWidget(app(ownerA));
+        await tester.pumpAndSettle();
+        expect(find.text('Retry loading'), findsOneWidget);
+        expect(
+          find.textContaining('/10 completed'),
+          findsNothing,
+          reason: 'A → B failure → A failure cannot resurrect old progress',
+        );
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+
     testWidgets('account provider replacement loads the new owner state '
         'and old in-flight saves cannot touch it', (tester) async {
       final ownerA = CourseLearningWidgetStore();

@@ -1269,6 +1269,7 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
           heardSamples: _grants.heardSamples,
           playingSample: _playing ? _playback?.sample : null,
           selectedRelation: _selected,
+          answerAcknowledged: session.answered,
           onListen: _listen,
           onAnswer: _answer,
         ),

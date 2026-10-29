@@ -2862,6 +2862,146 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets(
+    'sample status stays on each labeled button and resets on fresh prompts',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final h = await harness(tester);
+      final containers = <ProviderContainer>[];
+      addTearDown(() {
+        for (final container in containers) {
+          cleanup(container, h.audio);
+        }
+      });
+
+      ProviderContainer container = await _mountComparison(
+        tester,
+        store: h.store,
+        audio: h.audio,
+        catalogue: catalogue,
+      );
+      containers.add(container);
+
+      String statusOnButton(String label) {
+        final Finder button = find.bySemanticsLabel(label);
+        expect(button, findsOneWidget, reason: 'one semantic button: $label');
+        final data = tester.getSemantics(button).getSemanticsData();
+        expect(data.label, label);
+        return data.value;
+      }
+
+      expect(statusOnButton('Listen to sample A'), 'Not heard');
+      expect(statusOnButton('Listen to sample B'), 'Not heard');
+      expect(find.bySemanticsLabel('Not heard'), findsNothing);
+      expect(
+        tester
+            .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Same'))
+            .onPressed,
+        isNull,
+        reason: 'a fresh pair still requires both recordings',
+      );
+
+      final exercise = catalogue.exercises.first;
+      for (final sample in [
+        ('Listen to sample A', exercise.sampleA.referenceId),
+        ('Listen to sample B', exercise.sampleB.referenceId),
+      ]) {
+        await tester.tap(find.text(sample.$1));
+        await tester.pump();
+        expect(statusOnButton(sample.$1), 'Playing');
+        h.audio.completeNext(
+          CourseAudioResult.completed(
+            referenceId: sample.$2,
+            source: CourseAudioSource.unverifiedRecording,
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+      }
+      expect(statusOnButton('Listen to sample A'), 'Heard');
+      expect(statusOnButton('Listen to sample B'), 'Heard');
+
+      final relation = exercise.expectedRelation;
+      await tester.tap(
+        find.text(relation == PhonemeRelation.same ? 'Same' : 'Different'),
+      );
+      await _readSnapshot(tester, h.store);
+      for (var i = 0; i < 20 && find.text('Continue').evaluate().isEmpty; i++) {
+        await tester.pump();
+      }
+      expect(find.text('Continue'), findsOneWidget);
+      expect(
+        tester
+            .widget<SoundComparison>(find.byType(SoundComparison))
+            .state
+            .answered,
+        isTrue,
+      );
+      expect(statusOnButton('Listen to sample A'), 'Answered');
+      expect(statusOnButton('Listen to sample B'), 'Answered');
+      expect(find.bySemanticsLabel('Answered'), findsNothing);
+      expect(
+        tester
+            .widget<ElevatedButton>(
+              find.widgetWithText(ElevatedButton, 'Listen to sample A'),
+            )
+            .onPressed,
+        isNull,
+      );
+
+      await tester.tap(find.text('Continue'));
+      await _readSnapshot(tester, h.store);
+      await tester.pump();
+      for (
+        var i = 0;
+        i < 40 && _busyProgressIndicator().evaluate().isNotEmpty;
+        i++
+      ) {
+        await tester.pump();
+      }
+      expect(
+        tester
+            .widget<SoundComparison>(find.byType(SoundComparison))
+            .state
+            .answered,
+        isFalse,
+      );
+      expect(statusOnButton('Listen to sample A'), 'Not heard');
+      expect(statusOnButton('Listen to sample B'), 'Not heard');
+      expect(
+        tester
+            .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Same'))
+            .onPressed,
+        isNull,
+        reason: 'the next pair starts without playback grants',
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      container.dispose();
+      containers.remove(container);
+      container = await _mountComparison(
+        tester,
+        store: h.store,
+        audio: h.audio,
+        catalogue: catalogue,
+      );
+      containers.add(container);
+      expect(statusOnButton('Listen to sample A'), 'Not heard');
+      expect(statusOnButton('Listen to sample B'), 'Not heard');
+      expect(
+        tester
+            .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Same'))
+            .onPressed,
+        isNull,
+        reason: 'reload restores no transient playback grants',
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      container.dispose();
+      containers.remove(container);
+      semantics.dispose();
+    },
+  );
+
   testWidgets('comparison active and debrief scale and scroll matrix', (
     tester,
   ) async {

@@ -584,6 +584,56 @@ void main() {
     },
   );
 
+  testWidgets('below_threshold_practice_can_finish_without_completion_credit', (
+    tester,
+  ) async {
+    final seed = _HeldSpellingStore();
+    final belowThreshold = await _practiceDebrief(
+      seed,
+      firstItemWrong: false,
+      correctAnswers: 0,
+    );
+    final store = _HeldSpellingStore(initialState: belowThreshold);
+    final audio = _ControlledSpellingAudio();
+    final app = await _mountSpelling(tester, store, audio);
+    addTearDown(() => app.dispose(tester));
+
+    expect(find.text('Section debrief'), findsOneWidget);
+    expect(find.text('Latest practice score: 0/10'), findsOneWidget);
+    expect(find.text('Finish practice'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Finish practice'),
+          )
+          .onPressed,
+      isNotNull,
+    );
+
+    await tester.tap(find.text('Finish practice'));
+    await tester.pumpAndSettle();
+
+    final SpellingSlot finishedSlot = store.committedState.slots[_activityId]!;
+    expect(store.submissions.last.action, isA<FinishSpellingRun>());
+    expect(
+      (store.submissions.last.action as FinishSpellingRun).recordCompletion,
+      isFalse,
+    );
+    expect(finishedSlot.checkpoint.finished, isTrue);
+    expect(store.committedState.completions, isEmpty);
+    expect(find.text('Practice run complete.'), findsOneWidget);
+    expect(find.text('Start new practice'), findsOneWidget);
+
+    await tester.tap(find.text('Start new practice'));
+    await tester.pumpAndSettle();
+
+    final SpellingSlot restartedSlot = store.committedState.slots[_activityId]!;
+    expect(store.submissions.last.action, isA<StartSpellingPractice>());
+    expect(restartedSlot.checkpoint.mode, SpellingRunMode.practice);
+    expect(restartedSlot.checkpoint.finished, isFalse);
+    expect(store.committedState.completions, isEmpty);
+  });
+
   testWidgets('initial_load_completed_while_paused_recovers_on_resume', (
     tester,
   ) async {
@@ -974,6 +1024,7 @@ SpellingPlaybackObservation _observation(
 Future<SpellingLearningState> _practiceDebrief(
   _HeldSpellingStore store, {
   required bool firstItemWrong,
+  int? correctAnswers,
 }) async {
   await store.perform(
     StartSpellingPractice(
@@ -983,7 +1034,9 @@ Future<SpellingLearningState> _practiceDebrief(
   );
   for (var index = 0; index < store.catalogue.rows.length; index++) {
     final row = store.catalogue.rows[index];
-    final correct = !(firstItemWrong && index == 0);
+    final correct = correctAnswers == null
+        ? !(firstItemWrong && index == 0)
+        : index < correctAnswers;
     final selected = correct
         ? row.exercise.correctOptionId
         : row.exercise.options

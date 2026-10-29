@@ -1215,10 +1215,7 @@ class _SpellingLessonScreenState extends ConsumerState<SpellingLessonScreen>
           slot?.checkpoint.mode == SpellingRunMode.reviewOnly;
       label = reviewOnly ? 'Finish review' : 'Finish practice';
       action = _finish;
-      canAct =
-          canAct &&
-          _frozenCommand == null &&
-          (reviewOnly || (session?.canComplete ?? false));
+      canAct = canAct && _frozenCommand == null;
     }
 
     if (label == null || action == null) return null;
