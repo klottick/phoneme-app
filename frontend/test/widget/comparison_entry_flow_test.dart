@@ -1653,6 +1653,7 @@ void main() {
       await tester.pump();
       await tester.runAsync(() => advanceAck.future);
       await tester.pump();
+      await tester.pumpAndSettle();
       final advanced = await _runRealAsync(tester, fixture.store.snapshot);
       final advancedSession = LessonSectionSession.fromJson(
         Map<String, dynamic>.from(advanced.checkpoint!.sessionJson),

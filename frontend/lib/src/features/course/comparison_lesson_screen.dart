@@ -1240,6 +1240,10 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     ComparisonLearningState state,
   ) {
     final exercise = catalogue.exercise(session.currentItemId!);
+    final promptIdentity = _prompt(
+      session,
+      state.slots[widget.activityId]!.cursor.generation,
+    );
     final correct = _localCorrect;
     final feedback =
         widget.activityId == uyDemoComparisonActivityId ||
@@ -1254,7 +1258,7 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
       children: [
         SoundComparison(
           prompt: SoundComparisonPrompt(
-            id: 'comparison-active',
+            id: '${promptIdentity.activityId}:${promptIdentity.runGeneration}:${promptIdentity.round}:${promptIdentity.itemId}',
             instruction: exercise.instruction,
             sampleAReferenceId: exercise.sampleA.referenceId,
             sampleBReferenceId: exercise.sampleB.referenceId,
