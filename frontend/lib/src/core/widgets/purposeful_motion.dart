@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 
-/// A short content change that retires the previous subtree from input and
-/// semantics as soon as the replacement is built.
+/// A short content change that retires the previous subtree from pointer and
+/// keyboard input and semantics as soon as the replacement is built.
 ///
 /// The outgoing child remains painted during its brief exit so the content
-/// change reads as a transition, but it can no longer invoke owner callbacks.
+/// change reads as a transition, but it can no longer receive focus or invoke
+/// owner callbacks.
 class PurposefulSwitcher extends StatefulWidget {
   const PurposefulSwitcher({super.key, required this.child});
 
@@ -55,17 +56,19 @@ class _PurposefulSwitcherState extends State<PurposefulSwitcher>
       switchOutCurve: Curves.easeInCubic,
       transitionBuilder: (Widget child, Animation<double> animation) {
         final bool entering = child.key == currentKey;
-        final Animation<double> curved = CurvedAnimation(
-          parent: animation,
-          curve: entering ? Curves.easeOutCubic : Curves.easeInCubic,
+        final Animation<double> curved = animation.drive(
+          CurveTween(
+            curve: entering ? Curves.easeOutCubic : Curves.easeInCubic,
+          ),
         );
         final Offset begin = entering
             ? const Offset(0, .04)
             : const Offset(0, -.04);
         return FadeTransition(
-          opacity: Tween<double>(begin: entering ? .01 : 0, end: 1).animate(
-            CurvedAnimation(parent: animation, curve: Curves.easeInOut),
-          ),
+          opacity: Tween<double>(
+            begin: entering ? .01 : 0,
+            end: 1,
+          ).animate(animation.drive(CurveTween(curve: Curves.easeInOut))),
           child: SlideTransition(
             position: Tween<Offset>(
               begin: begin,
@@ -81,7 +84,9 @@ class _PurposefulSwitcherState extends State<PurposefulSwitcher>
             fit: StackFit.passthrough,
             children: <Widget>[
               for (final Widget previous in previousChildren)
-                IgnorePointer(child: ExcludeSemantics(child: previous)),
+                IgnorePointer(
+                  child: ExcludeFocus(child: ExcludeSemantics(child: previous)),
+                ),
               if (currentChild != null) currentChild,
             ],
           ),
@@ -143,10 +148,7 @@ class _PurposefulRouteTransitionState extends State<PurposefulRouteTransition>
         ? widget.child
         : FadeTransition(
             opacity: Tween<double>(begin: .01, end: 1).animate(
-              CurvedAnimation(
-                parent: widget.animation,
-                curve: Curves.easeOutCubic,
-              ),
+              widget.animation.drive(CurveTween(curve: Curves.easeOutCubic)),
             ),
             child: SlideTransition(
               position:
@@ -154,9 +156,8 @@ class _PurposefulRouteTransitionState extends State<PurposefulRouteTransition>
                     begin: const Offset(0, .025),
                     end: Offset.zero,
                   ).animate(
-                    CurvedAnimation(
-                      parent: widget.animation,
-                      curve: Curves.easeOutCubic,
+                    widget.animation.drive(
+                      CurveTween(curve: Curves.easeOutCubic),
                     ),
                   ),
               child: widget.child,

@@ -14,6 +14,7 @@ import 'course_map_providers.dart';
 import 'course_map_state.dart';
 import 'course_system_view.dart';
 import 'french_space_map.dart';
+import '../../routing/course_map_route_coverage.dart';
 
 class CourseMapScreen extends ConsumerStatefulWidget {
   const CourseMapScreen({super.key, required this.systemId});
@@ -41,6 +42,9 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
     }
     final system = findSpaceSystem(widget.systemId);
     final state = ref.watch(courseMapStateProvider(widget.systemId));
+    final routeCoverageObserver = ref.read(
+      courseMapRouteCoverageObserverProvider,
+    );
     final availableDiscovery = state.bodies.where(
       (body) =>
           body.definition.target == MapTarget.discovery &&
@@ -313,6 +317,7 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
                 onLaunch: (body) => _launch(body, auth),
                 progressSummary: progressSummary,
                 pickerRevision: (auth.owner, auth.generation, auth.ready),
+                routeCoverageObserver: routeCoverageObserver,
               ),
       ),
     );

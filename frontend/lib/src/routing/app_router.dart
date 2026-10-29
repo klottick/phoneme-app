@@ -41,12 +41,16 @@ import '../features/progress/progress_analytics_screen.dart';
 import '../features/review/review_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/speak/speak_screen.dart';
+import 'course_map_route_coverage.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final onboarding = ref.watch(onboardingControllerProvider);
 
   return GoRouter(
     initialLocation: '/onboarding',
+    observers: <NavigatorObserver>[
+      ref.read(courseMapRouteCoverageObserverProvider),
+    ],
     redirect: (_, state) {
       if (!onboarding.isReady) {
         return '/onboarding';

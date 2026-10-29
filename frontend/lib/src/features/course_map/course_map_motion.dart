@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../routing/course_map_route_coverage.dart';
+
 /// Finite, event-driven preview travel on the course map.
 ///
 /// [anchor] remains the actual current location. The separate preview ship
@@ -15,6 +17,7 @@ class CourseMapMotion extends StatefulWidget {
     this.destination,
     this.selectionKey,
     this.anchorKey,
+    this.routeCoverageObserver,
   });
 
   static const flightDuration = Duration(milliseconds: 880);
@@ -23,6 +26,7 @@ class CourseMapMotion extends StatefulWidget {
   final Offset? destination;
   final Object? selectionKey;
   final Object? anchorKey;
+  final CourseMapRouteCoverageObserver? routeCoverageObserver;
   final Widget child;
 
   @override
@@ -45,11 +49,16 @@ class _CourseMapMotionState extends State<CourseMapMotion>
   bool _platformDisablesMotion = false;
   bool _tickerEnabled = true;
   bool _appActive = true;
+  ModalRoute<dynamic>? _route;
+  CourseMapRouteCoverageObserver? _boundCoverageObserver;
+  VoidCallback? _unsubscribeRouteCoverage;
+  bool _routeVisible = true;
   int _requestGeneration = 0;
 
   bool get _reducedMotion => _mediaDisablesMotion || _platformDisablesMotion;
 
-  bool get _canAnimate => !_reducedMotion && _tickerEnabled && _appActive;
+  bool get _canAnimate =>
+      !_reducedMotion && _tickerEnabled && _appActive && _routeVisible;
 
   Offset? get _target => widget.destination ?? widget.anchor;
 
@@ -103,6 +112,8 @@ class _CourseMapMotionState extends State<CourseMapMotion>
         MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     _platformDisablesMotion = _platformReducedMotion;
     _tickerEnabled = TickerMode.valuesOf(context).enabled;
+    _bindRoute(ModalRoute.of<dynamic>(context));
+    _routeVisible = _isRouteVisible;
 
     if (!_initialized) {
       _initialized = true;
@@ -124,9 +135,56 @@ class _CourseMapMotionState extends State<CourseMapMotion>
     _reconcileAvailability(wasReduced: wasReduced, wasEnabled: wasEnabled);
   }
 
+  void _bindRoute(ModalRoute<dynamic>? route) {
+    if (identical(route, _route) &&
+        identical(widget.routeCoverageObserver, _boundCoverageObserver)) {
+      return;
+    }
+    _unsubscribeRouteCoverage?.call();
+    _unsubscribeRouteCoverage = null;
+    _route = route;
+    _boundCoverageObserver = widget.routeCoverageObserver;
+    final CourseMapRouteCoverageObserver? observer =
+        widget.routeCoverageObserver;
+    if (route != null && observer != null) {
+      _unsubscribeRouteCoverage = observer.subscribe(
+        route,
+        _onRouteCoverageChanged,
+      );
+    }
+  }
+
+  bool get _isRouteVisible {
+    final ModalRoute<dynamic>? route = _route;
+    if (route == null) return true;
+    if (!route.isCurrent || route.offstage) return false;
+    return !(widget.routeCoverageObserver?.isCovered(route) ?? false);
+  }
+
+  void _onRouteCoverageChanged() {
+    if (!mounted) return;
+    final bool wasEnabled = _canAnimate;
+    final bool wasVisible = _routeVisible;
+    _routeVisible = _isRouteVisible;
+    if (wasVisible == _routeVisible) return;
+    _reconcileAvailability(wasReduced: _reducedMotion, wasEnabled: wasEnabled);
+  }
+
   @override
   void didUpdateWidget(covariant CourseMapMotion oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final bool wasEnabled = _canAnimate;
+    if (!identical(
+      oldWidget.routeCoverageObserver,
+      widget.routeCoverageObserver,
+    )) {
+      _bindRoute(_route);
+      _routeVisible = _isRouteVisible;
+      _reconcileAvailability(
+        wasReduced: _reducedMotion,
+        wasEnabled: wasEnabled,
+      );
+    }
     if (oldWidget.anchor == widget.anchor &&
         oldWidget.destination == widget.destination &&
         oldWidget.selectionKey == widget.selectionKey &&
@@ -264,6 +322,7 @@ class _CourseMapMotionState extends State<CourseMapMotion>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _unsubscribeRouteCoverage?.call();
     _curve.dispose();
     _controller.dispose();
     super.dispose();
