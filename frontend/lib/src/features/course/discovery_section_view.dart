@@ -6,6 +6,7 @@ import '../../core/course/lesson_debrief_content.dart';
 import 'exercises/listening_choice.dart';
 import 'exercises/listening_exercise_contract.dart';
 import 'lesson_section_debrief.dart';
+import 'lesson_progress_indicator.dart';
 
 /// Stateless view of one discovery listening section session.
 ///
@@ -27,6 +28,8 @@ class DiscoverySectionView extends StatelessWidget {
     super.key,
     required this.section,
     required this.session,
+    this.acknowledgedSession,
+    this.acknowledgedStateLoaded = false,
     required this.heard,
     required this.busy,
     this.playing = false,
@@ -47,6 +50,8 @@ class DiscoverySectionView extends StatelessWidget {
 
   final LessonSection section;
   final LessonSectionSession session;
+  final LessonSectionSession? acknowledgedSession;
+  final bool acknowledgedStateLoaded;
   final bool heard;
   final bool busy;
   final bool playing;
@@ -81,57 +86,116 @@ class DiscoverySectionView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final TextTheme textTheme = Theme.of(context).textTheme;
-    final Color divider = Theme.of(context).dividerColor;
-    final List<Widget> children = session.phase == LessonSectionPhase.exercise
-        ? _exerciseChildren(textTheme, divider)
-        : [
-            LessonSectionDebrief(
-              section: section,
-              session: session,
-              teachingEntries: teachingEntries,
-              busy: busy,
-              error: error,
-              conflict: conflict,
-              onReload: onReload,
-              onPractiseAgain: onPractiseAgain,
-              onReview: onReview,
-              onFinish: onFinish,
-              onRetrySave: onRetrySave,
-            )
-          ];
+    final LessonSectionSession? progress = acknowledgedSession;
     final String? notice = this.notice;
-    if (notice != null) {
-      // The notice shares the scrolling content with the controls so that
-      // large accessibility text cannot push the exercise off a small screen.
-      children.insert(
-          0,
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            color: Colors.orange.shade100,
-            child: Text(
-              notice,
-              style: const TextStyle(color: Colors.black87),
+    final Widget progressHeader = !acknowledgedStateLoaded
+        ? const SizedBox.shrink()
+        : LessonProgressIndicator(
+            completed: progress == null ? 0 : completedItemsThisRound(progress),
+            total: progress?.queue.length ?? session.queue.length,
+          );
+
+    if (session.phase == LessonSectionPhase.exercise) {
+      final bool answered = session.answered;
+      final bool inConflict = _inConflict();
+      final bool canNext = answered && !busy && error == null && !inConflict;
+      final bool isLast = session.position == session.queue.length - 1;
+      final VoidCallback? onFooterAction = busy
+          ? null
+          : inConflict
+          ? onReload
+          : error != null
+          ? onRetrySave
+          : canNext
+          ? onNext
+          : null;
+      final String footerLabel = inConflict
+          ? 'Reload saved progress'
+          : error != null
+          ? 'Retry saving'
+          : isLast
+          ? 'See section explanation'
+          : 'Next word';
+      return Column(
+        children: <Widget>[
+          progressHeader,
+          Expanded(
+            child: LessonContentViewport(
+              maxWidth: 560,
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  if (notice != null) _noticeBanner(notice),
+                  ..._exerciseChildren(textTheme),
+                ],
+              ),
             ),
-          ));
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 560),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: onFooterAction,
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                    child: Text(footerLabel),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
     }
-    return SingleChildScrollView(
-      padding: EdgeInsets.symmetric(
-        horizontal: 20,
-        vertical: session.phase == LessonSectionPhase.debrief ? 8 : 16,
-      ),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: children,
+
+    return Column(
+      children: <Widget>[
+        progressHeader,
+        Expanded(
+          child: LessonContentViewport(
+            maxWidth: 560,
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                if (notice != null) _noticeBanner(notice),
+                LessonSectionDebrief(
+                  section: section,
+                  session: session,
+                  teachingEntries: teachingEntries,
+                  busy: busy,
+                  error: error,
+                  conflict: conflict,
+                  onReload: onReload,
+                  onPractiseAgain: onPractiseAgain,
+                  onReview: onReview,
+                  onFinish: onFinish,
+                  onRetrySave: onRetrySave,
+                ),
+              ],
+            ),
           ),
         ),
-      ),
+      ],
     );
   }
+
+  Widget _noticeBanner(String message) => Container(
+    width: double.infinity,
+    margin: const EdgeInsets.only(bottom: 12),
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    color: Colors.orange.shade100,
+    child: Text(message, style: const TextStyle(color: Colors.black87)),
+  );
 
   TextStyle? _colored(TextStyle? base, Color color) =>
       base?.copyWith(color: color) ?? TextStyle(color: color);
@@ -139,14 +203,7 @@ class DiscoverySectionView extends StatelessWidget {
   List<Widget> _errorChildren(TextTheme textTheme) {
     return [
       const SizedBox(height: 24),
-      Text(
-        error!,
-        style: _colored(textTheme.bodyMedium, Colors.red),
-      ),
-      TextButton(
-        onPressed: busy ? null : onRetrySave,
-        child: const Text('Retry saving'),
-      ),
+      Text(error!, style: _colored(textTheme.bodyMedium, Colors.red)),
     ];
   }
 
@@ -157,10 +214,6 @@ class DiscoverySectionView extends StatelessWidget {
         conflict!,
         style: _colored(textTheme.bodyMedium, Colors.orange.shade700),
       ),
-      TextButton(
-        onPressed: busy || onReload == null ? null : onReload,
-        child: const Text('Reload saved progress'),
-      ),
     ];
   }
 
@@ -168,27 +221,26 @@ class DiscoverySectionView extends StatelessWidget {
   /// error, but its recovery is the explicit reload, not a retry.
   bool _inConflict() => conflict != null;
 
-  List<Widget> _exerciseChildren(TextTheme textTheme, Color divider) {
-    final bool answered = session.answered;
+  List<Widget> _exerciseChildren(TextTheme textTheme) {
     final bool inConflict = _inConflict();
     final bool inError = error != null || inConflict;
-    final bool canNext = answered && !busy && !inError;
-    final bool isLast = session.position == session.queue.length - 1;
+    final bool answered = session.answered;
     return [
       // Neutral title while the item is hidden: the word-bearing authored
       // title belongs to the debrief, so it must not leak during practice.
       Text('Listening practice', style: textTheme.titleLarge),
       const SizedBox(height: 6),
       Text(_progressLabel(), style: textTheme.bodyMedium),
-      const SizedBox(height: 20),
+      const SizedBox(height: 16),
       ListeningChoice(
         prompt: ListeningChoicePrompt(
           id: session.currentItemId!,
           instruction:
               'Listen to the French word, then choose the sound you hear.',
           choices: section.sounds
-              .map((sound) =>
-                  ListeningChoiceOption(id: sound, label: '/$sound/'))
+              .map(
+                (sound) => ListeningChoiceOption(id: sound, label: '/$sound/'),
+              )
               .toList(),
         ),
         state: ListeningExerciseState(
@@ -198,8 +250,8 @@ class DiscoverySectionView extends StatelessWidget {
           answered: answered,
           feedback: answered
               ? (session.lastCorrect == true
-                  ? ListeningFeedback.correct
-                  : ListeningFeedback.notYet)
+                    ? ListeningFeedback.correct
+                    : ListeningFeedback.notYet)
               : null,
         ),
         heard: heard,
@@ -209,11 +261,6 @@ class DiscoverySectionView extends StatelessWidget {
       ),
       if (error != null) ..._errorChildren(textTheme),
       if (inConflict) ..._conflictChildren(textTheme),
-      const SizedBox(height: 24),
-      FilledButton(
-        onPressed: canNext ? onNext : null,
-        child: Text(isLast ? 'See section explanation' : 'Next word'),
-      ),
     ];
   }
 

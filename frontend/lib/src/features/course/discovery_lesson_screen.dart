@@ -20,6 +20,7 @@ import '../../core/course/lesson_debrief_content.dart';
 import 'lesson_exercise_owner.dart';
 import '../../core/course/french_lesson_teaching.dart';
 import 'discovery_section_view.dart';
+import 'lesson_progress_indicator.dart';
 
 /// Lifecycle-aware screen that owns a discovery listening section session:
 /// loading (with corrupt-snapshot and load-failure recovery), playback with
@@ -110,7 +111,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     with WidgetsBindingObserver {
   static const String _saveErrorText =
       'This change could not be saved. Tap "Retry saving" to try again.';
-  static const String _loadErrorText = 'Your saved progress could not be '
+  static const String _loadErrorText =
+      'Your saved progress could not be '
       'loaded. Tap "Retry loading" to try again.';
   static const String _conflictText =
       'This copy no longer matches the saved progress for this section. Tap '
@@ -118,10 +120,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   static const String _invalidCommandText =
       'This learning action is no longer valid. Tap "Reload saved progress" '
       'to load the saved state.';
-  // Pure Retry/unavailable guidance (I1): the exact shared alpha disclosure
-  // is pinned persistently on the exercise surface itself
-  // (DiscoverySectionView), so the transient failure wording stays focused
-  // on retry — mirroring the published lesson surface.
+  // Keep the transient failure wording focused on the actionable recovery;
+  // routine qualification copy lives outside this learner-facing flow.
   static const String _audioErrorText =
       'The French audio could not be played. Tap "Listen to the word" to try '
       'again.';
@@ -183,9 +183,10 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
         if (content.lessonId != section.lessonId ||
             content.contentRevision != section.contentRevision ||
             content.entries.length != section.items.length ||
-            !List.generate(content.entries.length,
-                    (i) => content.entries[i].itemId == section.items[i].id)
-                .every((v) => v)) {
+            !List.generate(
+              content.entries.length,
+              (i) => content.entries[i].itemId == section.items[i].id,
+            ).every((v) => v)) {
           throw const FormatException('Mismatched lesson teaching content.');
         }
         _debriefContent = content;
@@ -372,7 +373,9 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   }
 
   void _onStoreReplaced(
-      CourseLearningStore? previous, CourseLearningStore next) {
+    CourseLearningStore? previous,
+    CourseLearningStore next,
+  ) {
     if (identical(previous, next)) return;
     if (_teachingUnavailable) return;
     // The owner changed: stop the old owner's audio immediately, invalidate
@@ -391,6 +394,7 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     _currentPlaybackRequest = null;
     _selectedSound = null;
     _store = next;
+    _learningState = null;
     _fence = ExerciseLifecycleFence();
     _hearingGrants = ExerciseAudioGrants<AttemptAudioSource>(
       requiredSamples: {null},
@@ -411,8 +415,20 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
 
   static String get _activityId => 'lesson:${frenchUySection.lessonId}';
 
-  void _captureOwner(CourseLearningStore store,
-      {bool deferRouteCapture = false}) {
+  LessonSectionSession? get _acknowledgedSession {
+    final CourseLearningState? state = _learningState;
+    if (state == null || state.scope != _store?.scope) return null;
+    final Object? snapshot = state.activities[_activityId]?.snapshot;
+    return snapshot is DiscoveryCheckpoint ? snapshot.session : null;
+  }
+
+  bool get _acknowledgedStateLoaded =>
+      _learningState != null && _learningState!.scope == _store?.scope;
+
+  void _captureOwner(
+    CourseLearningStore store, {
+    bool deferRouteCapture = false,
+  }) {
     final auth = ref.read(learningAuthScopeProvider);
     _ownerStore = store;
     _ownerAuth = auth.owner;
@@ -452,8 +468,11 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     }
   }
 
-  Future<void> _load(CourseLearningStore store,
-      {bool retry = false, bool preserveSession = false}) async {
+  Future<void> _load(
+    CourseLearningStore store, {
+    bool retry = false,
+    bool preserveSession = false,
+  }) async {
     if (_teachingUnavailable) return;
     final section = _section;
     if (section == null) return;
@@ -536,7 +555,10 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   }
 
   void _publish(
-      LessonSectionSession session, LessonSection section, String? notice) {
+    LessonSectionSession session,
+    LessonSection section,
+    String? notice,
+  ) {
     if (!mounted) return;
     _hearingGrants.beginPrompt(_promptFor(session));
     setState(() {
@@ -560,8 +582,9 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   AttemptAudioSource _audioSourceForCurrentItem(LessonSectionSession session) {
     final String alias = _currentItem(session).id;
     final definition = LearningRegistry.french().require(_activityId);
-    final source =
-        definition.items.firstWhere((item) => item.sessionAlias == alias);
+    final source = definition.items.firstWhere(
+      (item) => item.sessionAlias == alias,
+    );
     return authoredAudioSource(source) ?? AttemptAudioSource.notApplicable;
   }
 
@@ -787,7 +810,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     final callbackError = owner.acknowledgementError;
     if (callbackError != null && mounted) {
       _showSnackBar(
-          'Your progress was saved, but the screen could not update.');
+        'Your progress was saved, but the screen could not update.',
+      );
     }
   }
 
@@ -874,10 +898,12 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
         _conflictError != null) {
       return;
     }
-    final LearningCommand? command = _prepare(ChooseSound(
-      selectedSound: sound,
-      audioSource: _audioSourceForCurrentItem(session),
-    ));
+    final LearningCommand? command = _prepare(
+      ChooseSound(
+        selectedSound: sound,
+        audioSource: _audioSourceForCurrentItem(session),
+      ),
+    );
     if (command == null) return;
     _selectedSound = sound;
     // The engine freezes the candidate and immediate feedback together; the
@@ -895,18 +921,21 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     if (command == null) return;
     final LessonSectionSession draft =
         (command.candidate as DiscoveryCheckpoint).session;
-    _runSave(command, onSaved: () {
-      if (mounted) {
-        setState(() {
-          _session = draft;
-          // `heard` refers to the current item; a new item requires a fresh
-          // completed playback before it can be answered.
-          _hearingGrants.beginPrompt(_promptFor(draft));
-          _playing = false;
-          _selectedSound = null;
-        });
-      }
-    });
+    _runSave(
+      command,
+      onSaved: () {
+        if (mounted) {
+          setState(() {
+            _session = draft;
+            // `heard` refers to the current item; a new item requires a fresh
+            // completed playback before it can be answered.
+            _hearingGrants.beginPrompt(_promptFor(draft));
+            _playing = false;
+            _selectedSound = null;
+          });
+        }
+      },
+    );
   }
 
   void _onReview() {
@@ -916,24 +945,27 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     if (command == null) return;
     final LessonSectionSession draft =
         (command.candidate as DiscoveryCheckpoint).session;
-    _runSave(command, onSaved: () {
-      if (mounted) {
-        setState(() {
-          _session = draft;
-          _hearingGrants.beginPrompt(_promptFor(draft));
-          _playing = false;
-          _selectedSound = null;
-        });
-      }
-    });
+    _runSave(
+      command,
+      onSaved: () {
+        if (mounted) {
+          setState(() {
+            _session = draft;
+            _hearingGrants.beginPrompt(_promptFor(draft));
+            _playing = false;
+            _selectedSound = null;
+          });
+        }
+      },
+    );
   }
 
   void _onFinish() {
     final session = _session;
     if (session == null || !session.canComplete) return;
-    final command = _prepare(FinishLearningActivity(
-      recordCompletion: !widget.review,
-    ));
+    final command = _prepare(
+      FinishLearningActivity(recordCompletion: !widget.review),
+    );
     if (command != null) _runSave(command, onSaved: _exit);
   }
 
@@ -989,17 +1021,20 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     );
     final LessonSectionSession fresh =
         (command.candidate as DiscoveryCheckpoint).session;
-    _runSave(command, onSaved: () {
-      if (mounted) {
-        setState(() {
-          _session = fresh;
-          // A fresh item requires a fresh completed playback.
-          _hearingGrants.beginPrompt(_promptFor(fresh));
-          _playing = false;
-          _selectedSound = null;
-        });
-      }
-    });
+    _runSave(
+      command,
+      onSaved: () {
+        if (mounted) {
+          setState(() {
+            _session = fresh;
+            // A fresh item requires a fresh completed playback.
+            _hearingGrants.beginPrompt(_promptFor(fresh));
+            _playing = false;
+            _selectedSound = null;
+          });
+        }
+      },
+    );
   }
 
   void _onRetryLoad() {
@@ -1055,8 +1090,9 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
   }
 
   void _showSnackBar(String message) {
-    final ScaffoldMessengerState? messenger =
-        ScaffoldMessenger.maybeOf(context);
+    final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(
+      context,
+    );
     messenger?.showSnackBar(SnackBar(content: Text(message)));
   }
 
@@ -1076,8 +1112,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     final String title = _teachingUnavailable
         ? 'Discovery lesson'
         : _session?.phase == LessonSectionPhase.debrief
-            ? section.title
-            : 'Listening practice';
+        ? section.title
+        : 'Listening practice';
     return Scaffold(
       appBar: AppBar(title: Text(title)),
       body: _body(),
@@ -1096,30 +1132,45 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     }
     if (_loadError != null) {
       final String loadError = _loadError!;
-      return SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(loadError, textAlign: TextAlign.center),
-                const SizedBox(height: 16),
-                if (_contentChanged)
-                  FilledButton(
-                    onPressed: _onStartNewRun,
-                    child: const Text('Start new run'),
-                  )
-                else
-                  FilledButton(
-                    onPressed: _store == null ? null : _onRetryLoad,
-                    child: const Text('Retry loading'),
+      final LessonSectionSession? acknowledged = _acknowledgedSession;
+      return Column(
+        children: <Widget>[
+          if (_acknowledgedStateLoaded && acknowledged != null)
+            LessonProgressIndicator(
+              completed: completedItemsThisRound(acknowledged),
+              total: acknowledged.queue.length,
+              roundLabel: acknowledged.round > 1
+                  ? 'Review round ${acknowledged.round}'
+                  : null,
+            ),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 480),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(loadError, textAlign: TextAlign.center),
+                      const SizedBox(height: 16),
+                      if (_contentChanged)
+                        FilledButton(
+                          onPressed: _onStartNewRun,
+                          child: const Text('Start new run'),
+                        )
+                      else
+                        FilledButton(
+                          onPressed: _store == null ? null : _onRetryLoad,
+                          child: const Text('Retry loading'),
+                        ),
+                    ],
                   ),
-              ],
+                ),
+              ),
             ),
           ),
-        ),
+        ],
       );
     }
     final session = _session;
@@ -1129,6 +1180,8 @@ class _DiscoveryLessonScreenState extends ConsumerState<DiscoveryLessonScreen>
     return DiscoverySectionView(
       section: section,
       session: session,
+      acknowledgedSession: _acknowledgedSession,
+      acknowledgedStateLoaded: _acknowledgedStateLoaded,
       heard: _hearingGrants.canAnswer,
       busy: _busy || _fence.isSuspended,
       playing: _playing,

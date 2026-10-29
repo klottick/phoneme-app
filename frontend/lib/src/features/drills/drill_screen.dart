@@ -139,9 +139,10 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
       final slot = state.activities[_activityId];
       if (slot == null) {
         final command = store.prepare(
-            state: state,
-            activityId: _activityId,
-            action: StartLearningRun(options: RunOptions()));
+          state: state,
+          activityId: _activityId,
+          action: StartLearningRun(options: RunOptions()),
+        );
         _pending = command;
         _pendingStore = store;
         await _submitPending();
@@ -158,10 +159,9 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
       }
       final checkpoint = slot.snapshot as DrillCheckpoint;
       if (checkpoint.pairIds.length != _pairs.length ||
-          checkpoint.pairIds
-              .asMap()
-              .entries
-              .any((entry) => entry.value != _pairs[entry.key].id)) {
+          checkpoint.pairIds.asMap().entries.any(
+            (entry) => entry.value != _pairs[entry.key].id,
+          )) {
         setState(() {
           _loading = false;
           _contentChanged = true;
@@ -283,9 +283,10 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
       state: _state!,
       activityId: _activityId,
       action: ChooseDrillWord(
-          selectedWord: selected,
-          audioSource:
-              authoredAudioSource(_item) ?? AttemptAudioSource.notApplicable),
+        selectedWord: selected,
+        audioSource:
+            authoredAudioSource(_item) ?? AttemptAudioSource.notApplicable,
+      ),
     );
     _pending = command;
     _pendingStore = _store;
@@ -433,7 +434,10 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
     }
     if (!_endCommitted) {
       final command = _store!.prepare(
-          state: _state!, activityId: _activityId, action: const EndDrill());
+        state: _state!,
+        activityId: _activityId,
+        action: const EndDrill(),
+      );
       _pending = command;
       _pendingStore = _store;
       _ending = true;
@@ -476,18 +480,23 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
         operation != _finishOperation) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
         content: Text(
-            'Session complete! $_correct / ${_index == 0 ? 0 : _index} correct')));
+          'Session complete! $_correct / ${_index == 0 ? 0 : _index} correct',
+        ),
+      ),
+    );
     Navigator.of(context).pop();
   }
 
   Future<void> _startNewRun() async {
     if (!_contentChanged || _state == null || _busy || _pending != null) return;
     final command = _store!.prepare(
-        state: _state!,
-        activityId: _activityId,
-        action: StartLearningRun(options: RunOptions()));
+      state: _state!,
+      activityId: _activityId,
+      action: StartLearningRun(options: RunOptions()),
+    );
     _pending = command;
     _pendingStore = _store;
     await _submitPending();
@@ -500,97 +509,128 @@ class _DrillScreenState extends ConsumerState<DrillScreen>
     }
     if (_message != null || _checkpoint == null) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Minimal Pair Drill')),
-          body: Center(
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text(_message ?? 'Saved progress is unavailable.'),
-            if (_saveFailed)
-              FilledButton(
+        appBar: AppBar(title: const Text('Minimal Pair Drill')),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_message ?? 'Saved progress is unavailable.'),
+              if (_saveFailed)
+                FilledButton(
                   onPressed: _busy ? null : _retrySave,
-                  child: const Text('Retry saving'))
-            else if (_conflict)
-              FilledButton(
+                  child: const Text('Retry saving'),
+                )
+              else if (_conflict)
+                FilledButton(
                   onPressed: _busy ? null : () => _load(_store!),
-                  child: const Text('Reload saved progress'))
-            else if (_contentChanged)
-              FilledButton(
+                  child: const Text('Reload saved progress'),
+                )
+              else if (_contentChanged)
+                FilledButton(
                   onPressed: _busy ? null : _startNewRun,
-                  child: const Text('Start new run'))
-            else
-              FilledButton(
+                  child: const Text('Start new run'),
+                )
+              else
+                FilledButton(
                   onPressed: _busy ? null : () => _load(_store!, retry: true),
-                  child: const Text('Retry loading')),
-          ])));
+                  child: const Text('Retry loading'),
+                ),
+            ],
+          ),
+        ),
+      );
     }
     final current = _current;
     final itemIndex = _index;
     final options = _item.choices;
     return Scaffold(
-      appBar: AppBar(title: const Text('Minimal Pair Drill'), actions: [
-        Padding(
+      appBar: AppBar(
+        title: const Text('Minimal Pair Drill'),
+        actions: [
+          Padding(
             padding: const EdgeInsets.only(right: 16),
             child: Center(
-                child: Text('$_correct / ${_index + 1}',
-                    style: const TextStyle(fontWeight: FontWeight.bold)))),
-      ]),
+              child: Text(
+                '$_correct / ${_index + 1}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        ],
+      ),
       body: Padding(
-          padding: const EdgeInsets.all(16),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Item ${itemIndex + 1}',
-                style: Theme.of(context).textTheme.titleLarge),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Item ${itemIndex + 1}',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
             const SizedBox(height: 8),
             const Text('Listen and choose the word you hear.'),
-            const SizedBox(height: 4),
-            const Text(alphaAudioDisclosure,
-                style: TextStyle(fontStyle: FontStyle.italic)),
             const SizedBox(height: 16),
-            Row(children: [
-              Text('${current.phonemeA} vs ${current.phonemeB}',
-                  style: Theme.of(context).textTheme.headlineSmall),
-              const Spacer(),
-              IconButton(
+            Row(
+              children: [
+                Text(
+                  '${current.phonemeA} vs ${current.phonemeB}',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const Spacer(),
+                IconButton(
                   icon: Icon(_isPlaying ? Icons.stop : Icons.play_arrow),
                   iconSize: 36,
                   tooltip: 'Play audio',
-                  onPressed: _ending ||
+                  onPressed:
+                      _ending ||
                           _ended ||
                           _answerTransition ||
                           _busy ||
                           _pending != null
                       ? null
-                      : () => _onPlayStopFor(current, itemIndex)),
-            ]),
+                      : () => _onPlayStopFor(current, itemIndex),
+                ),
+              ],
+            ),
             const SizedBox(height: 24),
             for (final option in options)
               Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.tonal(
-                          onPressed: !_ending &&
-                                  !_ended &&
-                                  !_answerTransition &&
-                                  !_busy &&
-                                  _pending == null &&
-                                  _heard &&
-                                  !_isPlaying
-                              ? () => _answer(option, itemIndex)
-                              : null,
-                          child: Text(option, textAlign: TextAlign.center)))),
+                padding: const EdgeInsets.only(bottom: 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.tonal(
+                    onPressed:
+                        !_ending &&
+                            !_ended &&
+                            !_answerTransition &&
+                            !_busy &&
+                            _pending == null &&
+                            _heard &&
+                            !_isPlaying
+                        ? () => _answer(option, itemIndex)
+                        : null,
+                    child: Text(option, textAlign: TextAlign.center),
+                  ),
+                ),
+              ),
             if (_feedback.isNotEmpty) Text(_feedback),
             if (_saveFailed)
               FilledButton(
-                  onPressed: _busy ? null : _retrySave,
-                  child: const Text('Retry saving')),
+                onPressed: _busy ? null : _retrySave,
+                child: const Text('Retry saving'),
+              ),
             const Spacer(),
             Center(
-                child: TextButton(
-                    onPressed: _ending || _busy || _pending != null
-                        ? null
-                        : _endSession,
-                    child: const Text('End Session'))),
-          ])),
+              child: TextButton(
+                onPressed: _ending || _busy || _pending != null
+                    ? null
+                    : _endSession,
+                child: const Text('End Session'),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

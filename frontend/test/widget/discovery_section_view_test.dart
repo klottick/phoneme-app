@@ -33,8 +33,10 @@ LessonSectionSession _exerciseSession({
   bool currentAnswered = false,
   bool currentCorrect = true,
 }) {
-  final session =
-      LessonSectionSession(itemIds: _ids(), sessionId: 'test-section');
+  final session = LessonSectionSession(
+    itemIds: _ids(),
+    sessionId: 'test-section',
+  );
   for (var i = 0; i < position; i++) {
     session.submit(true);
     session.advance();
@@ -48,8 +50,10 @@ LessonSectionSession _exerciseSession({
 /// A session that has finished all ten items: the first [correctCount]
 /// items are correct, the rest wrong.
 LessonSectionSession _debriefSession({required int correctCount}) {
-  final session =
-      LessonSectionSession(itemIds: _ids(), sessionId: 'test-section');
+  final session = LessonSectionSession(
+    itemIds: _ids(),
+    sessionId: 'test-section',
+  );
   for (var i = 0; i < 10; i++) {
     session.submit(i < correctCount);
     session.advance();
@@ -73,45 +77,38 @@ Future<void> _pump(
   void Function()? onRetrySave,
   void Function()? onReload,
 }) async {
-  await tester.pumpWidget(MaterialApp(
-    home: Scaffold(
-      body: DiscoverySectionView(
-        section: section ?? _makeSection(),
-        session: session,
-        heard: heard,
-        busy: busy,
-        error: error,
-        conflict: conflict,
-        onListen: onListen ?? () {},
-        onAnswer: onAnswer ?? (String sound) {},
-        onNext: onNext ?? () {},
-        onReview: onReview ?? () {},
-        onFinish: onFinish ?? () {},
-        onRetrySave: onRetrySave ?? () {},
-        onReload: onReload ?? () {},
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: DiscoverySectionView(
+          section: section ?? _makeSection(),
+          session: session,
+          heard: heard,
+          busy: busy,
+          error: error,
+          conflict: conflict,
+          onListen: onListen ?? () {},
+          onAnswer: onAnswer ?? (String sound) {},
+          onNext: onNext ?? () {},
+          onReview: onReview ?? () {},
+          onFinish: onFinish ?? () {},
+          onRetrySave: onRetrySave ?? () {},
+          onReload: onReload ?? () {},
+        ),
       ),
     ),
-  ));
+  );
   await tester.pump();
 }
 
-const Map<String, Type> _buttonTypes = {
-  'Listen to the word': FilledButton,
-  '/u/': TextButton,
-  '/y/': TextButton,
-  'Next word': FilledButton,
-  'See section explanation': FilledButton,
-  'Retry saving': TextButton,
-  'Reload saved progress': TextButton,
-  'Finish section': FilledButton,
-  'Review mistakes': OutlinedButton,
-};
-
 bool _enabled(WidgetTester tester, String label) {
-  return tester
-      .widget<ButtonStyleButton>(find.ancestor(
-          of: find.text(label), matching: find.byType(_buttonTypes[label]!)))
-      .enabled;
+  final Finder button = find.ancestor(
+    of: find.text(label),
+    matching: find.byWidgetPredicate(
+      (Widget widget) => widget is ButtonStyleButton,
+    ),
+  );
+  return tester.widget<ButtonStyleButton>(button).enabled;
 }
 
 String _semanticsText(WidgetTester tester) {
@@ -131,17 +128,23 @@ String _semanticsText(WidgetTester tester) {
 
 void main() {
   group('active listening puzzle', () {
-    testWidgets(
-        'shows instructions and choice labels without exposing words, '
+    testWidgets('shows instructions and choice labels without exposing words, '
         'explanation, or early feedback', (tester) async {
       final section = _makeSection();
       final session = _exerciseSession(position: 3);
       await _pump(tester, section: section, session: session, heard: true);
-      expect(find.text('Listening practice'), findsOneWidget,
-          reason: 'the active exercise uses the neutral title');
-      expect(find.text(section.title), findsNothing,
-          reason: 'the authored word title must not appear during the '
-              'active exercise');
+      expect(
+        find.text('Listening practice'),
+        findsOneWidget,
+        reason: 'the active exercise uses the neutral title',
+      );
+      expect(
+        find.text(section.title),
+        findsNothing,
+        reason:
+            'the authored word title must not appear during the '
+            'active exercise',
+      );
       expect(find.text('Listen to the word'), findsOneWidget);
       expect(find.text('/u/'), findsOneWidget);
       expect(find.text('/y/'), findsOneWidget);
@@ -156,8 +159,9 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('assistive semantics before a submission do not leak answers',
-        (tester) async {
+    testWidgets('assistive semantics before a submission do not leak answers', (
+      tester,
+    ) async {
       final section = _makeSection();
       final session = _exerciseSession(position: 5);
       await _pump(tester, section: section, session: session, heard: true);
@@ -170,8 +174,9 @@ void main() {
       expect(text.contains('expected sound'), isFalse);
     });
 
-    testWidgets('choices stay disabled before hearing; listening calls back',
-        (tester) async {
+    testWidgets('choices stay disabled before hearing; listening calls back', (
+      tester,
+    ) async {
       var listens = 0;
       final answers = <String>[];
       final session = _exerciseSession(position: 0);
@@ -192,8 +197,9 @@ void main() {
       expect(listens, 1);
     });
 
-    testWidgets('after hearing, tapping a choice submits that sound',
-        (tester) async {
+    testWidgets('after hearing, tapping a choice submits that sound', (
+      tester,
+    ) async {
       final answers = <String>[];
       final session = _exerciseSession(position: 0);
       await _pump(tester, session: session, heard: true, onAnswer: answers.add);
@@ -204,46 +210,64 @@ void main() {
       expect(answers, ['y']);
     });
 
-    testWidgets('while busy, every pending control is disabled',
-        (tester) async {
+    testWidgets('while busy, every pending control is disabled', (
+      tester,
+    ) async {
       final session = _exerciseSession(position: 1, currentAnswered: true);
-      await _pump(tester,
-          session: session, heard: true, busy: true, error: 'Saving failed.');
+      await _pump(
+        tester,
+        session: session,
+        heard: true,
+        busy: true,
+        error: 'Saving failed.',
+      );
       expect(_enabled(tester, 'Listen to the word'), isFalse);
       expect(_enabled(tester, '/u/'), isFalse);
       expect(_enabled(tester, '/y/'), isFalse);
-      expect(_enabled(tester, 'Next word'), isFalse);
+      expect(find.text('Next word'), findsNothing);
       expect(_enabled(tester, 'Retry saving'), isFalse);
     });
 
     testWidgets(
-        'one submission shows immediate feedback and disables re-answer',
-        (tester) async {
-      final session = _exerciseSession(
-          position: 2, currentAnswered: true, currentCorrect: true);
-      await _pump(tester, session: session, heard: true);
-      expect(find.text('Correct'), findsOneWidget);
-      expect(find.text('Not yet'), findsNothing);
-      expect(_enabled(tester, 'Listen to the word'), isFalse);
-      expect(_enabled(tester, '/u/'), isFalse);
-      expect(_enabled(tester, '/y/'), isFalse);
-      expect(_enabled(tester, 'Next word'), isTrue);
-    });
+      'one submission shows immediate feedback and disables re-answer',
+      (tester) async {
+        final session = _exerciseSession(
+          position: 2,
+          currentAnswered: true,
+          currentCorrect: true,
+        );
+        await _pump(tester, session: session, heard: true);
+        expect(find.text('Correct'), findsOneWidget);
+        expect(find.text('Not yet'), findsNothing);
+        expect(_enabled(tester, 'Listen to the word'), isFalse);
+        expect(_enabled(tester, '/u/'), isFalse);
+        expect(_enabled(tester, '/y/'), isFalse);
+        expect(_enabled(tester, 'Next word'), isTrue);
+      },
+    );
 
-    testWidgets('a wrong submission shows Not yet instead of Correct',
-        (tester) async {
+    testWidgets('a wrong submission shows Not yet instead of Correct', (
+      tester,
+    ) async {
       final session = _exerciseSession(
-          position: 2, currentAnswered: true, currentCorrect: false);
+        position: 2,
+        currentAnswered: true,
+        currentCorrect: false,
+      );
       await _pump(tester, session: session, heard: true);
       expect(find.text('Not yet'), findsOneWidget);
       expect(find.text('Correct'), findsNothing);
     });
 
-    testWidgets('Next word advances; the last item invites the debrief',
-        (tester) async {
+    testWidgets('Next word advances; the last item invites the debrief', (
+      tester,
+    ) async {
       var nexts = 0;
       final session = _exerciseSession(
-          position: 0, currentAnswered: true, currentCorrect: true);
+        position: 0,
+        currentAnswered: true,
+        currentCorrect: true,
+      );
       await _pump(tester, session: session, heard: true, onNext: () => nexts++);
       expect(find.text('Next word'), findsOneWidget);
       expect(find.text('See section explanation'), findsNothing);
@@ -254,9 +278,16 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       var nextsLast = 0;
       final last = _exerciseSession(
-          position: 9, currentAnswered: true, currentCorrect: true);
-      await _pump(tester,
-          session: last, heard: true, onNext: () => nextsLast++);
+        position: 9,
+        currentAnswered: true,
+        currentCorrect: true,
+      );
+      await _pump(
+        tester,
+        session: last,
+        heard: true,
+        onNext: () => nextsLast++,
+      );
       expect(find.text('See section explanation'), findsOneWidget);
       expect(find.text('Next word'), findsNothing);
       await tester.tap(find.text('See section explanation'));
@@ -267,65 +298,81 @@ void main() {
 
   group('errors', () {
     testWidgets(
-        'a pre-answer error is shown but never masquerades as an answer',
-        (tester) async {
-      var retries = 0;
-      final session = _exerciseSession(position: 0);
-      await _pump(tester,
+      'a pre-answer error is shown but never masquerades as an answer',
+      (tester) async {
+        var retries = 0;
+        final session = _exerciseSession(position: 0);
+        await _pump(
+          tester,
           session: session,
           heard: false,
           error: 'Audio unavailable.',
-          onRetrySave: () => retries++);
-      expect(find.text('Audio unavailable.'), findsOneWidget);
-      expect(find.text('Correct'), findsNothing);
-      expect(find.text('Not yet'), findsNothing);
-      expect(_enabled(tester, 'Listen to the word'), isFalse);
-      expect(_enabled(tester, '/u/'), isFalse);
-      expect(_enabled(tester, '/y/'), isFalse);
-      expect(_enabled(tester, 'Next word'), isFalse);
-      expect(_enabled(tester, 'Retry saving'), isTrue);
-      await tester.tap(find.text('Retry saving'));
-      await tester.pump();
-      expect(retries, 1);
-    });
+          onRetrySave: () => retries++,
+        );
+        expect(find.text('Audio unavailable.'), findsOneWidget);
+        expect(find.text('Correct'), findsNothing);
+        expect(find.text('Not yet'), findsNothing);
+        expect(_enabled(tester, 'Listen to the word'), isFalse);
+        expect(_enabled(tester, '/u/'), isFalse);
+        expect(_enabled(tester, '/y/'), isFalse);
+        expect(find.text('Next word'), findsNothing);
+        expect(_enabled(tester, 'Retry saving'), isTrue);
+        await tester.tap(find.text('Retry saving'));
+        await tester.pump();
+        expect(retries, 1);
+      },
+    );
 
     testWidgets(
-        'a failed save keeps feedback, blocks progression, offers retry',
-        (tester) async {
-      var retries = 0;
-      var nexts = 0;
-      final session = _exerciseSession(
-          position: 0, currentAnswered: true, currentCorrect: true);
-      await _pump(tester,
+      'a failed save keeps feedback, blocks progression, offers retry',
+      (tester) async {
+        var retries = 0;
+        var nexts = 0;
+        final session = _exerciseSession(
+          position: 0,
+          currentAnswered: true,
+          currentCorrect: true,
+        );
+        await _pump(
+          tester,
           session: session,
           heard: true,
           error: 'Saving failed.',
           onNext: () => nexts++,
-          onRetrySave: () => retries++);
-      expect(find.text('Correct'), findsOneWidget);
-      expect(find.text('Saving failed.'), findsOneWidget);
-      expect(_enabled(tester, 'Next word'), isFalse);
-      expect(_enabled(tester, 'Retry saving'), isTrue);
-      await tester.tap(find.text('Next word'));
-      await tester.pump();
-      expect(nexts, 0, reason: 'save failure must not advance');
-      await tester.tap(find.text('Retry saving'));
-      await tester.pump();
-      expect(retries, 1);
-    });
+          onRetrySave: () => retries++,
+        );
+        expect(find.text('Correct'), findsOneWidget);
+        expect(find.text('Saving failed.'), findsOneWidget);
+        expect(find.text('Next word'), findsNothing);
+        expect(_enabled(tester, 'Retry saving'), isTrue);
+        expect(nexts, 0, reason: 'save failure must not advance');
+        await tester.tap(find.text('Retry saving'));
+        await tester.pump();
+        expect(retries, 1);
+      },
+    );
   });
 
   group('debrief', () {
-    testWidgets('passes at the 80% threshold with finish eligible',
-        (tester) async {
+    testWidgets('passes at the 80% threshold with finish eligible', (
+      tester,
+    ) async {
       final section = _makeSection();
       final session = _debriefSession(correctCount: 8);
       var finishes = 0;
-      await _pump(tester, section: section, session: session, onFinish: () => finishes++);
+      await _pump(
+        tester,
+        section: section,
+        session: session,
+        onFinish: () => finishes++,
+      );
       expect(find.text(section.explanation), findsOneWidget);
       expect(find.text('Section debrief'), findsOneWidget);
-      expect(find.text(section.title), findsOneWidget,
-          reason: 'the word-bearing authored title belongs to the debrief');
+      expect(
+        find.text(section.title),
+        findsOneWidget,
+        reason: 'the word-bearing authored title belongs to the debrief',
+      );
       expect(find.text('Listening practice'), findsNothing);
       expect(find.text('You got 8 of 10 correct.'), findsOneWidget);
       expect(find.text('Passing needs 8 of 10 correct.'), findsOneWidget);
@@ -337,13 +384,18 @@ void main() {
       expect(finishes, 1);
     });
 
-    testWidgets('lists unresolved words and offers review even when passing',
-        (tester) async {
+    testWidgets('lists unresolved words and offers review even when passing', (
+      tester,
+    ) async {
       final section = _makeSection();
       final session = _debriefSession(correctCount: 8);
       var reviews = 0;
-      await _pump(tester,
-          section: section, session: session, onReview: () => reviews++);
+      await _pump(
+        tester,
+        section: section,
+        session: session,
+        onReview: () => reviews++,
+      );
       expect(find.text('wordword8'), findsOneWidget);
       expect(find.text('wordword9'), findsOneWidget);
       expect(find.text('wordword7'), findsNothing);
@@ -353,13 +405,18 @@ void main() {
       expect(reviews, 1);
     });
 
-    testWidgets('below the threshold finish is blocked but review remains',
-        (tester) async {
+    testWidgets('below the threshold finish is blocked but review remains', (
+      tester,
+    ) async {
       final section = _makeSection();
       final session = _debriefSession(correctCount: 5);
       var finishes = 0;
-      await _pump(tester,
-          section: section, session: session, onFinish: () => finishes++);
+      await _pump(
+        tester,
+        section: section,
+        session: session,
+        onFinish: () => finishes++,
+      );
       expect(find.text('You got 5 of 10 correct.'), findsOneWidget);
       expect(_enabled(tester, 'Finish section'), isFalse);
       await tester.tap(find.text('Finish section'));
@@ -370,8 +427,9 @@ void main() {
       expect(find.text('wordword9'), findsOneWidget);
     });
 
-    testWidgets('with no mistakes review is hidden and finish stays open',
-        (tester) async {
+    testWidgets('with no mistakes review is hidden and finish stays open', (
+      tester,
+    ) async {
       final session = _debriefSession(correctCount: 10);
       var finishes = 0;
       await _pump(tester, session: session, onFinish: () => finishes++);
@@ -384,16 +442,19 @@ void main() {
       expect(finishes, 1);
     });
 
-    testWidgets('a debrief save error blocks completion and offers retry',
-        (tester) async {
+    testWidgets('a debrief save error blocks completion and offers retry', (
+      tester,
+    ) async {
       var retries = 0;
       var finishes = 0;
       final session = _debriefSession(correctCount: 8);
-      await _pump(tester,
-          session: session,
-          error: 'Saving failed.',
-          onFinish: () => finishes++,
-          onRetrySave: () => retries++);
+      await _pump(
+        tester,
+        session: session,
+        error: 'Saving failed.',
+        onFinish: () => finishes++,
+        onRetrySave: () => retries++,
+      );
       expect(_enabled(tester, 'Finish section'), isFalse);
       expect(_enabled(tester, 'Review mistakes'), isFalse);
       expect(_enabled(tester, 'Retry saving'), isTrue);
@@ -408,30 +469,37 @@ void main() {
 
   group('stale session conflict', () {
     testWidgets(
-        'a conflict blocks all progression and offers the explicit reload',
-        (tester) async {
-      var reloads = 0;
-      final session = _exerciseSession(position: 0);
-      await _pump(
-        tester,
-        session: session,
-        heard: true,
-        conflict: 'Out of date with the saved progress.',
-        onReload: () => reloads++,
-      );
-      expect(find.text('Out of date with the saved progress.'), findsOneWidget);
-      expect(find.text('Reload saved progress'), findsOneWidget);
-      expect(find.text('Retry saving'), findsNothing,
-          reason: 'a conflict is recovered by reload, not by retry');
-      expect(_enabled(tester, 'Listen to the word'), isFalse);
-      expect(_enabled(tester, '/u/'), isFalse);
-      expect(_enabled(tester, '/y/'), isFalse);
-      expect(_enabled(tester, 'Next word'), isFalse);
-      expect(_enabled(tester, 'Reload saved progress'), isTrue);
-      await tester.tap(find.text('Reload saved progress'));
-      await tester.pump();
-      expect(reloads, 1);
-    });
+      'a conflict blocks all progression and offers the explicit reload',
+      (tester) async {
+        var reloads = 0;
+        final session = _exerciseSession(position: 0);
+        await _pump(
+          tester,
+          session: session,
+          heard: true,
+          conflict: 'Out of date with the saved progress.',
+          onReload: () => reloads++,
+        );
+        expect(
+          find.text('Out of date with the saved progress.'),
+          findsOneWidget,
+        );
+        expect(find.text('Reload saved progress'), findsOneWidget);
+        expect(
+          find.text('Retry saving'),
+          findsNothing,
+          reason: 'a conflict is recovered by reload, not by retry',
+        );
+        expect(_enabled(tester, 'Listen to the word'), isFalse);
+        expect(_enabled(tester, '/u/'), isFalse);
+        expect(_enabled(tester, '/y/'), isFalse);
+        expect(find.text('Next word'), findsNothing);
+        expect(_enabled(tester, 'Reload saved progress'), isTrue);
+        await tester.tap(find.text('Reload saved progress'));
+        await tester.pump();
+        expect(reloads, 1);
+      },
+    );
 
     testWidgets('a debrief conflict blocks finish and review', (tester) async {
       var finishes = 0;
@@ -458,12 +526,13 @@ void main() {
       var reloads = 0;
       final session = _exerciseSession(position: 0);
       await _pump(
-          tester,
-          session: session,
-          heard: true,
-          busy: true,
-          conflict: 'Reload needed.',
-          onReload: () => reloads++);
+        tester,
+        session: session,
+        heard: true,
+        busy: true,
+        conflict: 'Reload needed.',
+        onReload: () => reloads++,
+      );
       expect(_enabled(tester, 'Reload saved progress'), isFalse);
       await tester.tap(find.text('Reload saved progress'));
       await tester.pump();
@@ -476,7 +545,10 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(360, 800));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final session = _exerciseSession(
-          position: 8, currentAnswered: true, currentCorrect: true);
+        position: 8,
+        currentAnswered: true,
+        currentCorrect: true,
+      );
       await _pump(tester, session: session, heard: true);
       expect(find.text('Next word'), findsOneWidget);
       await tester.scrollUntilVisible(find.text('Next word'), 200);
@@ -494,7 +566,10 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(390, 844));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final session = _exerciseSession(
-          position: 8, currentAnswered: true, currentCorrect: true);
+        position: 8,
+        currentAnswered: true,
+        currentCorrect: true,
+      );
       await _pump(tester, session: session, heard: true);
       await tester.scrollUntilVisible(find.text('Next word'), 200);
       expect(tester.takeException(), isNull);
@@ -507,16 +582,21 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('large text still reaches every control without overflow',
-        (tester) async {
+    testWidgets('large text still reaches every control without overflow', (
+      tester,
+    ) async {
       await tester.binding.setSurfaceSize(const Size(360, 800));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       tester.platformDispatcher.textScaleFactorTestValue = 1.4;
       // The test binding is recreated per test; reset defensively anyway.
       addTearDown(
-          () => tester.platformDispatcher.textScaleFactorTestValue = 1.0);
+        () => tester.platformDispatcher.textScaleFactorTestValue = 1.0,
+      );
       final session = _exerciseSession(
-          position: 8, currentAnswered: true, currentCorrect: true);
+        position: 8,
+        currentAnswered: true,
+        currentCorrect: true,
+      );
       await _pump(tester, session: session, heard: true);
       await tester.scrollUntilVisible(find.text('Next word'), 200);
       expect(tester.takeException(), isNull);

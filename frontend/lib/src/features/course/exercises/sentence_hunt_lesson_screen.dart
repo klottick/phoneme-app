@@ -18,6 +18,7 @@ import 'package:linguist/src/features/course/exercises/listening_exercise_contra
 import 'package:linguist/src/features/course/exercises/sentence_hunt.dart';
 import 'package:linguist/src/features/course/exercises/sentence_hunt_controller.dart';
 import 'package:linguist/src/features/course/exercises/sentence_hunt_section_debrief.dart';
+import 'package:linguist/src/features/course/lesson_progress_indicator.dart';
 
 /// Provider- and lifecycle-owning shell around the controlled hunt.
 class SentenceHuntLessonScreen extends ConsumerStatefulWidget {
@@ -59,9 +60,9 @@ class _SentenceHuntLessonScreenState
 
   ProviderSubscription<LearningAuthScope>? _authSubscription;
   ProviderSubscription<AsyncValue<SentenceHuntCatalogue>>?
-      _catalogueSubscription;
+  _catalogueSubscription;
   ProviderSubscription<AsyncValue<SentenceHuntLearningStore>>?
-      _storeSubscription;
+  _storeSubscription;
   ProviderSubscription<CourseReferenceAudio>? _audioSubscription;
   GoRouter? _goRouter;
   ModalRoute<dynamic>? _route;
@@ -85,22 +86,29 @@ class _SentenceHuntLessonScreenState
     _appSuspended = switch (WidgetsBinding.instance.lifecycleState) {
       AppLifecycleState.paused ||
       AppLifecycleState.hidden ||
-      AppLifecycleState.detached =>
-        true,
+      AppLifecycleState.detached => true,
       _ => false,
     };
     try {
       _auth = ref.read(learningAuthScopeProvider);
       _authSubscription = ref.listenManual<LearningAuthScope>(
-          learningAuthScopeProvider, _authChanged);
-      _catalogueSubscription =
-          ref.listenManual<AsyncValue<SentenceHuntCatalogue>>(
-              sentenceHuntCatalogueProvider, _catalogueChanged);
-      _storeSubscription =
-          ref.listenManual<AsyncValue<SentenceHuntLearningStore>>(
-              sentenceHuntLearningStoreProvider, _storeChanged);
+        learningAuthScopeProvider,
+        _authChanged,
+      );
+      _catalogueSubscription = ref
+          .listenManual<AsyncValue<SentenceHuntCatalogue>>(
+            sentenceHuntCatalogueProvider,
+            _catalogueChanged,
+          );
+      _storeSubscription = ref
+          .listenManual<AsyncValue<SentenceHuntLearningStore>>(
+            sentenceHuntLearningStoreProvider,
+            _storeChanged,
+          );
       _audioSubscription = ref.listenManual<CourseReferenceAudio>(
-          courseReferenceAudioProvider, _audioChanged);
+        courseReferenceAudioProvider,
+        _audioChanged,
+      );
     } on Object {
       _auth = LearningAuthScope(
         owner: LearningOwner.guest(),
@@ -227,7 +235,8 @@ class _SentenceHuntLessonScreenState
     }
     if (widget.itemId != null &&
         !section.items.any(
-            (SentenceHuntItem item) => item.identity.itemId == widget.itemId)) {
+          (SentenceHuntItem item) => item.identity.itemId == widget.itemId,
+        )) {
       _catalogue = catalogue;
       _section = section;
       _acquiring = false;
@@ -300,11 +309,7 @@ class _SentenceHuntLessonScreenState
           ? SentenceHuntEntryMode.reviewOnly
           : SentenceHuntEntryMode.practice,
       policy: widget.policy,
-      isCurrent: () => _controllerOwns(
-        controller,
-        store,
-        capturedAuth,
-      ),
+      isCurrent: () => _controllerOwns(controller, store, capturedAuth),
       onStateChanged: () {
         if (mounted && identical(_controller, controller)) setState(() {});
       },
@@ -383,7 +388,8 @@ class _SentenceHuntLessonScreenState
       return;
     }
     _auth = next;
-    final bool ownerChanged = old != null &&
+    final bool ownerChanged =
+        old != null &&
         (old.owner != next.owner || old.generation != next.generation);
     if (ownerChanged) {
       _invalidateAcquisition();
@@ -431,7 +437,9 @@ class _SentenceHuntLessonScreenState
   }
 
   void _audioChanged(
-      CourseReferenceAudio? previous, CourseReferenceAudio next) {
+    CourseReferenceAudio? previous,
+    CourseReferenceAudio next,
+  ) {
     if (_audio == null || identical(_audio, next)) return;
     _requireDependencyRecovery();
   }
@@ -589,137 +597,178 @@ class _SentenceHuntLessonScreenState
         state?.session?.phase == LessonSectionPhase.debrief;
     final bool showExercise =
         state?.phase == SentenceHuntPhase.exercise && state?.prompt != null;
-    final bool showUnavailable = _acquisitionError != null ||
+    final bool showUnavailable =
+        _acquisitionError != null ||
         state?.phase == SentenceHuntPhase.unavailable;
+    final LessonSectionSession? session = state?.session;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Sentence hunt')),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              if (_blocked)
-                const Text(
-                    'Sentence hunt is paused while this screen is covered or unavailable.'),
-              if (_acquiring ||
-                  (controller == null &&
-                      !showUnavailable &&
-                      !_recoveryRequired))
-                const Center(child: CircularProgressIndicator()),
-              if (_acquisitionError != null) ...<Widget>[
-                Text(_acquisitionError!),
-                if (!controlsBlocked && !_acquiring)
-                  TextButton(
-                    onPressed:
-                        _acquisitionFailure == _AcquisitionFailure.content
-                            ? _retryValidation
-                            : _retryProviderAcquisition,
-                    child: Text(
-                      _acquisitionFailure == _AcquisitionFailure.content
-                          ? 'Retry validation'
-                          : 'Retry loading',
+        child: Column(
+          children: <Widget>[
+            if (session != null)
+              LessonProgressIndicator(
+                completed: completedItemsThisRound(session),
+                total: session.queue.length,
+                roundLabel: state!.reviewOnly || session.round > 1
+                    ? 'Review round ${session.round}'
+                    : null,
+              ),
+            Expanded(
+              child: LessonContentViewport(
+                maxWidth: 640,
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    if (_blocked)
+                      const Text(
+                        'Sentence hunt is paused while this screen is covered or unavailable.',
+                      ),
+                    if (_acquiring ||
+                        (controller == null &&
+                            !showUnavailable &&
+                            !_recoveryRequired))
+                      const Center(child: CircularProgressIndicator()),
+                    if (_acquisitionError != null) ...<Widget>[
+                      Text(_acquisitionError!),
+                      if (!controlsBlocked && !_acquiring)
+                        TextButton(
+                          onPressed:
+                              _acquisitionFailure == _AcquisitionFailure.content
+                              ? _retryValidation
+                              : _retryProviderAcquisition,
+                          child: Text(
+                            _acquisitionFailure == _AcquisitionFailure.content
+                                ? 'Retry validation'
+                                : 'Retry loading',
+                          ),
+                        ),
+                    ],
+                    if (state?.error != null &&
+                        !showDebrief &&
+                        !state!.savePending)
+                      Text(state.error!),
+                    if (state?.savePending == true &&
+                        state?.error != null &&
+                        !showExercise &&
+                        !showDebrief) ...<Widget>[
+                      Text(state!.error!),
+                      if (!controlsBlocked)
+                        TextButton(
+                          onPressed: controller!.retrySave,
+                          child: const Text('Retry saving'),
+                        ),
+                    ],
+                    if (state?.conflict != null && !showDebrief) ...<Widget>[
+                      Text(state!.conflict!),
+                      if (!controlsBlocked)
+                        TextButton(
+                          onPressed: () => controller!.load(retry: true),
+                          child: const Text('Reload saved progress'),
+                        ),
+                    ],
+                    if (state?.loadFailed == true &&
+                        !showDebrief &&
+                        !state!.savePending &&
+                        !controlsBlocked)
+                      TextButton(
+                        onPressed: () => controller!.load(retry: true),
+                        child: const Text('Retry loading'),
+                      ),
+                    if (state?.modeMismatch == true)
+                      const Text(
+                        'The saved run is being resumed in its original mode; this link cannot change it.',
+                      ),
+                    if (_itemNotice != null) Text(_itemNotice!),
+                    if (_recoveryRequired && !_blocked && !_acquiring)
+                      TextButton(
+                        onPressed: _resumeExplicitly,
+                        child: const Text('Resume exercise'),
+                      ),
+                    if (showExercise) ...<Widget>[
+                      SentenceHunt(
+                        prompt: state!.prompt!,
+                        state: ListeningExerciseState(
+                          busy: state.busy,
+                          playing: state.playing,
+                          blocked: controlsBlocked,
+                          answered: state.feedback != null,
+                          feedback: state.feedback,
+                        ),
+                        selectedTokenIds: state.selectedTokenIds,
+                        canSubmit: state.canSubmit && !controlsBlocked,
+                        onPlay: controller!.play,
+                        onToggleToken: controller.toggleToken,
+                        onSubmit: controller.submit,
+                      ),
+                      if (state.audioError != null) ...<Widget>[
+                        Text(state.audioError!),
+                        if (!controlsBlocked &&
+                            !state.busy &&
+                            state.feedback == null)
+                          TextButton(
+                            onPressed: controller.play,
+                            child: const Text('Retry audio'),
+                          ),
+                      ],
+                      if (state.savePending &&
+                          state.error != null &&
+                          !controlsBlocked)
+                        TextButton(
+                          onPressed: controller.retrySave,
+                          child: const Text('Retry saving'),
+                        ),
+                    ],
+                    if (showDebrief && _section != null)
+                      SentenceHuntSectionDebrief(
+                        section: _section!,
+                        session: state!.session!,
+                        latestAttempts:
+                            state.debriefAttempts ??
+                            const <SentenceHuntAttempt>[],
+                        busy: state.busy || controlsBlocked,
+                        canReview: state.canReview && !controlsBlocked,
+                        canFinish: state.canFinish && !controlsBlocked,
+                        completionEligible: state.completionEligible,
+                        reviewOnly: state.reviewOnly,
+                        finished: state.finished,
+                        error: state.savePending ? state.error : null,
+                        conflict: state.conflict,
+                        onReviewMistakes: controller!.reviewMistakes,
+                        onFinish: controller.finish,
+                        onRetrySave: controller.retrySave,
+                        onReload: () => controller.load(retry: true),
+                      ),
+                    if (state?.busy == true) const LinearProgressIndicator(),
+                  ],
+                ),
+              ),
+            ),
+            if (showExercise && session?.answered == true && !controlsBlocked)
+              SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 640),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: state!.canAdvance && !controlsBlocked
+                            ? controller!.advance
+                            : null,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                        ),
+                        child: const Text('Continue'),
+                      ),
                     ),
                   ),
-              ],
-              if (state?.error != null && !showDebrief && !state!.savePending)
-                Text(state.error!),
-              if (state?.savePending == true &&
-                  state?.error != null &&
-                  !showExercise &&
-                  !showDebrief) ...<Widget>[
-                Text(state!.error!),
-                if (!controlsBlocked)
-                  TextButton(
-                    onPressed: controller!.retrySave,
-                    child: const Text('Retry saving'),
-                  ),
-              ],
-              if (state?.conflict != null && !showDebrief) ...<Widget>[
-                Text(state!.conflict!),
-                if (!controlsBlocked)
-                  TextButton(
-                    onPressed: () => controller!.load(retry: true),
-                    child: const Text('Reload saved progress'),
-                  ),
-              ],
-              if (state?.loadFailed == true &&
-                  !showDebrief &&
-                  !state!.savePending &&
-                  !controlsBlocked)
-                TextButton(
-                  onPressed: () => controller!.load(retry: true),
-                  child: const Text('Retry loading'),
                 ),
-              if (state?.modeMismatch == true)
-                const Text(
-                    'The saved run is being resumed in its original mode; this link cannot change it.'),
-              if (_itemNotice != null) Text(_itemNotice!),
-              if (_recoveryRequired && !_blocked && !_acquiring)
-                TextButton(
-                  onPressed: _resumeExplicitly,
-                  child: const Text('Resume exercise'),
-                ),
-              if (showExercise) ...<Widget>[
-                SentenceHunt(
-                  prompt: state!.prompt!,
-                  state: ListeningExerciseState(
-                    busy: state.busy,
-                    playing: state.playing,
-                    blocked: controlsBlocked,
-                    answered: state.feedback != null,
-                    feedback: state.feedback,
-                  ),
-                  selectedTokenIds: state.selectedTokenIds,
-                  canSubmit: state.canSubmit && !controlsBlocked,
-                  onPlay: controller!.play,
-                  onToggleToken: controller.toggleToken,
-                  onSubmit: controller.submit,
-                ),
-                if (state.audioError != null) ...<Widget>[
-                  Text(state.audioError!),
-                  if (!controlsBlocked && !state.busy && state.feedback == null)
-                    TextButton(
-                      onPressed: controller.play,
-                      child: const Text('Retry audio'),
-                    ),
-                ],
-                if (state.canAdvance && !controlsBlocked)
-                  FilledButton(
-                    onPressed: controller.advance,
-                    child: const Text('Continue'),
-                  ),
-                if (state.savePending &&
-                    state.error != null &&
-                    !controlsBlocked)
-                  TextButton(
-                    onPressed: controller.retrySave,
-                    child: const Text('Retry saving'),
-                  ),
-              ],
-              if (showDebrief && _section != null)
-                SentenceHuntSectionDebrief(
-                  section: _section!,
-                  session: state!.session!,
-                  latestAttempts:
-                      state.debriefAttempts ?? const <SentenceHuntAttempt>[],
-                  busy: state.busy || controlsBlocked,
-                  canReview: state.canReview && !controlsBlocked,
-                  canFinish: state.canFinish && !controlsBlocked,
-                  completionEligible: state.completionEligible,
-                  reviewOnly: state.reviewOnly,
-                  finished: state.finished,
-                  error: state.savePending ? state.error : null,
-                  conflict: state.conflict,
-                  onReviewMistakes: controller!.reviewMistakes,
-                  onFinish: controller.finish,
-                  onRetrySave: controller.retrySave,
-                  onReload: () => controller.load(retry: true),
-                ),
-              if (state?.busy == true) const LinearProgressIndicator(),
-            ],
-          ),
+              ),
+          ],
         ),
       ),
     );

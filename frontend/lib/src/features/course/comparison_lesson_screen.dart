@@ -19,6 +19,7 @@ import 'exercises/listening_exercise_contract.dart';
 import 'exercises/sound_comparison.dart';
 import 'lesson_exercise_owner.dart';
 import 'comparison_session_id.dart';
+import 'lesson_progress_indicator.dart';
 
 class ComparisonLessonScreen extends ConsumerStatefulWidget {
   const ComparisonLessonScreen({
@@ -44,8 +45,6 @@ class ComparisonLessonScreen extends ConsumerStatefulWidget {
 class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     with WidgetsBindingObserver {
   static const _unavailable = 'This comparison activity is unavailable.';
-  static const _uyDemoDisclosure =
-      'Demo practice: this authored comparison content has not had qualified French review. It is practice, not an assessment.';
   static const _loadError =
       'Your saved comparison progress could not be loaded.';
   static const _saveError =
@@ -64,7 +63,8 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
   ExerciseLifecycleFence _fence = ExerciseLifecycleFence();
   late ExerciseAudioGrants<CourseAudioSource> _grants =
       ExerciseAudioGrants<CourseAudioSource>(
-          requiredSamples: {ComparisonSample.a, ComparisonSample.b});
+        requiredSamples: {ComparisonSample.a, ComparisonSample.b},
+      );
   FrozenExerciseSave<ComparisonLearningCommand, ComparisonCommit>? _save;
   CourseReferenceAudio? _activeAudio;
   ExerciseRequestIdentity? _playback;
@@ -145,7 +145,8 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     _fence = ExerciseLifecycleFence();
     if (_appSuspended || _routeCovered || _authUnready) _fence.suspend();
     _grants = ExerciseAudioGrants<CourseAudioSource>(
-        requiredSamples: {ComparisonSample.a, ComparisonSample.b});
+      requiredSamples: {ComparisonSample.a, ComparisonSample.b},
+    );
     _validateAndLoad();
   }
 
@@ -185,10 +186,14 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     ComparisonLearningStore store;
     LearningAuthScope auth;
     try {
-      _storeSubscription ??=
-          ref.listenManual(comparisonLearningStoreProvider, _storeChanged);
-      _authSubscription ??=
-          ref.listenManual(learningAuthScopeProvider, _authChanged);
+      _storeSubscription ??= ref.listenManual(
+        comparisonLearningStoreProvider,
+        _storeChanged,
+      );
+      _authSubscription ??= ref.listenManual(
+        learningAuthScopeProvider,
+        _authChanged,
+      );
       auth = ref.read(learningAuthScopeProvider);
       store = ref.read(comparisonLearningStoreProvider);
     } catch (_) {
@@ -234,7 +239,9 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
   }
 
   static bool _sameSample(
-          ComparisonSampleContent a, ComparisonSampleContent b) =>
+    ComparisonSampleContent a,
+    ComparisonSampleContent b,
+  ) =>
       a.slot == b.slot &&
       a.referenceId == b.referenceId &&
       a.target.phonemeId == b.target.phonemeId &&
@@ -251,8 +258,11 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     });
   }
 
-  Future<void> _load(ComparisonLearningStore store, int operation,
-      {bool retry = false}) async {
+  Future<void> _load(
+    ComparisonLearningStore store,
+    int operation, {
+    bool retry = false,
+  }) async {
     if (_contentError != null || !mounted) return;
     final fence = _fence;
     final epoch = fence.lifecycleEpoch;
@@ -278,7 +288,8 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
             error is LearningContentChangedException) {
           _conflict = 'Saved comparison progress changed. Reload to continue.';
         } else {
-          _error = error is ComparisonUnavailableException ||
+          _error =
+              error is ComparisonUnavailableException ||
                   error is LearningUnavailableException ||
                   error is LearningCorruptException ||
                   error is LearningUnsupportedVersionException
@@ -298,11 +309,13 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
       final freshPolicy = widget.policy ?? LessonPolicy();
       _busy = false;
       _prepareAndRun(
-          store,
-          loaded,
-          StartComparisonRun(
-              sessionId: createComparisonSessionId(),
-              policy: freshPolicy));
+        store,
+        loaded,
+        StartComparisonRun(
+          sessionId: createComparisonSessionId(),
+          policy: freshPolicy,
+        ),
+      );
       return;
     }
     try {
@@ -329,25 +342,46 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
   void _publish(LessonSectionSession session) {
     final slot = _state!.slots[widget.activityId]!;
     final identity = _prompt(session, slot.cursor.generation);
+    final PhonemeRelation? savedSelection = _savedSelection(session, slot);
     _grants.beginPrompt(identity);
     setState(() {
       _session = session;
       _busy = false;
       _playing = false;
       _answered = session.answered;
-      _selected = null;
+      _selected = savedSelection;
       _localCorrect = session.answered ? session.lastCorrect : null;
       _audioError = null;
     });
   }
 
+  PhonemeRelation? _savedSelection(
+    LessonSectionSession session,
+    ComparisonSlot slot,
+  ) {
+    final String? pairId = session.currentItemId;
+    if (!session.answered || pairId == null) return null;
+    for (final ComparisonPairAttempt attempt in _state!.attempts.reversed) {
+      if (attempt.activityId == widget.activityId &&
+          attempt.pairId == pairId &&
+          attempt.contentRevision == _catalogue!.contentRevision &&
+          attempt.runGeneration == slot.cursor.generation &&
+          attempt.round == session.round) {
+        return attempt.selectedRelation;
+      }
+    }
+    return null;
+  }
+
   ExercisePromptIdentity _prompt(
-          LessonSectionSession session, int generation) =>
-      ExercisePromptIdentity(
-          activityId: widget.activityId,
-          runGeneration: generation,
-          round: session.round,
-          itemId: session.currentItemId ?? 'debrief');
+    LessonSectionSession session,
+    int generation,
+  ) => ExercisePromptIdentity(
+    activityId: widget.activityId,
+    runGeneration: generation,
+    round: session.round,
+    itemId: session.currentItemId ?? 'debrief',
+  );
 
   bool _ownsAuthAndRoute(ComparisonLearningStore store) {
     if (!mounted ||
@@ -369,8 +403,12 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     }
   }
 
-  bool _ownsOperationContext(ComparisonLearningStore store,
-          ExerciseLifecycleFence fence, int epoch, int contextRevision) =>
+  bool _ownsOperationContext(
+    ComparisonLearningStore store,
+    ExerciseLifecycleFence fence,
+    int epoch,
+    int contextRevision,
+  ) =>
       mounted &&
       contextRevision == _widgetContextRevision &&
       identical(_fence, fence) &&
@@ -379,7 +417,9 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
       _ownsAuthAndRoute(store);
 
   void _storeChanged(
-      ComparisonLearningStore? previous, ComparisonLearningStore next) {
+    ComparisonLearningStore? previous,
+    ComparisonLearningStore next,
+  ) {
     if (identical(previous, next) || _contentError != null) {
       return;
     }
@@ -405,7 +445,8 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     _busy = false;
     _playing = false;
     _grants = ExerciseAudioGrants<CourseAudioSource>(
-        requiredSamples: {ComparisonSample.a, ComparisonSample.b});
+      requiredSamples: {ComparisonSample.a, ComparisonSample.b},
+    );
     _fence = ExerciseLifecycleFence();
     _ownerScope = next.scope;
     final auth = ref.read(learningAuthScopeProvider);
@@ -424,7 +465,8 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     }
     if (_contentError != null) return;
     final currentStore = _store;
-    final ownerOrGenerationChanged = currentStore != null &&
+    final ownerOrGenerationChanged =
+        currentStore != null &&
         (next.owner != currentStore.scope.owner ||
             next.generation != _authGeneration);
     if (!next.ready || ownerOrGenerationChanged) {
@@ -464,7 +506,9 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
   }
 
   Future<void> _listen(ComparisonSample sample) async {
-    final session = _session, store = _store, slot = _state?.slots[widget.activityId];
+    final session = _session,
+        store = _store,
+        slot = _state?.slots[widget.activityId];
     if (session == null ||
         store == null ||
         slot == null ||
@@ -476,8 +520,9 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
       return;
     }
     final exercise = _catalogue!.exercise(session.currentItemId!);
-    final content =
-        sample == ComparisonSample.a ? exercise.sampleA : exercise.sampleB;
+    final content = sample == ComparisonSample.a
+        ? exercise.sampleA
+        : exercise.sampleB;
     final fence = _fence;
     final contextRevision = _widgetContextRevision;
     final request = ExerciseRequestIdentity(
@@ -504,10 +549,12 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     _activeAudio = audio;
     CourseAudioResult result;
     try {
-      result = await audio.playReference(content.referenceId,
-          use: CourseAudioUse.alphaPractice,
-          variant: CourseAudioVariant.normal,
-          allowPracticeTts: false);
+      result = await audio.playReference(
+        content.referenceId,
+        use: CourseAudioUse.alphaPractice,
+        variant: CourseAudioVariant.normal,
+        allowPracticeTts: false,
+      );
     } catch (_) {
       _audioFailed(request, fence, store, contextRevision);
       return;
@@ -515,18 +562,24 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     if (!mounted ||
         !identical(_playback, request) ||
         !_ownsOperationContext(
-            store, fence, request.lifecycleEpoch, contextRevision) ||
+          store,
+          fence,
+          request.lifecycleEpoch,
+          contextRevision,
+        ) ||
         !identical(_state?.slots[widget.activityId], slot) ||
         _session?.currentItemId != request.prompt.itemId) {
       return;
     }
-    final accepted = result.outcome == CourseAudioOutcome.completed &&
+    final accepted =
+        result.outcome == CourseAudioOutcome.completed &&
         result.source == CourseAudioSource.unverifiedRecording &&
         _grants.acceptSuccess(
-            request: request,
-            actualReferenceId: result.referenceId,
-            outcome: result.outcome,
-            actualSource: result.source);
+          request: request,
+          actualReferenceId: result.referenceId,
+          outcome: result.outcome,
+          actualSource: result.source,
+        );
     _playback = null;
     setState(() {
       _busy = false;
@@ -538,14 +591,19 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
   }
 
   void _audioFailed(
-      ExerciseRequestIdentity request,
-      ExerciseLifecycleFence fence,
-      ComparisonLearningStore store,
-      int contextRevision) {
+    ExerciseRequestIdentity request,
+    ExerciseLifecycleFence fence,
+    ComparisonLearningStore store,
+    int contextRevision,
+  ) {
     if (!mounted ||
         !identical(_playback, request) ||
         !_ownsOperationContext(
-            store, fence, request.lifecycleEpoch, contextRevision)) {
+          store,
+          fence,
+          request.lifecycleEpoch,
+          contextRevision,
+        )) {
       return;
     }
     _playback = null;
@@ -599,11 +657,13 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
       final command = store.prepare(
         state: state,
         activityId: widget.activityId,
-        action: AnswerComparisonPair(ComparePhonemesAnswer(
-          selectedRelation: relation,
-          expectedRelationSnapshot: exercise.expectedRelation,
-          observations: observations,
-        )),
+        action: AnswerComparisonPair(
+          ComparePhonemesAnswer(
+            selectedRelation: relation,
+            expectedRelationSnapshot: exercise.expectedRelation,
+            observations: observations,
+          ),
+        ),
       );
       setState(() {});
       _run(command);
@@ -625,23 +685,23 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
   }
 
   ComparisonPlaybackObservation _observation(
-          ExerciseHearingGrant<CourseAudioSource> grant,
-          ComparisonSample sample,
-          String pairId,
-          LessonSectionSession session,
-          ComparisonSlot slot) =>
-      ComparisonPlaybackObservation(
-        slot: sample,
-        referenceId: grant.request.referenceId,
-        outcome: CourseAudioOutcome.completed,
-        source: grant.source,
-        activityId: widget.activityId,
-        runGeneration: slot.cursor.generation,
-        round: session.round,
-        pairId: pairId,
-        profile: slot.scope,
-        uiGeneration: grant.request.lifecycleEpoch,
-      );
+    ExerciseHearingGrant<CourseAudioSource> grant,
+    ComparisonSample sample,
+    String pairId,
+    LessonSectionSession session,
+    ComparisonSlot slot,
+  ) => ComparisonPlaybackObservation(
+    slot: sample,
+    referenceId: grant.request.referenceId,
+    outcome: CourseAudioOutcome.completed,
+    source: grant.source,
+    activityId: widget.activityId,
+    runGeneration: slot.cursor.generation,
+    round: session.round,
+    pairId: pairId,
+    profile: slot.scope,
+    uiGeneration: grant.request.lifecycleEpoch,
+  );
 
   void _run(ComparisonLearningCommand command) {
     final store = _store;
@@ -654,12 +714,16 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     final fence = _fence;
     final contextRevision = _widgetContextRevision;
     late final FrozenExerciseSave<ComparisonLearningCommand, ComparisonCommit>
-        owner;
+    owner;
     owner = FrozenExerciseSave(
       fence: fence,
       submit: store.submit,
       stillOwnsStoreAuthRoute: () => _ownsOperationContext(
-          store, fence, fence.lifecycleEpoch, contextRevision),
+        store,
+        fence,
+        fence.lifecycleEpoch,
+        contextRevision,
+      ),
       onAcknowledged: (commit) async {
         if (!identical(_save, owner) ||
             contextRevision != _widgetContextRevision ||
@@ -668,9 +732,10 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
         }
         _state = commit.state;
         final saved = LessonSectionSession.fromJson(
-            Map<String, dynamic>.from(commit.slot.checkpoint.sessionJson),
-            itemIds: _catalogue!.exercises.map((e) => e.id).toList(),
-            contentRevision: _catalogue!.contentRevision);
+          Map<String, dynamic>.from(commit.slot.checkpoint.sessionJson),
+          itemIds: _catalogue!.exercises.map((e) => e.id).toList(),
+          contentRevision: _catalogue!.contentRevision,
+        );
         _error = null;
         _conflict = null;
         if (command.action is FinishComparisonRun) _finished = true;
@@ -690,36 +755,43 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
       _busy = true;
       _error = null;
     });
-    unawaited(owner.claimAndSubmit(command).then((result) {
-      if (!mounted ||
-          !identical(_save, owner) ||
-          contextRevision != _widgetContextRevision ||
-          !identical(_store, store)) {
-        return;
-      }
-      if (result != null || owner.pendingCommand == null) {
-        _explicitRetryRequired = false;
-      }
-      if (owner.acknowledgementError != null) {
-        setState(() {
-          _busy = false;
-          _error = null;
-          _conflict =
-              'This change was saved, but the screen could not update. Reload saved progress.';
-        });
-      }
-    }, onError: (Object error) {
-      if (!mounted ||
-          !identical(_save, owner) ||
-          contextRevision != _widgetContextRevision ||
-          !identical(_store, store)) {
-        return;
-      }
-      setState(() {
-        _busy = false;
-        _classifySaveFailure(error);
-      });
-    }));
+    unawaited(
+      owner
+          .claimAndSubmit(command)
+          .then(
+            (result) {
+              if (!mounted ||
+                  !identical(_save, owner) ||
+                  contextRevision != _widgetContextRevision ||
+                  !identical(_store, store)) {
+                return;
+              }
+              if (result != null || owner.pendingCommand == null) {
+                _explicitRetryRequired = false;
+              }
+              if (owner.acknowledgementError != null) {
+                setState(() {
+                  _busy = false;
+                  _error = null;
+                  _conflict =
+                      'This change was saved, but the screen could not update. Reload saved progress.';
+                });
+              }
+            },
+            onError: (Object error) {
+              if (!mounted ||
+                  !identical(_save, owner) ||
+                  contextRevision != _widgetContextRevision ||
+                  !identical(_store, store)) {
+                return;
+              }
+              setState(() {
+                _busy = false;
+                _classifySaveFailure(error);
+              });
+            },
+          ),
+    );
   }
 
   void _advance() => _command(const AdvanceComparisonPair());
@@ -748,12 +820,18 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
 
   void _releaseInput() => _inputClaimed = false;
 
-  void _prepareAndRun(ComparisonLearningStore store,
-      ComparisonLearningState state, ComparisonAction action) {
+  void _prepareAndRun(
+    ComparisonLearningStore store,
+    ComparisonLearningState state,
+    ComparisonAction action,
+  ) {
     if (!_ownsAuthAndRoute(store) || !_claimInput()) return;
     try {
       final command = store.prepare(
-          state: state, activityId: widget.activityId, action: action);
+        state: state,
+        activityId: widget.activityId,
+        action: action,
+      );
       _run(command);
     } catch (_) {
       _releaseInput();
@@ -835,7 +913,8 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     _stopAudio();
     _fence.resume();
     _grants = ExerciseAudioGrants<CourseAudioSource>(
-        requiredSamples: {ComparisonSample.a, ComparisonSample.b});
+      requiredSamples: {ComparisonSample.a, ComparisonSample.b},
+    );
     _fence = ExerciseLifecycleFence();
     _load(store, ++_loadOperation, retry: true);
   }
@@ -851,11 +930,13 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
       return;
     }
     _prepareAndRun(
-        store,
-        state,
-        StartComparisonRun(
-            sessionId: 'comparison-${DateTime.now().microsecondsSinceEpoch}',
-            policy: _session!.policy));
+      store,
+      state,
+      StartComparisonRun(
+        sessionId: 'comparison-${DateTime.now().microsecondsSinceEpoch}',
+        policy: _session!.policy,
+      ),
+    );
   }
 
   void _stopAudio() {
@@ -1020,131 +1101,181 @@ class _ComparisonLessonScreenState extends ConsumerState<ComparisonLessonScreen>
     final catalogue = _catalogue;
     final session = _session;
     final state = _state;
-    final active = catalogue != null &&
+    final active =
+        catalogue != null &&
         session != null &&
         state?.slots[widget.activityId] != null &&
         session.phase == LessonSectionPhase.exercise &&
         session.currentItemId != null;
+    final bool inDebrief = session?.phase == LessonSectionPhase.debrief;
+    final String? footerLabel = inDebrief
+        ? null
+        : _contentError != null
+        ? 'Retry validation'
+        : _conflict != null
+        ? 'Reload saved progress'
+        : _loadFailed
+        ? _save?.claimed == true
+              ? 'Reload saved progress'
+              : 'Retry loading'
+        : _error != null
+        ? 'Retry saving'
+        : active && _answered
+        ? 'Continue'
+        : null;
+    final bool footerEnabled =
+        !_busy && !_appSuspended && !_routeCovered && !_authUnready;
+    final VoidCallback? footerAction = !footerEnabled
+        ? null
+        : switch (footerLabel) {
+            'Retry validation' => _retryValidation,
+            'Reload saved progress' => _reload,
+            'Retry loading' => _retryLoad,
+            'Retry saving' => _retrySave,
+            'Continue' => _canAdvance ? _advance : null,
+            _ => null,
+          };
     return Scaffold(
       appBar: AppBar(title: const Text('Sound comparison practice')),
       body: SafeArea(
-          child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (widget.activityId == uyDemoComparisonActivityId)
-                    const Text(_uyDemoDisclosure),
-                  if (_contentError != null) ...[
-                    Text(_contentError!),
-                    TextButton(
-                        onPressed: _busy ? null : _retryValidation,
-                        child: const Text('Retry validation')),
+        child: Column(
+          children: <Widget>[
+            if (session != null)
+              LessonProgressIndicator(
+                completed: completedItemsThisRound(session),
+                total: session.queue.length,
+                roundLabel: session.round > 1
+                    ? 'Review round ${session.round}'
+                    : null,
+              ),
+            Expanded(
+              child: LessonContentViewport(
+                maxWidth: 640,
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    if (_contentError != null) ...[Text(_contentError!)],
+                    if (_contentError == null &&
+                        _error == null &&
+                        _conflict == null &&
+                        !active &&
+                        session == null)
+                      const Center(child: CircularProgressIndicator()),
+                    if (_error != null &&
+                        session?.phase != LessonSectionPhase.debrief)
+                      Text(_error!),
+                    if (_conflict != null && !inDebrief) ...[Text(_conflict!)],
+                    if (_finished) const Text('Comparison complete.'),
+                    if (active) _activeView(catalogue, session, state!),
+                    if (catalogue != null &&
+                        session?.phase == LessonSectionPhase.debrief &&
+                        !_finished)
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (widget.pairId != null)
+                            Text('Requested pair: ${widget.pairId}'),
+                          ComparisonSectionDebrief(
+                            catalogue: catalogue,
+                            session: session!,
+                            busy: _busy,
+                            error: _loadFailed ? null : _error,
+                            conflict:
+                                _conflict ??
+                                (_loadFailed
+                                    ? 'Saved comparison progress is unavailable. Reload to continue.'
+                                    : null),
+                            canFinish: session.canComplete,
+                            onReview: _review,
+                            onFinish: _finish,
+                            onRetrySave: _retrySave,
+                            onReload: _reload,
+                            onPractiseAgain: _restart,
+                          ),
+                        ],
+                      ),
+                    if (_busy) const LinearProgressIndicator(),
                   ],
-                  if (_contentError == null &&
-                      _error == null &&
-                      _conflict == null &&
-                      !active &&
-                      session == null)
-                    const Center(child: CircularProgressIndicator()),
-                  if (_error != null &&
-                      session?.phase != LessonSectionPhase.debrief)
-                    Text(_error!),
-                  if (_loadFailed &&
-                      session?.phase != LessonSectionPhase.debrief) ...[
-                    TextButton(
-                        onPressed:
-                            _save?.claimed == true ? _reload : _retryLoad,
-                        child: Text(_save?.claimed == true
-                            ? 'Reload saved progress'
-                            : 'Retry loading')),
-                  ],
-                  if (_conflict != null &&
-                      session?.phase != LessonSectionPhase.debrief) ...[
-                    Text(_conflict!),
-                    TextButton(
-                        onPressed: _reload,
-                        child: const Text('Reload saved progress')),
-                  ],
-                  if (_finished) const Text('Comparison complete.'),
-                  if (active) _activeView(catalogue, session, state!),
-                  if (catalogue != null &&
-                      session?.phase == LessonSectionPhase.debrief &&
-                      !_finished)
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (widget.pairId != null)
-                          Text('Requested pair: ${widget.pairId}'),
-                        ComparisonSectionDebrief(
-                          catalogue: catalogue,
-                          session: session!,
-                          busy: _busy,
-                          error: _loadFailed ? null : _error,
-                          conflict: _conflict ??
-                              (_loadFailed
-                                  ? 'Saved comparison progress is unavailable. Reload to continue.'
-                                  : null),
-                          canFinish: session.canComplete,
-                          onReview: _review,
-                          onFinish: _finish,
-                          onRetrySave: _retrySave,
-                          onReload: _reload,
-                          onPractiseAgain: _restart,
+                ),
+              ),
+            ),
+            if (footerLabel != null)
+              SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 640),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: footerAction,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
                         ),
-                      ],
+                        child: Text(footerLabel),
+                      ),
                     ),
-                  if (_error != null &&
-                      !_loadFailed &&
-                      session?.phase != LessonSectionPhase.debrief)
-                    TextButton(
-                        onPressed: _retrySave,
-                        child: const Text('Retry saving')),
-                  if (_busy) const LinearProgressIndicator(),
-                ],
-              ))),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _activeView(ComparisonCatalogue catalogue,
-      LessonSectionSession session, ComparisonLearningState state) {
+  bool get _canAdvance =>
+      _answered &&
+      !_busy &&
+      _error == null &&
+      _conflict == null &&
+      !_loadFailed &&
+      _save?.pendingCommand == null;
+
+  Widget _activeView(
+    ComparisonCatalogue catalogue,
+    LessonSectionSession session,
+    ComparisonLearningState state,
+  ) {
     final exercise = catalogue.exercise(session.currentItemId!);
     final correct = _localCorrect;
-    final feedback = widget.activityId == uyDemoComparisonActivityId ||
+    final feedback =
+        widget.activityId == uyDemoComparisonActivityId ||
             !_answered ||
             correct == null
         ? null
         : correct
-            ? ListeningFeedback.correct
-            : ListeningFeedback.notYet;
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SoundComparison(
-        prompt: SoundComparisonPrompt(
-          id: 'comparison-active',
-          instruction: exercise.instruction,
-          sampleAReferenceId: exercise.sampleA.referenceId,
-          sampleBReferenceId: exercise.sampleB.referenceId,
+        ? ListeningFeedback.correct
+        : ListeningFeedback.notYet;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SoundComparison(
+          prompt: SoundComparisonPrompt(
+            id: 'comparison-active',
+            instruction: exercise.instruction,
+            sampleAReferenceId: exercise.sampleA.referenceId,
+            sampleBReferenceId: exercise.sampleB.referenceId,
+          ),
+          state: ListeningExerciseState(
+            busy: _busy,
+            playing: _playing,
+            blocked: !_ownsAuthAndRoute(_store!),
+            answered: _answered,
+            feedback: feedback,
+          ),
+          heardSamples: _grants.heardSamples,
+          playingSample: _playing ? _playback?.sample : null,
+          selectedRelation: _selected,
+          answerAcknowledged: session.answered,
+          onListen: _listen,
+          onAnswer: _answer,
         ),
-        state: ListeningExerciseState(
-          busy: _busy,
-          playing: _playing,
-          blocked: !_ownsAuthAndRoute(_store!),
-          answered: _answered,
-          feedback: feedback,
-        ),
-        heardSamples: _grants.heardSamples,
-        selectedRelation: _selected,
-        onListen: _listen,
-        onAnswer: _answer,
-      ),
-      if (_audioError != null) Text(_audioError!),
-      if (_answered &&
-          !_busy &&
-          _error == null &&
-          _conflict == null &&
-          _save?.claimed != true)
-        FilledButton(onPressed: _advance, child: const Text('Continue')),
-    ]);
+        if (_audioError != null) Text(_audioError!),
+      ],
+    );
   }
 
   void _retryLoad() {

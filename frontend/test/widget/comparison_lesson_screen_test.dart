@@ -286,18 +286,17 @@ final class _ComparisonWidgetStore implements ComparisonLearningStore {
   }) : _asyncZone = asyncZone {
     _currentAuth = currentAuth ?? () => auth;
     _backendOwner = backendOwner ?? () => auth.owner;
-    _harness = persistence.sqlHarness ??=
-        registry == null
-            ? ComparisonLearningSqlTestHarness(
-                catalogue: catalogue,
-                currentAuth: _currentAuth,
-                backendOwner: _backendOwner,
-              )
-            : ComparisonLearningSqlTestHarness(
-                registry: registry,
-                currentAuth: _currentAuth,
-                backendOwner: _backendOwner,
-              );
+    _harness = persistence.sqlHarness ??= registry == null
+        ? ComparisonLearningSqlTestHarness(
+            catalogue: catalogue,
+            currentAuth: _currentAuth,
+            backendOwner: _backendOwner,
+          )
+        : ComparisonLearningSqlTestHarness(
+            registry: registry,
+            currentAuth: _currentAuth,
+            backendOwner: _backendOwner,
+          );
     _delegate = _harness.createRepository(
       owner: auth.owner,
       generation: auth.generation,
@@ -808,7 +807,7 @@ Future<void> _answerVisiblePair(
   await tester.pump();
   for (
     var i = 0;
-    i < 40 && find.byType(LinearProgressIndicator).evaluate().isNotEmpty;
+    i < 40 && _busyProgressIndicator().evaluate().isNotEmpty;
     i++
   ) {
     await tester.pump();
@@ -825,6 +824,10 @@ void _expectNoComparisonCorrectnessFeedback(WidgetTester tester) {
   );
 }
 
+Finder _busyProgressIndicator() => find.byWidgetPredicate(
+  (Widget widget) => widget is LinearProgressIndicator && widget.value == null,
+);
+
 void main() {
   final catalogue = loadFrenchComparisonCatalogue();
   var ownerNumber = 0;
@@ -836,7 +839,8 @@ void main() {
       _ControlledCourseReferenceAudio audio,
     })
   >
-  harness(WidgetTester tester, {
+  harness(
+    WidgetTester tester, {
     ComparisonCatalogue? requestedCatalogue,
     ComparisonCatalogueRegistry? registry,
   }) async {
@@ -919,14 +923,15 @@ void main() {
       find.text(
         'Demo practice: this authored comparison content has not had qualified French review. It is practice, not an assessment.',
       ),
-      findsOneWidget,
+      findsNothing,
     );
     expect(
       find.text(
         'Alpha audio: recordings are unverified; device speech is practice-only.',
       ),
-      findsOneWidget,
+      findsNothing,
     );
+    expect(find.text('0/10 completed · 10 remaining'), findsOneWidget);
     expect(find.text('Compare the vowel in each sample.'), findsOneWidget);
     for (final hidden in [
       'HIDDEN-UY-NOTE-6D21',
@@ -1080,102 +1085,101 @@ void main() {
     expect(find.text('Compare the vowel in each sample.'), findsNothing);
   });
 
-  testWidgets(
-    'uy_demo_correct_answer_hides_feedback_through_ack_and_restore',
-    (tester) async {
-      final demo = loadFrenchUyDemoComparisonCatalogue();
-      final registry = ComparisonCatalogueRegistry([
-        ComparisonCatalogueRegistration.available(catalogue),
-        ComparisonCatalogueRegistration.available(demo),
-      ]);
-      final h = await harness(
-        tester,
-        requestedCatalogue: demo,
-        registry: registry,
-      );
-      ProviderContainer? container;
-      addTearDown(() {
-        final mounted = container;
-        if (mounted != null) cleanup(mounted, h.audio);
-      });
-      container = await _mountComparison(
-        tester,
-        store: h.store,
-        audio: h.audio,
-        catalogue: demo,
-        activityId: uyDemoComparisonActivityId,
-        registry: registry,
-      );
-      final exercise = demo.exercises.first;
-      await tester.tap(find.text('Listen to sample A'));
-      h.audio.completeNext(
-        CourseAudioResult.completed(
-          referenceId: exercise.sampleA.referenceId,
-          source: CourseAudioSource.unverifiedRecording,
-        ),
-      );
+  testWidgets('uy_demo_correct_answer_hides_feedback_through_ack_and_restore', (
+    tester,
+  ) async {
+    final demo = loadFrenchUyDemoComparisonCatalogue();
+    final registry = ComparisonCatalogueRegistry([
+      ComparisonCatalogueRegistration.available(catalogue),
+      ComparisonCatalogueRegistration.available(demo),
+    ]);
+    final h = await harness(
+      tester,
+      requestedCatalogue: demo,
+      registry: registry,
+    );
+    ProviderContainer? container;
+    addTearDown(() {
+      final mounted = container;
+      if (mounted != null) cleanup(mounted, h.audio);
+    });
+    container = await _mountComparison(
+      tester,
+      store: h.store,
+      audio: h.audio,
+      catalogue: demo,
+      activityId: uyDemoComparisonActivityId,
+      registry: registry,
+    );
+    final exercise = demo.exercises.first;
+    await tester.tap(find.text('Listen to sample A'));
+    h.audio.completeNext(
+      CourseAudioResult.completed(
+        referenceId: exercise.sampleA.referenceId,
+        source: CourseAudioSource.unverifiedRecording,
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('Listen to sample B'));
+    h.audio.completeNext(
+      CourseAudioResult.completed(
+        referenceId: exercise.sampleB.referenceId,
+        source: CourseAudioSource.unverifiedRecording,
+      ),
+    );
+    await tester.pump();
+
+    final answerGate = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
+    final answerEntered = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
+    addTearDown(() {
+      if (!answerGate.isCompleted) answerGate.complete();
+    });
+    h.persistence.holdNextWrite = answerGate;
+    h.persistence.writeEntered = answerEntered;
+    await tester.tap(find.text('Different'));
+    await tester.runAsync(() => answerEntered.future);
+    _expectNoComparisonCorrectnessFeedback(tester);
+    final held = await _readSnapshot(tester, h.store);
+    expect(held.attempts, isEmpty);
+    expect(find.text('Continue'), findsNothing);
+
+    answerGate.complete();
+    final saved = await _readSnapshot(tester, h.store);
+    expect(saved.attempts, hasLength(1));
+    expect(saved.attempts.single.correct, isTrue);
+    expect(saved.attempts.single.activityId, uyDemoComparisonActivityId);
+    for (
+      var frame = 0;
+      frame < 30 && find.text('Continue').evaluate().isEmpty;
+      frame++
+    ) {
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
       await tester.pump();
-      await tester.tap(find.text('Listen to sample B'));
-      h.audio.completeNext(
-        CourseAudioResult.completed(
-          referenceId: exercise.sampleB.referenceId,
-          source: CourseAudioSource.unverifiedRecording,
-        ),
-      );
-      await tester.pump();
+    }
+    expect(find.text('Continue'), findsOneWidget);
+    _expectNoComparisonCorrectnessFeedback(tester);
+    final audioRequestsBeforeRestore = h.audio.requests.length;
 
-      final answerGate = await _runRealAsync(
-        tester,
-        () async => Completer<void>(),
-      );
-      final answerEntered = await _runRealAsync(
-        tester,
-        () async => Completer<void>(),
-      );
-      addTearDown(() {
-        if (!answerGate.isCompleted) answerGate.complete();
-      });
-      h.persistence.holdNextWrite = answerGate;
-      h.persistence.writeEntered = answerEntered;
-      await tester.tap(find.text('Different'));
-      await tester.runAsync(() => answerEntered.future);
-      _expectNoComparisonCorrectnessFeedback(tester);
-      final held = await _readSnapshot(tester, h.store);
-      expect(held.attempts, isEmpty);
-      expect(find.text('Continue'), findsNothing);
-
-      answerGate.complete();
-      final saved = await _readSnapshot(tester, h.store);
-      expect(saved.attempts, hasLength(1));
-      expect(saved.attempts.single.correct, isTrue);
-      expect(saved.attempts.single.activityId, uyDemoComparisonActivityId);
-      for (
-        var frame = 0;
-        frame < 30 && find.text('Continue').evaluate().isEmpty;
-        frame++
-      ) {
-        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
-        await tester.pump();
-      }
-      expect(find.text('Continue'), findsOneWidget);
-      _expectNoComparisonCorrectnessFeedback(tester);
-      final audioRequestsBeforeRestore = h.audio.requests.length;
-
-      await tester.pumpWidget(const SizedBox.shrink());
-      cleanup(container, h.audio);
-      container = await _mountComparison(
-        tester,
-        store: h.store,
-        audio: h.audio,
-        catalogue: demo,
-        activityId: uyDemoComparisonActivityId,
-        registry: registry,
-      );
-      expect(find.text('Continue'), findsOneWidget);
-      _expectNoComparisonCorrectnessFeedback(tester);
-      expect(h.audio.requests, hasLength(audioRequestsBeforeRestore));
-    },
-  );
+    await tester.pumpWidget(const SizedBox.shrink());
+    cleanup(container, h.audio);
+    container = await _mountComparison(
+      tester,
+      store: h.store,
+      audio: h.audio,
+      catalogue: demo,
+      activityId: uyDemoComparisonActivityId,
+      registry: registry,
+    );
+    expect(find.text('Continue'), findsOneWidget);
+    _expectNoComparisonCorrectnessFeedback(tester);
+    expect(h.audio.requests, hasLength(audioRequestsBeforeRestore));
+  });
 
   testWidgets(
     'uy_demo_owner_change_during_sample_b_and_frozen_retry_has_no_stale_submit',
@@ -1313,7 +1317,9 @@ void main() {
       final frozen = storeB.submitted.last;
       expect(frozen.action, isA<AnswerComparisonPair>());
       final staleRetry = tester
-          .widget<TextButton>(find.widgetWithText(TextButton, 'Retry saving'))
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Retry saving'),
+          )
           .onPressed!;
 
       final ownerC = LearningOwner.account('uy-demo-owner-c-${ownerNumber++}');
@@ -2851,10 +2857,150 @@ void main() {
       find.text(
         'Alpha audio: recordings are unverified; device speech is practice-only.',
       ),
-      findsOneWidget,
+      findsNothing,
     );
     semantics.dispose();
   });
+
+  testWidgets(
+    'sample status stays on each labeled button and resets on fresh prompts',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final h = await harness(tester);
+      final containers = <ProviderContainer>[];
+      addTearDown(() {
+        for (final container in containers) {
+          cleanup(container, h.audio);
+        }
+      });
+
+      ProviderContainer container = await _mountComparison(
+        tester,
+        store: h.store,
+        audio: h.audio,
+        catalogue: catalogue,
+      );
+      containers.add(container);
+
+      String statusOnButton(String label) {
+        final Finder button = find.bySemanticsLabel(label);
+        expect(button, findsOneWidget, reason: 'one semantic button: $label');
+        final data = tester.getSemantics(button).getSemanticsData();
+        expect(data.label, label);
+        return data.value;
+      }
+
+      expect(statusOnButton('Listen to sample A'), 'Not heard');
+      expect(statusOnButton('Listen to sample B'), 'Not heard');
+      expect(find.bySemanticsLabel('Not heard'), findsNothing);
+      expect(
+        tester
+            .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Same'))
+            .onPressed,
+        isNull,
+        reason: 'a fresh pair still requires both recordings',
+      );
+
+      final exercise = catalogue.exercises.first;
+      for (final sample in [
+        ('Listen to sample A', exercise.sampleA.referenceId),
+        ('Listen to sample B', exercise.sampleB.referenceId),
+      ]) {
+        await tester.tap(find.text(sample.$1));
+        await tester.pump();
+        expect(statusOnButton(sample.$1), 'Playing');
+        h.audio.completeNext(
+          CourseAudioResult.completed(
+            referenceId: sample.$2,
+            source: CourseAudioSource.unverifiedRecording,
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+      }
+      expect(statusOnButton('Listen to sample A'), 'Heard');
+      expect(statusOnButton('Listen to sample B'), 'Heard');
+
+      final relation = exercise.expectedRelation;
+      await tester.tap(
+        find.text(relation == PhonemeRelation.same ? 'Same' : 'Different'),
+      );
+      await _readSnapshot(tester, h.store);
+      for (var i = 0; i < 20 && find.text('Continue').evaluate().isEmpty; i++) {
+        await tester.pump();
+      }
+      expect(find.text('Continue'), findsOneWidget);
+      expect(
+        tester
+            .widget<SoundComparison>(find.byType(SoundComparison))
+            .state
+            .answered,
+        isTrue,
+      );
+      expect(statusOnButton('Listen to sample A'), 'Answered');
+      expect(statusOnButton('Listen to sample B'), 'Answered');
+      expect(find.bySemanticsLabel('Answered'), findsNothing);
+      expect(
+        tester
+            .widget<ElevatedButton>(
+              find.widgetWithText(ElevatedButton, 'Listen to sample A'),
+            )
+            .onPressed,
+        isNull,
+      );
+
+      await tester.tap(find.text('Continue'));
+      await _readSnapshot(tester, h.store);
+      await tester.pump();
+      for (
+        var i = 0;
+        i < 40 && _busyProgressIndicator().evaluate().isNotEmpty;
+        i++
+      ) {
+        await tester.pump();
+      }
+      expect(
+        tester
+            .widget<SoundComparison>(find.byType(SoundComparison))
+            .state
+            .answered,
+        isFalse,
+      );
+      expect(statusOnButton('Listen to sample A'), 'Not heard');
+      expect(statusOnButton('Listen to sample B'), 'Not heard');
+      expect(
+        tester
+            .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Same'))
+            .onPressed,
+        isNull,
+        reason: 'the next pair starts without playback grants',
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      container.dispose();
+      containers.remove(container);
+      container = await _mountComparison(
+        tester,
+        store: h.store,
+        audio: h.audio,
+        catalogue: catalogue,
+      );
+      containers.add(container);
+      expect(statusOnButton('Listen to sample A'), 'Not heard');
+      expect(statusOnButton('Listen to sample B'), 'Not heard');
+      expect(
+        tester
+            .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Same'))
+            .onPressed,
+        isNull,
+        reason: 'reload restores no transient playback grants',
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      container.dispose();
+      containers.remove(container);
+      semantics.dispose();
+    },
+  );
 
   testWidgets('comparison active and debrief scale and scroll matrix', (
     tester,
@@ -3147,7 +3293,7 @@ void main() {
     tracker.observe(owner: h.auth.owner, ready: true);
     await tester.pump();
     expect(find.text('Listen to sample A'), findsOneWidget);
-    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(_busyProgressIndicator(), findsNothing);
     expect(h.audio.requests, hasLength(1));
     expect(
       h.store.prepared.where((c) => c.action is AnswerComparisonPair),
@@ -3425,7 +3571,7 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    expect(_busyProgressIndicator(), findsOneWidget);
     expect(h.audio.stopCalls, stopsBeforeOldResult);
     expect(
       tester.widget<SoundComparison>(find.byType(SoundComparison)).heardSamples,
@@ -4123,7 +4269,7 @@ void main() {
     );
     expect(await h.store.sqlCounts(), countsBefore);
     final staleRetry = tester
-        .widget<TextButton>(find.widgetWithText(TextButton, 'Retry saving'))
+        .widget<FilledButton>(find.widgetWithText(FilledButton, 'Retry saving'))
         .onPressed!;
     await tester.tap(find.text('Retry saving'));
     final retried = await _readSnapshot(tester, h.store);
@@ -4169,7 +4315,7 @@ void main() {
       await tester.pump();
       expect(
         tester
-            .widget<ElevatedButton>(find.widgetWithText(ElevatedButton, 'Same'))
+            .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Same'))
             .onPressed,
         isNull,
       );
@@ -4190,7 +4336,7 @@ void main() {
       await tester.pump();
       expect(
         tester
-            .widget<ElevatedButton>(find.widgetWithText(ElevatedButton, 'Same'))
+            .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Same'))
             .onPressed,
         isNotNull,
       );
@@ -4206,7 +4352,7 @@ void main() {
       await tester.pump();
       expect(
         tester
-            .widget<ElevatedButton>(find.widgetWithText(ElevatedButton, 'Same'))
+            .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Same'))
             .onPressed,
         isNull,
       );
@@ -4260,7 +4406,7 @@ void main() {
     );
     expect(
       tester
-          .widget<ElevatedButton>(find.widgetWithText(ElevatedButton, 'Same'))
+          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Same'))
           .onPressed,
       isNull,
     );
@@ -4297,7 +4443,7 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      expect(_busyProgressIndicator(), findsOneWidget);
       expect(
         tester
             .widget<SoundComparison>(find.byType(SoundComparison))
@@ -4368,8 +4514,8 @@ void main() {
         await tester.pump();
         expect(
           tester
-              .widget<ElevatedButton>(
-                find.widgetWithText(ElevatedButton, 'Same'),
+              .widget<OutlinedButton>(
+                find.widgetWithText(OutlinedButton, 'Same'),
               )
               .onPressed,
           isNull,
@@ -4403,7 +4549,7 @@ void main() {
       await tester.pump();
       expect(
         tester
-            .widget<ElevatedButton>(find.widgetWithText(ElevatedButton, 'Same'))
+            .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Same'))
             .onPressed,
         isNotNull,
       );
@@ -4436,7 +4582,7 @@ void main() {
     );
     expect(
       tester
-          .widget<ElevatedButton>(find.widgetWithText(ElevatedButton, 'Same'))
+          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Same'))
           .onPressed,
       isNull,
     );
@@ -4461,7 +4607,7 @@ void main() {
     expect(h.audio.pending, isEmpty);
     expect(
       tester
-          .widget<ElevatedButton>(find.widgetWithText(ElevatedButton, 'Same'))
+          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Same'))
           .onPressed,
       isNull,
     );
@@ -4896,7 +5042,7 @@ void main() {
   });
 
   testWidgets(
-    'answered restore shows feedback without selected answer or audio',
+    'answered restore shows the saved selection without replaying audio',
     (tester) async {
       final h = await harness(tester);
       await _seedAnsweredFirst(tester, h.store, catalogue);
@@ -4912,7 +5058,20 @@ void main() {
       expect(view.state.answered, isTrue);
       expect(view.state.feedback, ListeningFeedback.correct);
       expect(find.text('Correct'), findsOneWidget);
-      expect(view.selectedRelation, isNull);
+      expect(view.selectedRelation, isNotNull);
+      expect(find.text('1/10 completed · 9 remaining'), findsOneWidget);
+      final String selectedLabel = view.selectedRelation == PhonemeRelation.same
+          ? 'Same'
+          : 'Different';
+      expect(
+        tester
+            .getSemantics(find.bySemanticsLabel(selectedLabel))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected
+            .name,
+        'isTrue',
+      );
       expect(h.audio.requests, isEmpty);
       expect(
         (await _readSnapshot(tester, h.store)).attempts,
@@ -4954,7 +5113,7 @@ void main() {
     expect(h.audio.requests, isEmpty);
     expect(
       tester
-          .widget<ElevatedButton>(find.widgetWithText(ElevatedButton, 'Same'))
+          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Same'))
           .onPressed,
       isNull,
     );
@@ -4962,7 +5121,7 @@ void main() {
     await tester.tap(find.text('Listen to sample A'));
     expect(
       tester
-          .widget<ElevatedButton>(find.widgetWithText(ElevatedButton, 'Same'))
+          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Same'))
           .onPressed,
       isNull,
     );
@@ -4975,7 +5134,7 @@ void main() {
     await tester.pump();
     expect(
       tester
-          .widget<ElevatedButton>(find.widgetWithText(ElevatedButton, 'Same'))
+          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Same'))
           .onPressed,
       isNull,
     );
@@ -5175,7 +5334,7 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    expect(_busyProgressIndicator(), findsOneWidget);
     expect(
       tester.widget<SoundComparison>(find.byType(SoundComparison)).heardSamples,
       isEmpty,

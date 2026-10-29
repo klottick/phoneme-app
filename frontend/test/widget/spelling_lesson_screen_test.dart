@@ -30,53 +30,49 @@ import '../support/sentence_hunt_fixtures.dart';
 
 const _activityId = 'en-fr-u-y-spelling';
 const _prompt = 'Listen, then choose how the vowel is written.';
-const _alphaDisclosure =
-    'Alpha audio: recordings are unverified; device speech is practice-only.';
-const _practiceDisclosure =
-    'Demo practice: this authored spelling content has not had qualified French review. It is practice, not an assessment.';
-
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({'selected_course_id': 'en-fr'});
     courseBackend = null;
   });
 
-  testWidgets(
-    'spelling_prompt_and_disclosures_are_exact_and_options_wait_for_audio',
-    (tester) async {
-      final store = _HeldSpellingStore();
-      final audio = _ControlledSpellingAudio();
-      final app = await _mountSpelling(tester, store, audio);
-      addTearDown(() => app.dispose(tester));
+  testWidgets('spelling_prompt_is_clear_and_options_wait_for_audio', (
+    tester,
+  ) async {
+    final store = _HeldSpellingStore();
+    final audio = _ControlledSpellingAudio();
+    final app = await _mountSpelling(tester, store, audio);
+    addTearDown(() => app.dispose(tester));
 
-      expect(find.text(_prompt), findsOneWidget);
-      expect(find.text(_alphaDisclosure), findsOneWidget);
-      expect(find.text(_practiceDisclosure), findsOneWidget);
-      expect(find.text('u'), findsOneWidget);
-      expect(find.text('ou'), findsOneWidget);
-      expect(_option(tester, 'u').onPressed, isNull);
-      expect(_option(tester, 'ou').onPressed, isNull);
-      expect(store.submissions, isEmpty, reason: 'entry must not auto-start');
+    expect(find.text(_prompt), findsOneWidget);
+    expect(find.textContaining('Alpha audio:'), findsNothing);
+    expect(find.textContaining('Demo practice:'), findsNothing);
+    expect(find.text('u'), findsOneWidget);
+    expect(find.text('ou'), findsOneWidget);
+    expect(find.text('0/10 completed · 10 remaining'), findsOneWidget);
+    expect(_option(tester, 'u').onPressed, isNull);
+    expect(_option(tester, 'ou').onPressed, isNull);
+    expect(store.submissions, isEmpty, reason: 'entry must not auto-start');
 
-      await tester.tap(find.text('Start practice'));
-      await tester.pumpAndSettle();
-      expect(store.submissions, hasLength(1));
-      expect(store.submissions.single.action, isA<StartSpellingPractice>());
+    await tester.tap(find.text('Start practice'));
+    await tester.pumpAndSettle();
+    expect(find.text('0/10 completed · 10 remaining'), findsOneWidget);
+    expect(store.submissions, hasLength(1));
+    expect(store.submissions.single.action, isA<StartSpellingPractice>());
 
-      await tester.tap(find.text('Listen to the word'));
-      await tester.pump();
-      expect(audio.requests, hasLength(1));
-      expect(audio.requests.single.referenceId, 'fr-word-tout');
-      expect(audio.requests.single.use, CourseAudioUse.alphaPractice);
-      expect(audio.requests.single.allowPracticeTts, isFalse);
-      expect(_option(tester, 'u').onPressed, isNull);
-      audio.requests.single.complete();
-      await tester.pump();
-      await tester.pump();
-      expect(_option(tester, 'u').onPressed, isNotNull);
-      expect(_option(tester, 'ou').onPressed, isNotNull);
-    },
-  );
+    await tester.tap(find.text('Listen to the word'));
+    await tester.pump();
+    expect(audio.requests, hasLength(1));
+    expect(audio.requests.single.referenceId, 'fr-word-tout');
+    expect(audio.requests.single.use, CourseAudioUse.alphaPractice);
+    expect(audio.requests.single.allowPracticeTts, isFalse);
+    expect(_option(tester, 'u').onPressed, isNull);
+    audio.requests.single.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(_option(tester, 'u').onPressed, isNotNull);
+    expect(_option(tester, 'ou').onPressed, isNotNull);
+  });
 
   testWidgets('held_answer_save_stays_secret_until_durable_ack', (
     tester,
@@ -91,6 +87,11 @@ void main() {
     await tester.tap(find.text('ou'));
     await tester.pump();
     expect(find.text('Saving your answer…'), findsOneWidget);
+    expect(
+      find.text('0/10 completed · 10 remaining'),
+      findsOneWidget,
+      reason: 'pending answer save must not count as acknowledged progress',
+    );
     expect(find.text('tout'), findsNothing);
     expect(
       find.text('In tout, ou represents the authored target /u/.'),
@@ -116,6 +117,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Correct'), findsOneWidget);
+    expect(find.text('1/10 completed · 9 remaining'), findsOneWidget);
     expect(find.text('Continue'), findsOneWidget);
     final Text highlightedWord = tester.widget<Text>(
       find.byKey(const ValueKey<String>('spelling-feedback-word')),
@@ -582,6 +584,56 @@ void main() {
     },
   );
 
+  testWidgets('below_threshold_practice_can_finish_without_completion_credit', (
+    tester,
+  ) async {
+    final seed = _HeldSpellingStore();
+    final belowThreshold = await _practiceDebrief(
+      seed,
+      firstItemWrong: false,
+      correctAnswers: 0,
+    );
+    final store = _HeldSpellingStore(initialState: belowThreshold);
+    final audio = _ControlledSpellingAudio();
+    final app = await _mountSpelling(tester, store, audio);
+    addTearDown(() => app.dispose(tester));
+
+    expect(find.text('Section debrief'), findsOneWidget);
+    expect(find.text('Latest practice score: 0/10'), findsOneWidget);
+    expect(find.text('Finish practice'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Finish practice'),
+          )
+          .onPressed,
+      isNotNull,
+    );
+
+    await tester.tap(find.text('Finish practice'));
+    await tester.pumpAndSettle();
+
+    final SpellingSlot finishedSlot = store.committedState.slots[_activityId]!;
+    expect(store.submissions.last.action, isA<FinishSpellingRun>());
+    expect(
+      (store.submissions.last.action as FinishSpellingRun).recordCompletion,
+      isFalse,
+    );
+    expect(finishedSlot.checkpoint.finished, isTrue);
+    expect(store.committedState.completions, isEmpty);
+    expect(find.text('Practice run complete.'), findsOneWidget);
+    expect(find.text('Start new practice'), findsOneWidget);
+
+    await tester.tap(find.text('Start new practice'));
+    await tester.pumpAndSettle();
+
+    final SpellingSlot restartedSlot = store.committedState.slots[_activityId]!;
+    expect(store.submissions.last.action, isA<StartSpellingPractice>());
+    expect(restartedSlot.checkpoint.mode, SpellingRunMode.practice);
+    expect(restartedSlot.checkpoint.finished, isFalse);
+    expect(store.committedState.completions, isEmpty);
+  });
+
   testWidgets('initial_load_completed_while_paused_recovers_on_resume', (
     tester,
   ) async {
@@ -972,6 +1024,7 @@ SpellingPlaybackObservation _observation(
 Future<SpellingLearningState> _practiceDebrief(
   _HeldSpellingStore store, {
   required bool firstItemWrong,
+  int? correctAnswers,
 }) async {
   await store.perform(
     StartSpellingPractice(
@@ -981,7 +1034,9 @@ Future<SpellingLearningState> _practiceDebrief(
   );
   for (var index = 0; index < store.catalogue.rows.length; index++) {
     final row = store.catalogue.rows[index];
-    final correct = !(firstItemWrong && index == 0);
+    final correct = correctAnswers == null
+        ? !(firstItemWrong && index == 0)
+        : index < correctAnswers;
     final selected = correct
         ? row.exercise.correctOptionId
         : row.exercise.options

@@ -106,41 +106,42 @@ void main() {
     courseBackend = null;
   });
 
-  testWidgets('progress explains the new format and assessment boundary', (
-    tester,
-  ) async {
-    final LearningOwner guest = LearningOwner.guest();
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          courseLearningStateProvider.overrideWith(
-            (ref) async => CourseLearningState.empty(
-              LearningScope(courseId: 'en-fr', owner: guest),
+  testWidgets(
+    'progress avoids a repeated format disclosure and preserves assessment boundary',
+    (tester) async {
+      final LearningOwner guest = LearningOwner.guest();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            courseLearningStateProvider.overrideWith(
+              (ref) async => CourseLearningState.empty(
+                LearningScope(courseId: 'en-fr', owner: guest),
+              ),
             ),
-          ),
-          _comparisonPresentationOverride(),
-          sentenceHuntCatalogueProvider.overrideWith(
-            (ref) async => syntheticSentenceCatalogue(),
-          ),
-          sentenceHuntLearningStateProvider.overrideWith(
-            (ref) async => SentenceHuntState.empty(
-              SentenceHuntProfileScope(courseId: 'en-fr', owner: guest),
+            _comparisonPresentationOverride(),
+            sentenceHuntCatalogueProvider.overrideWith(
+              (ref) async => syntheticSentenceCatalogue(),
             ),
-          ),
-        ],
-        child: const MaterialApp(home: CourseProgressScreen()),
-      ),
-    );
-    await tester.pumpAndSettle();
+            sentenceHuntLearningStateProvider.overrideWith(
+              (ref) async => SentenceHuntState.empty(
+                SentenceHuntProfileScope(courseId: 'en-fr', owner: guest),
+              ),
+            ),
+          ],
+          child: const MaterialApp(home: CourseProgressScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    expect(
-      find.text(
-        'This alpha uses a new progress format. Earlier development progress has not been imported.',
-      ),
-      findsOneWidget,
-    );
-    expect(find.textContaining('not assessed'), findsWidgets);
-  });
+      expect(
+        find.text(
+          'This alpha uses a new progress format. Earlier development progress has not been imported.',
+        ),
+        findsNothing,
+      );
+      expect(find.textContaining('not assessed'), findsWidgets);
+    },
+  );
 
   testWidgets('sqlite_open_failure_stays_unavailable_until_same_handle_retry', (
     tester,

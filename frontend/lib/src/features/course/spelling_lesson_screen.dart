@@ -17,10 +17,9 @@ import '../../core/course/spelling_learning_state.dart';
 import '../../core/course/spelling_learning_store.dart';
 import '../../core/course/spelling_learning_validator.dart';
 import '../../core/course/storage/spelling_learning_command_codec.dart';
+import 'lesson_progress_indicator.dart';
 
 const String _spellingPrompt = 'Listen, then choose how the vowel is written.';
-const String _spellingPracticeDisclosure =
-    'Demo practice: this authored spelling content has not had qualified French review. It is practice, not an assessment.';
 const String _spellingLoadError =
     'Saved spelling progress could not be loaded.';
 const String _spellingSaveError =
@@ -918,7 +917,7 @@ class _SpellingLessonScreenState extends ConsumerState<SpellingLessonScreen>
 
   OutlinedButton _optionButton(String optionId) => OutlinedButton(
     onPressed: _canAnswer ? () => _answer(optionId) : null,
-    style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+    style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
     child: Text(optionId),
   );
 
@@ -926,77 +925,97 @@ class _SpellingLessonScreenState extends ConsumerState<SpellingLessonScreen>
   Widget build(BuildContext context) {
     final SpellingSlot? slot = _slot;
     final LessonSectionSession? session = _session;
+    final int total = session?.queue.length ?? _catalogue?.rows.length ?? 0;
+    final int completed = session == null
+        ? 0
+        : completedItemsThisRound(session);
+    final bool showProgress = _state != null && !_readOnlyUnavailable;
+    final bool reviewRound =
+        slot?.checkpoint.mode == SpellingRunMode.reviewOnly ||
+        (session?.round ?? 1) > 1;
     return Scaffold(
       appBar: AppBar(title: const Text('Sound → spelling practice')),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
+        child: Column(
           children: <Widget>[
-            const Text(alphaAudioDisclosure),
-            const SizedBox(height: 8),
-            const Text(_spellingPracticeDisclosure),
-            const SizedBox(height: 20),
-            const Text(_spellingPrompt),
-            if (_loading) ...<Widget>[
-              const SizedBox(height: 12),
-              const LinearProgressIndicator(),
-            ],
-            if (_error != null) ...<Widget>[
-              const SizedBox(height: 12),
-              Text(_error!),
-            ],
-            if (_loadFailed)
-              TextButton(
-                onPressed: _busy ? null : _retryLoad,
-                child: const Text('Retry loading'),
+            if (showProgress)
+              LessonProgressIndicator(
+                completed: completed,
+                total: total,
+                roundLabel: reviewRound
+                    ? 'Review round ${session?.round ?? 1}'
+                    : null,
               ),
-            if (_saveFailed && _frozenCommand != null)
-              TextButton(
-                onPressed: _busy ? null : _retrySaving,
-                child: const Text('Retry saving'),
+            Expanded(
+              child: LessonContentViewport(
+                maxWidth: 640,
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    const Text(_spellingPrompt),
+                    if (_loading) ...<Widget>[
+                      const SizedBox(height: 12),
+                      const LinearProgressIndicator(),
+                    ],
+                    if (_error != null) ...<Widget>[
+                      const SizedBox(height: 12),
+                      Text(_error!),
+                    ],
+                    if (_loadFailed)
+                      TextButton(
+                        onPressed: _busy ? null : _retryLoad,
+                        child: const Text('Retry loading'),
+                      ),
+                    if (_saveFailed && _frozenCommand != null)
+                      TextButton(
+                        onPressed: _busy ? null : _retrySaving,
+                        child: const Text('Retry saving'),
+                      ),
+                    if (_state == null && !_readOnlyUnavailable)
+                      _optionButtons(),
+                    if (_readOnlyUnavailable) ...<Widget>[
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Saved spelling practice is unavailable in this review view.',
+                      ),
+                    ] else if (!_loading &&
+                        !_loadFailed &&
+                        _state != null) ...<Widget>[
+                      if (slot == null)
+                        _emptyState()
+                      else if (widget.review &&
+                          slot.checkpoint.mode == SpellingRunMode.practice &&
+                          session?.phase == LessonSectionPhase.debrief)
+                        _debriefView(slot, session!)
+                      else if (slot.checkpoint.finished)
+                        _finishedView(slot)
+                      else if (session?.phase == LessonSectionPhase.exercise &&
+                          session?.currentItemId != null)
+                        _exerciseView()
+                      else if (session?.phase == LessonSectionPhase.debrief)
+                        _debriefView(slot, session!)
+                      else
+                        const Center(child: CircularProgressIndicator()),
+                    ],
+                    if (_isSavingAnswer)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 12),
+                        child: Text('Saving your answer…'),
+                      ),
+                    if (_busy && !_isSavingAnswer)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 12),
+                        child: LinearProgressIndicator(),
+                      ),
+                  ],
+                ),
               ),
-            if (_state == null && !_readOnlyUnavailable) _optionButtons(),
-            if (_readOnlyUnavailable) ...<Widget>[
-              const SizedBox(height: 12),
-              const Text(
-                'Saved spelling practice is unavailable in this review view.',
-              ),
-              TextButton(
-                onPressed: _busy || _frozenCommand != null
-                    ? null
-                    : _continuePractice,
-                child: const Text('Continue practice'),
-              ),
-            ] else if (!_loading && !_loadFailed && _state != null) ...<Widget>[
-              if (slot == null)
-                _emptyState()
-              else if (widget.review &&
-                  slot.checkpoint.mode == SpellingRunMode.practice &&
-                  session?.phase == LessonSectionPhase.debrief)
-                _debriefView(slot, session!)
-              else if (slot.checkpoint.finished)
-                _finishedView(slot)
-              else if (session?.phase == LessonSectionPhase.exercise &&
-                  session?.currentItemId != null)
-                _exerciseView()
-              else if (session?.phase == LessonSectionPhase.debrief)
-                _debriefView(slot, session!)
-              else
-                const Center(child: CircularProgressIndicator()),
-            ],
-            if (_isSavingAnswer)
-              const Padding(
-                padding: EdgeInsets.only(top: 12),
-                child: Text('Saving your answer…'),
-              ),
-            if (_busy && !_isSavingAnswer)
-              const Padding(
-                padding: EdgeInsets.only(top: 12),
-                child: LinearProgressIndicator(),
-              ),
+            ),
           ],
         ),
       ),
+      bottomNavigationBar: _bottomAction(slot, session),
     );
   }
 
@@ -1010,13 +1029,6 @@ class _SpellingLessonScreenState extends ConsumerState<SpellingLessonScreen>
         const SizedBox(height: 16),
         _listenButton(),
         _optionButtons(),
-        const SizedBox(height: 16),
-        FilledButton(
-          onPressed: _busy || _loadFailed || _frozenCommand != null
-              ? null
-              : _startPractice,
-          child: const Text('Start practice'),
-        ),
       ],
     );
   }
@@ -1034,17 +1046,13 @@ class _SpellingLessonScreenState extends ConsumerState<SpellingLessonScreen>
       if (_feedback case final SpellingAttempt attempt) ...<Widget>[
         const SizedBox(height: 16),
         _feedbackView(attempt),
-        const SizedBox(height: 16),
-        FilledButton(
-          onPressed: _busy || _frozenCommand != null ? null : _advance,
-          child: const Text('Continue'),
-        ),
       ],
     ],
   );
 
   Widget _listenButton() => FilledButton.icon(
     onPressed: _canListen ? _listen : null,
+    style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
     icon: _playing
         ? const SizedBox.square(
             dimension: 18,
@@ -1141,10 +1149,6 @@ class _SpellingLessonScreenState extends ConsumerState<SpellingLessonScreen>
                   : _reviewMistakes,
               child: const Text('Review mistakes'),
             ),
-          FilledButton(
-            onPressed: _busy || _frozenCommand != null ? null : _finish,
-            child: const Text('Finish review'),
-          ),
         ] else if (reviewOnly) ...<Widget>[
           if (hasMisses)
             OutlinedButton(
@@ -1153,10 +1157,6 @@ class _SpellingLessonScreenState extends ConsumerState<SpellingLessonScreen>
                   : _reviewMistakes,
               child: const Text('Review mistakes'),
             ),
-          FilledButton(
-            onPressed: _busy || _frozenCommand != null ? null : _finish,
-            child: const Text('Finish review'),
-          ),
         ] else ...<Widget>[
           if (hasMisses)
             OutlinedButton(
@@ -1165,10 +1165,6 @@ class _SpellingLessonScreenState extends ConsumerState<SpellingLessonScreen>
                   : _reviewMistakes,
               child: const Text('Review mistakes'),
             ),
-          FilledButton(
-            onPressed: _busy || _frozenCommand != null ? null : _finish,
-            child: const Text('Finish practice'),
-          ),
         ],
       ],
     );
@@ -1183,14 +1179,66 @@ class _SpellingLessonScreenState extends ConsumerState<SpellingLessonScreen>
             ? 'Review run complete.'
             : 'Practice run complete.',
       ),
-      if (slot.checkpoint.mode == SpellingRunMode.reviewOnly ||
-          (!widget.review && slot.checkpoint.mode == SpellingRunMode.practice))
-        FilledButton(
-          onPressed: _busy || _frozenCommand != null ? null : _startPractice,
-          child: const Text('Start new practice'),
-        ),
     ],
   );
+
+  Widget? _bottomAction(SpellingSlot? slot, LessonSectionSession? session) {
+    String? label;
+    VoidCallback? action;
+    bool canAct = !_busy && !_loading && !_loadFailed && !_saveFailed;
+
+    if (_readOnlyUnavailable) {
+      label = 'Continue practice';
+      action = _continuePractice;
+      canAct = !_busy && _frozenCommand == null;
+    } else if (_state != null && slot == null && !widget.review) {
+      label = 'Start practice';
+      action = _startPractice;
+      canAct = canAct && _frozenCommand == null;
+    } else if (slot?.checkpoint.finished == true) {
+      final bool canStartNew =
+          slot!.checkpoint.mode == SpellingRunMode.reviewOnly ||
+          (!widget.review && slot.checkpoint.mode == SpellingRunMode.practice);
+      if (canStartNew) {
+        label = 'Start new practice';
+        action = _startPractice;
+        canAct = canAct && _frozenCommand == null;
+      }
+    } else if (session?.phase == LessonSectionPhase.exercise &&
+        session!.answered) {
+      label = 'Continue';
+      action = _advance;
+      canAct = canAct && _frozenCommand == null;
+    } else if (session?.phase == LessonSectionPhase.debrief &&
+        !(widget.review && slot?.checkpoint.mode == SpellingRunMode.practice)) {
+      final bool reviewOnly =
+          slot?.checkpoint.mode == SpellingRunMode.reviewOnly;
+      label = reviewOnly ? 'Finish review' : 'Finish practice';
+      action = _finish;
+      canAct = canAct && _frozenCommand == null;
+    }
+
+    if (label == null || action == null) return null;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: canAct ? action : null,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(52),
+              ),
+              child: Text(label),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   UyDemoSpellingRow _rowFor(String itemId) => _catalogue!.rows.singleWhere(
     (UyDemoSpellingRow row) => row.exercise.id == itemId,

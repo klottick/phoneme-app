@@ -156,13 +156,17 @@ class CountingNavigatorObserver extends NavigatorObserver {
   }
 }
 
-final List<String> expectedSounds =
-    frenchUySection.items.map((item) => item.expectedSound).toList();
-final List<String> discoveryItemIds =
-    frenchUySection.items.map((item) => item.id).toList();
+final List<String> expectedSounds = frenchUySection.items
+    .map((item) => item.expectedSound)
+    .toList();
+final List<String> discoveryItemIds = frenchUySection.items
+    .map((item) => item.id)
+    .toList();
 
 void seedStoreSession(
-    CourseLearningWidgetStore store, LessonSectionSession session) {
+  CourseLearningWidgetStore store,
+  LessonSectionSession session,
+) {
   store.seedSession(session);
 }
 
@@ -172,14 +176,15 @@ LessonSectionSession? parseStoreSession(CourseLearningWidgetStore store) =>
 Map<String, dynamic>? sessionJson(CourseLearningWidgetStore store) =>
     store.discoverySession?.toJson();
 
-bool hasCompletion(CourseLearningWidgetStore store) =>
-    store.committedState.completions
-        .any((completion) => completion.lessonId == 'en-fr-u-y');
+bool hasCompletion(CourseLearningWidgetStore store) => store
+    .committedState
+    .completions
+    .any((completion) => completion.lessonId == 'en-fr-u-y');
 
-int actionCount(CourseLearningWidgetStore store, Type actionType) =>
-    store.submitted
-        .where((command) => command.action.runtimeType == actionType)
-        .length;
+int actionCount(CourseLearningWidgetStore store, Type actionType) => store
+    .submitted
+    .where((command) => command.action.runtimeType == actionType)
+    .length;
 
 void failAction(CourseLearningWidgetStore store, Type action, bool fail) {
   if (fail) {
@@ -241,8 +246,9 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   group('shared_owner_preserves_discovery_frozen_retry_and_lifecycle', () {
-    testWidgets('legacy speak success grants only authored evidence',
-        (tester) async {
+    testWidgets('legacy speak success grants only authored evidence', (
+      tester,
+    ) async {
       final audio = FakeAudio();
       final store = CourseLearningWidgetStore();
       await tester.pumpWidget(pumpLesson(tester, audio, store));
@@ -254,8 +260,11 @@ void main() {
       audio.fail = true;
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
-      expect(choicesEnabled(tester), isFalse,
-          reason: 'a failed replay revokes this sample grant');
+      expect(
+        choicesEnabled(tester),
+        isFalse,
+        reason: 'a failed replay revokes this sample grant',
+      );
       audio.fail = false;
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
@@ -267,8 +276,9 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('paused late audio cannot revoke resumed playback grant',
-        (tester) async {
+    testWidgets('paused late audio cannot revoke resumed playback grant', (
+      tester,
+    ) async {
       final audio = QueuedGateAudio();
       addTearDown(() {
         for (final gate in audio.gates) {
@@ -293,26 +303,30 @@ void main() {
       expect(choicesEnabled(tester), isTrue);
       audio.gates[0].complete();
       await tester.pump();
-      expect(choicesEnabled(tester), isTrue,
-          reason: 'old audio completion cannot alter the newer grant');
+      expect(
+        choicesEnabled(tester),
+        isTrue,
+        reason: 'old audio completion cannot alter the newer grant',
+      );
       expect(actionCount(store, ChooseSound), 0);
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('A to B to A repository changes keep owners isolated',
-        (tester) async {
+    testWidgets('A to B to A repository changes keep owners isolated', (
+      tester,
+    ) async {
       final audio = FakeAudio();
       final ownerA = CourseLearningWidgetStore();
       final ownerB = CourseLearningWidgetStore();
       Widget app(CourseLearningWidgetStore owner) => ProviderScope(
-            overrides: [
-              courseAudioProvider.overrideWithValue(audio),
-              courseLearningStoreProvider.overrideWithValue(owner),
-            ],
-            child: const MaterialApp(
-              home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
-            ),
-          );
+        overrides: [
+          courseAudioProvider.overrideWithValue(audio),
+          courseLearningStoreProvider.overrideWithValue(owner),
+        ],
+        child: const MaterialApp(
+          home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
+        ),
+      );
       await tester.pumpWidget(app(ownerA));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Listen to the word'));
@@ -322,48 +336,56 @@ void main() {
       await tester.pumpWidget(app(ownerA));
       await tester.pumpAndSettle();
       expect(find.text('Item 1 of 10'), findsOneWidget);
-      expect(choicesEnabled(tester), isFalse,
-          reason: 'returning to A must not restore its old transient grant');
+      expect(
+        choicesEnabled(tester),
+        isFalse,
+        reason: 'returning to A must not restore its old transient grant',
+      );
       expect(ownerB.discoverySession?.attemptCount, 0);
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('same-owner held save retries the identical command on resume',
-        (tester) async {
-      final gate = Completer<void>();
-      addTearDown(() {
-        if (!gate.isCompleted) gate.complete();
-      });
-      final audio = FakeAudio();
-      final store = CourseLearningWidgetStore()
-        ..actionGates[ChooseSound] = gate;
-      await tester.pumpWidget(pumpLesson(tester, audio, store));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Listen to the word'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('/u/'));
-      await tester.pump();
-      expect(actionCount(store, ChooseSound), 1);
-      final command = store.submitted.last;
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-      tester.binding.scheduleForcedFrame();
-      await tester.pump();
-      gate.complete();
-      await tester.pump();
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-      await tester.pumpAndSettle();
-      final answers = store.submitted
-          .where((submitted) => submitted.action is ChooseSound)
-          .toList();
-      expect(answers, hasLength(2));
-      expect(identical(answers[0], command), isTrue);
-      expect(identical(answers[1], command), isTrue);
-      expect(store.discoverySession?.attemptCount, 1);
-      await tester.pumpWidget(const SizedBox());
-    });
+    testWidgets(
+      'same-owner held save retries the identical command on resume',
+      (tester) async {
+        final gate = Completer<void>();
+        addTearDown(() {
+          if (!gate.isCompleted) gate.complete();
+        });
+        final audio = FakeAudio();
+        final store = CourseLearningWidgetStore()
+          ..actionGates[ChooseSound] = gate;
+        await tester.pumpWidget(pumpLesson(tester, audio, store));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Listen to the word'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('/u/'));
+        await tester.pump();
+        expect(actionCount(store, ChooseSound), 1);
+        final command = store.submitted.last;
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        tester.binding.scheduleForcedFrame();
+        await tester.pump();
+        gate.complete();
+        await tester.pump();
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        await tester.pumpAndSettle();
+        final answers = store.submitted
+            .where((submitted) => submitted.action is ChooseSound)
+            .toList();
+        expect(answers, hasLength(2));
+        expect(identical(answers[0], command), isTrue);
+        expect(identical(answers[1], command), isTrue);
+        expect(store.discoverySession?.attemptCount, 1);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
 
-    testWidgets('auth generation change fences an in-flight acknowledgement',
-        (tester) async {
+    testWidgets('auth generation change fences an in-flight acknowledgement', (
+      tester,
+    ) async {
       final gate = Completer<void>();
       addTearDown(() {
         if (!gate.isCompleted) gate.complete();
@@ -385,29 +407,36 @@ void main() {
       store.seedSession(session);
       final router = lessonRouter();
       addTearDown(router.dispose);
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          courseAudioProvider.overrideWithValue(FakeAudio()),
-          courseLearningStoreProvider.overrideWithValue(store),
-          learningAuthScopeProvider.overrideWith((ref) => tracker),
-        ],
-        child: MaterialApp.router(routerConfig: router),
-      ));
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            courseAudioProvider.overrideWithValue(FakeAudio()),
+            courseLearningStoreProvider.overrideWithValue(store),
+            learningAuthScopeProvider.overrideWith((ref) => tracker),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Finish section'));
       await tester.pump();
       tracker.observe(
-          owner: LearningOwner.account('next-account'), ready: true);
+        owner: LearningOwner.account('next-account'),
+        ready: true,
+      );
       gate.complete();
       await tester.pumpAndSettle();
-      expect(router.routeInformationProvider.value.uri.path,
-          '/course-lesson/en-fr-u-y',
-          reason: 'a stale auth acknowledgement cannot navigate away');
+      expect(
+        router.routeInformationProvider.value.uri.path,
+        '/course-lesson/en-fr-u-y',
+        reason: 'a stale auth acknowledgement cannot navigate away',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('held lower finish cannot pop a newly pushed route',
-        (tester) async {
+    testWidgets('held lower finish cannot pop a newly pushed route', (
+      tester,
+    ) async {
       final gate = Completer<void>();
       final observer = CountingNavigatorObserver();
       addTearDown(() {
@@ -431,21 +460,22 @@ void main() {
           GoRoute(path: '/home', builder: (_, __) => const Text('home')),
           GoRoute(
             path: '/course-lesson/:id',
-            builder: (_, state) => DiscoveryLessonScreen(
-              lessonId: state.pathParameters['id']!,
-            ),
+            builder: (_, state) =>
+                DiscoveryLessonScreen(lessonId: state.pathParameters['id']!),
           ),
           GoRoute(path: '/other', builder: (_, __) => const Text('other top')),
         ],
       );
       addTearDown(router.dispose);
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          courseAudioProvider.overrideWithValue(FakeAudio()),
-          courseLearningStoreProvider.overrideWithValue(store),
-        ],
-        child: MaterialApp.router(routerConfig: router),
-      ));
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            courseAudioProvider.overrideWithValue(FakeAudio()),
+            courseLearningStoreProvider.overrideWithValue(store),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
       await tester.pumpAndSettle();
       router.push('/course-lesson/en-fr-u-y');
       await tester.pumpAndSettle();
@@ -456,28 +486,41 @@ void main() {
       await pumpRouteTransition(tester);
       gate.complete();
       await tester.pumpAndSettle();
-      expect(observer.popCount, 0,
-          reason: 'the covered lesson cannot pop the newer route on ACK');
+      expect(
+        observer.popCount,
+        0,
+        reason: 'the covered lesson cannot pop the newer route on ACK',
+      );
       expect(find.text('other top'), findsOneWidget);
       router.pop();
       await tester.pumpAndSettle();
       expect(find.text('home'), findsNothing);
-      expect(find.text('Retry saving'), findsOneWidget,
-          reason: 'uncovering preserves the covered Finish for explicit retry');
+      expect(
+        find.text('Retry saving'),
+        findsOneWidget,
+        reason: 'uncovering preserves the covered Finish for explicit retry',
+      );
       final finishCount = actionCount(store, FinishLearningActivity);
       final popCountBeforeRetry = observer.popCount;
       await tester.tap(find.text('Retry saving'));
       await tester.pumpAndSettle();
-      expect(actionCount(store, FinishLearningActivity), finishCount + 1,
-          reason: 'the explicit retry resubmits the frozen Finish command');
+      expect(
+        actionCount(store, FinishLearningActivity),
+        finishCount + 1,
+        reason: 'the explicit retry resubmits the frozen Finish command',
+      );
       expect(identical(store.submitted.last, originalFinish), isTrue);
-      expect(observer.popCount, popCountBeforeRetry + 1,
-          reason: 'the current acknowledged Finish exits exactly once');
+      expect(
+        observer.popCount,
+        popCountBeforeRetry + 1,
+        reason: 'the current acknowledged Finish exits exactly once',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('same-URI pushed discovery remains above held lower finish',
-        (tester) async {
+    testWidgets('same-URI pushed discovery remains above held lower finish', (
+      tester,
+    ) async {
       final gate = Completer<void>();
       final observer = CountingNavigatorObserver();
       addTearDown(() {
@@ -500,20 +543,21 @@ void main() {
         routes: [
           GoRoute(
             path: '/course-lesson/:id',
-            builder: (_, state) => DiscoveryLessonScreen(
-              lessonId: state.pathParameters['id']!,
-            ),
+            builder: (_, state) =>
+                DiscoveryLessonScreen(lessonId: state.pathParameters['id']!),
           ),
         ],
       );
       addTearDown(router.dispose);
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          courseAudioProvider.overrideWithValue(FakeAudio()),
-          courseLearningStoreProvider.overrideWithValue(store),
-        ],
-        child: MaterialApp.router(routerConfig: router),
-      ));
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            courseAudioProvider.overrideWithValue(FakeAudio()),
+            courseLearningStoreProvider.overrideWithValue(store),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Finish section'));
       await tester.pump();
@@ -521,39 +565,47 @@ void main() {
       await pumpRouteTransition(tester);
       gate.complete();
       await tester.pumpAndSettle();
-      expect(observer.popCount, 0,
-          reason: 'equal route URIs do not confer ownership to the lower page');
+      expect(
+        observer.popCount,
+        0,
+        reason: 'equal route URIs do not confer ownership to the lower page',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
     testWidgets(
-        'conflict remains frozen through pause and resumes only on reload',
-        (tester) async {
-      final store = CourseLearningWidgetStore()
-        ..actionFailures[ChooseSound] = const LearningConflictException();
-      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Listen to the word'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('/u/'));
-      await tester.pumpAndSettle();
-      final attemptsBeforePause = actionCount(store, ChooseSound);
-      expect(find.text('Reload saved progress'), findsOneWidget);
-      expect(find.text('Retry saving'), findsNothing);
-      await suspendResume(tester);
-      expect(actionCount(store, ChooseSound), attemptsBeforePause,
-          reason: 'a typed conflict must not be resubmitted on resume');
-      expect(find.text('Reload saved progress'), findsOneWidget);
-      expect(find.text('Retry saving'), findsNothing);
-      await tester.tap(find.text('Reload saved progress'));
-      await tester.pumpAndSettle();
-      expect(find.text('Reload saved progress'), findsNothing);
-      expect(store.discoverySession?.attemptCount, 0);
-      await tester.pumpWidget(const SizedBox());
-    });
+      'conflict remains frozen through pause and resumes only on reload',
+      (tester) async {
+        final store = CourseLearningWidgetStore()
+          ..actionFailures[ChooseSound] = const LearningConflictException();
+        await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Listen to the word'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('/u/'));
+        await tester.pumpAndSettle();
+        final attemptsBeforePause = actionCount(store, ChooseSound);
+        expect(find.text('Reload saved progress'), findsOneWidget);
+        expect(find.text('Retry saving'), findsNothing);
+        await suspendResume(tester);
+        expect(
+          actionCount(store, ChooseSound),
+          attemptsBeforePause,
+          reason: 'a typed conflict must not be resubmitted on resume',
+        );
+        expect(find.text('Reload saved progress'), findsOneWidget);
+        expect(find.text('Retry saving'), findsNothing);
+        await tester.tap(find.text('Reload saved progress'));
+        await tester.pumpAndSettle();
+        expect(find.text('Reload saved progress'), findsNothing);
+        expect(store.discoverySession?.attemptCount, 0);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
 
-    testWidgets('content-changed conflict remains frozen through pause',
-        (tester) async {
+    testWidgets('content-changed conflict remains frozen through pause', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore()
         ..actionFailures[ChooseSound] = const LearningContentChangedException();
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
@@ -565,8 +617,11 @@ void main() {
       final attemptsBeforePause = actionCount(store, ChooseSound);
       expect(find.text('Reload saved progress'), findsOneWidget);
       await suspendResume(tester);
-      expect(actionCount(store, ChooseSound), attemptsBeforePause,
-          reason: 'content changes require the same explicit reload path');
+      expect(
+        actionCount(store, ChooseSound),
+        attemptsBeforePause,
+        reason: 'content changes require the same explicit reload path',
+      );
       expect(find.text('Reload saved progress'), findsOneWidget);
       expect(find.text('Retry saving'), findsNothing);
       await tester.tap(find.text('Reload saved progress'));
@@ -575,8 +630,9 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('covered failed write returns as exact explicit retry',
-        (tester) async {
+    testWidgets('covered failed write returns as exact explicit retry', (
+      tester,
+    ) async {
       final gate = Completer<void>();
       addTearDown(() {
         if (!gate.isCompleted) gate.complete();
@@ -588,21 +644,22 @@ void main() {
         routes: [
           GoRoute(
             path: '/lesson',
-            builder: (_, __) => const DiscoveryLessonScreen(
-              lessonId: 'en-fr-u-y',
-            ),
+            builder: (_, __) =>
+                const DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
           ),
           GoRoute(path: '/other', builder: (_, __) => const Text('upper page')),
         ],
       );
       addTearDown(router.dispose);
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          courseAudioProvider.overrideWithValue(FakeAudio()),
-          courseLearningStoreProvider.overrideWithValue(store),
-        ],
-        child: MaterialApp.router(routerConfig: router),
-      ));
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            courseAudioProvider.overrideWithValue(FakeAudio()),
+            courseLearningStoreProvider.overrideWithValue(store),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
@@ -619,8 +676,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Retry saving'), findsOneWidget);
       expect(find.text('Reload saved progress'), findsNothing);
-      expect(store.discoverySession?.attemptCount, 0,
-          reason: 'a failed covered save must not discard its draft');
+      expect(
+        store.discoverySession?.attemptCount,
+        0,
+        reason: 'a failed covered save must not discard its draft',
+      );
       store.actionFailures.remove(ChooseSound);
       await tester.tap(find.text('Retry saving'));
       await tester.pumpAndSettle();
@@ -634,8 +694,9 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('covered successful Finish waits for explicit retry to exit',
-        (tester) async {
+    testWidgets('covered successful Finish waits for explicit retry to exit', (
+      tester,
+    ) async {
       final gate = Completer<void>();
       addTearDown(() {
         if (!gate.isCompleted) gate.complete();
@@ -659,21 +720,22 @@ void main() {
           GoRoute(path: '/home', builder: (_, __) => const Text('home page')),
           GoRoute(
             path: '/lesson',
-            builder: (_, __) => const DiscoveryLessonScreen(
-              lessonId: 'en-fr-u-y',
-            ),
+            builder: (_, __) =>
+                const DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
           ),
           GoRoute(path: '/other', builder: (_, __) => const Text('upper page')),
         ],
       );
       addTearDown(router.dispose);
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          courseAudioProvider.overrideWithValue(FakeAudio()),
-          courseLearningStoreProvider.overrideWithValue(store),
-        ],
-        child: MaterialApp.router(routerConfig: router),
-      ));
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            courseAudioProvider.overrideWithValue(FakeAudio()),
+            courseLearningStoreProvider.overrideWithValue(store),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
       await tester.pumpAndSettle();
       router.push('/lesson');
       await tester.pumpAndSettle();
@@ -688,15 +750,24 @@ void main() {
       final coveredPopCount = observer.popCount;
       router.pop();
       await tester.pumpAndSettle();
-      expect(find.text('Retry saving'), findsOneWidget,
-          reason: 'return requires a learner-confirmed idempotent retry');
-      expect(observer.popCount, coveredPopCount + 1,
-          reason: 'uncover itself does not exit');
+      expect(
+        find.text('Retry saving'),
+        findsOneWidget,
+        reason: 'return requires a learner-confirmed idempotent retry',
+      );
+      expect(
+        observer.popCount,
+        coveredPopCount + 1,
+        reason: 'uncover itself does not exit',
+      );
       final beforeRetry = observer.popCount;
       await tester.tap(find.text('Retry saving'));
       await tester.pumpAndSettle();
-      expect(observer.popCount, beforeRetry + 1,
-          reason: 'only the current explicit ACK may run Finish navigation');
+      expect(
+        observer.popCount,
+        beforeRetry + 1,
+        reason: 'only the current explicit ACK may run Finish navigation',
+      );
       expect(find.text('home page'), findsOneWidget);
       final finishes = store.submitted
           .where((command) => command.action is FinishLearningActivity)
@@ -705,72 +776,80 @@ void main() {
       expect(identical(finishes.first, original), isTrue);
       expect(identical(finishes.last, original), isTrue);
       expect(
-          store.committedState.completions
-              .where((completion) => completion.lessonId == 'en-fr-u-y')
-              .length,
-          1);
+        store.committedState.completions
+            .where((completion) => completion.lessonId == 'en-fr-u-y')
+            .length,
+        1,
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
     testWidgets(
-        'covered initial load is reread on zero-transition route return',
-        (tester) async {
-      final gate = Completer<void>();
-      addTearDown(() {
-        if (!gate.isCompleted) gate.complete();
-      });
-      final store = CourseLearningWidgetStore()..loadGate = gate;
-      final router = GoRouter(
-        initialLocation: '/lesson',
-        routes: [
-          GoRoute(
-            path: '/lesson',
-            pageBuilder: (_, state) => CustomTransitionPage<void>(
-              key: state.pageKey,
-              transitionDuration: Duration.zero,
-              reverseTransitionDuration: Duration.zero,
-              child: const DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
-              transitionsBuilder: (_, __, ___, child) => child,
+      'covered initial load is reread on zero-transition route return',
+      (tester) async {
+        final gate = Completer<void>();
+        addTearDown(() {
+          if (!gate.isCompleted) gate.complete();
+        });
+        final store = CourseLearningWidgetStore()..loadGate = gate;
+        final router = GoRouter(
+          initialLocation: '/lesson',
+          routes: [
+            GoRoute(
+              path: '/lesson',
+              pageBuilder: (_, state) => CustomTransitionPage<void>(
+                key: state.pageKey,
+                transitionDuration: Duration.zero,
+                reverseTransitionDuration: Duration.zero,
+                child: const DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
+                transitionsBuilder: (_, __, ___, child) => child,
+              ),
             ),
-          ),
-          GoRoute(
-            path: '/other',
-            pageBuilder: (_, state) => CustomTransitionPage<void>(
-              key: state.pageKey,
-              transitionDuration: Duration.zero,
-              reverseTransitionDuration: Duration.zero,
-              child: const Text('upper page'),
-              transitionsBuilder: (_, __, ___, child) => child,
+            GoRoute(
+              path: '/other',
+              pageBuilder: (_, state) => CustomTransitionPage<void>(
+                key: state.pageKey,
+                transitionDuration: Duration.zero,
+                reverseTransitionDuration: Duration.zero,
+                child: const Text('upper page'),
+                transitionsBuilder: (_, __, ___, child) => child,
+              ),
             ),
+          ],
+        );
+        addTearDown(router.dispose);
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              courseAudioProvider.overrideWithValue(FakeAudio()),
+              courseLearningStoreProvider.overrideWithValue(store),
+            ],
+            child: MaterialApp.router(routerConfig: router),
           ),
-        ],
-      );
-      addTearDown(router.dispose);
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          courseAudioProvider.overrideWithValue(FakeAudio()),
-          courseLearningStoreProvider.overrideWithValue(store),
-        ],
-        child: MaterialApp.router(routerConfig: router),
-      ));
-      await tester.pump();
-      router.push('/other');
-      await tester.pump();
-      gate.complete();
-      await tester.pump();
-      expect(find.text('upper page'), findsOneWidget);
-      router.pop();
-      await tester.pump();
-      await tester.pump();
-      await tester.pump();
-      expect(find.text('Item 1 of 10'), findsOneWidget,
+        );
+        await tester.pump();
+        router.push('/other');
+        await tester.pump();
+        gate.complete();
+        await tester.pump();
+        expect(find.text('upper page'), findsOneWidget);
+        router.pop();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump();
+        expect(
+          find.text('Item 1 of 10'),
+          findsOneWidget,
           reason:
-              'route currentness changes must recover without animation ticks');
-      await tester.pumpWidget(const SizedBox());
-    });
+              'route currentness changes must recover without animation ticks',
+        );
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
 
-    testWidgets('nested zero-transition route recovers covered load',
-        (tester) async {
+    testWidgets('nested zero-transition route recovers covered load', (
+      tester,
+    ) async {
       final gate = Completer<void>();
       addTearDown(() {
         if (!gate.isCompleted) gate.complete();
@@ -778,26 +857,28 @@ void main() {
       final store = CourseLearningWidgetStore()..loadGate = gate;
       final navigatorKey = GlobalKey<NavigatorState>();
       Route<dynamic> route(RouteSettings settings) => PageRouteBuilder<void>(
-            settings: settings,
-            transitionDuration: Duration.zero,
-            reverseTransitionDuration: Duration.zero,
-            pageBuilder: (_, __, ___) => settings.name == '/lesson'
-                ? const DiscoveryLessonScreen(lessonId: 'en-fr-u-y')
-                : const Text('nested upper'),
-          );
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          courseAudioProvider.overrideWithValue(FakeAudio()),
-          courseLearningStoreProvider.overrideWithValue(store),
-        ],
-        child: MaterialApp(
-          home: Navigator(
-            key: navigatorKey,
-            onGenerateRoute: route,
-            initialRoute: '/lesson',
+        settings: settings,
+        transitionDuration: Duration.zero,
+        reverseTransitionDuration: Duration.zero,
+        pageBuilder: (_, __, ___) => settings.name == '/lesson'
+            ? const DiscoveryLessonScreen(lessonId: 'en-fr-u-y')
+            : const Text('nested upper'),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            courseAudioProvider.overrideWithValue(FakeAudio()),
+            courseLearningStoreProvider.overrideWithValue(store),
+          ],
+          child: MaterialApp(
+            home: Navigator(
+              key: navigatorKey,
+              onGenerateRoute: route,
+              initialRoute: '/lesson',
+            ),
           ),
         ),
-      ));
+      );
       await tester.pump();
       navigatorKey.currentState!.pushNamed('/other');
       await tester.pump();
@@ -808,13 +889,17 @@ void main() {
       await tester.pump();
       await tester.pump();
       await tester.pump();
-      expect(find.text('Item 1 of 10'), findsOneWidget,
-          reason: 'the screen follows its actual nested Navigator route');
+      expect(
+        find.text('Item 1 of 10'),
+        findsOneWidget,
+        reason: 'the screen follows its actual nested Navigator route',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('covered audio completion requires fresh listening',
-        (tester) async {
+    testWidgets('covered audio completion requires fresh listening', (
+      tester,
+    ) async {
       final audio = QueuedGateAudio();
       addTearDown(() {
         for (final gate in audio.gates) {
@@ -827,21 +912,22 @@ void main() {
         routes: [
           GoRoute(
             path: '/lesson',
-            builder: (_, __) => const DiscoveryLessonScreen(
-              lessonId: 'en-fr-u-y',
-            ),
+            builder: (_, __) =>
+                const DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
           ),
           GoRoute(path: '/other', builder: (_, __) => const Text('upper page')),
         ],
       );
       addTearDown(router.dispose);
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          courseAudioProvider.overrideWithValue(audio),
-          courseLearningStoreProvider.overrideWithValue(store),
-        ],
-        child: MaterialApp.router(routerConfig: router),
-      ));
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            courseAudioProvider.overrideWithValue(audio),
+            courseLearningStoreProvider.overrideWithValue(store),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Listen to the word'));
       await tester.pump();
@@ -851,8 +937,11 @@ void main() {
       await tester.pumpAndSettle();
       router.pop();
       await tester.pumpAndSettle();
-      expect(choicesEnabled(tester), isFalse,
-          reason: 'a completion while covered cannot grant hearing');
+      expect(
+        choicesEnabled(tester),
+        isFalse,
+        reason: 'a completion while covered cannot grant hearing',
+      );
       await tester.tap(find.text('Listen to the word'));
       await tester.pump();
       expect(audio.gates, hasLength(2));
@@ -862,8 +951,9 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('return before old audio completion protects new playback',
-        (tester) async {
+    testWidgets('return before old audio completion protects new playback', (
+      tester,
+    ) async {
       final audio = QueuedGateAudio();
       addTearDown(() {
         for (final gate in audio.gates) {
@@ -876,21 +966,22 @@ void main() {
         routes: [
           GoRoute(
             path: '/lesson',
-            builder: (_, __) => const DiscoveryLessonScreen(
-              lessonId: 'en-fr-u-y',
-            ),
+            builder: (_, __) =>
+                const DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
           ),
           GoRoute(path: '/other', builder: (_, __) => const Text('upper page')),
         ],
       );
       addTearDown(router.dispose);
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          courseAudioProvider.overrideWithValue(audio),
-          courseLearningStoreProvider.overrideWithValue(store),
-        ],
-        child: MaterialApp.router(routerConfig: router),
-      ));
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            courseAudioProvider.overrideWithValue(audio),
+            courseLearningStoreProvider.overrideWithValue(store),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Listen to the word'));
       await tester.pump();
@@ -908,23 +999,29 @@ void main() {
       expect(choicesEnabled(tester), isTrue);
       audio.gates[0].complete();
       await tester.pump();
-      expect(choicesEnabled(tester), isTrue,
-          reason: 'late old playback cannot replace the new grant');
-      expect(find.byType(CircularProgressIndicator), findsNothing,
-          reason: 'late old playback cannot strand the new playback state');
+      expect(
+        choicesEnabled(tester),
+        isTrue,
+        reason: 'late old playback cannot replace the new grant',
+      );
+      expect(
+        find.byType(CircularProgressIndicator),
+        findsNothing,
+        reason: 'late old playback cannot strand the new playback state',
+      );
       await tester.pumpWidget(const SizedBox());
     });
   });
 
   group('first pass', () {
-    testWidgets(
-        'full ten-item pass shows immediate feedback, no early '
+    testWidgets('full ten-item pass shows immediate feedback, no early '
         'explanation, debrief at 10/10, and completes once', (tester) async {
       final audio = FakeAudio();
       final store = CourseLearningWidgetStore();
       await tester.pumpWidget(pumpLesson(tester, audio, store));
       await tester.pumpAndSettle();
       expect(find.text('Item 1 of 10'), findsOneWidget);
+      expect(find.text('0/10 completed · 10 remaining'), findsOneWidget);
       for (var i = 0; i < section.items.length; i++) {
         expect(find.text(section.explanation), findsNothing);
         await tester.tap(find.text('Listen to the word'));
@@ -933,6 +1030,11 @@ void main() {
         await tester.tap(find.text('/${expectedSounds[i]}/'));
         await tester.pumpAndSettle();
         expect(find.text('Correct'), findsOneWidget);
+        expect(
+          find.text('${i + 1}/10 completed · ${9 - i} remaining'),
+          findsOneWidget,
+          reason: 'every acknowledged submission counts regardless of score',
+        );
         expect(find.text(section.explanation), findsNothing);
         await advance(tester, last: i == section.items.length - 1);
       }
@@ -948,8 +1050,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'failing score still debriefs, mistake-only review, then '
+    testWidgets('failing score still debriefs, mistake-only review, then '
         'completion', (tester) async {
       final audio = FakeAudio();
       final store = CourseLearningWidgetStore();
@@ -967,7 +1068,7 @@ void main() {
         true,
         false,
         true,
-        false
+        false,
       ];
       for (var i = 0; i < section.items.length; i++) {
         await tester.tap(find.text('Listen to the word'));
@@ -983,27 +1084,38 @@ void main() {
       expect(find.text('You got 5 of 10 correct.'), findsOneWidget);
       expect(find.text('Passing needs 8 of 10 correct.'), findsOneWidget);
       expect(
-          tester
-              .widget<FilledButton>(
-                  find.widgetWithText(FilledButton, 'Finish section'))
-              .onPressed,
-          isNull,
-          reason: 'Finish must be unavailable below the threshold');
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Finish section'),
+            )
+            .onPressed,
+        isNull,
+        reason: 'Finish must be unavailable below the threshold',
+      );
       for (final word in ['tu', 'rue', 'lune', 'jus', 'mur']) {
         expect(find.text(word), findsOneWidget);
       }
       // Review round: only the five unresolved words, in original order.
       await tester.tap(find.text('Review mistakes'));
       await tester.pumpAndSettle();
+      expect(find.text('Review round 2 · item 1 of 5'), findsOneWidget);
+      expect(find.text('0/5 completed · 5 remaining'), findsOneWidget);
       final List<String> unresolved = ['tu', 'rue', 'lune', 'jus', 'mur'];
       for (var i = 0; i < unresolved.length; i++) {
         await tester.tap(find.text('Listen to the word'));
         await tester.pumpAndSettle();
-        expect(audio.spoken.last, unresolved[i],
-            reason: 'review must follow the unresolved order');
+        expect(
+          audio.spoken.last,
+          unresolved[i],
+          reason: 'review must follow the unresolved order',
+        );
         await tester.tap(find.text('/y/')); // the expected sound for all five
         await tester.pumpAndSettle();
         expect(find.text('Correct'), findsOneWidget);
+        expect(
+          find.text('${i + 1}/5 completed · ${4 - i} remaining'),
+          findsOneWidget,
+        );
         await advance(tester, last: i == unresolved.length - 1);
       }
       expect(find.text('You got 10 of 10 correct.'), findsOneWidget);
@@ -1014,8 +1126,9 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('a wrong choice is recorded against the expected sound',
-        (tester) async {
+    testWidgets('a wrong choice is recorded against the expected sound', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore();
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
       await tester.pumpAndSettle();
@@ -1032,11 +1145,14 @@ void main() {
   });
 
   group('resume and restore', () {
-    testWidgets('resumes an in-progress first pass without replaying items',
-        (tester) async {
+    testWidgets('resumes an in-progress first pass without replaying items', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore();
-      final session =
-          LessonSectionSession(itemIds: discoveryItemIds, sessionId: 'seed');
+      final session = LessonSectionSession(
+        itemIds: discoveryItemIds,
+        sessionId: 'seed',
+      );
       session.submit(true);
       session.advance();
       session.submit(false);
@@ -1047,19 +1163,25 @@ void main() {
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
       await tester.pumpAndSettle();
       expect(find.text('Item 4 of 10'), findsOneWidget);
-      expect(choicesEnabled(tester), isFalse,
-          reason: 'a resumed unsubmitted item needs a fresh listen');
+      expect(
+        choicesEnabled(tester),
+        isFalse,
+        reason: 'a resumed unsubmitted item needs a fresh listen',
+      );
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
       expect(choicesEnabled(tester), isTrue);
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('resumes the debrief and finishes from the saved state',
-        (tester) async {
+    testWidgets('resumes the debrief and finishes from the saved state', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore();
-      final session =
-          LessonSectionSession(itemIds: discoveryItemIds, sessionId: 'seed');
+      final session = LessonSectionSession(
+        itemIds: discoveryItemIds,
+        sessionId: 'seed',
+      );
       for (var i = 0; i < 10; i++) {
         session.submit(true);
         session.advance();
@@ -1075,12 +1197,15 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('resumes a review round and completes after mastering it',
-        (tester) async {
+    testWidgets('resumes a review round and completes after mastering it', (
+      tester,
+    ) async {
       final audio = FakeAudio();
       final store = CourseLearningWidgetStore();
-      final session =
-          LessonSectionSession(itemIds: discoveryItemIds, sessionId: 'seed');
+      final session = LessonSectionSession(
+        itemIds: discoveryItemIds,
+        sessionId: 'seed',
+      );
       const firstPass = [
         true,
         false,
@@ -1091,7 +1216,7 @@ void main() {
         true,
         false,
         true,
-        true
+        true,
       ];
       for (final bool outcome in firstPass) {
         session.submit(outcome);
@@ -1120,31 +1245,41 @@ void main() {
     });
 
     testWidgets(
-        'unsupported saved data stays unavailable and requires explicit retry',
-        (tester) async {
-      final store = CourseLearningWidgetStore()
-        ..failLoad = true
-        ..loadFailure = const LearningUnsupportedVersionException();
-      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
-      await tester.pumpAndSettle();
-      expect(find.textContaining('could not be loaded'), findsOneWidget);
-      expect(find.text('Retry loading'), findsOneWidget);
-      expect(store.submitCalls, 0,
-          reason: 'unavailable data must not trigger an automatic new run');
-      store.failLoad = false;
-      await tester.tap(find.text('Retry loading'));
-      await tester.pumpAndSettle();
-      expect(find.text('Item 1 of 10'), findsOneWidget);
-      expect(store.submitCalls, 1,
-          reason: 'fresh state starts only after an explicit retry');
-      await tester.pumpWidget(const SizedBox());
-    });
+      'unsupported saved data stays unavailable and requires explicit retry',
+      (tester) async {
+        final store = CourseLearningWidgetStore()
+          ..failLoad = true
+          ..loadFailure = const LearningUnsupportedVersionException();
+        await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('could not be loaded'), findsOneWidget);
+        expect(find.text('Retry loading'), findsOneWidget);
+        expect(
+          store.submitCalls,
+          0,
+          reason: 'unavailable data must not trigger an automatic new run',
+        );
+        store.failLoad = false;
+        await tester.tap(find.text('Retry loading'));
+        await tester.pumpAndSettle();
+        expect(find.text('Item 1 of 10'), findsOneWidget);
+        expect(
+          store.submitCalls,
+          1,
+          reason: 'fresh state starts only after an explicit retry',
+        );
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
 
-    testWidgets('load failure offers retry, then restores the session',
-        (tester) async {
+    testWidgets('load failure offers retry, then restores the session', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore();
-      final session =
-          LessonSectionSession(itemIds: discoveryItemIds, sessionId: 'seed');
+      final session = LessonSectionSession(
+        itemIds: discoveryItemIds,
+        sessionId: 'seed',
+      );
       session.submit(true);
       seedStoreSession(store, session);
       store.failLoad = true;
@@ -1162,9 +1297,10 @@ void main() {
     testWidgets('saved policy is authoritative on resume', (tester) async {
       final store = CourseLearningWidgetStore();
       final session = LessonSectionSession(
-          itemIds: discoveryItemIds,
-          sessionId: 'seed',
-          policy: LessonPolicy(completionThresholdPercent: 90));
+        itemIds: discoveryItemIds,
+        sessionId: 'seed',
+        policy: LessonPolicy(completionThresholdPercent: 90),
+      );
       for (var i = 0; i < 10; i++) {
         session.submit(i != 4);
         session.advance();
@@ -1174,20 +1310,29 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Passing needs 9 of 10 correct.'), findsOneWidget);
       expect(
-          tester
-              .widget<FilledButton>(
-                  find.widgetWithText(FilledButton, 'Finish section'))
-              .onPressed,
-          isNot(isNull),
-          reason: '9 of 10 meets the saved 90% threshold');
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Finish section'),
+            )
+            .onPressed,
+        isNot(isNull),
+        reason: '9 of 10 meets the saved 90% threshold',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('fresh sessions carry the configured policy when saved',
-        (tester) async {
+    testWidgets('fresh sessions carry the configured policy when saved', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore();
-      await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store,
-          policy: LessonPolicy(completionThresholdPercent: 70)));
+      await tester.pumpWidget(
+        pumpLesson(
+          tester,
+          FakeAudio(),
+          store,
+          policy: LessonPolicy(completionThresholdPercent: 70),
+        ),
+      );
       await tester.pumpAndSettle();
       for (var i = 0; i < 10; i++) {
         await tester.tap(find.text('Listen to the word'));
@@ -1197,13 +1342,13 @@ void main() {
         await advance(tester, last: i == 9);
       }
       expect(
-          (sessionJson(store)!['policy'] as Map)['completionThresholdPercent'],
-          70);
+        (sessionJson(store)!['policy'] as Map)['completionThresholdPercent'],
+        70,
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'resume during initial load must not leave a permanent '
+    testWidgets('resume during initial load must not leave a permanent '
         'spinner', (tester) async {
       final store = CourseLearningWidgetStore()..loadGate = Completer<void>();
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
@@ -1212,13 +1357,15 @@ void main() {
       store.loadGate!.complete();
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(find.text('Item 1 of 10'), findsOneWidget,
-          reason: 'resume must re-drive the interrupted initial load');
+      expect(
+        find.text('Item 1 of 10'),
+        findsOneWidget,
+        reason: 'resume must re-drive the interrupted initial load',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'an initial load that completes while suspended still '
+    testWidgets('an initial load that completes while suspended still '
         'recovers on resume', (tester) async {
       final store = CourseLearningWidgetStore()..loadGate = Completer<void>();
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
@@ -1229,17 +1376,22 @@ void main() {
       store.loadGate!.complete(); // the load completes while suspended
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(find.text('Item 1 of 10'), findsNothing,
-          reason: 'a suspended load must not publish to the UI');
+      expect(
+        find.text('Item 1 of 10'),
+        findsNothing,
+        reason: 'a suspended load must not publish to the UI',
+      );
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
-      expect(find.text('Item 1 of 10'), findsOneWidget,
-          reason: 'resume must re-drive the interrupted load');
+      expect(
+        find.text('Item 1 of 10'),
+        findsOneWidget,
+        reason: 'resume must re-drive the interrupted load',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'double retry loading must not allow a late load to '
+    testWidgets('double retry loading must not allow a late load to '
         'erase feedback', (tester) async {
       final first = Completer<CourseLearningState>();
       final second = Completer<CourseLearningState>();
@@ -1262,16 +1414,22 @@ void main() {
       expect(find.text('Correct'), findsOneWidget);
       second.complete(store.committedState);
       await tester.pumpAndSettle();
-      expect(find.text('Correct'), findsOneWidget,
-          reason: 'a late duplicate load result must not replace an '
-              'answered session');
-      expect(store.loadCalls, 2,
-          reason: 'initial failure plus one coalesced retry');
+      expect(
+        find.text('Correct'),
+        findsOneWidget,
+        reason:
+            'a late duplicate load result must not replace an '
+            'answered session',
+      );
+      expect(
+        store.loadCalls,
+        2,
+        reason: 'initial failure plus one coalesced retry',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'resumed recovery re-drives a hung load without waiting '
+    testWidgets('resumed recovery re-drives a hung load without waiting '
         'on it', (tester) async {
       final store = CourseLearningWidgetStore()..loadGate = Completer<void>();
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
@@ -1284,21 +1442,31 @@ void main() {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(find.text('Item 1 of 10'), findsNothing,
-          reason: 'the hung load has not settled yet in either generation');
+      expect(
+        find.text('Item 1 of 10'),
+        findsNothing,
+        reason: 'the hung load has not settled yet in either generation',
+      );
       store.loadGate!.complete();
       await tester.pumpAndSettle();
-      expect(find.text('Item 1 of 10'), findsOneWidget,
-          reason: 'the re-driven load must still settle the UI');
-      expect(store.loadCalls, 2,
-          reason: 'one initial plus one recovery load, no duplicates');
+      expect(
+        find.text('Item 1 of 10'),
+        findsOneWidget,
+        reason: 'the re-driven load must still settle the UI',
+      );
+      expect(
+        store.loadCalls,
+        2,
+        reason: 'one initial plus one recovery load, no duplicates',
+      );
       await tester.pumpWidget(const SizedBox());
     });
   });
 
   group('save failures and retries', () {
-    testWidgets('unavailable answer save requires retry loading',
-        (tester) async {
+    testWidgets('unavailable answer save requires retry loading', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore()
         ..actionFailures[ChooseSound] = const LearningUnavailableException();
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
@@ -1311,16 +1479,25 @@ void main() {
       expect(find.text('Retry saving'), findsNothing);
       expect(find.text('Retry loading'), findsOneWidget);
       expect(store.discoverySession!.attemptCount, 0);
+      expect(
+        find.text('0/10 completed · 10 remaining'),
+        findsOneWidget,
+        reason: 'unacknowledged answer is not persisted progress',
+      );
       await tester.tap(find.text('Retry loading'));
       await tester.pumpAndSettle();
       expect(store.retryLoadCalls, 1);
-      expect(store.discoverySession!.attemptCount, 0,
-          reason: 'an unavailable candidate must not receive answer credit');
+      expect(
+        store.discoverySession!.attemptCount,
+        0,
+        reason: 'an unavailable candidate must not receive answer credit',
+      );
       expect(find.text('Item 1 of 10'), findsOneWidget);
     });
 
-    testWidgets('invalid answer command requires reload, not save retry',
-        (tester) async {
+    testWidgets('invalid answer command requires reload, not save retry', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore()
         ..actionFailures[ChooseSound] = const LearningInvalidCommandException();
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
@@ -1339,8 +1516,9 @@ void main() {
       expect(store.discoverySession!.attemptCount, 0);
     });
 
-    testWidgets('answer save failure keeps the same attempt, retried once',
-        (tester) async {
+    testWidgets('answer save failure keeps the same attempt, retried once', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore();
       failAction(store, ChooseSound, true);
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
@@ -1349,35 +1527,46 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('/u/'));
       await tester.pumpAndSettle();
-      expect(find.text('Correct'), findsOneWidget,
-          reason: 'feedback is immediate while persistence is pending');
+      expect(
+        find.text('Correct'),
+        findsOneWidget,
+        reason: 'feedback is immediate while persistence is pending',
+      );
       expect(find.textContaining('could not be saved'), findsOneWidget);
       expect(
-          tester
-              .widget<FilledButton>(
-                  find.widgetWithText(FilledButton, 'Next word'))
-              .onPressed,
-          isNull,
-          reason: 'Next stays disabled until the save succeeds');
-      expect(parseStoreSession(store)!.attemptCount, 0,
-          reason: 'the failed answer must not update committed attempts');
+        find.widgetWithText(FilledButton, 'Next word'),
+        findsNothing,
+        reason: 'the fixed action area offers retry instead of Next',
+      );
+      expect(find.widgetWithText(FilledButton, 'Retry saving'), findsOneWidget);
+      expect(
+        parseStoreSession(store)!.attemptCount,
+        0,
+        reason: 'the failed answer must not update committed attempts',
+      );
       failAction(store, ChooseSound, false);
       await tester.tap(find.text('Retry saving'));
       await tester.pumpAndSettle();
       expect(sessionJson(store), isNotNull);
-      expect(parseStoreSession(store)!.attemptCount, 1,
-          reason: 'the failed answer is recorded exactly once');
       expect(
-          tester
-              .widget<FilledButton>(
-                  find.widgetWithText(FilledButton, 'Next word'))
-              .onPressed,
-          isNot(isNull));
+        parseStoreSession(store)!.attemptCount,
+        1,
+        reason: 'the failed answer is recorded exactly once',
+      );
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Next word'),
+            )
+            .onPressed,
+        isNot(isNull),
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('advance save failure keeps the saved item; retry advances',
-        (tester) async {
+    testWidgets('advance save failure keeps the saved item; retry advances', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore();
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
       await tester.pumpAndSettle();
@@ -1386,16 +1575,25 @@ void main() {
       await tester.tap(find.text('/u/'));
       await tester.pumpAndSettle();
       expect(parseStoreSession(store)!.position, 0);
-      expect(parseStoreSession(store)!.answered, isTrue,
-          reason: 'the answer itself saved before the advance attempt');
+      expect(
+        parseStoreSession(store)!.answered,
+        isTrue,
+        reason: 'the answer itself saved before the advance attempt',
+      );
       failAction(store, AdvanceLesson, true);
       await tester.tap(find.text('Next word'));
       await tester.pumpAndSettle();
       expect(find.textContaining('could not be saved'), findsOneWidget);
-      expect(find.text('Item 1 of 10'), findsOneWidget,
-          reason: 'the UI must not move past the saved item');
-      expect(parseStoreSession(store)!.position, 0,
-          reason: 'a failed advance must not fabricate the new item');
+      expect(
+        find.text('Item 1 of 10'),
+        findsOneWidget,
+        reason: 'the UI must not move past the saved item',
+      );
+      expect(
+        parseStoreSession(store)!.position,
+        0,
+        reason: 'a failed advance must not fabricate the new item',
+      );
       failAction(store, AdvanceLesson, false);
       await tester.tap(find.text('Retry saving'));
       await tester.pumpAndSettle();
@@ -1405,8 +1603,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'completion failure leaves no completion; retry completes '
+    testWidgets('completion failure leaves no completion; retry completes '
         'exactly once', (tester) async {
       final store = CourseLearningWidgetStore();
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
@@ -1421,30 +1618,41 @@ void main() {
       failAction(store, FinishLearningActivity, true);
       await tester.tap(find.text('Finish section'));
       await tester.pumpAndSettle();
-      expect(hasCompletion(store), isFalse,
-          reason: 'no completion before the save succeeds');
+      expect(
+        hasCompletion(store),
+        isFalse,
+        reason: 'no completion before the save succeeds',
+      );
       expect(find.textContaining('could not be saved'), findsOneWidget);
-      expect(find.text('Finish section'), findsOneWidget,
-          reason: 'the learner stays on the debrief');
+      expect(
+        find.text('Finish section'),
+        findsOneWidget,
+        reason: 'the learner stays on the debrief',
+      );
       failAction(store, FinishLearningActivity, false);
       await tester.tap(find.text('Retry saving'));
       await tester.pumpAndSettle();
       expect(hasCompletion(store), isTrue);
-      expect(actionCount(store, FinishLearningActivity), 2,
-          reason: 'the failed attempt and one successful retry');
+      expect(
+        actionCount(store, FinishLearningActivity),
+        2,
+        reason: 'the failed attempt and one successful retry',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('review start failure stays on the debrief; retry resumes',
-        (tester) async {
+    testWidgets('review start failure stays on the debrief; retry resumes', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore();
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
       await tester.pumpAndSettle();
       for (var i = 0; i < 10; i++) {
         await tester.tap(find.text('Listen to the word'));
         await tester.pumpAndSettle();
-        final String pick =
-            i < 8 ? expectedSounds[i] : (expectedSounds[i] == 'u' ? 'y' : 'u');
+        final String pick = i < 8
+            ? expectedSounds[i]
+            : (expectedSounds[i] == 'u' ? 'y' : 'u');
         await tester.tap(find.text('/$pick/'));
         await tester.pumpAndSettle();
         await advance(tester, last: i == 9);
@@ -1454,8 +1662,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('could not be saved'), findsOneWidget);
       expect(sessionJson(store), isNotNull);
-      expect(parseStoreSession(store)!.phase, LessonSectionPhase.debrief,
-          reason: 'the review round must not publish before its save');
+      expect(
+        parseStoreSession(store)!.phase,
+        LessonSectionPhase.debrief,
+        reason: 'the review round must not publish before its save',
+      );
       failAction(store, ReviewDiscoveryMistakes, false);
       await tester.tap(find.text('Retry saving'));
       await tester.pumpAndSettle();
@@ -1466,8 +1677,7 @@ void main() {
   });
 
   group('lifecycle and owners', () {
-    testWidgets(
-        'a save held at dispose commits exactly once and never '
+    testWidgets('a save held at dispose commits exactly once and never '
         'touches the disposed screen', (tester) async {
       final audio = GateAudio();
       final store = CourseLearningWidgetStore()
@@ -1487,17 +1697,25 @@ void main() {
           .complete(); // the save completes after disposal
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(tester.takeException(), isNull,
-          reason: 'a save completing after disposal must not throw or publish');
-      expect(actionCount(store, ChooseSound), 1,
-          reason: 'a disposed screen must not resend the save');
-      expect((parseStoreSession(store)?.attemptCount ?? 0), 1,
-          reason: 'the same-owner save lands exactly once in storage');
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: 'a save completing after disposal must not throw or publish',
+      );
+      expect(
+        actionCount(store, ChooseSound),
+        1,
+        reason: 'a disposed screen must not resend the save',
+      );
+      expect(
+        (parseStoreSession(store)?.attemptCount ?? 0),
+        1,
+        reason: 'the same-owner save lands exactly once in storage',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'a playback held at dispose cannot unlock or record '
+    testWidgets('a playback held at dispose cannot unlock or record '
         'anything afterwards', (tester) async {
       final audio = GateAudio();
       final store = CourseLearningWidgetStore();
@@ -1509,16 +1727,21 @@ void main() {
       audio.gate.complete(); // the real late completion
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(tester.takeException(), isNull,
-          reason: 'a playback completing after disposal must not throw');
-      expect(actionCount(store, ChooseSound), 0,
-          reason: 'a late playback must not record or enable answers');
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: 'a playback completing after disposal must not throw',
+      );
+      expect(
+        actionCount(store, ChooseSound),
+        0,
+        reason: 'a late playback must not record or enable answers',
+      );
       expect(audio.stops, greaterThanOrEqualTo(1));
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'in-flight playback cannot unlock choices across '
+    testWidgets('in-flight playback cannot unlock choices across '
         'background/resume', (tester) async {
       final audio = GateAudio();
       final store = CourseLearningWidgetStore();
@@ -1532,23 +1755,33 @@ void main() {
       audio.gate.complete(); // playback completes while suspended
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(choicesEnabled(tester), isFalse,
-          reason: 'a suspended playback completion must not unlock choices');
+      expect(
+        choicesEnabled(tester),
+        isFalse,
+        reason: 'a suspended playback completion must not unlock choices',
+      );
       expect(actionCount(store, ChooseSound), 0);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(choicesEnabled(tester), isFalse,
-          reason: 'a fresh completed playback is required after resume');
+      expect(
+        choicesEnabled(tester),
+        isFalse,
+        reason: 'a fresh completed playback is required after resume',
+      );
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
-      expect(choicesEnabled(tester), isTrue,
-          reason: 'a fresh completed playback re-enables the choices');
+      expect(
+        choicesEnabled(tester),
+        isTrue,
+        reason: 'a fresh completed playback re-enables the choices',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('backgrounding must not abandon a failed answer retry',
-        (tester) async {
+    testWidgets('backgrounding must not abandon a failed answer retry', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore()
         ..failingActions.add(ChooseSound);
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
@@ -1560,21 +1793,27 @@ void main() {
       expect(find.text('Retry saving'), findsOneWidget);
       await suspendResume(tester);
       failAction(store, ChooseSound, false);
-      final FilledButton next = tester
-          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Next word'));
-      expect(next.onPressed, isNull,
-          reason: 'uncommitted answer must not advance after resume');
-      expect(find.text('Retry saving'), findsOneWidget,
-          reason: 'the failed save intent survives suspension');
+      expect(
+        find.widgetWithText(FilledButton, 'Next word'),
+        findsNothing,
+        reason: 'uncommitted answer must not advance after resume',
+      );
+      expect(
+        find.text('Retry saving'),
+        findsOneWidget,
+        reason: 'the failed save intent survives suspension',
+      );
       await tester.tap(find.text('Retry saving'));
       await tester.pumpAndSettle();
-      expect((parseStoreSession(store)?.attemptCount ?? 0), 1,
-          reason: 'the retry records the held answer exactly once');
+      expect(
+        (parseStoreSession(store)?.attemptCount ?? 0),
+        1,
+        reason: 'the retry records the held answer exactly once',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'a save completing while suspended settles exactly once '
+    testWidgets('a save completing while suspended settles exactly once '
         'on resume', (tester) async {
       final store = CourseLearningWidgetStore()
         ..actionGates[ChooseSound] = Completer<void>();
@@ -1590,20 +1829,30 @@ void main() {
       store.actionGates[ChooseSound]!.complete(); // completes while suspended
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(find.text('Retry saving'), findsNothing,
-          reason: 'a suspended completion is neither success nor error UI');
+      expect(
+        find.text('Retry saving'),
+        findsNothing,
+        reason: 'a suspended completion is neither success nor error UI',
+      );
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
-      expect((parseStoreSession(store)?.attemptCount ?? 0), 1,
-          reason: 'resume must settle the save idempotently, exactly once');
+      expect(
+        (parseStoreSession(store)?.attemptCount ?? 0),
+        1,
+        reason: 'resume must settle the save idempotently, exactly once',
+      );
       expect(find.text('Correct'), findsOneWidget);
-      expect(find.text('Retry saving'), findsNothing,
-          reason: 'a settled save must not leave an error behind');
+      expect(
+        find.text('Retry saving'),
+        findsNothing,
+        reason: 'a settled save must not leave an error behind',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('a held answer must stay non-advanceable while suspended',
-        (tester) async {
+    testWidgets('a held answer must stay non-advanceable while suspended', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore()
         ..actionGates[ChooseSound] = Completer<void>();
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
@@ -1616,13 +1865,16 @@ void main() {
       tester.binding.scheduleForcedFrame();
       await tester.pump();
       expect(
-          tester
-              .widget<FilledButton>(
-                  find.widgetWithText(FilledButton, 'Next word'))
-              .onPressed,
-          isNull,
-          reason: 'pending persistence must not masquerade as committed '
-              'while suspended');
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Next word'),
+            )
+            .onPressed,
+        isNull,
+        reason:
+            'pending persistence must not masquerade as committed '
+            'while suspended',
+      );
       store.actionGates[ChooseSound]!.complete();
       await tester.pump();
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
@@ -1630,8 +1882,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'inactive focus changes must not duplicate an in-flight '
+    testWidgets('inactive focus changes must not duplicate an in-flight '
         'save', (tester) async {
       final store = CourseLearningWidgetStore()
         ..actionGates[ChooseSound] = Completer<void>();
@@ -1646,49 +1897,175 @@ void main() {
       await tester.pump();
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pump();
-      expect(actionCount(store, ChooseSound), 1,
-          reason: 'no suspension occurred; do not re-run pending action');
+      expect(
+        actionCount(store, ChooseSound),
+        1,
+        reason: 'no suspension occurred; do not re-run pending action',
+      );
       store.actionGates[ChooseSound]!.complete();
       await tester.pumpAndSettle();
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('replacing owner must stop old playback immediately',
-        (tester) async {
+    testWidgets('replacing owner must stop old playback immediately', (
+      tester,
+    ) async {
       final audio = GateAudio();
       final ownerA = CourseLearningWidgetStore();
       final ownerB = CourseLearningWidgetStore();
       Widget app(CourseLearningWidgetStore owner) => ProviderScope(
-              overrides: [
-                courseAudioProvider.overrideWithValue(audio),
-                courseLearningStoreProvider.overrideWithValue(owner),
-              ],
-              child: const MaterialApp(
-                  home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y')));
+        overrides: [
+          courseAudioProvider.overrideWithValue(audio),
+          courseLearningStoreProvider.overrideWithValue(owner),
+        ],
+        child: const MaterialApp(
+          home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
+        ),
+      );
       await tester.pumpWidget(app(ownerA));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Listen to the word'));
       await tester.pump(); // old-owner playback in flight
       await tester.pumpWidget(app(ownerB));
       await tester.pump();
-      expect(audio.stops, greaterThan(0),
-          reason: 'owner replacement must stop the old playback');
+      expect(
+        audio.stops,
+        greaterThan(0),
+        reason: 'owner replacement must stop the old playback',
+      );
       audio.gate.complete();
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(choicesEnabled(tester), isFalse,
-          reason: 'old playback must not enable choices');
-      expect(find.text('Item 1 of 10'), findsOneWidget,
-          reason: 'the replacement owner state must be loaded');
+      expect(
+        choicesEnabled(tester),
+        isFalse,
+        reason: 'old playback must not enable choices',
+      );
+      expect(
+        find.text('Item 1 of 10'),
+        findsOneWidget,
+        reason: 'the replacement owner state must be loaded',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
     testWidgets(
-        'account provider replacement loads the new owner state '
+      'discovery progress hides the retired owner count until current load ACK',
+      (tester) async {
+        final ownerA = CourseLearningWidgetStore();
+        final savedA = LessonSectionSession(
+          itemIds: discoveryItemIds,
+          sessionId: 'owner-a-progress',
+        );
+        savedA.submit(true);
+        savedA.advance();
+        savedA.submit(false);
+        savedA.advance();
+        savedA.submit(true);
+        savedA.advance();
+        seedStoreSession(ownerA, savedA);
+
+        final ownerB = CourseLearningWidgetStore()
+          ..loadGate = Completer<void>();
+        final savedB = LessonSectionSession(
+          itemIds: discoveryItemIds,
+          sessionId: 'owner-b-progress',
+        )..submit(false);
+        seedStoreSession(ownerB, savedB);
+        final audio = FakeAudio();
+        Widget app(CourseLearningWidgetStore owner) => ProviderScope(
+          overrides: [
+            courseAudioProvider.overrideWithValue(audio),
+            courseLearningStoreProvider.overrideWithValue(owner),
+          ],
+          child: const MaterialApp(
+            home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
+          ),
+        );
+
+        await tester.pumpWidget(app(ownerA));
+        await tester.pumpAndSettle();
+        expect(find.text('3/10 completed · 7 remaining'), findsOneWidget);
+
+        await tester.pumpWidget(app(ownerB));
+        await tester.pump();
+        expect(
+          find.text('3/10 completed · 7 remaining'),
+          findsNothing,
+          reason: 'a retired owner’s ACK must not be shown for the new owner',
+        );
+        expect(
+          find.textContaining('/10 completed'),
+          findsNothing,
+          reason: 'do not project progress before the new owner has loaded',
+        );
+
+        ownerB.loadGate!.complete();
+        await tester.pumpAndSettle();
+        expect(find.text('1/10 completed · 9 remaining'), findsOneWidget);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+
+    testWidgets(
+      'failed same-scope store replacements never show retired progress',
+      (tester) async {
+        final ownerA = CourseLearningWidgetStore();
+        final savedA = LessonSectionSession(
+          itemIds: discoveryItemIds,
+          sessionId: 'owner-a-failed-replacement',
+        );
+        savedA.submit(true);
+        savedA.advance();
+        savedA.submit(false);
+        savedA.advance();
+        savedA.submit(true);
+        savedA.advance();
+        seedStoreSession(ownerA, savedA);
+
+        final ownerB = CourseLearningWidgetStore()..failLoad = true;
+        expect(ownerA.scope, ownerB.scope);
+        Widget app(CourseLearningWidgetStore owner) => ProviderScope(
+          overrides: [courseLearningStoreProvider.overrideWithValue(owner)],
+          child: const MaterialApp(
+            home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
+          ),
+        );
+
+        await tester.pumpWidget(app(ownerA));
+        await tester.pumpAndSettle();
+        expect(find.text('3/10 completed · 7 remaining'), findsOneWidget);
+
+        await tester.pumpWidget(app(ownerB));
+        await tester.pumpAndSettle();
+        expect(find.text('Retry loading'), findsOneWidget);
+        expect(
+          find.text('3/10 completed · 7 remaining'),
+          findsNothing,
+          reason: 'same-scope replacement load failure has no current ACK',
+        );
+        expect(find.textContaining('/10 completed'), findsNothing);
+
+        ownerA.failLoad = true;
+        await tester.pumpWidget(app(ownerA));
+        await tester.pumpAndSettle();
+        expect(find.text('Retry loading'), findsOneWidget);
+        expect(
+          find.textContaining('/10 completed'),
+          findsNothing,
+          reason: 'A → B failure → A failure cannot resurrect old progress',
+        );
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+
+    testWidgets('account provider replacement loads the new owner state '
         'and old in-flight saves cannot touch it', (tester) async {
       final ownerA = CourseLearningWidgetStore();
-      final seedA =
-          LessonSectionSession(itemIds: discoveryItemIds, sessionId: 'owner-a');
+      final seedA = LessonSectionSession(
+        itemIds: discoveryItemIds,
+        sessionId: 'owner-a',
+      );
       seedA.submit(true);
       seedA.advance();
       seedA.submit(false);
@@ -1701,13 +2078,17 @@ void main() {
       final ownerB =
           CourseLearningWidgetStore(); // This owner has no saved state.
       final audio = FakeAudio();
-      await tester.pumpWidget(ProviderScope(
+      await tester.pumpWidget(
+        ProviderScope(
           overrides: [
             courseAudioProvider.overrideWithValue(audio),
             courseLearningStoreProvider.overrideWithValue(ownerA),
           ],
           child: const MaterialApp(
-              home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'))));
+            home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
+          ),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(find.text('Item 4 of 10'), findsOneWidget);
       // Start an answer against owner A but hold its save open.
@@ -1716,18 +2097,28 @@ void main() {
       await tester.tap(find.text('/${expectedSounds[3]}/'));
       await tester.pump();
       // The provider switches owners while the save is pending.
-      await tester.pumpWidget(ProviderScope(
+      await tester.pumpWidget(
+        ProviderScope(
           overrides: [
             courseAudioProvider.overrideWithValue(audio),
             courseLearningStoreProvider.overrideWithValue(ownerB),
           ],
           child: const MaterialApp(
-              home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'))));
+            home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
+          ),
+        ),
+      );
       await tester.pumpAndSettle();
-      expect(find.text('Item 1 of 10'), findsOneWidget,
-          reason: 'the new owner state must be loaded');
-      expect(parseStoreSession(ownerB)!.attemptCount, 0,
-          reason: 'the replacement owner receives no old-owner answers');
+      expect(
+        find.text('Item 1 of 10'),
+        findsOneWidget,
+        reason: 'the new owner state must be loaded',
+      );
+      expect(
+        parseStoreSession(ownerB)!.attemptCount,
+        0,
+        reason: 'the replacement owner receives no old-owner answers',
+      );
       // The old owner's pending save may land on its own data, but the UI
       // must keep showing the new owner state.
       ownerA.actionGates[ChooseSound]!.complete();
@@ -1735,63 +2126,93 @@ void main() {
       final LessonSectionSession aSession = parseStoreSession(ownerA)!;
       expect(aSession.sessionId, 'owner-a');
       expect(aSession.answeredItemCount, 4);
-      expect(parseStoreSession(ownerB)!.attemptCount, 0,
-          reason: 'the stale save must not transfer a checkpoint');
-      expect(find.text('Item 1 of 10'), findsOneWidget,
-          reason: 'stale callbacks must not mutate the UI');
-      expect(choicesEnabled(tester), isFalse,
-          reason: 'stale callbacks must not enable unanswered audio');
+      expect(
+        parseStoreSession(ownerB)!.attemptCount,
+        0,
+        reason: 'the stale save must not transfer a checkpoint',
+      );
+      expect(
+        find.text('Item 1 of 10'),
+        findsOneWidget,
+        reason: 'stale callbacks must not mutate the UI',
+      );
+      expect(
+        choicesEnabled(tester),
+        isFalse,
+        reason: 'stale callbacks must not enable unanswered audio',
+      );
       // New-owner answers land on the new owner only.
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('/u/'));
       await tester.pumpAndSettle();
-      expect(parseStoreSession(ownerB)!.sessionId, isNot('owner-a'),
-          reason: 'the new owner must carry its own session identity');
+      expect(
+        parseStoreSession(ownerB)!.sessionId,
+        isNot('owner-a'),
+        reason: 'the new owner must carry its own session identity',
+      );
       expect(parseStoreSession(ownerA)!.sessionId, 'owner-a');
-      expect(parseStoreSession(ownerA)!.attemptCount, 4,
-          reason: 'stale UI writes must not extend the old owner session');
+      expect(
+        parseStoreSession(ownerA)!.attemptCount,
+        4,
+        reason: 'stale UI writes must not extend the old owner session',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'owner replacement discards the old owner late load '
+    testWidgets('owner replacement discards the old owner late load '
         'result', (tester) async {
       final ownerA = CourseLearningWidgetStore()..loadGate = Completer<void>();
       final ownerB = CourseLearningWidgetStore();
-      final seedB =
-          LessonSectionSession(itemIds: discoveryItemIds, sessionId: 'owner-b');
+      final seedB = LessonSectionSession(
+        itemIds: discoveryItemIds,
+        sessionId: 'owner-b',
+      );
       seedB.submit(true);
       seedStoreSession(ownerB, seedB);
       final audio = FakeAudio();
       Widget app(CourseLearningWidgetStore owner) => ProviderScope(
-              overrides: [
-                courseAudioProvider.overrideWithValue(audio),
-                courseLearningStoreProvider.overrideWithValue(owner),
-              ],
-              child: const MaterialApp(
-                  home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y')));
+        overrides: [
+          courseAudioProvider.overrideWithValue(audio),
+          courseLearningStoreProvider.overrideWithValue(owner),
+        ],
+        child: const MaterialApp(
+          home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
+        ),
+      );
       await tester.pumpWidget(app(ownerA));
       await tester.pump(); // owner A's load is in flight, held
       await tester.pumpWidget(app(ownerB));
       await tester.pumpAndSettle();
-      expect(find.text('Item 1 of 10'), findsOneWidget,
-          reason: 'the replacement owner state must be loaded');
-      expect(find.text('Correct'), findsOneWidget,
-          reason: 'the replacement owner saved state must be restored');
+      expect(
+        find.text('Item 1 of 10'),
+        findsOneWidget,
+        reason: 'the replacement owner state must be loaded',
+      );
+      expect(
+        find.text('Correct'),
+        findsOneWidget,
+        reason: 'the replacement owner saved state must be restored',
+      );
       ownerA.loadGate!.complete(); // the old owner load lands late
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(find.text('Correct'), findsOneWidget,
-          reason: 'the old owner late load result must not replace the '
-              'new owner session');
-      expect(sessionJson(ownerB), isNotNull,
-          reason: 'the new owner state must remain intact');
+      expect(
+        find.text('Correct'),
+        findsOneWidget,
+        reason:
+            'the old owner late load result must not replace the '
+            'new owner session',
+      );
+      expect(
+        sessionJson(ownerB),
+        isNotNull,
+        reason: 'the new owner state must remain intact',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'audio failure creates no answer and keeps listening '
+    testWidgets('audio failure creates no answer and keeps listening '
         'retryable', (tester) async {
       final audio = FakeAudio(fail: true);
       final store = CourseLearningWidgetStore();
@@ -1800,8 +2221,11 @@ void main() {
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
       expect(find.textContaining('could not be played'), findsOneWidget);
-      expect(choicesEnabled(tester), isFalse,
-          reason: 'a failed playback must not unlock the choices');
+      expect(
+        choicesEnabled(tester),
+        isFalse,
+        reason: 'a failed playback must not unlock the choices',
+      );
       expect(actionCount(store, ChooseSound), 0);
       expect(parseStoreSession(store)!.attemptCount, 0);
       expect(find.text('Listen to the word'), findsWidgets);
@@ -1812,20 +2236,30 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('cancelled playback is silent and keeps listening retryable',
-        (tester) async {
+    testWidgets('cancelled playback is silent and keeps listening retryable', (
+      tester,
+    ) async {
       final audio = FakeAudio(cancel: true);
       final store = CourseLearningWidgetStore();
       await tester.pumpWidget(pumpLesson(tester, audio, store));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('could not be played'), findsNothing,
-          reason: 'a cancelled request is not an audio failure');
-      expect(choicesEnabled(tester), isFalse,
-          reason: 'a cancelled playback must never unlock the choices');
-      expect(actionCount(store, ChooseSound), 0,
-          reason: 'a cancelled playback records no answer');
+      expect(
+        find.textContaining('could not be played'),
+        findsNothing,
+        reason: 'a cancelled request is not an audio failure',
+      );
+      expect(
+        choicesEnabled(tester),
+        isFalse,
+        reason: 'a cancelled playback must never unlock the choices',
+      );
+      expect(
+        actionCount(store, ChooseSound),
+        0,
+        reason: 'a cancelled playback records no answer',
+      );
       // Listening stays retryable after a cancellation.
       audio.cancel = false;
       await tester.tap(find.text('Listen to the word'));
@@ -1835,69 +2269,59 @@ void main() {
     });
 
     testWidgets(
-        'the audio failure guidance carries the exact alpha '
-        'disclosure', (tester) async {
-      final audio = FakeAudio(fail: true);
-      final store = CourseLearningWidgetStore();
-      await tester.pumpWidget(pumpLesson(tester, audio, store));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Listen to the word'));
-      await tester.pumpAndSettle();
-      expect(
-          find.text('Alpha audio: recordings are unverified; '
-              'device speech is practice-only.'),
+      'audio failure keeps actionable recovery without routine alpha copy',
+      (tester) async {
+        final audio = FakeAudio(fail: true);
+        final store = CourseLearningWidgetStore();
+        await tester.pumpWidget(pumpLesson(tester, audio, store));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Listen to the word'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Alpha audio:'), findsNothing);
+        expect(
+          find.textContaining('The French audio could not be played.'),
           findsOneWidget,
-          reason: 'practice surfaces must carry the exact alpha label');
-      await tester.pumpWidget(const SizedBox());
-    });
+        );
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
 
-    testWidgets(
-        'the exercise surface pins the exact disclosure persistently — '
-        'initial, pending and success — with no device-source claim',
-        (tester) async {
+    testWidgets('the exercise surface omits repeated qualification copy while '
+        'keeping audio and answer gates', (tester) async {
       final audio = GateAudio();
       final store = CourseLearningWidgetStore();
       await tester.pumpWidget(pumpLesson(tester, audio, store));
       await tester.pumpAndSettle();
+      expect(find.textContaining('Alpha audio:'), findsNothing);
       expect(
-          find.text('Alpha audio: recordings are unverified; '
-              'device speech is practice-only.'),
-          findsWidgets,
-          reason: 'the exact alpha disclosure must be present from the '
-              'initial state, before any playback at all (I1: previously only '
-              'failure wording carried it)');
-      expect(find.textContaining('Practice audio: spoken by this device.'),
-          findsNothing,
-          reason: 'covered words now select recorded (unverified) assets — '
-              'the unconditional device-source claim is false and must be '
-              'gone');
+        find.textContaining('Practice audio: spoken by this device.'),
+        findsNothing,
+        reason:
+            'covered words now select recorded (unverified) assets — '
+            'the unconditional device-source claim is false and must be '
+            'gone',
+      );
       // Pending (held) playback keeps the same disclosure.
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
-      expect(
-          find.text('Alpha audio: recordings are unverified; '
-              'device speech is practice-only.'),
-          findsWidgets);
+      expect(find.textContaining('Alpha audio:'), findsNothing);
       expect(choicesEnabled(tester), isFalse);
       // Success keeps the same disclosure: a successful listener must see
       // the alpha sentence, not a device-speech claim.
       audio.gate.complete();
       await tester.pumpAndSettle();
-      expect(
-          find.text('Alpha audio: recordings are unverified; '
-              'device speech is practice-only.'),
-          findsWidgets,
-          reason: 'the disclosure must persist on the success state');
+      expect(find.textContaining('Alpha audio:'), findsNothing);
       expect(choicesEnabled(tester), isTrue);
-      expect(find.textContaining('Practice audio: spoken by this device.'),
-          findsNothing);
+      expect(
+        find.textContaining('Practice audio: spoken by this device.'),
+        findsNothing,
+      );
       await tester.pumpWidget(const SizedBox());
     });
   });
 
   group('stale session conflicts (typed conflict recovery)', () {
-    testWidgets(
-        'a conflicting answer offers Reload saved progress and '
+    testWidgets('a conflicting answer offers Reload saved progress and '
         'the reload recovers the stored state', (tester) async {
       final audio = FakeAudio();
       final store = CourseLearningWidgetStore();
@@ -1906,90 +2330,127 @@ void main() {
       // A competing instance committed the same step first (different
       // session identity), as in the stacked real-store regression.
       final foreign = LessonSectionSession(
-          itemIds: discoveryItemIds, sessionId: 'other-screen-session')
-        ..submit(true);
+        itemIds: discoveryItemIds,
+        sessionId: 'other-screen-session',
+      )..submit(true);
       seedStoreSession(store, foreign);
 
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('/u/'));
       await tester.pumpAndSettle();
-      expect(find.text('Correct'), findsOneWidget,
-          reason: 'the local feedback stays while the state is stale');
-      expect(find.textContaining('matches the saved progress'), findsOneWidget,
-          reason: 'the typed conflict must be surfaced');
-      expect(find.text('Retry saving'), findsNothing,
-          reason: 'resending the same checkpoint can never succeed');
       expect(
-          tester
-              .widget<FilledButton>(
-                  find.widgetWithText(FilledButton, 'Next word'))
-              .onPressed,
-          isNull,
-          reason: 'stale state must not advance');
+        find.text('Correct'),
+        findsOneWidget,
+        reason: 'the local feedback stays while the state is stale',
+      );
+      expect(
+        find.textContaining('matches the saved progress'),
+        findsOneWidget,
+        reason: 'the typed conflict must be surfaced',
+      );
+      expect(
+        find.text('Retry saving'),
+        findsNothing,
+        reason: 'resending the same checkpoint can never succeed',
+      );
+      expect(
+        find.widgetWithText(FilledButton, 'Next word'),
+        findsNothing,
+        reason: 'stale state must not advance',
+      );
 
       await tester.tap(find.text('Reload saved progress'));
       await tester.pumpAndSettle();
       expect(find.text('Reload saved progress'), findsNothing);
       expect(find.textContaining('matches the saved progress'), findsNothing);
-      expect(parseStoreSession(store)!.sessionId, 'other-screen-session',
-          reason: 'the reload discarded the stale draft, not the store');
-      expect(actionCount(store, ChooseSound), 1,
-          reason: 'the stale answer was attempted once and rejected once');
+      expect(
+        parseStoreSession(store)!.sessionId,
+        'other-screen-session',
+        reason: 'the reload discarded the stale draft, not the store',
+      );
+      expect(
+        actionCount(store, ChooseSound),
+        1,
+        reason: 'the stale answer was attempted once and rejected once',
+      );
       // Reload cancels the stale hearing: a fresh completed playback is
       // required before the restored exercise can be answered again.
       expect(audio.stops, greaterThanOrEqualTo(1));
       await tester.tap(find.text('Next word'));
       await tester.pumpAndSettle();
-      expect(find.text('Item 2 of 10'), findsOneWidget,
-          reason: 'the recovered state must be usable');
+      expect(
+        find.text('Item 2 of 10'),
+        findsOneWidget,
+        reason: 'the recovered state must be usable',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'a stale same-session advance conflict recovers via the '
+    testWidgets('a stale same-session advance conflict recovers via the '
         'explicit reload', (tester) async {
       final store = CourseLearningWidgetStore();
-      final seed =
-          LessonSectionSession(itemIds: discoveryItemIds, sessionId: 'shared')
-            ..submit(true);
+      final seed = LessonSectionSession(
+        itemIds: discoveryItemIds,
+        sessionId: 'shared',
+      )..submit(true);
       seedStoreSession(store, seed);
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
       await tester.pumpAndSettle();
-      expect(find.text('Correct'), findsOneWidget,
-          reason: 'both instances load the same stored state');
+      expect(
+        find.text('Correct'),
+        findsOneWidget,
+        reason: 'both instances load the same stored state',
+      );
       // The competing instance advances and answers the next item.
-      final competitor = LessonSectionSession.fromJson(sessionJson(store)!,
-          itemIds: discoveryItemIds,
-          contentRevision: frenchUySection.contentRevision)
-        ..advance()
-        ..submit(true);
+      final competitor =
+          LessonSectionSession.fromJson(
+              sessionJson(store)!,
+              itemIds: discoveryItemIds,
+              contentRevision: frenchUySection.contentRevision,
+            )
+            ..advance()
+            ..submit(true);
       seedStoreSession(store, competitor);
 
       await tester.tap(find.text('Next word'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('matches the saved progress'), findsOneWidget,
-          reason: 'the behind stored count is a typed conflict');
-      expect(find.text('Item 1 of 10'), findsOneWidget,
-          reason: 'the stale advance must not publish');
+      expect(
+        find.textContaining('matches the saved progress'),
+        findsOneWidget,
+        reason: 'the behind stored count is a typed conflict',
+      );
+      expect(
+        find.text('Item 1 of 10'),
+        findsOneWidget,
+        reason: 'the stale advance must not publish',
+      );
       await tester.tap(find.text('Reload saved progress'));
       await tester.pumpAndSettle();
-      expect(parseStoreSession(store)!.attemptCount, 2,
-          reason: 'the store rejection is untouched by the reload');
+      expect(
+        parseStoreSession(store)!.attemptCount,
+        2,
+        reason: 'the store rejection is untouched by the reload',
+      );
       expect(find.text('Correct'), findsOneWidget);
-      expect(find.text('Item 2 of 10'), findsOneWidget,
-          reason: 'the recovered state must be usable');
+      expect(
+        find.text('Item 2 of 10'),
+        findsOneWidget,
+        reason: 'the recovered state must be usable',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('a failing reload keeps Retry loading and recovers after',
-        (tester) async {
+    testWidgets('a failing reload keeps Retry loading and recovers after', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore();
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
       await tester.pumpAndSettle();
       final foreign = LessonSectionSession(
-          itemIds: discoveryItemIds, sessionId: 'other-screen-session')
-        ..submit(true);
+        itemIds: discoveryItemIds,
+        sessionId: 'other-screen-session',
+      )..submit(true);
       seedStoreSession(store, foreign);
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
@@ -2006,20 +2467,23 @@ void main() {
       await tester.tap(find.text('Retry loading'));
       await tester.pumpAndSettle();
       expect(parseStoreSession(store)!.sessionId, 'other-screen-session');
-      expect(find.text('Correct'), findsOneWidget,
-          reason: 'the retry load restored the stored committed state');
+      expect(
+        find.text('Correct'),
+        findsOneWidget,
+        reason: 'the retry load restored the stored committed state',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'a second Reload tap before redraw cannot start a '
+    testWidgets('a second Reload tap before redraw cannot start a '
         'competing load', (tester) async {
       final store = CourseLearningWidgetStore();
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
       await tester.pumpAndSettle();
       final foreign = LessonSectionSession(
-          itemIds: discoveryItemIds, sessionId: 'other-screen-session')
-        ..submit(true);
+        itemIds: discoveryItemIds,
+        sessionId: 'other-screen-session',
+      )..submit(true);
       seedStoreSession(store, foreign);
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
@@ -2032,31 +2496,36 @@ void main() {
       await tester.pump();
       store.loadGate!.complete();
       await tester.pumpAndSettle();
-      expect(store.loadCalls, 2,
-          reason: 'initial load plus one coalesced reload');
+      expect(
+        store.loadCalls,
+        2,
+        reason: 'initial load plus one coalesced reload',
+      );
       expect(find.text('Correct'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'owner replacement discards a held stale conflict save '
+    testWidgets('owner replacement discards a held stale conflict save '
         'and the new owner stays untouched', (tester) async {
       final storeA = CourseLearningWidgetStore()
         ..actionGates[ChooseSound] = Completer<void>()
         ..actionFailures[ChooseSound] = const LearningConflictException();
       final storeB = CourseLearningWidgetStore();
-      final seedB =
-          LessonSectionSession(itemIds: discoveryItemIds, sessionId: 'owner-b')
-            ..submit(true);
+      final seedB = LessonSectionSession(
+        itemIds: discoveryItemIds,
+        sessionId: 'owner-b',
+      )..submit(true);
       seedStoreSession(storeB, seedB);
       final audio = FakeAudio();
       Widget app(CourseLearningWidgetStore owner) => ProviderScope(
-              overrides: [
-                courseAudioProvider.overrideWithValue(audio),
-                courseLearningStoreProvider.overrideWithValue(owner),
-              ],
-              child: const MaterialApp(
-                  home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y')));
+        overrides: [
+          courseAudioProvider.overrideWithValue(audio),
+          courseLearningStoreProvider.overrideWithValue(owner),
+        ],
+        child: const MaterialApp(
+          home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
+        ),
+      );
       await tester.pumpWidget(app(storeA));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Listen to the word'));
@@ -2068,24 +2537,35 @@ void main() {
       // owner's state loads and the stale intent is dropped.
       await tester.pumpWidget(app(storeB));
       await tester.pumpAndSettle();
-      expect(find.text('Correct'), findsOneWidget,
-          reason: 'the replacement owner state must be loaded');
+      expect(
+        find.text('Correct'),
+        findsOneWidget,
+        reason: 'the replacement owner state must be loaded',
+      );
       expect(storeA.actionGates[ChooseSound]!.isCompleted, isFalse);
       storeA.actionGates[ChooseSound]!.complete(); // conflict lands late
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(parseStoreSession(storeB)!.sessionId, 'owner-b',
-          reason: 'the stale save must not transfer a checkpoint');
+      expect(
+        parseStoreSession(storeB)!.sessionId,
+        'owner-b',
+        reason: 'the stale save must not transfer a checkpoint',
+      );
       expect(parseStoreSession(storeB)!.attemptCount, 1);
-      expect(find.textContaining('matches the saved progress'), findsNothing,
-          reason: 'a conflict that lands after the owner switch '
-              'must not publish into the new owner UI');
+      expect(
+        find.textContaining('matches the saved progress'),
+        findsNothing,
+        reason:
+            'a conflict that lands after the owner switch '
+            'must not publish into the new owner UI',
+      );
       expect(find.text('Reload saved progress'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('a conflict completing while suspended settles on resume',
-        (tester) async {
+    testWidgets('a conflict completing while suspended settles on resume', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore()
         ..actionGates[ChooseSound] = Completer<void>()
         ..actionFailures[ChooseSound] = const LearningConflictException();
@@ -2101,12 +2581,18 @@ void main() {
       store.actionGates[ChooseSound]!.complete(); // conflict settles suspended
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(find.textContaining('matches the saved progress'), findsNothing,
-          reason: 'a suspended completion must not publish');
+      expect(
+        find.textContaining('matches the saved progress'),
+        findsNothing,
+        reason: 'a suspended completion must not publish',
+      );
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
-      expect(find.textContaining('matches the saved progress'), findsOneWidget,
-          reason: 'resume must settle the stale conflict');
+      expect(
+        find.textContaining('matches the saved progress'),
+        findsOneWidget,
+        reason: 'resume must settle the stale conflict',
+      );
       expect(find.text('Retry saving'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
@@ -2114,8 +2600,10 @@ void main() {
 
   group('repeat practice', () {
     LessonSectionSession perfectSeed(String sessionId) {
-      final seed =
-          LessonSectionSession(itemIds: discoveryItemIds, sessionId: sessionId);
+      final seed = LessonSectionSession(
+        itemIds: discoveryItemIds,
+        sessionId: sessionId,
+      );
       for (var i = 0; i < 10; i++) {
         seed.submit(true);
         seed.advance();
@@ -2123,55 +2611,86 @@ void main() {
       return seed;
     }
 
-    testWidgets(
-        'a completed review route offers Practise again, persists '
-        'the fresh zero-attempt identity first, then exposes the exercise',
-        (tester) async {
+    testWidgets('a completed review route offers Practise again, persists '
+        'the fresh zero-attempt identity first, then exposes the exercise', (
+      tester,
+    ) async {
       final audio = FakeAudio();
       final store = CourseLearningWidgetStore()
         ..seedSession(perfectSeed('perfect'));
       await tester.pumpWidget(pumpLesson(tester, audio, store, review: true));
       await tester.pumpAndSettle();
-      expect(find.text('Section debrief'), findsOneWidget,
-          reason: 'the historical debrief is restored');
-      expect(find.text('Practise again'), findsOneWidget,
-          reason: 'a mastered review entry must be practisable');
-      expect(find.text('Listen to the word'), findsNothing,
-          reason: 'until the explicit restart, no exercise is exposed');
+      expect(
+        find.text('Section debrief'),
+        findsOneWidget,
+        reason: 'the historical debrief is restored',
+      );
+      expect(
+        find.text('Practise again'),
+        findsOneWidget,
+        reason: 'a mastered review entry must be practisable',
+      );
+      expect(
+        find.text('Listen to the word'),
+        findsNothing,
+        reason: 'until the explicit restart, no exercise is exposed',
+      );
 
       await tester.tap(find.text('Practise again'));
       await tester.pumpAndSettle();
       final restarted = parseStoreSession(store)!;
-      expect(restarted.attemptCount, 0,
-          reason: 'the fresh zero-attempt identity was persisted first');
-      expect(restarted.sessionId, isNot('perfect'),
-          reason: 'a new session identity starts the repeat');
-      expect(find.text('Item 1 of 10'), findsOneWidget,
-          reason: 'only after the save settles is the exercise exposed');
-      expect(actionCount(store, ChooseSound), 0,
-          reason: 'no answer may land before the restart save');
-      expect(hasCompletion(store), isFalse,
-          reason: 'restarting does not itself complete the section');
+      expect(
+        restarted.attemptCount,
+        0,
+        reason: 'the fresh zero-attempt identity was persisted first',
+      );
+      expect(
+        restarted.sessionId,
+        isNot('perfect'),
+        reason: 'a new session identity starts the repeat',
+      );
+      expect(
+        find.text('Item 1 of 10'),
+        findsOneWidget,
+        reason: 'only after the save settles is the exercise exposed',
+      );
+      expect(
+        actionCount(store, ChooseSound),
+        0,
+        reason: 'no answer may land before the restart save',
+      );
+      expect(
+        hasCompletion(store),
+        isFalse,
+        reason: 'restarting does not itself complete the section',
+      );
 
       // The recovered exercise is usable and records the new history.
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
-      expect(audio.spoken.last, 'tout',
-          reason: 'a fresh hearing for the first item');
+      expect(
+        audio.spoken.last,
+        'tout',
+        reason: 'a fresh hearing for the first item',
+      );
       await tester.tap(find.text('/u/'));
       await tester.pumpAndSettle();
       expect(find.text('Correct'), findsOneWidget);
-      expect(parseStoreSession(store)!.attemptCount, 1,
-          reason: 'the repeated practice records its own history');
+      expect(
+        parseStoreSession(store)!.attemptCount,
+        1,
+        reason: 'the repeated practice records its own history',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'a normal-route debrief with unresolved words offers '
+    testWidgets('a normal-route debrief with unresolved words offers '
         'Practise again alongside review', (tester) async {
       final store = CourseLearningWidgetStore();
-      final seed =
-          LessonSectionSession(itemIds: discoveryItemIds, sessionId: 'seed');
+      final seed = LessonSectionSession(
+        itemIds: discoveryItemIds,
+        sessionId: 'seed',
+      );
       for (var i = 0; i < 10; i++) {
         seed.submit(i < 8);
         seed.advance();
@@ -2182,8 +2701,11 @@ void main() {
       expect(find.text('Section debrief'), findsOneWidget);
       expect(find.text('Review mistakes'), findsOneWidget);
       expect(find.text('Finish section'), findsOneWidget);
-      expect(find.text('Practise again'), findsOneWidget,
-          reason: 'the restart is offered with unresolved words present');
+      expect(
+        find.text('Practise again'),
+        findsOneWidget,
+        reason: 'the restart is offered with unresolved words present',
+      );
       // The unresolved-words debrief is the tallest variant: on the default
       // 800x600 test surface the restart control sits below the fold, so
       // scroll it into the scroller (as the accessibility regressions do)
@@ -2191,18 +2713,24 @@ void main() {
       await tester.scrollUntilVisible(find.text('Practise again'), 100);
       await tester.tap(find.text('Practise again'));
       await tester.pumpAndSettle();
-      expect(parseStoreSession(store)!.attemptCount, 0,
-          reason: 'the restart persists before the exercise is exposed');
+      expect(
+        parseStoreSession(store)!.attemptCount,
+        0,
+        reason: 'the restart persists before the exercise is exposed',
+      );
       expect(find.text('Item 1 of 10'), findsOneWidget);
-      expect(find.text('Review mistakes'), findsNothing,
-          reason: 'the fresh first pass replaces the debrief');
+      expect(
+        find.text('Review mistakes'),
+        findsNothing,
+        reason: 'the fresh first pass replaces the debrief',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'a failed restart save keeps the debrief, retries the same '
-        'identity, and never exposes or records the exercise early',
-        (tester) async {
+    testWidgets('a failed restart save keeps the debrief, retries the same '
+        'identity, and never exposes or records the exercise early', (
+      tester,
+    ) async {
       final seedJson = perfectSeed('perfect').toJson();
       final store = CourseLearningWidgetStore()
         ..seedSession(perfectSeed('perfect'))
@@ -2212,29 +2740,45 @@ void main() {
       await tester.tap(find.text('Practise again'));
       await tester.pumpAndSettle();
       expect(find.textContaining('could not be saved'), findsOneWidget);
-      expect(sessionJson(store), seedJson,
-          reason: 'a failed restart must not touch the saved state');
-      expect(find.text('Item 1 of 10'), findsNothing,
-          reason: 'the new exercise must not leak before its save lands');
-      expect(find.text('Practise again'), findsWidgets,
-          reason: 'the historical debrief stays');
+      expect(
+        sessionJson(store),
+        seedJson,
+        reason: 'a failed restart must not touch the saved state',
+      );
+      expect(
+        find.text('Item 1 of 10'),
+        findsNothing,
+        reason: 'the new exercise must not leak before its save lands',
+      );
+      expect(
+        find.text('Practise again'),
+        findsWidgets,
+        reason: 'the historical debrief stays',
+      );
 
       failAction(store, StartLearningRun, false);
       await tester.tap(find.text('Retry saving'));
       await tester.tap(find.text('Retry saving')); // before redraw
       await tester.pump();
       await tester.pumpAndSettle();
-      expect(actionCount(store, StartLearningRun), 2,
-          reason: 'a double retry before redraw must be single-shot');
+      expect(
+        actionCount(store, StartLearningRun),
+        2,
+        reason: 'a double retry before redraw must be single-shot',
+      );
       final restarted = parseStoreSession(store)!;
       expect(restarted.attemptCount, 0);
-      expect(find.text('Item 1 of 10'), findsOneWidget,
-          reason: 'the settled restart exposes the exercise');
+      expect(
+        find.text('Item 1 of 10'),
+        findsOneWidget,
+        reason: 'the settled restart exposes the exercise',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('a double Practise again before redraw starts one save',
-        (tester) async {
+    testWidgets('a double Practise again before redraw starts one save', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore()
         ..seedSession(perfectSeed('perfect'))
         ..actionGates[StartLearningRun] = Completer<void>();
@@ -2244,8 +2788,11 @@ void main() {
       await tester.tap(find.text('Practise again')); // before redraw
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 20));
-      expect(actionCount(store, StartLearningRun), 1,
-          reason: 'a double tap must not start a second restart save');
+      expect(
+        actionCount(store, StartLearningRun),
+        1,
+        reason: 'a double tap must not start a second restart save',
+      );
       store.actionGates[StartLearningRun]!.complete();
       await tester.pumpAndSettle();
       expect(parseStoreSession(store)!.attemptCount, 0);
@@ -2253,8 +2800,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'a restart save completing while suspended settles '
+    testWidgets('a restart save completing while suspended settles '
         'idempotently on resume', (tester) async {
       final store = CourseLearningWidgetStore()
         ..seedSession(perfectSeed('perfect'))
@@ -2271,19 +2817,27 @@ void main() {
           .complete(); // settles while suspended
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(find.text('Item 1 of 10'), findsNothing,
-          reason: 'a suspended settlement must not publish the exercise');
+      expect(
+        find.text('Item 1 of 10'),
+        findsNothing,
+        reason: 'a suspended settlement must not publish the exercise',
+      );
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
-      expect(parseStoreSession(store)!.attemptCount, 0,
-          reason: 'the restart save landed exactly once in storage');
-      expect(find.text('Item 1 of 10'), findsOneWidget,
-          reason: 'resume settles the pending restart exercise');
+      expect(
+        parseStoreSession(store)!.attemptCount,
+        0,
+        reason: 'the restart save landed exactly once in storage',
+      );
+      expect(
+        find.text('Item 1 of 10'),
+        findsOneWidget,
+        reason: 'resume settles the pending restart exercise',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'a failed restart keeps its retry intent across '
+    testWidgets('a failed restart keeps its retry intent across '
         'suspension', (tester) async {
       final seedJson = perfectSeed('perfect').toJson();
       final store = CourseLearningWidgetStore()
@@ -2295,21 +2849,29 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('could not be saved'), findsOneWidget);
       await suspendResume(tester);
-      expect(sessionJson(store), seedJson,
-          reason: 'suspension must not settle the failed restart');
-      expect(find.textContaining('could not be saved'), findsOneWidget,
-          reason: 'the failed save intent survives suspension');
+      expect(
+        sessionJson(store),
+        seedJson,
+        reason: 'suspension must not settle the failed restart',
+      );
+      expect(
+        find.textContaining('could not be saved'),
+        findsOneWidget,
+        reason: 'the failed save intent survives suspension',
+      );
       failAction(store, StartLearningRun, false);
       await tester.tap(find.text('Retry saving'));
       await tester.pumpAndSettle();
       expect(parseStoreSession(store)!.attemptCount, 0);
-      expect(find.text('Item 1 of 10'), findsOneWidget,
-          reason: 'the retry settles the restart exercise');
+      expect(
+        find.text('Item 1 of 10'),
+        findsOneWidget,
+        reason: 'the retry settles the restart exercise',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'owner replacement discards a held pending restart and '
+    testWidgets('owner replacement discards a held pending restart and '
         'the new owner stays untouched', (tester) async {
       final ownerA = CourseLearningWidgetStore()
         ..seedSession(perfectSeed('perfect'))
@@ -2317,38 +2879,57 @@ void main() {
       final ownerB = CourseLearningWidgetStore();
       final audio = FakeAudio();
       Widget app(CourseLearningWidgetStore owner) => ProviderScope(
-              overrides: [
-                courseAudioProvider.overrideWithValue(audio),
-                courseLearningStoreProvider.overrideWithValue(owner),
-              ],
-              child: const MaterialApp(
-                  home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y')));
+        overrides: [
+          courseAudioProvider.overrideWithValue(audio),
+          courseLearningStoreProvider.overrideWithValue(owner),
+        ],
+        child: const MaterialApp(
+          home: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
+        ),
+      );
       await tester.pumpWidget(app(ownerA));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Practise again'));
       await tester.pump(); // restart save in flight, held
-      expect(sessionJson(ownerA), perfectSeed('perfect').toJson(),
-          reason: 'nothing is written before the save settles');
+      expect(
+        sessionJson(ownerA),
+        perfectSeed('perfect').toJson(),
+        reason: 'nothing is written before the save settles',
+      );
       await tester.pumpWidget(app(ownerB));
       await tester.pumpAndSettle();
-      expect(parseStoreSession(ownerB)!.attemptCount, 0,
-          reason: 'the replacement owner must stay untouched');
+      expect(
+        parseStoreSession(ownerB)!.attemptCount,
+        0,
+        reason: 'the replacement owner must stay untouched',
+      );
       ownerA.actionGates[StartLearningRun]!
           .complete(); // the old save may land on its own data
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(parseStoreSession(ownerA)!.attemptCount, 0,
-          reason: 'the old owner keeps its reconciled restart');
-      expect(parseStoreSession(ownerB)!.attemptCount, 0,
-          reason: 'the stale restart save must not transfer a checkpoint');
-      expect(find.text('Item 1 of 10'), findsOneWidget,
-          reason: 'the screen shows the new owner state, not the pending '
-              'restart exercise');
+      expect(
+        parseStoreSession(ownerA)!.attemptCount,
+        0,
+        reason: 'the old owner keeps its reconciled restart',
+      );
+      expect(
+        parseStoreSession(ownerB)!.attemptCount,
+        0,
+        reason: 'the stale restart save must not transfer a checkpoint',
+      );
+      expect(
+        find.text('Item 1 of 10'),
+        findsOneWidget,
+        reason:
+            'the screen shows the new owner state, not the pending '
+            'restart exercise',
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('Practise again is disabled while a save is in flight',
-        (tester) async {
+    testWidgets('Practise again is disabled while a save is in flight', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore()
         ..seedSession(perfectSeed('perfect'))
         ..actionGates[StartLearningRun] = Completer<void>();
@@ -2357,9 +2938,13 @@ void main() {
       await tester.tap(find.text('Practise again'));
       await tester.pump(); // the busy state is now drawn
       final button = tester.widget<OutlinedButton>(
-          find.widgetWithText(OutlinedButton, 'Practise again'));
-      expect(button.onPressed, isNull,
-          reason: 'a pending restart must not be re-triggered');
+        find.widgetWithText(OutlinedButton, 'Practise again'),
+      );
+      expect(
+        button.onPressed,
+        isNull,
+        reason: 'a pending restart must not be re-triggered',
+      );
       store.actionGates[StartLearningRun]!.complete();
       await tester.pumpAndSettle();
       expect(find.text('Item 1 of 10'), findsOneWidget);
@@ -2368,22 +2953,32 @@ void main() {
   });
 
   group('routing', () {
-    testWidgets(
-        'pilot route opens the discovery screen, non-pilot and '
+    testWidgets('pilot route opens the discovery screen, non-pilot and '
         'unknown lessons keep the legacy screen', (tester) async {
       SharedPreferences.setMockInitialValues({});
       final audio = FakeAudio();
       final store = CourseLearningWidgetStore();
-      final container = ProviderContainer(overrides: [
-        courseAudioProvider.overrideWithValue(audio),
-        courseLearningStoreProvider.overrideWithValue(store),
-        comparisonLearningStateProvider.overrideWith((ref) async =>
-            ComparisonLearningState.empty(ComparisonProfileScope(
-                courseId: 'en-fr', owner: LearningOwner.guest()))),
-      ]);
+      final container = ProviderContainer(
+        overrides: [
+          courseAudioProvider.overrideWithValue(audio),
+          courseLearningStoreProvider.overrideWithValue(store),
+          comparisonLearningStateProvider.overrideWith(
+            (ref) async => ComparisonLearningState.empty(
+              ComparisonProfileScope(
+                courseId: 'en-fr',
+                owner: LearningOwner.guest(),
+              ),
+            ),
+          ),
+        ],
+      );
       addTearDown(container.dispose);
-      await tester.pumpWidget(UncontrolledProviderScope(
-          container: container, child: const LinguistApp()));
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const LinguistApp(),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(find.text('I speak English'), findsOneWidget);
       await tester.tap(find.text('Start English → French'));
@@ -2404,25 +2999,32 @@ void main() {
 
       router.go('/course-lesson/en-fr-u-y?review=true');
       await tester.pumpAndSettle();
-      final screen = tester
-          .widget<DiscoveryLessonScreen>(find.byType(DiscoveryLessonScreen));
+      final screen = tester.widget<DiscoveryLessonScreen>(
+        find.byType(DiscoveryLessonScreen),
+      );
       expect(screen.review, isTrue, reason: 'the review query is preserved');
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('a held Finish does not navigate while suspended',
-        (tester) async {
+    testWidgets('a held Finish does not navigate while suspended', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore()
         ..actionGates[FinishLearningActivity] = Completer<void>();
       final router = lessonRouter();
       addTearDown(router.dispose);
-      await tester.pumpWidget(ProviderScope(
+      await tester.pumpWidget(
+        ProviderScope(
           overrides: [
             courseAudioProvider.overrideWithValue(FakeAudio()),
             courseLearningStoreProvider.overrideWithValue(store),
           ],
           child: MaterialApp.router(
-              debugShowCheckedModeBanner: false, routerConfig: router)));
+            debugShowCheckedModeBanner: false,
+            routerConfig: router,
+          ),
+        ),
+      );
       await tester.pumpAndSettle();
       await playPerfectSection(tester);
       await tester.tap(find.text('Finish section'));
@@ -2434,31 +3036,43 @@ void main() {
           .complete(); // completes while suspended
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(router.routeInformationProvider.value.uri.path,
-          '/course-lesson/en-fr-u-y',
-          reason: 'a suspended completion must not navigate');
+      expect(
+        router.routeInformationProvider.value.uri.path,
+        '/course-lesson/en-fr-u-y',
+        reason: 'a suspended completion must not navigate',
+      );
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
-      expect(hasCompletion(store), isTrue,
-          reason: 'resume must settle the pending completion');
-      expect(router.routeInformationProvider.value.uri.path, '/home',
-          reason: 'a settled completion exits to home');
+      expect(
+        hasCompletion(store),
+        isTrue,
+        reason: 'resume must settle the pending completion',
+      );
+      expect(
+        router.routeInformationProvider.value.uri.path,
+        '/home',
+        reason: 'a settled completion exits to home',
+      );
     });
 
-    testWidgets(
-        'inactive after suspension must not navigate before '
+    testWidgets('inactive after suspension must not navigate before '
         'resumed', (tester) async {
       final store = CourseLearningWidgetStore()
         ..actionGates[FinishLearningActivity] = Completer<void>();
       final router = lessonRouter();
       addTearDown(router.dispose);
-      await tester.pumpWidget(ProviderScope(
+      await tester.pumpWidget(
+        ProviderScope(
           overrides: [
             courseAudioProvider.overrideWithValue(FakeAudio()),
             courseLearningStoreProvider.overrideWithValue(store),
           ],
           child: MaterialApp.router(
-              debugShowCheckedModeBanner: false, routerConfig: router)));
+            debugShowCheckedModeBanner: false,
+            routerConfig: router,
+          ),
+        ),
+      );
       await tester.pumpAndSettle();
       await playPerfectSection(tester);
       await tester.tap(find.text('Finish section'));
@@ -2473,46 +3087,63 @@ void main() {
       tester.binding.scheduleForcedFrame();
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(router.routeInformationProvider.value.uri.path,
-          '/course-lesson/en-fr-u-y',
-          reason: 'inactive is not recovery; navigation waits for resumed');
+      expect(
+        router.routeInformationProvider.value.uri.path,
+        '/course-lesson/en-fr-u-y',
+        reason: 'inactive is not recovery; navigation waits for resumed',
+      );
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
-      expect(router.routeInformationProvider.value.uri.path, '/home',
-          reason: 'resumed settles the completion exactly once');
+      expect(
+        router.routeInformationProvider.value.uri.path,
+        '/home',
+        reason: 'resumed settles the completion exactly once',
+      );
     });
 
-    testWidgets(
-        'a double Finish before redraw settles once and pops '
+    testWidgets('a double Finish before redraw settles once and pops '
         'exactly one route', (tester) async {
       final store = CourseLearningWidgetStore()
         ..actionGates[FinishLearningActivity] = Completer<void>();
-      final router = GoRouter(initialLocation: '/home', routes: [
-        GoRoute(
+      final router = GoRouter(
+        initialLocation: '/home',
+        routes: [
+          GoRoute(
             path: '/home',
-            pageBuilder: (_, __) => const NoTransitionPage(child: _HomeStub())),
-        GoRoute(
+            pageBuilder: (_, __) => const NoTransitionPage(child: _HomeStub()),
+          ),
+          GoRoute(
             path: '/course-list',
             pageBuilder: (_, __) => const NoTransitionPage(
-                child: Scaffold(body: Center(child: Text('course list'))))),
-        GoRoute(
+              child: Scaffold(body: Center(child: Text('course list'))),
+            ),
+          ),
+          GoRoute(
             path: '/course-lesson/:id',
             pageBuilder: (_, state) {
               final String id = state.pathParameters['id']!;
               return NoTransitionPage(
-                  child: sectionForLesson(id) != null
-                      ? DiscoveryLessonScreen(lessonId: id)
-                      : CourseLessonScreen(lessonId: id));
-            }),
-      ]);
+                child: sectionForLesson(id) != null
+                    ? DiscoveryLessonScreen(lessonId: id)
+                    : CourseLessonScreen(lessonId: id),
+              );
+            },
+          ),
+        ],
+      );
       addTearDown(router.dispose);
-      await tester.pumpWidget(ProviderScope(
+      await tester.pumpWidget(
+        ProviderScope(
           overrides: [
             courseAudioProvider.overrideWithValue(FakeAudio()),
             courseLearningStoreProvider.overrideWithValue(store),
           ],
           child: MaterialApp.router(
-              debugShowCheckedModeBanner: false, routerConfig: router)));
+            debugShowCheckedModeBanner: false,
+            routerConfig: router,
+          ),
+        ),
+      );
       await tester.pumpAndSettle();
       // Multi-entry stack: home -> course list -> lesson, so a double pop has
       // a different, observable landing screen than a single pop. `push`
@@ -2535,40 +3166,55 @@ void main() {
       await tester.pump(); // first save starts (held); the second is refused
       store.actionGates[FinishLearningActivity]!.complete();
       await tester.pumpAndSettle();
-      expect(actionCount(store, FinishLearningActivity), 1,
-          reason: 'a double tap must not start a second completion');
+      expect(
+        actionCount(store, FinishLearningActivity),
+        1,
+        reason: 'a double tap must not start a second completion',
+      );
       expect(hasCompletion(store), isTrue);
       // One settled Finish pops exactly one route, landing on the course
       // list; a double pop would drop the stack to home instead.
       expect(find.byType(DiscoveryLessonScreen), findsNothing);
-      expect(find.text('course list'), findsOneWidget,
-          reason: 'one settled Finish pops exactly one route (no double pop)');
+      expect(
+        find.text('course list'),
+        findsOneWidget,
+        reason: 'one settled Finish pops exactly one route (no double pop)',
+      );
       expect(find.byType(_HomeStub), findsNothing);
     });
 
-    testWidgets(
-        'only a successful Finish exits; without a previous route '
+    testWidgets('only a successful Finish exits; without a previous route '
         'it falls back to home', (tester) async {
       final store = CourseLearningWidgetStore();
       failAction(store, FinishLearningActivity, true);
       final router = lessonRouter();
       addTearDown(router.dispose);
-      await tester.pumpWidget(ProviderScope(
+      await tester.pumpWidget(
+        ProviderScope(
           overrides: [
             courseAudioProvider.overrideWithValue(FakeAudio()),
             courseLearningStoreProvider.overrideWithValue(store),
           ],
           child: MaterialApp.router(
-              debugShowCheckedModeBanner: false, routerConfig: router)));
+            debugShowCheckedModeBanner: false,
+            routerConfig: router,
+          ),
+        ),
+      );
       await tester.pumpAndSettle();
-      expect(router.routeInformationProvider.value.uri.path,
-          '/course-lesson/en-fr-u-y');
+      expect(
+        router.routeInformationProvider.value.uri.path,
+        '/course-lesson/en-fr-u-y',
+      );
       await playPerfectSection(tester);
       await tester.tap(find.text('Finish section'));
       await tester.pumpAndSettle();
       expect(hasCompletion(store), isFalse);
-      expect(find.byType(DiscoveryLessonScreen), findsOneWidget,
-          reason: 'a failed Finish must not navigate away');
+      expect(
+        find.byType(DiscoveryLessonScreen),
+        findsOneWidget,
+        reason: 'a failed Finish must not navigate away',
+      );
       failAction(store, FinishLearningActivity, false);
       await tester.tap(find.text('Retry saving'));
       await tester.pumpAndSettle();
@@ -2577,36 +3223,50 @@ void main() {
       expect(find.byType(DiscoveryLessonScreen), findsNothing);
     });
 
-    testWidgets('review=true Finish saves but never records completion',
-        (tester) async {
+    testWidgets('review=true Finish saves but never records completion', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore();
       final GoRouter router = GoRouter(
-          initialLocation: '/course-lesson/en-fr-u-y?review=true',
-          routes: [
-            GoRoute(
-              path: '/course-lesson/:id',
-              builder: (_, state) => DiscoveryLessonScreen(
-                  lessonId: state.pathParameters['id']!,
-                  review: state.uri.queryParameters['review'] == 'true'),
+        initialLocation: '/course-lesson/en-fr-u-y?review=true',
+        routes: [
+          GoRoute(
+            path: '/course-lesson/:id',
+            builder: (_, state) => DiscoveryLessonScreen(
+              lessonId: state.pathParameters['id']!,
+              review: state.uri.queryParameters['review'] == 'true',
             ),
-            GoRoute(path: '/home', builder: (_, __) => const _HomeStub()),
-          ]);
+          ),
+          GoRoute(path: '/home', builder: (_, __) => const _HomeStub()),
+        ],
+      );
       addTearDown(router.dispose);
-      await tester.pumpWidget(ProviderScope(
+      await tester.pumpWidget(
+        ProviderScope(
           overrides: [
             courseAudioProvider.overrideWithValue(FakeAudio()),
             courseLearningStoreProvider.overrideWithValue(store),
           ],
           child: MaterialApp.router(
-              debugShowCheckedModeBanner: false, routerConfig: router)));
+            debugShowCheckedModeBanner: false,
+            routerConfig: router,
+          ),
+        ),
+      );
       await tester.pumpAndSettle();
       await playPerfectSection(tester);
       await tester.tap(find.text('Finish section'));
       await tester.pumpAndSettle();
-      expect(hasCompletion(store), isFalse,
-          reason: 'review=true must not add a completion');
-      expect(sessionJson(store), isNotNull,
-          reason: 'review=true must still save the section state');
+      expect(
+        hasCompletion(store),
+        isFalse,
+        reason: 'review=true must not add a completion',
+      );
+      expect(
+        sessionJson(store),
+        isNotNull,
+        reason: 'review=true must still save the section state',
+      );
       expect(router.routeInformationProvider.value.uri.path, '/home');
     });
   });
@@ -2616,27 +3276,38 @@ void main() {
     final List<String> words = section.items.map((item) => item.word).toList();
 
     void expectNoHiddenContent(WidgetTester tester) {
-      expect(find.text('Listening practice'), findsWidgets,
-          reason: 'the neutral title must be active outside the debrief');
+      expect(
+        find.text('Listening practice'),
+        findsWidgets,
+        reason: 'the neutral title must be active outside the debrief',
+      );
       final List<String> texts = tester
           .widgetList<Text>(find.byType(Text))
           .map((Text widget) => widget.data ?? '')
           .toList();
       for (final String word in words) {
-        expect(texts, isNot(contains(word)),
-            reason: 'word "$word" must stay hidden outside the debrief');
+        expect(
+          texts,
+          isNot(contains(word)),
+          reason: 'word "$word" must stay hidden outside the debrief',
+        );
       }
-      expect(texts, isNot(contains(section.title)),
-          reason: 'the word-bearing authored title must stay hidden '
-              'outside the debrief');
+      expect(
+        texts,
+        isNot(contains(section.title)),
+        reason:
+            'the word-bearing authored title must stay hidden '
+            'outside the debrief',
+      );
     }
 
-    testWidgets(
-        'the active first item exposes no words before playback, '
-        'after playback, or after a wrong or correct submission',
-        (tester) async {
+    testWidgets('the active first item exposes no words before playback, '
+        'after playback, or after a wrong or correct submission', (
+      tester,
+    ) async {
       await tester.pumpWidget(
-          pumpLesson(tester, FakeAudio(), CourseLearningWidgetStore()));
+        pumpLesson(tester, FakeAudio(), CourseLearningWidgetStore()),
+      );
       await tester.pumpAndSettle();
       expectNoHiddenContent(tester);
       await tester.tap(find.text('Listen to the word'));
@@ -2659,12 +3330,13 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'a restored exercise keeps the words hidden until the '
+    testWidgets('a restored exercise keeps the words hidden until the '
         'debrief', (tester) async {
       final store = CourseLearningWidgetStore();
-      final seed =
-          LessonSectionSession(itemIds: discoveryItemIds, sessionId: 'seed');
+      final seed = LessonSectionSession(
+        itemIds: discoveryItemIds,
+        sessionId: 'seed',
+      );
       seed.submit(true);
       seed.advance();
       seed.submit(false);
@@ -2680,8 +3352,9 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('loading and load-error states keep the words hidden',
-        (tester) async {
+    testWidgets('loading and load-error states keep the words hidden', (
+      tester,
+    ) async {
       final holder = CourseLearningWidgetStore()..loadGate = Completer<void>();
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), holder));
       await tester.pump(); // the load is still in flight
@@ -2705,11 +3378,14 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('the debrief reveals the authored title and explanation',
-        (tester) async {
+    testWidgets('the debrief reveals the authored title and explanation', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore();
-      final seed =
-          LessonSectionSession(itemIds: discoveryItemIds, sessionId: 'seed');
+      final seed = LessonSectionSession(
+        itemIds: discoveryItemIds,
+        sessionId: 'seed',
+      );
       for (var i = 0; i < 10; i++) {
         seed.submit(true);
         seed.advance();
@@ -2719,13 +3395,18 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Section debrief'), findsOneWidget);
       expect(
-          find.descendant(
-              of: find.byType(DiscoverySectionView),
-              matching: find.text(section.title)),
-          findsOneWidget,
-          reason: 'the word-bearing title is revealed in the debrief body');
-      expect(find.text(section.title), findsWidgets,
-          reason: 'the debrief app bar may carry the authored title too');
+        find.descendant(
+          of: find.byType(DiscoverySectionView),
+          matching: find.text(section.title),
+        ),
+        findsOneWidget,
+        reason: 'the word-bearing title is revealed in the debrief body',
+      );
+      expect(
+        find.text(section.title),
+        findsWidgets,
+        reason: 'the debrief app bar may carry the authored title too',
+      );
       expect(find.text(section.explanation), findsOneWidget);
       expect(find.text('Listening practice'), findsNothing);
       await tester.pumpWidget(const SizedBox());
@@ -2733,8 +3414,9 @@ void main() {
   });
 
   group('real typed repository integration', () {
-    testWidgets('two stacked instances recover through explicit typed reload',
-        (tester) async {
+    testWidgets('two stacked instances recover through explicit typed reload', (
+      tester,
+    ) async {
       await tester.binding.setSurfaceSize(const Size(800, 1200));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       SharedPreferences.setMockInitialValues({});
@@ -2775,6 +3457,7 @@ void main() {
         );
         return row!.read<int>('row_count');
       }
+
       Future<void> tapAndWaitForLearningTransaction(Finder target) async {
         final completed = interceptor.waitForNextLearningTransaction();
         await tester.tap(target);
@@ -2784,21 +3467,30 @@ void main() {
         );
         await tester.pumpAndSettle();
       }
-      final router = GoRouter(initialLocation: '/home', routes: [
-        GoRoute(
+
+      final router = GoRouter(
+        initialLocation: '/home',
+        routes: [
+          GoRoute(
             path: '/home',
             pageBuilder: (_, __) =>
-                const NoTransitionPage(child: Scaffold(body: Text('home')))),
-        GoRoute(
+                const NoTransitionPage(child: Scaffold(body: Text('home'))),
+          ),
+          GoRoute(
             path: '/lesson',
             pageBuilder: (_, __) => const NoTransitionPage(
-                child: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'))),
-      ]);
+              child: DiscoveryLessonScreen(lessonId: 'en-fr-u-y'),
+            ),
+          ),
+        ],
+      );
       addTearDown(router.dispose);
-      await tester.pumpWidget(UncontrolledProviderScope(
-        container: container,
-        child: MaterialApp.router(routerConfig: router),
-      ));
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
       await tester.pumpAndSettle();
       final firstStart = interceptor.waitForNextLearningTransaction();
       router.push('/lesson');
@@ -2826,25 +3518,33 @@ void main() {
       expect(find.text('Item 2 of 10'), findsOneWidget);
       final attemptsBeforeFailure = await attemptCount();
       expect(attemptsBeforeFailure, 1);
-      await tester.runAsync(() => database.customStatement('''
+      await tester.runAsync(
+        () => database.customStatement('''
         CREATE TRIGGER fail_discovery_answer
         BEFORE INSERT ON learning_attempts
         BEGIN SELECT RAISE(ABORT, 'injected discovery answer failure'); END
-      '''));
+      '''),
+      );
       await tester.tap(find.text('Listen to the word'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('/y/'));
       await tester.pumpAndSettle();
       expect(find.text('Correct'), findsOneWidget);
       expect(find.textContaining('could not be saved'), findsOneWidget);
-      expect(await attemptCount(), attemptsBeforeFailure,
-          reason: 'the failed answer was not committed to SQLite');
+      expect(
+        await attemptCount(),
+        attemptsBeforeFailure,
+        reason: 'the failed answer was not committed to SQLite',
+      );
       await tester.runAsync(
         () => database.customStatement('DROP TRIGGER fail_discovery_answer'),
       );
       await tapAndWaitForLearningTransaction(find.text('Retry saving'));
-      expect(await attemptCount(), attemptsBeforeFailure + 1,
-          reason: 'retry commits the answer exactly once');
+      expect(
+        await attemptCount(),
+        attemptsBeforeFailure + 1,
+        reason: 'retry commits the answer exactly once',
+      );
       await tapAndWaitForLearningTransaction(find.text('Next word'));
       expect(find.text('Item 3 of 10'), findsOneWidget);
       for (var i = 2; i < 10; i++) {
@@ -2868,28 +3568,37 @@ void main() {
         () => container.read(courseLearningStoreProvider).load(),
       );
       expect(committed!.history, hasLength(10));
-      expect(committed.completions.map((entry) => entry.lessonId),
-          contains('en-fr-u-y'));
-      expect(committed.activities['lesson:en-fr-u-y']?.snapshot,
-          isA<DiscoveryCheckpoint>());
+      expect(
+        committed.completions.map((entry) => entry.lessonId),
+        contains('en-fr-u-y'),
+      );
+      expect(
+        committed.activities['lesson:en-fr-u-y']?.snapshot,
+        isA<DiscoveryCheckpoint>(),
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('same-session competing advance reload preserves typed state',
-        (tester) async {
+    testWidgets('same-session competing advance reload preserves typed state', (
+      tester,
+    ) async {
       final store = CourseLearningWidgetStore();
       final seed = LessonSectionSession(
-          itemIds: discoveryItemIds, sessionId: 'shared-real-contract')
-        ..submit(true);
+        itemIds: discoveryItemIds,
+        sessionId: 'shared-real-contract',
+      )..submit(true);
       seedStoreSession(store, seed);
       await tester.pumpWidget(pumpLesson(tester, FakeAudio(), store));
       await tester.pumpAndSettle();
       expect(find.text('Correct'), findsOneWidget);
-      final competitor = LessonSectionSession.fromJson(sessionJson(store)!,
-          itemIds: discoveryItemIds,
-          contentRevision: frenchUySection.contentRevision)
-        ..advance()
-        ..submit(true);
+      final competitor =
+          LessonSectionSession.fromJson(
+              sessionJson(store)!,
+              itemIds: discoveryItemIds,
+              contentRevision: frenchUySection.contentRevision,
+            )
+            ..advance()
+            ..submit(true);
       seedStoreSession(store, competitor);
 
       await tester.tap(find.text('Next word'));
@@ -2904,8 +3613,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets(
-        'failed typed commit does not publish state; retry commits '
+    testWidgets('failed typed commit does not publish state; retry commits '
         'the answer once', (tester) async {
       final store = CourseLearningWidgetStore();
       final audio = FakeAudio();
@@ -2938,8 +3646,11 @@ void main() {
       failAction(store, FinishLearningActivity, true);
       await tester.tap(find.text('Finish section'));
       await tester.pumpAndSettle();
-      expect(store.committedState.completions, isEmpty,
-          reason: 'failed completion is not authoritative');
+      expect(
+        store.committedState.completions,
+        isEmpty,
+        reason: 'failed completion is not authoritative',
+      );
       failAction(store, FinishLearningActivity, false);
       await tester.tap(find.text('Retry saving'));
       await tester.pumpAndSettle();
@@ -2951,8 +3662,10 @@ void main() {
 }
 
 GoRouter lessonRouter() {
-  return GoRouter(initialLocation: '/course-lesson/en-fr-u-y', routes: [
-    GoRoute(
+  return GoRouter(
+    initialLocation: '/course-lesson/en-fr-u-y',
+    routes: [
+      GoRoute(
         path: '/course-lesson/:id',
         builder: (_, state) {
           final String id = state.pathParameters['id']!;
@@ -2960,9 +3673,11 @@ GoRouter lessonRouter() {
           return sectionForLesson(id) != null
               ? DiscoveryLessonScreen(lessonId: id, review: review)
               : CourseLessonScreen(lessonId: id, review: review);
-        }),
-    GoRoute(path: '/home', builder: (_, __) => const _HomeStub()),
-  ]);
+        },
+      ),
+      GoRoute(path: '/home', builder: (_, __) => const _HomeStub()),
+    ],
+  );
 }
 
 Future<void> playPerfectSection(WidgetTester tester) async {

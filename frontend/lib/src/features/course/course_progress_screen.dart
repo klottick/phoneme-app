@@ -55,13 +55,18 @@ class _CourseProgressScreenState extends ConsumerState<CourseProgressScreen> {
       final message = result.status == SupportedSyncStatus.synced
           ? 'Supported scores and answer totals backed up. Detailed history, mistakes and lesson resume stay on this device.'
           : 'Supported backup pending. Local commits remain saved on this device. Earlier server totals were not reset or imported.';
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     } catch (_) {
       if (!isCurrent()) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
           content: Text(
-              'Supported backup status could not be checked. Local commits remain saved on this device.')));
+            'Supported backup status could not be checked. Local commits remain saved on this device.',
+          ),
+        ),
+      );
     }
   }
 
@@ -106,40 +111,47 @@ class _CourseProgressScreenState extends ConsumerState<CourseProgressScreen> {
     final progress = ref.watch(courseLearningStateProvider);
     return Scaffold(
       appBar: AppBar(
-          title: Text(widget.review ? 'Review sounds' : 'Course progress')),
-      body: ListView(padding: const EdgeInsets.all(20), children: [
-        progress.when(
-          skipLoadingOnRefresh: false,
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (_, __) => Center(
-            child: TextButton(
-              onPressed: _retryingLoad ? null : _retryLoad,
-              child:
-                  Text(_retryingLoad ? 'Retrying…' : 'Retry loading progress'),
+        title: Text(widget.review ? 'Review sounds' : 'Course progress'),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          progress.when(
+            skipLoadingOnRefresh: false,
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (_, __) => Center(
+              child: TextButton(
+                onPressed: _retryingLoad ? null : _retryLoad,
+                child: Text(
+                  _retryingLoad ? 'Retrying…' : 'Retry loading progress',
+                ),
+              ),
+            ),
+            data: (state) => _ProgressContent(
+              state: state,
+              review: widget.review,
+              registry: ref.watch(learningRegistryProvider),
+              onSync: _syncProgress,
             ),
           ),
-          data: (state) => _ProgressContent(
-            state: state,
-            review: widget.review,
-            registry: ref.watch(learningRegistryProvider),
-            onSync: _syncProgress,
+          const Divider(height: 32),
+          _ComparisonProgressSection(
+            retrying: _retryingComparisonLoad,
+            onRetry: _retryComparisonLoad,
           ),
-        ),
-        const Divider(height: 32),
-        _ComparisonProgressSection(
-          retrying: _retryingComparisonLoad,
-          onRetry: _retryComparisonLoad,
-        ),
-        const Divider(height: 32),
-        const SentenceHuntProgressSection(),
-      ]),
+          const Divider(height: 32),
+          const SentenceHuntProgressSection(),
+        ],
+      ),
     );
   }
 }
 
 class _ComparisonProgressSection extends ConsumerWidget {
-  const _ComparisonProgressSection(
-      {required this.retrying, required this.onRetry});
+  const _ComparisonProgressSection({
+    required this.retrying,
+    required this.onRetry,
+  });
   final bool retrying;
   final Future<void> Function() onRetry;
 
@@ -149,46 +161,55 @@ class _ComparisonProgressSection extends ConsumerWidget {
     return progress.when(
       skipLoadingOnRefresh: false,
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (_, __) =>
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Comparison practice, not phoneme mastery'),
-        const Text('Unavailable'),
-        TextButton(
+      error: (_, __) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Comparison practice, not phoneme mastery'),
+          const Text('Unavailable'),
+          TextButton(
             onPressed: retrying ? null : onRetry,
-            child: Text(retrying
-                ? 'Retrying comparison…'
-                : 'Retry comparison progress')),
-      ]),
+            child: Text(
+              retrying ? 'Retrying comparison…' : 'Retry comparison progress',
+            ),
+          ),
+        ],
+      ),
       data: (state) {
         try {
           final summary = ComparisonProgressSummary.fromState(
-              state: state, catalogue: ref.watch(comparisonCatalogueProvider));
+            state: state,
+            catalogue: ref.watch(comparisonCatalogueProvider),
+          );
           return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(summary.practiceLabel),
-                Text(summary.pairsLabel),
-                Text(summary.answersLabel),
-                Text(summary.afterDebriefLabel),
-                Text(summary.completionLabel),
-                Text(summary.unresolvedLabel),
-                for (final mistake in summary.unresolvedMistakes)
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text('Comparison pair ${mistake.key.pairId}'),
-                    subtitle: Text(
-                        'Unresolved · ${mistake.failureCount} incorrect answers'),
-                    onTap: () => context.push(
-                        '/course-comparison/${mistake.key.activityId}?pairId=${mistake.key.pairId}&review=true'),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(summary.practiceLabel),
+              Text(summary.pairsLabel),
+              Text(summary.answersLabel),
+              Text(summary.afterDebriefLabel),
+              Text(summary.completionLabel),
+              Text(summary.unresolvedLabel),
+              for (final mistake in summary.unresolvedMistakes)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('Comparison pair ${mistake.key.pairId}'),
+                  subtitle: Text(
+                    'Unresolved · ${mistake.failureCount} incorrect answers',
                   ),
-              ]);
+                  onTap: () => context.push(
+                    '/course-comparison/${mistake.key.activityId}?pairId=${mistake.key.pairId}&review=true',
+                  ),
+                ),
+            ],
+          );
         } catch (_) {
           return const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Comparison practice, not phoneme mastery'),
-                Text('Unavailable'),
-              ]);
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Comparison practice, not phoneme mastery'),
+              Text('Unavailable'),
+            ],
+          );
         }
       },
     );
@@ -210,8 +231,10 @@ class _ProgressContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final completionSummary =
-        CourseCompletionSummary.fromState(state: state, registry: registry);
+    final completionSummary = CourseCompletionSummary.fromState(
+      state: state,
+      registry: registry,
+    );
     final summaries = state.summaries.entries.toList()
       ..sort((a, b) {
         final keyA = a.key;
@@ -227,67 +250,78 @@ class _ProgressContent extends StatelessWidget {
     final mistakes = state.mistakes.values.toList()
       ..sort((a, b) => a.key.targetSound.compareTo(b.key.targetSound));
 
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(frenchCourse.title, style: Theme.of(context).textTheme.titleLarge),
-      const SizedBox(height: 16),
-      Text('Discovery lessons: '
-          '${completionSummary.discoveryCompleteCount}/${completionSummary.discoveryTotal} complete'),
-      Text('Existing lessons (includes discovery pilot): '
-          '${completionSummary.existingComplete}/${completionSummary.existingTotal} complete'),
-      const Text(
-          'On this device, committed practice and game answers are shown separately.'),
-      const Text(
-          'This alpha uses a new progress format. Earlier development progress has not been imported.'),
-      if (courseBackend?.auth.currentUser != null)
-        TextButton.icon(
-          icon: const Icon(Icons.cloud_upload_outlined),
-          label: const Text('Sync supported progress'),
-          onPressed: onSync,
-        ),
-      const Text(
-          'Supported backup covers scores and answer totals. Detailed history, mistakes and lesson resume stay on this device.'),
-      if (state.pending.isNotEmpty)
-        const Text(
-            'Supported backup is pending; local commits remain saved on this device.'),
-      const Text('Earlier server totals were not reset or imported.'),
-      const SizedBox(height: 16),
-      if (review) ...[
-        const Text('Unresolved sounds'),
-        if (mistakes.isEmpty)
-          const Text(
-              'No unresolved sounds right now. Practice a lesson or play a round.'),
-        for (final mistake in mistakes) _mistakeTile(context, mistake),
-      ] else ...[
-        const Text('Practice and game evidence'),
-        if (summaries.isEmpty)
-          const Text('Your first answers will appear here.'),
-        for (final entry in summaries)
-          _summaryTile(context, entry.key, entry.value),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(frenchCourse.title, style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 16),
-        const Text('Recent local answers'),
-        if (state.history.isEmpty) const Text('No local answer history yet.'),
-        for (final batch in state.history.reversed)
-          for (final attempt in batch.attempts.reversed)
-            Card(
-              child: ListTile(
-                title: Text(
-                    '${attempt.correct ? 'Correct' : 'Incorrect'} · ${attempt.itemId}'),
-                subtitle: Text(
+        Text(
+          'Discovery lessons: '
+          '${completionSummary.discoveryCompleteCount}/${completionSummary.discoveryTotal} complete',
+        ),
+        Text(
+          'Existing lessons (includes discovery pilot): '
+          '${completionSummary.existingComplete}/${completionSummary.existingTotal} complete',
+        ),
+        const Text(
+          'On this device, committed practice and game answers are shown separately.',
+        ),
+        if (courseBackend?.auth.currentUser != null)
+          TextButton.icon(
+            icon: const Icon(Icons.cloud_upload_outlined),
+            label: const Text('Sync supported progress'),
+            onPressed: onSync,
+          ),
+        const Text(
+          'Supported backup covers scores and answer totals. Detailed history, mistakes and lesson resume stay on this device.',
+        ),
+        if (state.pending.isNotEmpty)
+          const Text(
+            'Supported backup is pending; local commits remain saved on this device.',
+          ),
+        const Text('Earlier server totals were not reset or imported.'),
+        const SizedBox(height: 16),
+        if (review) ...[
+          const Text('Unresolved sounds'),
+          if (mistakes.isEmpty)
+            const Text(
+              'No unresolved sounds right now. Practice a lesson or play a round.',
+            ),
+          for (final mistake in mistakes) _mistakeTile(context, mistake),
+        ] else ...[
+          const Text('Practice and game evidence'),
+          if (summaries.isEmpty)
+            const Text('Your first answers will appear here.'),
+          for (final entry in summaries)
+            _summaryTile(context, entry.key, entry.value),
+          const SizedBox(height: 16),
+          const Text('Recent local answers'),
+          if (state.history.isEmpty) const Text('No local answer history yet.'),
+          for (final batch in state.history.reversed)
+            for (final attempt in batch.attempts.reversed)
+              Card(
+                child: ListTile(
+                  title: Text(
+                    '${attempt.correct ? 'Correct' : 'Incorrect'} · ${attempt.itemId}',
+                  ),
+                  subtitle: Text(
                     '${attempt.origin == AttemptOrigin.practice ? 'Practice' : 'Game'} · '
                     '${attempt.presentation == AttemptPresentation.firstInRun ? 'first' : 'repeat'} presentation · '
                     '${attempt.assistance.isEmpty ? 'no tracked assistance' : 'assisted'} · '
-                    '${attempt.contentState.name} · audio: ${attempt.audioSource.name}'),
+                    '${attempt.contentState.name} · audio: ${attempt.audioSource.name}',
+                  ),
+                ),
               ),
-            ),
-        const SizedBox(height: 16),
-        const Text('Speaking: not assessed'),
-        const Text('Pronunciation assessment: not assessed'),
-        const SizedBox(height: 12),
-        const Text('Arcade best scores — separate from sound accuracy'),
-        Text('Sound Match: ${state.bestScores['arcade:sound'] ?? 0}'),
-        Text('Word Match: ${state.bestScores['arcade:word'] ?? 0}'),
+          const SizedBox(height: 16),
+          const Text('Speaking: not assessed'),
+          const Text('Pronunciation assessment: not assessed'),
+          const SizedBox(height: 12),
+          const Text('Arcade best scores — separate from sound accuracy'),
+          Text('Sound Match: ${state.bestScores['arcade:sound'] ?? 0}'),
+          Text('Word Match: ${state.bestScores['arcade:word'] ?? 0}'),
+        ],
       ],
-    ]);
+    );
   }
 
   Widget _summaryTile(BuildContext context, SummaryKey key, SkillCount count) {
@@ -298,15 +332,18 @@ class _ProgressContent extends StatelessWidget {
     final presentation = key.presentation == AttemptPresentation.firstInRun
         ? 'first presentation'
         : 'repeat presentation';
-    final skill =
-        key.skill == LearningSkill.listening ? 'Listening' : 'Sound–spelling';
+    final skill = key.skill == LearningSkill.listening
+        ? 'Listening'
+        : 'Sound–spelling';
     final answerLabel = count.total == 1 ? 'answer' : 'answers';
     return Card(
       child: ListTile(
         title: Text('/${key.sound}/ · $skill'),
-        subtitle: Text('$origin · $presentation · $assistance\n'
-            '${count.correct} correct / ${count.total} $answerLabel · sample size ${count.total}\n'
-            '${key.skill == LearningSkill.listening ? 'Audio source: pending recording' : 'Audio source: not applicable'}'),
+        subtitle: Text(
+          '$origin · $presentation · $assistance\n'
+          '${count.correct} correct / ${count.total} $answerLabel · sample size ${count.total}\n'
+          '${key.skill == LearningSkill.listening ? 'Audio source: pending recording' : 'Audio source: not applicable'}',
+        ),
         isThreeLine: true,
         trailing: const Icon(Icons.play_arrow),
         onTap: () => _openSound(context, key.sound, key.skill),
@@ -322,7 +359,8 @@ class _ProgressContent extends StatelessWidget {
     final item = definition?.items
         .where((candidate) => candidate.id == key.itemId)
         .firstOrNull;
-    final reviewable = definition != null &&
+    final reviewable =
+        definition != null &&
         definition.contentRevision == key.contentRevision &&
         item != null &&
         item.targetSounds.contains(key.targetSound);
@@ -331,9 +369,11 @@ class _ProgressContent extends StatelessWidget {
     return Card(
       child: ListTile(
         title: Text(label),
-        subtitle: Text(reviewable
-            ? 'Unresolved · ${mistake.failureCount} incorrect answers'
-            : 'Unavailable content · not reviewable'),
+        subtitle: Text(
+          reviewable
+              ? 'Unresolved · ${mistake.failureCount} incorrect answers'
+              : 'Unavailable content · not reviewable',
+        ),
         trailing: reviewable ? const Icon(Icons.play_arrow) : null,
         onTap: reviewable
             ? () => _openSound(context, key.targetSound, key.skill)
@@ -356,9 +396,9 @@ class _ProgressContent extends StatelessWidget {
   }
 
   String _assistanceLabel(AssistanceFlag flag) => switch (flag) {
-        AssistanceFlag.explanationVisible => 'explanation shown',
-        AssistanceFlag.graphemeHint => 'grapheme hint',
-        AssistanceFlag.afterDebrief => 'after debrief',
-        AssistanceFlag.answerRevealed => 'answer revealed',
-      };
+    AssistanceFlag.explanationVisible => 'explanation shown',
+    AssistanceFlag.graphemeHint => 'grapheme hint',
+    AssistanceFlag.afterDebrief => 'after debrief',
+    AssistanceFlag.answerRevealed => 'answer revealed',
+  };
 }

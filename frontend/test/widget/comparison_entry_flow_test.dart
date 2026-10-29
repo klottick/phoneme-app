@@ -243,8 +243,8 @@ void main() {
         reason:
             'a saved checkpoint must not restore playback or hearing grants',
       );
-      final sameButton = tester.widget<ElevatedButton>(
-        find.widgetWithText(ElevatedButton, 'Same'),
+      final sameButton = tester.widget<OutlinedButton>(
+        find.widgetWithText(OutlinedButton, 'Same'),
       );
       expect(
         sameButton.onPressed,
@@ -303,8 +303,8 @@ void main() {
         isEmpty,
         reason: 'the stale answer is a conflict, not credited progress',
       );
-      final sameButtonAfterReload = tester.widget<ElevatedButton>(
-        find.widgetWithText(ElevatedButton, 'Same'),
+      final sameButtonAfterReload = tester.widget<OutlinedButton>(
+        find.widgetWithText(OutlinedButton, 'Same'),
       );
       expect(
         sameButtonAfterReload.onPressed,
