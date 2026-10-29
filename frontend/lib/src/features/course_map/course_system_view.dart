@@ -8,6 +8,7 @@ import 'course_destination_panel.dart';
 import 'course_map_canvas.dart';
 import 'course_map_state.dart';
 import 'french_space_map.dart';
+import '../../core/widgets/purposeful_motion.dart';
 
 class CourseSystemView extends StatelessWidget {
   const CourseSystemView({
@@ -63,13 +64,16 @@ class CourseSystemView extends StatelessWidget {
             child: Center(child: Text('No destinations are available.')),
           );
         }
-        return CourseDestinationPanel(
-          body: selected,
-          onLaunch: selected.launch == null ? null : () => onLaunch(selected),
-          focusOrder: state.bodies.length,
-          compact: true,
-          isCurrentLocation: selected.definition.id == current?.definition.id,
-          progressSummary: progressSummary,
+        return PurposefulSwitcher(
+          child: CourseDestinationPanel(
+            key: ValueKey('destination-panel-${selected.definition.id}'),
+            body: selected,
+            onLaunch: selected.launch == null ? null : () => onLaunch(selected),
+            focusOrder: state.bodies.length,
+            compact: true,
+            isCurrentLocation: selected.definition.id == current?.definition.id,
+            progressSummary: progressSummary,
+          ),
         );
       }
 

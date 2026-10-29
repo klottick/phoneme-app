@@ -24,6 +24,7 @@ corresponding original license texts are preserved byte-for-byte in
 - Simple Space `PNG/Retina/station_C.png` → `station_sentences.png`
 - Simple Space `PNG/Retina/meteor_detailedSmall.png` → `asteroid_small.png`
 - Simple Space `PNG/Retina/meteor_detailedLarge.png` → `asteroid_large.png`
+- Simple Space `PNG/Retina/ship_A.png` → `ship_preview.png`
 
 The archive SHA-256 values above identify the exact source ZIPs used; the
 original PNGs are copied without edits and rendered with Flutter's local asset

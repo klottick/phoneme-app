@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../core/providers/app_providers.dart';
 import '../core/theme/space_course_theme.dart';
+import '../core/widgets/purposeful_motion.dart';
 import '../core/course/lesson_section.dart';
 import '../core/course/french_sentence_exercises.dart';
 import '../core/course/french_sentence_package.dart';
@@ -76,169 +77,246 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: <RouteBase>[
-      GoRoute(path: '/arcade', builder: (_, __) => const SpaceCourseTheme(child: CourseRootNavigation(location: '/arcade', child: ArcadeLobby()))),
       GoRoute(
-          path: '/arcade/sound',
-          builder: (_, __) => const ArcadeScreen(silent: false)),
+        path: '/arcade',
+        builder: (_, __) => const SpaceCourseTheme(
+          child: CourseRootNavigation(
+            location: '/arcade',
+            child: ArcadeLobby(),
+          ),
+        ),
+      ),
       GoRoute(
-          path: '/arcade/word',
-          builder: (_, __) => const ArcadeScreen(silent: true)),
+        path: '/arcade/sound',
+        builder: (_, __) => const ArcadeScreen(silent: false),
+      ),
       GoRoute(
-          path: '/course-lesson/:id',
-          builder: (_, state) {
-            final String lessonId = state.pathParameters['id']!;
-            final bool review = state.uri.queryParameters['review'] == 'true';
-            // Selective routing: only authored discovery sections use the new
-            // lifecycle-aware screen; every other lesson keeps the legacy
-            // screen and its behavior.
-            if (sectionForLesson(lessonId) != null) {
-              return SpaceCourseTheme(
-                child: DiscoveryLessonScreen(lessonId: lessonId, review: review),
-              );
-            }
-            return CourseLessonScreen(lessonId: lessonId, review: review);
-          }),
+        path: '/arcade/word',
+        builder: (_, __) => const ArcadeScreen(silent: true),
+      ),
+      GoRoute(
+        path: '/course-lesson/:id',
+        pageBuilder: (_, state) {
+          final String lessonId = state.pathParameters['id']!;
+          final bool review = state.uri.queryParameters['review'] == 'true';
+          // Selective routing: only authored discovery sections use the new
+          // lifecycle-aware screen; every other lesson keeps the legacy
+          // screen and its behavior.
+          if (sectionForLesson(lessonId) != null) {
+            return _coursePage(
+              state,
+              SpaceCourseTheme(
+                child: DiscoveryLessonScreen(
+                  lessonId: lessonId,
+                  review: review,
+                ),
+              ),
+            );
+          }
+          return _coursePage(
+            state,
+            CourseLessonScreen(lessonId: lessonId, review: review),
+          );
+        },
+      ),
       GoRoute(
         path: '/course-spelling/:activityId',
-        builder: (context, state) {
+        pageBuilder: (context, state) {
           final String? activityId = state.pathParameters['activityId'];
-          final Map<String, List<String>> all =
-              state.uri.queryParametersAll;
+          final Map<String, List<String>> all = state.uri.queryParametersAll;
           if (activityId != uyDemoSpellingActivityId ||
               all.keys.any((String key) => key != 'review') ||
               all.values.any((List<String> values) => values.length != 1) ||
               (all['review'] != null &&
                   !<String>{'true', 'false'}.contains(all['review']!.single))) {
-            return const SpaceCourseTheme(child: _SpellingRouteUnavailable());
+            return _coursePage(
+              state,
+              const SpaceCourseTheme(child: _SpellingRouteUnavailable()),
+            );
           }
-          return SpaceCourseTheme(
-            child: SpellingLessonScreen(
-              review: all['review']?.single == 'true',
+          return _coursePage(
+            state,
+            SpaceCourseTheme(
+              child: SpellingLessonScreen(
+                review: all['review']?.single == 'true',
+              ),
             ),
           );
         },
       ),
       GoRoute(
-          path: '/course-progress',
-          builder: (_, __) => const SpaceCourseTheme(child: CourseRootNavigation(location: '/course-progress', child: CourseProgressScreen()))),
-      GoRoute(path: '/course-chart', builder: (_, __) => const SpaceCourseTheme(child: CourseChartScreen())),
-      GoRoute(path: '/course-system/:systemId', builder: (_, state) => SpaceCourseTheme(child: CourseMapScreen(systemId: state.pathParameters['systemId']!))),
+        path: '/course-progress',
+        pageBuilder: (_, state) => _coursePage(
+          state,
+          const SpaceCourseTheme(
+            child: CourseRootNavigation(
+              location: '/course-progress',
+              child: CourseProgressScreen(),
+            ),
+          ),
+        ),
+      ),
       GoRoute(
-          path: '/course-comparison/:activityId',
-          builder: (context, state) {
-            const unavailable = SpaceCourseTheme(child: Scaffold(
-                body: Center(
-                    child: Text('This comparison activity is unavailable.'))));
-            final activityId = state.pathParameters['activityId'];
-            final all = state.uri.queryParametersAll;
-            if ((activityId != comparisonActivityId &&
-                    activityId != uyDemoComparisonActivityId) ||
-                all.keys.any((key) => key != 'review' && key != 'pairId') ||
-                all.values.any((values) => values.length != 1) ||
-                (all['review'] != null &&
-                    !{'true', 'false'}.contains(all['review']!.single)) ||
-                (all['pairId'] != null &&
-                    all['pairId']!.single.trim().isEmpty)) {
-              return unavailable;
-            }
-            final pairId = all['pairId']?.single;
-            return Consumer(builder: (context, ref, _) {
-              try {
-                final registry =
-                    ref.watch(comparisonCatalogueRegistryProvider);
-                final registration = registry.registrationFor(activityId!);
-                if (registration == null) {
+        path: '/course-chart',
+        pageBuilder: (_, state) => _coursePage(
+          state,
+          const SpaceCourseTheme(child: CourseChartScreen()),
+        ),
+      ),
+      GoRoute(
+        path: '/course-system/:systemId',
+        pageBuilder: (_, state) => _coursePage(
+          state,
+          SpaceCourseTheme(
+            child: CourseMapScreen(systemId: state.pathParameters['systemId']!),
+          ),
+        ),
+      ),
+      GoRoute(
+        path: '/course-comparison/:activityId',
+        pageBuilder: (context, state) {
+          const unavailable = SpaceCourseTheme(
+            child: Scaffold(
+              body: Center(
+                child: Text('This comparison activity is unavailable.'),
+              ),
+            ),
+          );
+          final activityId = state.pathParameters['activityId'];
+          final all = state.uri.queryParametersAll;
+          if ((activityId != comparisonActivityId &&
+                  activityId != uyDemoComparisonActivityId) ||
+              all.keys.any((key) => key != 'review' && key != 'pairId') ||
+              all.values.any((values) => values.length != 1) ||
+              (all['review'] != null &&
+                  !{'true', 'false'}.contains(all['review']!.single)) ||
+              (all['pairId'] != null && all['pairId']!.single.trim().isEmpty)) {
+            return _coursePage(state, unavailable);
+          }
+          final pairId = all['pairId']?.single;
+          return _coursePage(
+            state,
+            Consumer(
+              builder: (context, ref, _) {
+                try {
+                  final registry = ref.watch(
+                    comparisonCatalogueRegistryProvider,
+                  );
+                  final registration = registry.registrationFor(activityId!);
+                  if (registration == null) {
+                    return unavailable;
+                  }
+                  final catalogue = registration.catalogue;
+                  if (pairId != null &&
+                      catalogue != null &&
+                      !catalogue.byId.containsKey(pairId)) {
+                    return unavailable;
+                  }
+                  return SpaceCourseTheme(
+                    child: ComparisonLessonScreen(
+                      activityId: activityId,
+                      review: all['review']?.single == 'true',
+                      pairId: pairId,
+                    ),
+                  );
+                } catch (_) {
                   return unavailable;
                 }
-                final catalogue = registration.catalogue;
-                if (pairId != null &&
-                    catalogue != null &&
-                    !catalogue.byId.containsKey(pairId)) {
-                  return unavailable;
-                }
-                return SpaceCourseTheme(child: ComparisonLessonScreen(
-                    activityId: activityId,
-                    review: all['review']?.single == 'true',
-                    pairId: pairId));
-              } catch (_) {
-                return unavailable;
-              }
-            });
-          }),
+              },
+            ),
+          );
+        },
+      ),
       GoRoute(
         path: '/course-sentence-hunt',
-        builder: (context, state) {
+        pageBuilder: (context, state) {
           if (state.uri.queryParametersAll.isNotEmpty) {
-            return const _SentenceHuntRouteUnavailable();
+            return _coursePage(state, const _SentenceHuntRouteUnavailable());
           }
-          return const SentenceHuntSectionsScreen();
+          return _coursePage(state, const SentenceHuntSectionsScreen());
         },
       ),
       GoRoute(
         path: '/course-sentence-hunt/:sectionId',
-        builder: (context, state) {
+        pageBuilder: (context, state) {
           final String? sectionId = state.pathParameters['sectionId'];
           final SentenceHuntSectionSpecification? specification =
               _sentenceHuntSpecification(sectionId);
           final Map<String, List<String>> all = state.uri.queryParametersAll;
           if (specification == null ||
-              all.keys
-                  .any((String key) => key != 'review' && key != 'itemId') ||
+              all.keys.any(
+                (String key) => key != 'review' && key != 'itemId',
+              ) ||
               all.values.any((List<String> values) => values.length != 1) ||
               (all['review'] != null &&
                   !<String>{'true', 'false'}.contains(all['review']!.single))) {
-            return const _SentenceHuntRouteUnavailable();
+            return _coursePage(state, const _SentenceHuntRouteUnavailable());
           }
           final String? itemId = all['itemId']?.single;
           if (itemId != null &&
               (itemId.trim().isEmpty ||
                   !specification.items.any(
-                      (SentenceHuntItemSpecification item) =>
-                          item.id == itemId))) {
-            return const _SentenceHuntRouteUnavailable();
+                    (SentenceHuntItemSpecification item) => item.id == itemId,
+                  ))) {
+            return _coursePage(state, const _SentenceHuntRouteUnavailable());
           }
-          return Consumer(
-            builder: (BuildContext context, WidgetRef ref, Widget? child) {
-              final AsyncValue<SentenceHuntCatalogue> catalogue =
-                  ref.watch(sentenceHuntCatalogueProvider);
-              return catalogue.when(
-                skipLoadingOnRefresh: false,
-                loading: () => Scaffold(
-                  appBar: AppBar(title: const Text('Sentence hunt')),
-                  body: const Center(child: CircularProgressIndicator()),
-                ),
-                error: (_, __) => _SentenceHuntContentUnavailable(
-                  message: 'Sentence-hunt content could not be checked.',
-                  onRetry: () => ref.invalidate(sentenceHuntCatalogueProvider),
-                ),
-                data: (SentenceHuntCatalogue value) {
-                  try {
-                    value.section(specification.id);
-                  } on Object {
-                    return const _SentenceHuntContentUnavailable(
-                      message: 'This sentence-hunt section is unavailable.',
+          return _coursePage(
+            state,
+            Consumer(
+              builder: (BuildContext context, WidgetRef ref, Widget? child) {
+                final AsyncValue<SentenceHuntCatalogue> catalogue = ref.watch(
+                  sentenceHuntCatalogueProvider,
+                );
+                return catalogue.when(
+                  skipLoadingOnRefresh: false,
+                  loading: () => Scaffold(
+                    appBar: AppBar(title: const Text('Sentence hunt')),
+                    body: const Center(child: CircularProgressIndicator()),
+                  ),
+                  error: (_, __) => _SentenceHuntContentUnavailable(
+                    message: 'Sentence-hunt content could not be checked.',
+                    onRetry: () =>
+                        ref.invalidate(sentenceHuntCatalogueProvider),
+                  ),
+                  data: (SentenceHuntCatalogue value) {
+                    try {
+                      value.section(specification.id);
+                    } on Object {
+                      return const _SentenceHuntContentUnavailable(
+                        message: 'This sentence-hunt section is unavailable.',
+                      );
+                    }
+                    if (!value.isAvailable(specification.id)) {
+                      return const _SentenceHuntContentUnavailable(
+                        message:
+                            'This complete sentence section is unavailable '
+                            'until its content and audio are reviewed.',
+                      );
+                    }
+                    return SentenceHuntLessonScreen(
+                      sectionId: specification.id,
+                      review: all['review']?.single == 'true',
+                      itemId: itemId,
                     );
-                  }
-                  if (!value.isAvailable(specification.id)) {
-                    return const _SentenceHuntContentUnavailable(
-                      message: 'This complete sentence section is unavailable '
-                          'until its content and audio are reviewed.',
-                    );
-                  }
-                  return SentenceHuntLessonScreen(
-                    sectionId: specification.id,
-                    review: all['review']?.single == 'true',
-                    itemId: itemId,
-                  );
-                },
-              );
-            },
+                  },
+                );
+              },
+            ),
           );
         },
       ),
       GoRoute(
-          path: '/course-review',
-          builder: (_, __) => const SpaceCourseTheme(child: CourseRootNavigation(location: '/course-review', child: CourseProgressScreen(review: true)))),
+        path: '/course-review',
+        pageBuilder: (_, state) => _coursePage(
+          state,
+          const SpaceCourseTheme(
+            child: CourseRootNavigation(
+              location: '/course-review',
+              child: CourseProgressScreen(review: true),
+            ),
+          ),
+        ),
+      ),
       GoRoute(
         path: '/login',
         builder: (BuildContext context, GoRouterState state) {
@@ -253,9 +331,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/home',
-        builder: (BuildContext context, GoRouterState state) {
-          return const SpaceCourseTheme(child: CourseMapScreen(systemId: 'en-fr-u-y-system'));
-        },
+        pageBuilder: (BuildContext context, GoRouterState state) => _coursePage(
+          state,
+          const SpaceCourseTheme(
+            child: CourseMapScreen(systemId: 'en-fr-u-y-system'),
+          ),
+        ),
       ),
       GoRoute(
         path: '/profile',
@@ -358,6 +439,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   );
 });
 
+Page<void> _coursePage(GoRouterState state, Widget child) =>
+    CustomTransitionPage<void>(
+      key: state.pageKey,
+      transitionDuration: const Duration(milliseconds: 220),
+      reverseTransitionDuration: const Duration(milliseconds: 180),
+      child: child,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) =>
+          PurposefulRouteTransition(
+            animation: animation,
+            secondaryAnimation: secondaryAnimation,
+            child: child,
+          ),
+    );
+
 SentenceHuntSectionSpecification? _sentenceHuntSpecification(String? id) {
   if (id == null) return null;
   for (final SentenceHuntSectionSpecification specification
@@ -372,58 +467,55 @@ class _SentenceHuntRouteUnavailable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Sentence sound hunt')),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                const Text('This sentence-hunt route is unavailable.'),
-                TextButton(
-                  onPressed: () => context.go('/course-sentence-hunt'),
-                  child: const Text('Back to sentence sections'),
-                ),
-              ],
+    appBar: AppBar(title: const Text('Sentence sound hunt')),
+    body: Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const Text('This sentence-hunt route is unavailable.'),
+            TextButton(
+              onPressed: () => context.go('/course-sentence-hunt'),
+              child: const Text('Back to sentence sections'),
             ),
-          ),
+          ],
         ),
-      );
+      ),
+    ),
+  );
 }
 
 class _SentenceHuntContentUnavailable extends StatelessWidget {
-  const _SentenceHuntContentUnavailable({
-    required this.message,
-    this.onRetry,
-  });
+  const _SentenceHuntContentUnavailable({required this.message, this.onRetry});
 
   final String message;
   final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Sentence hunt')),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Text(message),
-                if (onRetry != null)
-                  TextButton(
-                    onPressed: onRetry,
-                    child: const Text('Retry validation'),
-                  ),
-                TextButton(
-                  onPressed: () => context.go('/course-sentence-hunt'),
-                  child: const Text('Back to sentence sections'),
-                ),
-              ],
+    appBar: AppBar(title: const Text('Sentence hunt')),
+    body: Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(message),
+            if (onRetry != null)
+              TextButton(
+                onPressed: onRetry,
+                child: const Text('Retry validation'),
+              ),
+            TextButton(
+              onPressed: () => context.go('/course-sentence-hunt'),
+              child: const Text('Back to sentence sections'),
             ),
-          ),
+          ],
         ),
-      );
+      ),
+    ),
+  );
 }
 
 class _SpellingRouteUnavailable extends StatelessWidget {
@@ -431,6 +523,6 @@ class _SpellingRouteUnavailable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => const Scaffold(
-        body: Center(child: Text('This spelling activity is unavailable.')),
-      );
+    body: Center(child: Text('This spelling activity is unavailable.')),
+  );
 }

@@ -38,10 +38,16 @@ class CourseMapCanvas extends StatelessWidget {
           current != null &&
           state.bodies.any((body) => body.definition.id == current);
       final currentRect = hasCurrentBody ? placements[current] : null;
+      final selectedRect = selectedBodyId == null
+          ? currentRect
+          : placements[selectedBodyId] ?? currentRect;
       return SizedBox(
         height: height,
         child: CourseMapMotion(
           anchor: currentRect?.center,
+          destination: selectedRect?.center,
+          selectionKey: selectedBodyId,
+          anchorKey: current,
           child: Stack(
             clipBehavior: Clip.hardEdge,
             fit: StackFit.expand,

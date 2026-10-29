@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/features/course_map/course_map_canvas.dart';
 import 'package:linguist/src/features/course_map/course_map_motion.dart';
@@ -99,4 +100,253 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.binding.transientCallbackCount, 0);
   });
+
+  testWidgets('selected_destination_gets_a_finite_visible_ship_flight', (
+    tester,
+  ) async {
+    final harnessKey = GlobalKey<_MotionCanvasHarnessState>();
+    await tester.pumpWidget(_MotionCanvasHarness(key: harnessKey));
+    await tester.pump();
+
+    final ship = find.byKey(const ValueKey('course-map-preview-ship'));
+    expect(ship, findsOneWidget);
+    final start = tester.getCenter(ship);
+    final origin = tester.getCenter(
+      find.byKey(const ValueKey('body-art-frame-discovery')),
+    );
+    final destination = tester.getCenter(
+      find.byKey(const ValueKey('body-art-frame-comparison')),
+    );
+    final marker = find.byIcon(Icons.navigation);
+    final truthfulMarkerBefore = tester.getRect(marker);
+
+    expect((start - origin).distance, lessThan(2));
+    expect((destination - start).distance, greaterThan(80));
+
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(tester.binding.transientCallbackCount, greaterThan(0));
+    final midFlight = tester.getCenter(ship);
+    expect((midFlight - start).distance, greaterThan(20));
+    expect((destination - midFlight).distance, greaterThan(20));
+
+    await tester.pump(const Duration(seconds: 2));
+    expect(tester.getCenter(ship), destination);
+    expect(tester.getRect(marker), truthfulMarkerBefore);
+    expect(tester.binding.transientCallbackCount, 0);
+
+    final semantics = tester.ensureSemantics();
+    final mapSemantics = tester.getSemantics(find.byType(CourseMapCanvas));
+    expect(_semanticsLabels(mapSemantics), isNot(contains('Preview ship')));
+    semantics.dispose();
+
+    await tester.tap(find.byKey(const ValueKey('body-art-frame-comparison')));
+    await tester.pump();
+    expect(harnessKey.currentState!.inspected, contains('comparison'));
+  });
+
+  testWidgets('rapid_selection_retargets_from_the_rendered_ship_position', (
+    tester,
+  ) async {
+    final harnessKey = GlobalKey<_MotionCanvasHarnessState>();
+    await tester.pumpWidget(_MotionCanvasHarness(key: harnessKey));
+    final ship = find.byKey(const ValueKey('course-map-preview-ship'));
+    await tester.pump();
+
+    await tester.pump(const Duration(milliseconds: 250));
+    final firstRenderedPosition = tester.getCenter(ship);
+    harnessKey.currentState!.select('context');
+    await tester.pump();
+    expect(
+      (tester.getCenter(ship) - firstRenderedPosition).distance,
+      lessThan(1),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 160));
+    final secondRenderedPosition = tester.getCenter(ship);
+    expect(
+      (secondRenderedPosition - firstRenderedPosition).distance,
+      greaterThan(8),
+    );
+    harnessKey.currentState!.select('spelling');
+    await tester.pump();
+    await tester.pump();
+    expect(
+      (tester.getCenter(ship) - secondRenderedPosition).distance,
+      lessThan(1),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.getCenter(ship),
+      tester.getCenter(find.byKey(const ValueKey('body-art-frame-spelling'))),
+    );
+    expect(tester.binding.transientCallbackCount, 0);
+  });
+
+  testWidgets('reduced_motion_snaps_initial_and_live_flights_to_stable', (
+    tester,
+  ) async {
+    final harnessKey = GlobalKey<_MotionCanvasHarnessState>();
+    await tester.pumpWidget(
+      _MotionCanvasHarness(key: harnessKey, reduced: true),
+    );
+    final ship = find.byKey(const ValueKey('course-map-preview-ship'));
+    final destination = tester.getCenter(
+      find.byKey(const ValueKey('body-art-frame-comparison')),
+    );
+
+    expect(tester.getCenter(ship), destination);
+    expect(tester.binding.transientCallbackCount, 0);
+
+    harnessKey.currentState!.setReducedMotion(false);
+    await tester.pump();
+    harnessKey.currentState!.select('context');
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 180));
+    final movingPosition = tester.getCenter(ship);
+    expect(
+      (movingPosition -
+              tester.getCenter(
+                find.byKey(const ValueKey('body-art-frame-comparison')),
+              ))
+          .distance,
+      greaterThan(10),
+    );
+
+    harnessKey.currentState!.setReducedMotion(true);
+    await tester.pump();
+    expect(
+      tester.getCenter(ship),
+      tester.getCenter(find.byKey(const ValueKey('body-art-frame-context'))),
+    );
+    expect(tester.binding.transientCallbackCount, 0);
+  });
+
+  testWidgets('ticker_suspension_freezes_and_resumes_without_catching_up', (
+    tester,
+  ) async {
+    final harnessKey = GlobalKey<_MotionCanvasHarnessState>();
+    await tester.pumpWidget(_MotionCanvasHarness(key: harnessKey));
+    final ship = find.byKey(const ValueKey('course-map-preview-ship'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 180));
+    final suspendedPosition = tester.getCenter(ship);
+
+    harnessKey.currentState!.setTickerMode(false);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 2));
+    expect(tester.getCenter(ship), suspendedPosition);
+    expect(tester.binding.transientCallbackCount, 0);
+
+    harnessKey.currentState!.setTickerMode(true);
+    await tester.pump();
+    expect(tester.getCenter(ship), suspendedPosition);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 180));
+    expect(
+      (tester.getCenter(ship) - suspendedPosition).distance,
+      greaterThan(8),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.getCenter(ship),
+      tester.getCenter(find.byKey(const ValueKey('body-art-frame-comparison'))),
+    );
+    expect(tester.binding.transientCallbackCount, 0);
+  });
+
+  testWidgets(
+    'backgrounding_suspends_flight_and_resume_starts_from_frozen_position',
+    (tester) async {
+      final harnessKey = GlobalKey<_MotionCanvasHarnessState>();
+      await tester.pumpWidget(_MotionCanvasHarness(key: harnessKey));
+      final ship = find.byKey(const ValueKey('course-map-preview-ship'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 180));
+      final suspendedPosition = tester.getCenter(ship);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
+      expect(tester.getCenter(ship), suspendedPosition);
+      expect(tester.binding.transientCallbackCount, 0);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(tester.getCenter(ship), suspendedPosition);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 180));
+      expect(
+        (tester.getCenter(ship) - suspendedPosition).distance,
+        greaterThan(8),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.binding.transientCallbackCount, 0);
+    },
+  );
+}
+
+String _semanticsLabels(SemanticsNode node) {
+  final labels = StringBuffer(node.label);
+  node.visitChildren((child) {
+    labels.write(_semanticsLabels(child));
+    return true;
+  });
+  return labels.toString();
+}
+
+class _MotionCanvasHarness extends StatefulWidget {
+  const _MotionCanvasHarness({super.key, this.reduced = false});
+
+  final bool reduced;
+
+  @override
+  State<_MotionCanvasHarness> createState() => _MotionCanvasHarnessState();
+}
+
+class _MotionCanvasHarnessState extends State<_MotionCanvasHarness> {
+  String selectedBodyId = 'comparison';
+  bool reduced = false;
+  bool tickerEnabled = true;
+  final List<String> inspected = <String>[];
+
+  @override
+  void initState() {
+    super.initState();
+    reduced = widget.reduced;
+  }
+
+  void select(String id) => setState(() => selectedBodyId = id);
+
+  void setReducedMotion(bool value) => setState(() => reduced = value);
+
+  void setTickerMode(bool value) => setState(() => tickerEnabled = value);
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    home: Scaffold(
+      body: Center(
+        child: TickerMode(
+          enabled: tickerEnabled,
+          child: MediaQuery(
+            data: MediaQueryData(
+              size: const Size(390, 844),
+              disableAnimations: reduced,
+            ),
+            child: SizedBox(
+              width: 390,
+              height: 420,
+              child: CourseMapCanvas(
+                state: _state(),
+                selectedBodyId: selectedBodyId,
+                onInspect: inspected.add,
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
