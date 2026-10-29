@@ -26,6 +26,7 @@ import 'package:linguist/src/core/course/storage/comparison_learning_sql_reposit
 import 'package:linguist/src/core/course/storage/learning_database.dart'
     show LearningDatabaseHandle;
 import 'package:linguist/src/features/course/comparison_lesson_screen.dart';
+import 'package:linguist/src/features/course/exercises/listening_exercise_frame.dart';
 import 'package:linguist/src/features/course/exercises/sound_comparison.dart';
 import 'package:linguist/src/features/course/exercises/listening_exercise_contract.dart';
 import '../support/course_learning_widget_store.dart';
@@ -524,6 +525,65 @@ Future<ComparisonLearningState> _readSnapshot(
   _ComparisonWidgetStore store,
 ) => _runRealAsync(tester, store.readSnapshot);
 
+SoundComparisonPrompt _activeComparisonPrompt(WidgetTester tester) =>
+    tester.widget<SoundComparison>(find.byType(SoundComparison)).prompt;
+
+ComparisonExercise _exerciseForPrompt(
+  ComparisonCatalogue catalogue,
+  SoundComparisonPrompt prompt,
+) => catalogue.exercises.singleWhere(
+  (exercise) =>
+      exercise.sampleA.referenceId == prompt.sampleAReferenceId &&
+      exercise.sampleB.referenceId == prompt.sampleBReferenceId,
+);
+
+Future<void> _hearComparisonSample(
+  WidgetTester tester,
+  _ControlledCourseReferenceAudio audio,
+  SoundComparisonPrompt prompt,
+  ComparisonSample sample,
+) async {
+  final isA = sample == ComparisonSample.a;
+  await tester.tap(
+    find.text(isA ? 'Listen to sample A' : 'Listen to sample B'),
+  );
+  audio.completeNext(
+    CourseAudioResult.completed(
+      referenceId: isA ? prompt.sampleAReferenceId : prompt.sampleBReferenceId,
+      source: CourseAudioSource.unverifiedRecording,
+    ),
+  );
+  await tester.pump();
+}
+
+Future<ComparisonExercise> _answerCurrentComparison(
+  WidgetTester tester, {
+  required ComparisonCatalogue catalogue,
+  required _ComparisonWidgetStore store,
+  required _ControlledCourseReferenceAudio audio,
+}) async {
+  final prompt = _activeComparisonPrompt(tester);
+  final exercise = _exerciseForPrompt(catalogue, prompt);
+  await _hearComparisonSample(tester, audio, prompt, ComparisonSample.a);
+  await _hearComparisonSample(tester, audio, prompt, ComparisonSample.b);
+  await tester.tap(
+    find.text(
+      exercise.expectedRelation == PhonemeRelation.same ? 'Same' : 'Different',
+    ),
+  );
+  await _readSnapshot(tester, store);
+  for (
+    var frame = 0;
+    frame < 30 && find.text('Continue').evaluate().isEmpty;
+    frame++
+  ) {
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pump();
+  }
+  expect(find.text('Continue'), findsOneWidget);
+  return exercise;
+}
+
 Future<ProviderContainer> _mountComparison(
   WidgetTester tester, {
   required _ComparisonWidgetStore store,
@@ -813,6 +873,7 @@ Future<void> _answerVisiblePair(
     await tester.pump();
   }
   await tester.pump();
+  await tester.pumpAndSettle();
 }
 
 void _expectNoComparisonCorrectnessFeedback(WidgetTester tester) {
@@ -886,6 +947,248 @@ void main() {
       await tester.pump();
     }
   }
+
+  testWidgets('comparison_question_identity_animates_only_the_current_pair', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final h = await harness(tester);
+    ProviderContainer? container;
+    addTearDown(() {
+      if (container != null) cleanup(container, h.audio);
+    });
+    container = await _mountComparison(
+      tester,
+      store: h.store,
+      audio: h.audio,
+      catalogue: catalogue,
+    );
+
+    final firstPrompt = _activeComparisonPrompt(tester);
+    final firstId = firstPrompt.id;
+    final firstExercise = _exerciseForPrompt(catalogue, firstPrompt);
+    void expectFirstIdentity() {
+      expect(_activeComparisonPrompt(tester).id, firstId);
+    }
+
+    await _hearComparisonSample(
+      tester,
+      h.audio,
+      firstPrompt,
+      ComparisonSample.a,
+    );
+    expectFirstIdentity();
+    await _hearComparisonSample(
+      tester,
+      h.audio,
+      firstPrompt,
+      ComparisonSample.b,
+    );
+    expectFirstIdentity();
+
+    final answerGate = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
+    final answerEntered = await _runRealAsync(
+      tester,
+      () async => Completer<void>(),
+    );
+    addTearDown(() {
+      if (!answerGate.isCompleted) answerGate.complete();
+    });
+    h.persistence.holdNextWrite = answerGate;
+    h.persistence.writeEntered = answerEntered;
+    await tester.tap(
+      find.text(
+        firstExercise.expectedRelation == PhonemeRelation.same
+            ? 'Same'
+            : 'Different',
+      ),
+    );
+    await tester.runAsync(() => answerEntered.future);
+    expectFirstIdentity();
+    answerGate.complete();
+    final saved = await _readSnapshot(tester, h.store);
+    for (
+      var frame = 0;
+      frame < 30 && find.text('Continue').evaluate().isEmpty;
+      frame++
+    ) {
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump();
+    }
+    expect(find.text('Continue'), findsOneWidget);
+    expectFirstIdentity();
+
+    await tester.tap(find.text('Continue'));
+    final advanced = await _readSnapshot(tester, h.store);
+    final slot = advanced.slots[comparisonActivityId]!;
+    final nextSession = LessonSectionSession.fromJson(
+      Map<String, dynamic>.from(slot.checkpoint.sessionJson),
+      itemIds: catalogue.exercises.map((exercise) => exercise.id).toList(),
+      contentRevision: catalogue.contentRevision,
+    );
+    final nextExercise = catalogue.exercise(nextSession.currentItemId!);
+    expect(nextExercise.id, isNot(firstExercise.id));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final nextPrompt = _activeComparisonPrompt(tester);
+    expect(nextPrompt.id, isNot(firstId));
+    expect(nextPrompt.sampleAReferenceId, nextExercise.sampleA.referenceId);
+    expect(nextPrompt.sampleBReferenceId, nextExercise.sampleB.referenceId);
+    final oldProblem = find.byKey(
+      ValueKey<String>('comparison-problem-$firstId'),
+      skipOffstage: false,
+    );
+    final currentProblem = find.byKey(
+      ValueKey<String>('comparison-problem-${nextPrompt.id}'),
+      skipOffstage: false,
+    );
+    expect(oldProblem, findsOneWidget);
+    expect(currentProblem, findsOneWidget);
+    expect(find.byType(ListeningExerciseFrame), findsNWidgets(2));
+    expect(
+      (tester.getRect(oldProblem).top - tester.getRect(currentProblem).top)
+          .abs(),
+      greaterThan(2),
+      reason: 'both real pair entries are at distinct intermediate offsets',
+    );
+    expect(find.text('Continue'), findsNothing);
+
+    final oldListen = find.descendant(
+      of: oldProblem,
+      matching: find.widgetWithText(ElevatedButton, 'Listen to sample A'),
+    );
+    final currentListen = find.descendant(
+      of: currentProblem,
+      matching: find.widgetWithText(ElevatedButton, 'Listen to sample A'),
+    );
+    final oldSame = find.descendant(
+      of: oldProblem,
+      matching: find.widgetWithText(OutlinedButton, 'Same'),
+    );
+    final currentSame = find.descendant(
+      of: currentProblem,
+      matching: find.widgetWithText(OutlinedButton, 'Same'),
+    );
+    expect(tester.widget<ElevatedButton>(oldListen).onPressed, isNull);
+    expect(tester.widget<OutlinedButton>(oldSame).onPressed, isNull);
+    expect(tester.widget<ElevatedButton>(currentListen).onPressed, isNotNull);
+    expect(find.bySemanticsLabel('Listen to sample A'), findsOneWidget);
+    expect(find.bySemanticsLabel('Listen to sample B'), findsOneWidget);
+    expect(find.bySemanticsLabel('Same'), findsOneWidget);
+    expect(find.bySemanticsLabel('Different'), findsOneWidget);
+
+    final oldListenRect = tester.getRect(oldListen);
+    final currentListenRect = tester.getRect(currentListen);
+    final staleOnlyPoints =
+        <Offset>[
+          Offset(oldListenRect.center.dx, oldListenRect.top + 2),
+          Offset(oldListenRect.center.dx, oldListenRect.bottom - 2),
+          Offset(oldListenRect.left + 2, oldListenRect.center.dy),
+          Offset(oldListenRect.right - 2, oldListenRect.center.dy),
+        ].where(
+          (point) =>
+              oldListenRect.contains(point) &&
+              !currentListenRect.contains(point),
+        );
+    expect(staleOnlyPoints, isNotEmpty);
+    final audioRequestsBeforeStaleTap = h.audio.requests.length;
+    await tester.tapAt(staleOnlyPoints.first);
+    await tester.pump();
+    expect(h.audio.requests, hasLength(audioRequestsBeforeStaleTap));
+    final oldSameRect = tester.getRect(oldSame);
+    final currentSameRect = tester.getRect(currentSame);
+    final staleAnswerPoints =
+        <Offset>[
+          Offset(oldSameRect.center.dx, oldSameRect.top + 2),
+          Offset(oldSameRect.center.dx, oldSameRect.bottom - 2),
+          Offset(oldSameRect.left + 2, oldSameRect.center.dy),
+          Offset(oldSameRect.right - 2, oldSameRect.center.dy),
+        ].where(
+          (point) =>
+              oldSameRect.contains(point) && !currentSameRect.contains(point),
+        );
+    expect(staleAnswerPoints, isNotEmpty);
+    await tester.tapAt(staleAnswerPoints.first);
+    await tester.pump();
+    expect(
+      h.store.submitted.where(
+        (command) => command.action is AnswerComparisonPair,
+      ),
+      hasLength(1),
+      reason: 'an outgoing answer cannot submit during the next question',
+    );
+
+    tester.binding.focusManager.primaryFocus?.unfocus();
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    expect(
+      tester
+          .getSemantics(find.bySemanticsLabel('Listen to sample A'))
+          .getSemanticsData()
+          .flagsCollection
+          .isFocused,
+      Tristate.isTrue,
+      reason: 'the first reachable hearing control belongs to the current pair',
+    );
+    semantics.dispose();
+    expect(saved.attempts, hasLength(1));
+  });
+
+  testWidgets(
+    'comparison_problem_transition_is_immediate_with_reduced_motion',
+    (tester) async {
+      tester.binding.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(
+        tester.binding.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+      final h = await harness(tester);
+      ProviderContainer? container;
+      addTearDown(() {
+        if (container != null) cleanup(container, h.audio);
+      });
+      container = await _mountComparison(
+        tester,
+        store: h.store,
+        audio: h.audio,
+        catalogue: catalogue,
+      );
+
+      final firstPrompt = _activeComparisonPrompt(tester);
+      final firstExercise = await _answerCurrentComparison(
+        tester,
+        catalogue: catalogue,
+        store: h.store,
+        audio: h.audio,
+      );
+      expect(firstExercise.sampleA.referenceId, firstPrompt.sampleAReferenceId);
+      await tester.tap(find.text('Continue'));
+      final advanced = await _readSnapshot(tester, h.store);
+      final slot = advanced.slots[comparisonActivityId]!;
+      final nextSession = LessonSectionSession.fromJson(
+        Map<String, dynamic>.from(slot.checkpoint.sessionJson),
+        itemIds: catalogue.exercises.map((exercise) => exercise.id).toList(),
+        contentRevision: catalogue.contentRevision,
+      );
+      final nextExercise = catalogue.exercise(nextSession.currentItemId!);
+      await tester.pump();
+
+      final nextPrompt = _activeComparisonPrompt(tester);
+      expect(nextPrompt.id, isNot(firstPrompt.id));
+      expect(nextPrompt.sampleAReferenceId, nextExercise.sampleA.referenceId);
+      expect(
+        find.byKey(
+          ValueKey<String>('comparison-problem-${firstPrompt.id}'),
+          skipOffstage: false,
+        ),
+        findsNothing,
+      );
+      expect(find.byType(ListeningExerciseFrame), findsOneWidget);
+    },
+  );
 
   testWidgets('uy_demo_active_prompt_hides_authored_answers_until_saved_debrief', (
     tester,
@@ -1814,6 +2117,7 @@ void main() {
       await tester.tap(find.text('Continue'));
       await _readSnapshot(tester, store);
       await tester.pump();
+      await tester.pumpAndSettle();
       expect(find.text('Listen to sample A'), findsOneWidget);
       final nextPrompt = tester
           .widget<SoundComparison>(find.byType(SoundComparison))
@@ -2959,6 +3263,7 @@ void main() {
       ) {
         await tester.pump();
       }
+      await tester.pumpAndSettle();
       expect(
         tester
             .widget<SoundComparison>(find.byType(SoundComparison))
