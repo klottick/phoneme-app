@@ -916,6 +916,174 @@ void main() {
     expect(tester.binding.transientCallbackCount, 0);
   });
 
+  testWidgets(
+    'imperative_map_launch_freezes_preview_and_pop_resumes_without_catch_up',
+    (tester) async {
+      final app = await _mountMapApp(tester, normalMotion: true);
+      addTearDown(() => _unmountMapApp(tester, app));
+
+      final ship = find.byKey(
+        const ValueKey('course-map-preview-ship'),
+        skipOffstage: false,
+      );
+      final origin = tester.getCenter(ship);
+      await tester.tap(find.byKey(const ValueKey('body-art-frame-comparison')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 180));
+      expect((tester.getCenter(ship) - origin).distance, greaterThan(10));
+      expect(find.text('Start comparison').hitTestable(), findsOneWidget);
+
+      // Exercise the real map action: CourseMapScreen._launch calls
+      // GoRouter.push, which places the lesson on the Navigator stack.
+      await tester.tap(find.text('Start comparison'));
+      await tester.pump();
+      expect(
+        app.router.state.uri.path,
+        '/course-comparison/en-fr-u-y-comparison',
+      );
+      expect(find.byType(CourseMapMotion, skipOffstage: false), findsOneWidget);
+      final Offset coveredPosition = tester.getCenter(ship);
+      await tester.pump(const Duration(seconds: 2));
+      expect(tester.getCenter(ship), coveredPosition);
+
+      app.router.pop();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      await tester.pump(const Duration(milliseconds: 240));
+      expect(
+        (tester.getCenter(ship) - coveredPosition).distance,
+        lessThan(.1),
+        reason: 'the ship stays frozen through the route reverse transition',
+      );
+      await tester.pump(const Duration(milliseconds: 180));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        (tester.getCenter(ship) - coveredPosition).distance,
+        greaterThan(5),
+      );
+      expect(app.store.submitted, isEmpty);
+      expect(app.audio.requests, isEmpty);
+
+      // Replacing the map while its preview is active must retire route
+      // listeners with the widget rather than leave a callback behind.
+      await tester.tap(find.byKey(const ValueKey('body-art-frame-discovery')));
+      await tester.pump();
+      app.router.go('/arcade');
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.byType(CourseMapMotion, skipOffstage: false), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'destination_and_tools_sheets_freeze_preview_through_fast_dismissal',
+    (tester) async {
+      final app = await _mountMapApp(tester, normalMotion: true);
+      addTearDown(() => _unmountMapApp(tester, app));
+
+      final ship = find.byKey(
+        const ValueKey('course-map-preview-ship'),
+        skipOffstage: false,
+      );
+      final origin = tester.getCenter(ship);
+      await tester.tap(find.byKey(const ValueKey('body-art-frame-comparison')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 180));
+      expect((tester.getCenter(ship) - origin).distance, greaterThan(10));
+      expect(
+        tester
+            .widget<CourseMapCanvas>(find.byType(CourseMapCanvas))
+            .selectedBodyId,
+        'comparison',
+      );
+
+      // The destination picker is the actual CourseSystemView modal route.
+      await tester.tap(find.byKey(const ValueKey('destination-picker')));
+      await tester.pump();
+      final Offset pickerCoveredPosition = tester.getCenter(ship);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(
+        (tester.getCenter(ship) - pickerCoveredPosition).distance,
+        lessThan(.1),
+      );
+
+      // Selecting a real destination retargets the preview while covered and
+      // dismisses the sheet through the picker’s normal selection path.
+      final discoveryRow = find.widgetWithText(ListTile, 'Hear the difference');
+      expect(discoveryRow.hitTestable(), findsOneWidget);
+      await tester.tap(discoveryRow);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(
+        (tester.getCenter(ship) - pickerCoveredPosition).distance,
+        lessThan(.1),
+        reason: 'the picker pop transition keeps the retargeted flight frozen',
+      );
+      await tester.pump(const Duration(milliseconds: 240));
+      expect(
+        (tester.getCenter(ship) - pickerCoveredPosition).distance,
+        lessThan(.1),
+        reason: 'resuming does not catch up across time spent under the sheet',
+      );
+      final discoveryTarget = tester.getCenter(
+        find.byKey(
+          const ValueKey('body-art-frame-discovery'),
+          skipOffstage: false,
+        ),
+      );
+      final discoveryDistanceAtResume =
+          (pickerCoveredPosition - discoveryTarget).distance;
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        (tester.getCenter(ship) - discoveryTarget).distance,
+        lessThan(discoveryDistanceAtResume),
+        reason: 'the suspended retarget resumes toward discovery',
+      );
+      expect(
+        tester
+            .widget<CourseMapCanvas>(find.byType(CourseMapCanvas))
+            .selectedBodyId,
+        'discovery',
+      );
+
+      // The map-tools sheet uses the other showModalBottomSheet path. Dismiss
+      // it before its entrance finishes to cover the quick-close lifecycle.
+      await tester.tap(find.byTooltip('More learning tools'));
+      await tester.pump();
+      final Offset toolsCoveredPosition = tester.getCenter(ship);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(
+        (tester.getCenter(ship) - toolsCoveredPosition).distance,
+        lessThan(.1),
+      );
+      await tester.tap(find.byTooltip('Close tools'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(
+        (tester.getCenter(ship) - toolsCoveredPosition).distance,
+        lessThan(.1),
+        reason: 'fast sheet dismissal does not resume motion during reverse',
+      );
+      await tester.pump(const Duration(milliseconds: 240));
+      expect(
+        (tester.getCenter(ship) - toolsCoveredPosition).distance,
+        lessThan(.1),
+      );
+      final toolsResumeDistance =
+          (toolsCoveredPosition - discoveryTarget).distance;
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        (tester.getCenter(ship) - discoveryTarget).distance,
+        lessThan(toolsResumeDistance),
+        reason: 'the tools sheet also resumes the finite flight',
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('map_has_no_page_scroll_and_inspection_only_changes_selection', (
     tester,
   ) async {

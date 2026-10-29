@@ -14,6 +14,7 @@ import 'package:linguist/src/core/course/sentence_hunt_content.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_providers.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_state.dart';
 import 'package:linguist/src/core/course/sentence_hunt_learning_store.dart';
+import 'package:linguist/src/core/widgets/purposeful_motion.dart';
 import 'package:linguist/src/features/course/exercises/listening_exercise_contract.dart';
 import 'package:linguist/src/features/course/exercises/sentence_hunt.dart';
 import 'package:linguist/src/features/course/exercises/sentence_hunt_controller.dart';
@@ -688,20 +689,27 @@ class _SentenceHuntLessonScreenState
                         child: const Text('Resume exercise'),
                       ),
                     if (showExercise) ...<Widget>[
-                      SentenceHunt(
-                        prompt: state!.prompt!,
-                        state: ListeningExerciseState(
-                          busy: state.busy,
-                          playing: state.playing,
-                          blocked: controlsBlocked,
-                          answered: state.feedback != null,
-                          feedback: state.feedback,
+                      PurposefulSwitcher(
+                        child: KeyedSubtree(
+                          key: ValueKey(
+                            'sentence-hunt-problem-${state!.prompt!.itemId}',
+                          ),
+                          child: SentenceHunt(
+                            prompt: state.prompt!,
+                            state: ListeningExerciseState(
+                              busy: state.busy,
+                              playing: state.playing,
+                              blocked: controlsBlocked,
+                              answered: state.feedback != null,
+                              feedback: state.feedback,
+                            ),
+                            selectedTokenIds: state.selectedTokenIds,
+                            canSubmit: state.canSubmit && !controlsBlocked,
+                            onPlay: controller!.play,
+                            onToggleToken: controller.toggleToken,
+                            onSubmit: controller.submit,
+                          ),
                         ),
-                        selectedTokenIds: state.selectedTokenIds,
-                        canSubmit: state.canSubmit && !controlsBlocked,
-                        onPlay: controller!.play,
-                        onToggleToken: controller.toggleToken,
-                        onSubmit: controller.submit,
                       ),
                       if (state.audioError != null) ...<Widget>[
                         Text(state.audioError!),

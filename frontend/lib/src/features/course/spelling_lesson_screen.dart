@@ -9,6 +9,7 @@ import '../../core/course/course_audio.dart';
 import '../../core/course/course_learning_error.dart';
 import '../../core/course/course_learning_providers.dart';
 import '../../core/course/french_uy_demo_spelling_content.dart';
+import '../../core/widgets/purposeful_motion.dart';
 import '../../core/course/lesson_policy.dart';
 import '../../core/course/lesson_section_session.dart';
 import '../../core/course/spelling_learning_command.dart';
@@ -992,7 +993,14 @@ class _SpellingLessonScreenState extends ConsumerState<SpellingLessonScreen>
                         _finishedView(slot)
                       else if (session?.phase == LessonSectionPhase.exercise &&
                           session?.currentItemId != null)
-                        _exerciseView()
+                        PurposefulSwitcher(
+                          child: KeyedSubtree(
+                            key: ValueKey(
+                              'spelling-problem-${session!.currentItemId}',
+                            ),
+                            child: _exerciseView(),
+                          ),
+                        )
                       else if (session?.phase == LessonSectionPhase.debrief)
                         _debriefView(slot, session!)
                       else
@@ -1043,10 +1051,15 @@ class _SpellingLessonScreenState extends ConsumerState<SpellingLessonScreen>
         Text(_audioError!),
       ],
       _optionButtons(),
-      if (_feedback case final SpellingAttempt attempt) ...<Widget>[
-        const SizedBox(height: 16),
-        _feedbackView(attempt),
-      ],
+      const SizedBox(height: 16),
+      PurposefulSwitcher(
+        child: _feedback == null
+            ? const SizedBox.shrink(key: ValueKey('spelling-feedback-none'))
+            : KeyedSubtree(
+                key: ValueKey('spelling-feedback-${_feedback!.itemId}'),
+                child: _feedbackView(_feedback!),
+              ),
+      ),
     ],
   );
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/widgets/purposeful_motion.dart';
 import 'listening_exercise_contract.dart';
 import 'listening_exercise_frame.dart';
 
@@ -26,43 +27,46 @@ class SoundComparison extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final locked = state.busy || state.blocked || state.answered;
-    return ListeningExerciseFrame(
-      instruction: prompt.instruction,
-      state: state,
-      controls: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                for (final sample in ComparisonSample.values) ...<Widget>[
-                  if (sample != ComparisonSample.a) const SizedBox(width: 12),
-                  Expanded(child: _sampleCard(context, sample, locked)),
+    return PurposefulSwitcher(
+      child: ListeningExerciseFrame(
+        key: ValueKey('comparison-problem-${prompt.id}'),
+        instruction: prompt.instruction,
+        state: state,
+        controls: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  for (final sample in ComparisonSample.values) ...<Widget>[
+                    if (sample != ComparisonSample.a) const SizedBox(width: 12),
+                    Expanded(child: _sampleCard(context, sample, locked)),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Same or different?',
-            style: Theme.of(context).textTheme.titleMedium,
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 8),
-          IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                for (final relation in PhonemeRelation.values) ...<Widget>[
-                  if (relation != PhonemeRelation.same)
-                    const SizedBox(width: 12),
-                  Expanded(child: _relationCard(context, relation, locked)),
+            const SizedBox(height: 20),
+            Text(
+              'Same or different?',
+              style: Theme.of(context).textTheme.titleMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  for (final relation in PhonemeRelation.values) ...<Widget>[
+                    if (relation != PhonemeRelation.same)
+                      const SizedBox(width: 12),
+                    Expanded(child: _relationCard(context, relation, locked)),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

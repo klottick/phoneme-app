@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:linguist/src/features/course_map/course_map_state.dart';
 import 'package:linguist/src/features/course_map/course_map_canvas.dart';
@@ -133,6 +134,90 @@ void main() {
     expect(state.currentBodyId, 'discovery');
     expect(find.text('Start comparison'), findsOneWidget);
   });
+
+  testWidgets(
+    'retiring_inspector_action_leaves_keyboard_focus_and_cannot_launch',
+    (tester) async {
+      final state = _state();
+      var selectedId = 'discovery';
+      final launched = <MapBodyState>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) => CourseSystemView(
+                state: state,
+                selectedBodyId: selectedId,
+                onInspect: (id) => setState(() => selectedId = id),
+                onLaunch: launched.add,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      // Use the real map target to replace the inspector while its outgoing
+      // button remains painted during AnimatedSwitcher’s exit.
+      final comparisonTarget = find.ancestor(
+        of: find.byKey(const ValueKey('body-art-frame-comparison')),
+        matching: find.byType(InkWell),
+      );
+      tester.widget<InkWell>(comparisonTarget).onTap!();
+      await tester.pump();
+      final oldPanel = find.byKey(
+        const ValueKey('destination-panel-discovery'),
+        skipOffstage: false,
+      );
+      final currentPanel = find.byKey(
+        const ValueKey('destination-panel-comparison'),
+        skipOffstage: false,
+      );
+      expect(oldPanel, findsOneWidget);
+      expect(currentPanel, findsOneWidget);
+
+      expect(
+        find.text('Start lesson', skipOffstage: false),
+        findsOneWidget,
+        reason: 'the outgoing action remains painted during the transition',
+      );
+      expect(
+        find.text('Start comparison', skipOffstage: false),
+        findsOneWidget,
+      );
+      tester.binding.focusManager.primaryFocus?.unfocus();
+      var retiringActionFocused = false;
+      for (var tab = 0; tab < state.bodies.length + 8; tab++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        if (_primaryFocusContainsText(tester, 'Start lesson')) {
+          retiringActionFocused = true;
+          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+          await tester.pump();
+          break;
+        }
+      }
+      expect(
+        launched,
+        isEmpty,
+        reason: 'keyboard activation cannot launch the retiring destination',
+      );
+      expect(
+        retiringActionFocused,
+        isFalse,
+        reason: 'keyboard traversal skips the retiring action',
+      );
+
+      // The current action stays interactive while both transition children
+      // are still painted.
+      final currentAction = find.widgetWithText(
+        FilledButton,
+        'Start comparison',
+      );
+      expect(currentAction.hitTestable(), findsOneWidget);
+      await tester.tap(currentAction);
+      expect(launched.map((body) => body.definition.id), ['comparison']);
+    },
+  );
 
   testWidgets('picker_selection_matches_the_resolved_inspector_fallback', (
     tester,
@@ -370,3 +455,20 @@ Widget _view(
     ),
   ),
 );
+
+bool _primaryFocusContainsText(WidgetTester tester, String text) {
+  final BuildContext? context =
+      tester.binding.focusManager.primaryFocus?.context;
+  if (context is! Element) return false;
+  var containsText = false;
+  void visit(Element element) {
+    if (element.widget case final Text widget when widget.data == text) {
+      containsText = true;
+      return;
+    }
+    if (!containsText) element.visitChildElements(visit);
+  }
+
+  visit(context);
+  return containsText;
+}

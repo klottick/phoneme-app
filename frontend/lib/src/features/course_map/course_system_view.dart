@@ -8,6 +8,8 @@ import 'course_destination_panel.dart';
 import 'course_map_canvas.dart';
 import 'course_map_state.dart';
 import 'french_space_map.dart';
+import '../../core/widgets/purposeful_motion.dart';
+import '../../routing/course_map_route_coverage.dart';
 
 class CourseSystemView extends StatelessWidget {
   const CourseSystemView({
@@ -18,6 +20,7 @@ class CourseSystemView extends StatelessWidget {
     required this.onLaunch,
     this.progressSummary,
     this.pickerRevision,
+    this.routeCoverageObserver,
   });
 
   final CourseMapState state;
@@ -26,6 +29,7 @@ class CourseSystemView extends StatelessWidget {
   final ValueChanged<MapBodyState> onLaunch;
   final Widget? progressSummary;
   final Object? pickerRevision;
+  final CourseMapRouteCoverageObserver? routeCoverageObserver;
 
   MapBodyState? get _selected =>
       state.bodies
@@ -63,13 +67,16 @@ class CourseSystemView extends StatelessWidget {
             child: Center(child: Text('No destinations are available.')),
           );
         }
-        return CourseDestinationPanel(
-          body: selected,
-          onLaunch: selected.launch == null ? null : () => onLaunch(selected),
-          focusOrder: state.bodies.length,
-          compact: true,
-          isCurrentLocation: selected.definition.id == current?.definition.id,
-          progressSummary: progressSummary,
+        return PurposefulSwitcher(
+          child: CourseDestinationPanel(
+            key: ValueKey('destination-panel-${selected.definition.id}'),
+            body: selected,
+            onLaunch: selected.launch == null ? null : () => onLaunch(selected),
+            focusOrder: state.bodies.length,
+            compact: true,
+            isCurrentLocation: selected.definition.id == current?.definition.id,
+            progressSummary: progressSummary,
+          ),
         );
       }
 
@@ -78,6 +85,7 @@ class CourseSystemView extends StatelessWidget {
         selectedBodyId: selected?.definition.id,
         onInspect: onInspect,
         focusOrderOffset: 0,
+        routeCoverageObserver: routeCoverageObserver,
       );
 
       final picker = _DestinationPickerButton(

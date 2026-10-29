@@ -7,6 +7,7 @@ import '../../core/theme/space_course_colors.dart';
 import 'course_map_catalogue.dart';
 import 'course_map_motion.dart';
 import 'course_map_state.dart';
+import '../../routing/course_map_route_coverage.dart';
 
 class CourseMapCanvas extends StatelessWidget {
   const CourseMapCanvas({
@@ -15,12 +16,14 @@ class CourseMapCanvas extends StatelessWidget {
     required this.selectedBodyId,
     required this.onInspect,
     this.focusOrderOffset = 0,
+    this.routeCoverageObserver,
   });
 
   final CourseMapState state;
   final String? selectedBodyId;
   final ValueChanged<String> onInspect;
   final int focusOrderOffset;
+  final CourseMapRouteCoverageObserver? routeCoverageObserver;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -38,10 +41,17 @@ class CourseMapCanvas extends StatelessWidget {
           current != null &&
           state.bodies.any((body) => body.definition.id == current);
       final currentRect = hasCurrentBody ? placements[current] : null;
+      final selectedRect = selectedBodyId == null
+          ? currentRect
+          : placements[selectedBodyId] ?? currentRect;
       return SizedBox(
         height: height,
         child: CourseMapMotion(
           anchor: currentRect?.center,
+          destination: selectedRect?.center,
+          selectionKey: selectedBodyId,
+          anchorKey: current,
+          routeCoverageObserver: routeCoverageObserver,
           child: Stack(
             clipBehavior: Clip.hardEdge,
             fit: StackFit.expand,

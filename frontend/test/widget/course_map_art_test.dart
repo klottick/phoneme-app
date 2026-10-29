@@ -233,7 +233,11 @@ Future<void> _verifyRenderedArtwork(
       .widgetList<Image>(find.byType(Image))
       .map(_assetPath)
       .toList();
-  expect(renderedPaths, hasLength(13));
+  expect(renderedPaths, hasLength(14));
+  expect(
+    renderedPaths,
+    contains('assets/images/course_map/art/ship_preview.png'),
+  );
   final decodedPaths = await tester.runAsync(() async {
     final decoded = <String>[];
     for (final path in renderedPaths) {
@@ -304,6 +308,7 @@ Future<void> _verifyRenderedArtwork(
   );
   expect(_assetPath(sun), 'assets/images/course_map/art/sun.png');
   expectedPaths.add(_assetPath(sun));
+  expectedPaths.add('assets/images/course_map/art/ship_preview.png');
   expect(renderedPaths, unorderedEquals(expectedPaths));
 }
 
