@@ -45,7 +45,7 @@ final MapSystemDefinition _frenchUySystem = MapSystemDefinition(
       id: 'comparison',
       title: 'Compare /u/ and /y/',
       description:
-          'Demo practice: this authored comparison content has not had qualified French review. It is practice, not an assessment.',
+          'Listen to two words and decide whether their target sounds match.',
       role: MapBodyRole.planet,
       optional: false,
       planned: false,
@@ -72,8 +72,7 @@ final MapSystemDefinition _frenchUySystem = MapSystemDefinition(
     MapBodyDefinition(
       id: 'spelling',
       title: 'Sound → spelling',
-      description:
-          'Demo practice: this authored spelling content has not had qualified French review. It is practice, not an assessment.',
+      description: 'Listen to a French word and choose its vowel spelling.',
       role: MapBodyRole.planet,
       optional: false,
       planned: false,
@@ -128,10 +127,8 @@ final MapSystemDefinition _frenchUySystem = MapSystemDefinition(
       id: 'mixed-comparison',
       title: 'Mixed comparison practice',
       description:
-          'Optional cross-system station: mixed-phoneme comparison practice '
-          'that covers sounds beyond /u/ and /y/, with its own evidence and '
-          'completion. It is alpha practice, not the system comparison '
-          'lesson.',
+          'Optional comparison practice with broader sound pairs and separate '
+          'progress.',
       role: MapBodyRole.station,
       optional: true,
       planned: false,

@@ -110,6 +110,7 @@ void main() {
       expect(storeAcquisitions, 2);
       expect(catalogueAcquisitions, 2);
       expect(find.bySemanticsLabel('Word 1 of 5: Tu'), findsOneWidget);
+      expect(find.text('0/5 completed · 5 remaining'), findsOneWidget);
       expect(find.textContaining('Synthetic test note'), findsNothing);
       expect(find.textContaining('Words with target:'), findsNothing);
       await tester.tap(find.text('Play sentence'));
@@ -255,6 +256,7 @@ void main() {
       await tester.tap(find.text('Submit answer'));
       await tester.pumpAndSettle();
       expect(find.text('Not yet'), findsOneWidget);
+      expect(find.text('1/5 completed · 4 remaining'), findsOneWidget);
       expect(find.text('Continue'), findsOneWidget);
       expect(
         rig.store.submitted.where(

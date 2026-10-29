@@ -66,23 +66,29 @@ void main() {
         ),
       );
       await _settle(tester);
+      expect(find.text('0/4 completed · 4 remaining'), findsOneWidget);
       await tester.tap(find.text('Listen to French word'));
       await _settle(tester);
       await tester.tap(find.text('/i/'));
       await _settle(tester);
       expect(find.textContaining('could not be saved'), findsOneWidget);
-      await tester.scrollUntilVisible(find.text('Next word'), 200);
-      expect(find.text('Next word'), findsOneWidget);
+      expect(
+        find.text('0/4 completed · 4 remaining'),
+        findsOneWidget,
+        reason: 'failed answer save is not persisted progress',
+      );
+      expect(find.text('Next word'), findsNothing);
+      expect(find.text('Retry saving'), findsOneWidget);
       expect(
         tester
             .widget<FilledButton>(
               find.ancestor(
-                of: find.text('Next word'),
+                of: find.text('Retry saving'),
                 matching: find.byType(FilledButton),
               ),
             )
             .onPressed,
-        isNull,
+        isNotNull,
       );
       final failed = store.submitted.last;
       expect(failed.action, isA<ChooseSound>());
@@ -90,6 +96,8 @@ void main() {
       store.failingActions.clear();
       await tester.tap(find.text('Retry saving'));
       await _settle(tester);
+      expect(find.text('1/4 completed · 3 remaining'), findsOneWidget);
+      expect(find.text('Next word'), findsOneWidget);
       expect(store.submitted.last, same(failed));
       expect(store.committedState.history, hasLength(1));
       expect(store.committedState.history.single.attempts, hasLength(1));

@@ -19,37 +19,50 @@ class ArcadeLobby extends StatelessWidget {
   const ArcadeLobby({super.key});
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Sound arcade')),
-        body: ListView(padding: const EdgeInsets.all(24), children: [
-          Text('One minute. One more combo.',
-              style: Theme.of(context).textTheme.headlineMedium),
-          const SizedBox(height: 12),
-          const Text(
-              'English → French\nPlay a quick round or keep your board going. No lives, no daily limits.'),
-          const SizedBox(height: 24),
-          Card(
-              child: ListTile(
-                  contentPadding: const EdgeInsets.all(24),
-                  leading: const Icon(Icons.headphones, size: 36),
-                  title: const Text('Sound Match'),
-                  subtitle: const Text(
-                      'Swap gems. Chase cascades. Hear French sounds.\nAudio required · 60 seconds'),
-                  trailing: const Icon(Icons.play_arrow),
-                  onTap: () => context.push('/arcade/sound'))),
-          Card(
-              child: ListTile(
-                  contentPadding: const EdgeInsets.all(24),
-                  leading: const Icon(Icons.gesture, size: 36),
-                  title: const Text('Word Match'),
-                  subtitle: const Text(
-                      'Link words. Clear obstacles. Find their shared sound.\nNo audio needed · 60 seconds'),
-                  trailing: const Icon(Icons.play_arrow),
-                  onTap: () => context.push('/arcade/word'))),
-          const SizedBox(height: 20),
-          const Text(
-              'Game points reward puzzle skill. Sound answers are tracked separately from your score.'),
-        ]),
-      );
+    appBar: AppBar(title: const Text('Sound arcade')),
+    body: ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        Text(
+          'One minute. One more combo.',
+          style: Theme.of(context).textTheme.headlineMedium,
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'English → French\nPlay a quick round or keep your board going. No lives, no daily limits.',
+        ),
+        const SizedBox(height: 24),
+        Card(
+          child: ListTile(
+            contentPadding: const EdgeInsets.all(24),
+            leading: const Icon(Icons.headphones, size: 36),
+            title: const Text('Sound Match'),
+            subtitle: const Text(
+              'Swap gems. Chase cascades. Hear French sounds.\nAudio required · 60 seconds',
+            ),
+            trailing: const Icon(Icons.play_arrow),
+            onTap: () => context.push('/arcade/sound'),
+          ),
+        ),
+        Card(
+          child: ListTile(
+            contentPadding: const EdgeInsets.all(24),
+            leading: const Icon(Icons.gesture, size: 36),
+            title: const Text('Word Match'),
+            subtitle: const Text(
+              'Link words. Clear obstacles. Find their shared sound.\nNo audio needed · 60 seconds',
+            ),
+            trailing: const Icon(Icons.play_arrow),
+            onTap: () => context.push('/arcade/word'),
+          ),
+        ),
+        const SizedBox(height: 20),
+        const Text(
+          'Game points reward puzzle skill. Sound answers are tracked separately from your score.',
+        ),
+      ],
+    ),
+  );
 }
 
 class ArcadeScreen extends ConsumerStatefulWidget {
@@ -97,10 +110,10 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
   CourseAudio? _audio;
   String get _activityId => widget.silent ? 'arcade:word' : 'arcade:sound';
   ArcadeClockState? get _clock => switch (_slot?.snapshot) {
-        SoundGameCheckpoint(:final clock) => clock,
-        WordGameCheckpoint(:final clock) => clock,
-        _ => null,
-      };
+    SoundGameCheckpoint(:final clock) => clock,
+    WordGameCheckpoint(:final clock) => clock,
+    _ => null,
+  };
   int get _remaining => ((_clock?.remaining ?? 60) - _elapsed).clamp(0, 60);
   int get _score => _clock?.score ?? 0;
   int get _round => _clock?.round ?? 1;
@@ -144,8 +157,9 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
       }
       _state = state;
       _slot = state.activities[_activityId];
-      final definition =
-          ref.read(learningRegistryProvider).require(_activityId);
+      final definition = ref
+          .read(learningRegistryProvider)
+          .require(_activityId);
       if (_slot != null &&
           (_slot!.contentRevision != definition.contentRevision ||
               _slot!.kind != definition.kind)) {
@@ -192,7 +206,9 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
   }
 
   void _onStoreReplaced(
-      CourseLearningStore? previous, CourseLearningStore next) {
+    CourseLearningStore? previous,
+    CourseLearningStore next,
+  ) {
     if (identical(previous, next)) return;
     _generation++;
     _loadOp++;
@@ -226,8 +242,11 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
     }
     final store = _store;
     final generation = _generation;
-    _pendingCommand =
-        store.prepare(state: _state!, activityId: _activityId, action: action);
+    _pendingCommand = store.prepare(
+      state: _state!,
+      activityId: _activityId,
+      action: action,
+    );
     _pendingStore = store;
     _pendingSuccess = onSuccess;
     return _submitPending(generation);
@@ -327,11 +346,13 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
       try {
         successCallback();
       } catch (error, stackTrace) {
-        FlutterError.reportError(FlutterErrorDetails(
-          exception: error,
-          stack: stackTrace,
-          library: 'arcade save continuation',
-        ));
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: error,
+            stack: stackTrace,
+            library: 'arcade save continuation',
+          ),
+        );
       }
     }
     return committed;
@@ -347,8 +368,12 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
     // Freeze the session while persisting it. If storage fails, keep this
     // screen and its in-memory board so the pause menu can retry the save.
     _timer?.cancel();
-    unawaited(_send(CheckpointArcade(elapsedSeconds: _elapsed, paused: true),
-        onSuccess: () => context.pushReplacement('/arcade/word')));
+    unawaited(
+      _send(
+        CheckpointArcade(elapsedSeconds: _elapsed, paused: true),
+        onSuccess: () => context.pushReplacement('/arcade/word'),
+      ),
+    );
   }
 
   Future<void> _start() async {
@@ -382,11 +407,13 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
       if (!mounted || generation != _generation || !identical(store, _store)) {
         return;
       }
-      unawaited(_send(
-        CheckpointArcade(elapsedSeconds: 0, paused: false),
-        onSuccess: () =>
-            _observePreview(onSuccess: () => _activate(resetCueAge: true)),
-      ));
+      unawaited(
+        _send(
+          CheckpointArcade(elapsedSeconds: 0, paused: false),
+          onSuccess: () =>
+              _observePreview(onSuccess: () => _activate(resetCueAge: true)),
+        ),
+      );
     });
   }
 
@@ -429,7 +456,8 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
         _showSummary = true;
         _timer?.cancel();
         unawaited(
-            _send(CheckpointArcade(elapsedSeconds: _elapsed, paused: true)));
+          _send(CheckpointArcade(elapsedSeconds: _elapsed, paused: true)),
+        );
       } else if (!widget.silent && _cueSound == null && _cueAge >= 12) {
         _newCue();
       }
@@ -467,17 +495,25 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
       'beau': 'o',
     };
     final contexts = widget.silent
-        ? preview.entries
-            .where((entry) => entry.value == 'u' || entry.value == 'y')
+        ? preview.entries.where(
+            (entry) => entry.value == 'u' || entry.value == 'y',
+          )
         : preview.entries;
     final items = contexts
-        .map((entry) =>
-            ItemContextKey(itemId: entry.key, targetSound: entry.value))
+        .map(
+          (entry) =>
+              ItemContextKey(itemId: entry.key, targetSound: entry.value),
+        )
         .toSet();
-    unawaited(_send(
+    unawaited(
+      _send(
         ObserveAssistance(
-            items: items, flags: {AssistanceFlag.explanationVisible}),
-        onSuccess: onSuccess));
+          items: items,
+          flags: {AssistanceFlag.explanationVisible},
+        ),
+        onSuccess: onSuccess,
+      ),
+    );
   }
 
   Future<void> _newCue() async {
@@ -517,8 +553,10 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
       if (generation != _cueGeneration || !mounted) return;
     } catch (_) {
       if (generation == _cueGeneration && mounted) {
-        setState(() => _message =
-            'Audio unavailable. Replay to retry, or play Word Match without sound.');
+        setState(
+          () => _message =
+              'Audio unavailable. Replay to retry, or play Word Match without sound.',
+        );
       }
     } finally {
       // A stale settlement must not clear a newer request's busy state.
@@ -552,28 +590,34 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
         ? HeardSoundCue(
             wordId: _cueWord!,
             targetSound: _cueSound!,
-            audioSource: AttemptAudioSource.pendingRecording)
+            audioSource: AttemptAudioSource.pendingRecording,
+          )
         : null;
     setState(() => _selected = null);
     _timer?.cancel();
-    unawaited(_send(
+    unawaited(
+      _send(
         SwapSoundTiles(
-            first: first,
-            second: index,
-            cue: cue,
-            elapsedSeconds: _elapsed), onSuccess: () {
-      if (cue != null) {
-        _cueSound = null;
-        _cueWord = null;
-        _audioReady = false;
-        _cueAge = 0;
-      }
-      if (!_roundOver) {
-        _activate();
-      } else {
-        _started = true;
-      }
-    }));
+          first: first,
+          second: index,
+          cue: cue,
+          elapsedSeconds: _elapsed,
+        ),
+        onSuccess: () {
+          if (cue != null) {
+            _cueSound = null;
+            _cueWord = null;
+            _audioReady = false;
+            _cueAge = 0;
+          }
+          if (!_roundOver) {
+            _activate();
+          } else {
+            _started = true;
+          }
+        },
+      ),
+    );
   }
 
   void _addWord(int index) {
@@ -596,8 +640,10 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
         local.dy >= box.size.height) {
       return;
     }
-    _addWord((local.dy / (box.size.height / 4)).floor() * 4 +
-        (local.dx / (box.size.width / 4)).floor());
+    _addWord(
+      (local.dy / (box.size.height / 4)).floor() * 4 +
+          (local.dx / (box.size.width / 4)).floor(),
+    );
   }
 
   void _submitWord() {
@@ -605,14 +651,18 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
     final indices = List<int>.of(_chain);
     setState(() => _chain.clear());
     _timer?.cancel();
-    unawaited(_send(LinkWordTiles(indices: indices, elapsedSeconds: _elapsed),
+    unawaited(
+      _send(
+        LinkWordTiles(indices: indices, elapsedSeconds: _elapsed),
         onSuccess: () {
-      if (!_roundOver) {
-        _activate();
-      } else {
-        _started = true;
-      }
-    }));
+          if (!_roundOver) {
+            _activate();
+          } else {
+            _started = true;
+          }
+        },
+      ),
+    );
   }
 
   @override
@@ -658,357 +708,427 @@ class _ArcadeScreenState extends ConsumerState<ArcadeScreen>
         if (!didPop) {
           _timer?.cancel();
           _checkpoint(
-              paused: true,
-              onSuccess: () => setState(() {
-                    _started = false;
-                    _showSummary = true;
-                  }));
+            paused: true,
+            onSuccess: () => setState(() {
+              _started = false;
+              _showSummary = true;
+            }),
+          );
         }
       },
       child: Scaffold(
         appBar: AppBar(
-            title: Text(widget.silent ? 'Word Match' : 'Sound Match'),
-            actions: [
-              if (_started && !_roundOver)
-                IconButton(
-                    tooltip: 'Pause',
-                    onPressed: () => _checkpoint(
-                        paused: true,
-                        onSuccess: () => setState(() {
-                              _started = false;
-                              _showSummary = true;
-                            })),
-                    icon: const Icon(Icons.pause)),
-            ]),
+          title: Text(widget.silent ? 'Word Match' : 'Sound Match'),
+          actions: [
+            if (_started && !_roundOver)
+              IconButton(
+                tooltip: 'Pause',
+                onPressed: () => _checkpoint(
+                  paused: true,
+                  onSuccess: () => setState(() {
+                    _started = false;
+                    _showSummary = true;
+                  }),
+                ),
+                icon: const Icon(Icons.pause),
+              ),
+          ],
+        ),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : Center(
                 child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 560),
-                    child: ListView(
-                      padding: const EdgeInsets.all(16),
-                      children: [
-                        if (!_started && !_showSummary)
-                          ..._intro(context)
-                        else if (_roundOver || _showSummary)
-                          ..._summary(context)
-                        else ...[
-                          Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text('Round $_round · ${_remaining}s',
-                                    style:
-                                        Theme.of(context).textTheme.titleLarge),
-                                Text('$_score pts',
-                                    style:
-                                        Theme.of(context).textTheme.titleLarge),
-                              ]),
-                          const SizedBox(height: 8),
-                          LinearProgressIndicator(value: _remaining / 60),
-                          const SizedBox(height: 16),
-                          Text(
-                              widget.silent
-                                  ? 'Connect words containing /${_word.target}/'
-                                  : 'Swap neighbors. Match three.',
-                              style: Theme.of(context).textTheme.titleMedium),
-                          if (!widget.silent && _cueSound != null)
-                            Row(children: [
-                              IconButton(
-                                  tooltip: 'Replay sound',
-                                  onPressed: _busy ? null : _playCue,
-                                  icon: const Icon(Icons.volume_up)),
-                              const Expanded(
-                                  child: Text('Listen for the bonus sound')),
-                            ]),
-                          if (!widget.silent)
-                            Text(alphaAudioDisclosure,
-                                textAlign: TextAlign.end,
-                                style: Theme.of(context).textTheme.bodySmall),
-                          const SizedBox(height: 8),
-                          if (widget.silent)
-                            GestureDetector(
-                              onPanDown: (d) => _dragOrigin = d.globalPosition,
-                              onPanStart: (d) {
-                                _chain.clear();
-                                if (_dragOrigin != null) _drag(_dragOrigin!);
-                                _drag(d.globalPosition);
-                              },
-                              onPanUpdate: (d) => _drag(d.globalPosition),
-                              onPanEnd: (_) => _submitWord(),
-                              child: _wordBoard(context),
-                            )
-                          else
-                            _soundBoard(context),
-                          const SizedBox(height: 12),
-                          if (widget.silent)
-                            Wrap(spacing: 8, children: [
-                              FilledButton(
-                                  onPressed:
-                                      _chain.length >= 3 ? _submitWord : null,
-                                  child: Text('Link ${_chain.length} words')),
-                              TextButton(
-                                  onPressed: () =>
-                                      setState(() => _chain.clear()),
-                                  child: const Text('Clear selection')),
-                            ]),
-                          const SizedBox(height: 8),
-                          Text(_message,
-                              key: const ValueKey('game-feedback'),
-                              style: Theme.of(context).textTheme.bodyLarge),
-                          if (_saveError != null) ...[
-                            Text(_saveError!),
-                            TextButton(
-                                onPressed: _submitPending,
-                                child: const Text('Retry save')),
-                          ],
-                          if (_reloadRequired)
-                            FilledButton(
-                              onPressed: _loading ? null : _reloadBoard,
-                              child: const Text('Reload saved board'),
+                  constraints: const BoxConstraints(maxWidth: 560),
+                  child: ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      if (!_started && !_showSummary)
+                        ..._intro(context)
+                      else if (_roundOver || _showSummary)
+                        ..._summary(context)
+                      else ...[
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Round $_round · ${_remaining}s',
+                              style: Theme.of(context).textTheme.titleLarge,
                             ),
-                          if (!widget.silent)
-                            TextButton(
-                                onPressed: _switchToWordMatch,
-                                child: const Text(
-                                    'Play without audio: Word Match')),
+                            Text(
+                              '$_score pts',
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        LinearProgressIndicator(value: _remaining / 60),
+                        const SizedBox(height: 16),
+                        Text(
+                          widget.silent
+                              ? 'Connect words containing /${_word.target}/'
+                              : 'Swap neighbors. Match three.',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        if (!widget.silent && _cueSound != null)
+                          Row(
+                            children: [
+                              IconButton(
+                                tooltip: 'Replay sound',
+                                onPressed: _busy ? null : _playCue,
+                                icon: const Icon(Icons.volume_up),
+                              ),
+                              const Expanded(
+                                child: Text('Listen for the bonus sound'),
+                              ),
+                            ],
+                          ),
+                        const SizedBox(height: 8),
+                        if (widget.silent)
+                          GestureDetector(
+                            onPanDown: (d) => _dragOrigin = d.globalPosition,
+                            onPanStart: (d) {
+                              _chain.clear();
+                              if (_dragOrigin != null) _drag(_dragOrigin!);
+                              _drag(d.globalPosition);
+                            },
+                            onPanUpdate: (d) => _drag(d.globalPosition),
+                            onPanEnd: (_) => _submitWord(),
+                            child: _wordBoard(context),
+                          )
+                        else
+                          _soundBoard(context),
+                        const SizedBox(height: 12),
+                        if (widget.silent)
+                          Wrap(
+                            spacing: 8,
+                            children: [
+                              FilledButton(
+                                onPressed: _chain.length >= 3
+                                    ? _submitWord
+                                    : null,
+                                child: Text('Link ${_chain.length} words'),
+                              ),
+                              TextButton(
+                                onPressed: () => setState(() => _chain.clear()),
+                                child: const Text('Clear selection'),
+                              ),
+                            ],
+                          ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _message,
+                          key: const ValueKey('game-feedback'),
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                        if (_saveError != null) ...[
+                          Text(_saveError!),
+                          TextButton(
+                            onPressed: _submitPending,
+                            child: const Text('Retry save'),
+                          ),
                         ],
+                        if (_reloadRequired)
+                          FilledButton(
+                            onPressed: _loading ? null : _reloadBoard,
+                            child: const Text('Reload saved board'),
+                          ),
+                        if (!widget.silent)
+                          TextButton(
+                            onPressed: _switchToWordMatch,
+                            child: const Text('Play without audio: Word Match'),
+                          ),
                       ],
-                    )),
+                    ],
+                  ),
+                ),
               ),
       ),
     );
   }
 
   List<Widget> _intro(BuildContext context) => [
-        Icon(widget.silent ? Icons.gesture : Icons.headphones,
-            size: 64, color: Theme.of(context).colorScheme.primary),
-        const SizedBox(height: 20),
-        Text(widget.silent ? 'No audio needed' : 'Headphones on. Gems ready.',
-            style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 12),
-        Text(widget.silent
-            ? 'Drag through 3 or more neighboring words containing the target sound. Diagonals count! You can also tap words, then Link. Long chains earn stars; stars clear rows. Crack outlined obstacles for +50.'
-            : 'Tap two neighboring gems to swap them. Match 3 or more to clear a line. Four earns a star that clears a row. Cascades multiply points. Every so often, listen to a French word and match its vowel family for a bonus.'),
-        const SizedBox(height: 16),
-        const Card(
-            child: Padding(
-                padding: EdgeInsets.all(16),
-                child: Text(
-                    'Quick sound preview\n\n/u/ → tout, rouge, vous: “ou”, a steady rounded vowel.\n/y/ → tu, rue, lune: say /i/ with rounded lips.\n/i/ → lit: a steady “ee”.\n/o/ → beau: a steady “oh”, without a glide.'))),
-        const SizedBox(height: 16),
-        FilledButton(
-            onPressed: _loadFailed ||
-                    _reloadRequired ||
-                    _saveBusy ||
-                    _pendingCommand != null
-                ? null
-                : _start,
-            child: Text(_slot != null
-                ? (_contentChanged ? 'Start new run' : 'Resume saved board')
-                : 'Start 60-second round')),
-        if (_loadFailed)
-          FilledButton(
-              onPressed: _loading ? null : _retryLoad,
-              child: const Text('Retry loading')),
-        if (_saveError != null) ...[
-          Text(_saveError!),
-          TextButton(
-              onPressed: _saveBusy ? null : _submitPending,
-              child: const Text('Retry save')),
-        ],
-        if (_reloadRequired)
-          FilledButton(
-              onPressed: _loading ? null : _reloadBoard,
-              child: const Text('Reload saved board')),
-        const SizedBox(height: 12),
-        const Text(
-            'Stop after a minute or continue the same board. Puzzle points do not determine lesson completion.'),
-        if (_message.isNotEmpty) Text(_message),
-      ];
+    Icon(
+      widget.silent ? Icons.gesture : Icons.headphones,
+      size: 64,
+      color: Theme.of(context).colorScheme.primary,
+    ),
+    const SizedBox(height: 20),
+    Text(
+      widget.silent ? 'No audio needed' : 'Headphones on. Gems ready.',
+      style: Theme.of(context).textTheme.headlineSmall,
+    ),
+    const SizedBox(height: 12),
+    Text(
+      widget.silent
+          ? 'Drag through 3 or more neighboring words containing the target sound. Diagonals count! You can also tap words, then Link. Long chains earn stars; stars clear rows. Crack outlined obstacles for +50.'
+          : 'Tap two neighboring gems to swap them. Match 3 or more to clear a line. Four earns a star that clears a row. Cascades multiply points. Every so often, listen to a French word and match its vowel family for a bonus.',
+    ),
+    const SizedBox(height: 16),
+    const Card(
+      child: Padding(
+        padding: EdgeInsets.all(16),
+        child: Text(
+          'Quick sound preview\n\n/u/ → tout, rouge, vous: “ou”, a steady rounded vowel.\n/y/ → tu, rue, lune: say /i/ with rounded lips.\n/i/ → lit: a steady “ee”.\n/o/ → beau: a steady “oh”, without a glide.',
+        ),
+      ),
+    ),
+    const SizedBox(height: 16),
+    FilledButton(
+      onPressed:
+          _loadFailed || _reloadRequired || _saveBusy || _pendingCommand != null
+          ? null
+          : _start,
+      child: Text(
+        _slot != null
+            ? (_contentChanged ? 'Start new run' : 'Resume saved board')
+            : 'Start 60-second round',
+      ),
+    ),
+    if (_loadFailed)
+      FilledButton(
+        onPressed: _loading ? null : _retryLoad,
+        child: const Text('Retry loading'),
+      ),
+    if (_saveError != null) ...[
+      Text(_saveError!),
+      TextButton(
+        onPressed: _saveBusy ? null : _submitPending,
+        child: const Text('Retry save'),
+      ),
+    ],
+    if (_reloadRequired)
+      FilledButton(
+        onPressed: _loading ? null : _reloadBoard,
+        child: const Text('Reload saved board'),
+      ),
+    const SizedBox(height: 12),
+    const Text(
+      'Stop after a minute or continue the same board. Puzzle points do not determine lesson completion.',
+    ),
+    if (_message.isNotEmpty) Text(_message),
+  ];
 
   List<Widget> _summary(BuildContext context) => [
-        const Icon(Icons.auto_awesome, size: 64),
-        const SizedBox(height: 20),
-        Text(_roundOver ? 'Round complete' : 'Paused',
-            style: Theme.of(context).textTheme.headlineMedium),
-        Text('$_score points · Round $_round',
-            style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 24),
-        FilledButton(
-            onPressed: _saveBusy
-                ? null
-                : () async {
-                    if (!await _send(_roundOver
-                        ? const ContinueArcadeRound()
-                        : CheckpointArcade(elapsedSeconds: 0, paused: false))) {
-                      return;
+    const Icon(Icons.auto_awesome, size: 64),
+    const SizedBox(height: 20),
+    Text(
+      _roundOver ? 'Round complete' : 'Paused',
+      style: Theme.of(context).textTheme.headlineMedium,
+    ),
+    Text(
+      '$_score points · Round $_round',
+      style: Theme.of(context).textTheme.titleLarge,
+    ),
+    const SizedBox(height: 24),
+    FilledButton(
+      onPressed: _saveBusy
+          ? null
+          : () async {
+              if (!await _send(
+                _roundOver
+                    ? const ContinueArcadeRound()
+                    : CheckpointArcade(elapsedSeconds: 0, paused: false),
+              )) {
+                return;
+              }
+              setState(() {
+                _chain.clear();
+                _selected = null;
+                _cueAge = 0;
+                _cueSound = null;
+                _cueWord = null;
+                _audioReady = false;
+                _showSummary = false;
+              });
+              _activate();
+            },
+      child: Text(_roundOver ? 'Continue this board' : 'Resume'),
+    ),
+    TextButton(
+      onPressed: _saveBusy
+          ? null
+          : () async {
+              await _checkpoint(
+                paused: true,
+                onSuccess: () {
+                  if (!mounted) return;
+                  setState(() {
+                    _started = false;
+                    _showSummary = true;
+                  });
+                  if (context.mounted) {
+                    final router = GoRouter.of(context);
+                    if (router.canPop()) {
+                      router.pop();
+                    } else {
+                      router.go('/arcade');
                     }
-                    setState(() {
-                      _chain.clear();
-                      _selected = null;
-                      _cueAge = 0;
-                      _cueSound = null;
-                      _cueWord = null;
-                      _audioReady = false;
-                      _showSummary = false;
-                    });
-                    _activate();
-                  },
-            child: Text(_roundOver ? 'Continue this board' : 'Resume')),
-        TextButton(
-            onPressed: _saveBusy
-                ? null
-                : () async {
-                    await _checkpoint(
-                        paused: true,
-                        onSuccess: () {
-                          if (!mounted) return;
-                          setState(() {
-                            _started = false;
-                            _showSummary = true;
-                          });
-                          if (context.mounted) {
-                            final router = GoRouter.of(context);
-                            if (router.canPop()) {
-                              router.pop();
-                            } else {
-                              router.go('/arcade');
-                            }
-                          }
-                        });
-                  },
-            child: const Text('Finish')),
-        if (_saveError != null) ...[
-          Text(_saveError!),
-          TextButton(
-              onPressed: _submitPending, child: const Text('Retry save')),
-        ],
-      ];
+                  }
+                },
+              );
+            },
+      child: const Text('Finish'),
+    ),
+    if (_saveError != null) ...[
+      Text(_saveError!),
+      TextButton(onPressed: _submitPending, child: const Text('Retry save')),
+    ],
+  ];
 
   Widget _wordBoard(BuildContext context) => AspectRatio(
-      aspectRatio: 1,
-      child: GridView.builder(
-        key: _boardKey,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: 16,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 4, crossAxisSpacing: 4, mainAxisSpacing: 4),
-        itemBuilder: (_, i) {
-          final word = wordByText(_word.board[i]);
-          final selected = _chain.contains(i);
-          final hint = _word.moves < 4;
-          final offset = word.text.indexOf(word.hint);
-          return Tooltip(
-              key: ValueKey('word-tile-$i'),
-              message: word.meaning,
-              child: Material(
-                color: selected
-                    ? Theme.of(context).colorScheme.primaryContainer
-                    : Theme.of(context).colorScheme.surfaceContainerHighest,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(
-                        color: _word.obstacles.contains(i)
-                            ? Colors.orange
-                            : selected
-                                ? Theme.of(context).colorScheme.primary
-                                : Colors.transparent,
-                        width: _word.obstacles.contains(i) ? 3 : 2)),
-                child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () => _addWord(i),
-                    child: Center(
-                        child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        if (_word.stars.contains(i))
-                          const Icon(Icons.star, size: 18),
-                        FittedBox(
-                            child: Padding(
-                                padding: const EdgeInsets.all(4),
-                                child: Text.rich(
-                                    TextSpan(children: [
-                                      TextSpan(
-                                          text: word.text.substring(0, offset)),
-                                      TextSpan(
-                                          text: word.hint,
-                                          style: hint
-                                              ? const TextStyle(
-                                                  fontWeight: FontWeight.w900,
-                                                  decoration:
-                                                      TextDecoration.underline)
-                                              : null),
-                                      TextSpan(
-                                          text: word.text.substring(
-                                              offset + word.hint.length)),
-                                    ]),
-                                    style: const TextStyle(fontSize: 20)))),
-                        if (selected)
-                          Text('${_chain.indexOf(i) + 1}',
-                              style: const TextStyle(fontSize: 11)),
-                      ],
-                    ))),
-              ));
-        },
-      ));
+    aspectRatio: 1,
+    child: GridView.builder(
+      key: _boardKey,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: 16,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 4,
+        crossAxisSpacing: 4,
+        mainAxisSpacing: 4,
+      ),
+      itemBuilder: (_, i) {
+        final word = wordByText(_word.board[i]);
+        final selected = _chain.contains(i);
+        final hint = _word.moves < 4;
+        final offset = word.text.indexOf(word.hint);
+        return Tooltip(
+          key: ValueKey('word-tile-$i'),
+          message: word.meaning,
+          child: Material(
+            color: selected
+                ? Theme.of(context).colorScheme.primaryContainer
+                : Theme.of(context).colorScheme.surfaceContainerHighest,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(
+                color: _word.obstacles.contains(i)
+                    ? Colors.orange
+                    : selected
+                    ? Theme.of(context).colorScheme.primary
+                    : Colors.transparent,
+                width: _word.obstacles.contains(i) ? 3 : 2,
+              ),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => _addWord(i),
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (_word.stars.contains(i))
+                      const Icon(Icons.star, size: 18),
+                    FittedBox(
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(text: word.text.substring(0, offset)),
+                              TextSpan(
+                                text: word.hint,
+                                style: hint
+                                    ? const TextStyle(
+                                        fontWeight: FontWeight.w900,
+                                        decoration: TextDecoration.underline,
+                                      )
+                                    : null,
+                              ),
+                              TextSpan(
+                                text: word.text.substring(
+                                  offset + word.hint.length,
+                                ),
+                              ),
+                            ],
+                          ),
+                          style: const TextStyle(fontSize: 20),
+                        ),
+                      ),
+                    ),
+                    if (selected)
+                      Text(
+                        '${_chain.indexOf(i) + 1}',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    ),
+  );
 
   Widget _soundBoard(BuildContext context) {
     const colors = [
       Color(0xff2369a4),
       Color(0xff9450a0),
       Color(0xff287c62),
-      Color(0xff9a6010)
+      Color(0xff9a6010),
     ];
     const icons = [
       Icons.circle_outlined,
       Icons.diamond_outlined,
       Icons.change_history,
-      Icons.crop_square
+      Icons.crop_square,
     ];
     return AspectRatio(
-        aspectRatio: 1,
-        child: GridView.builder(
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: 36,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 6, crossAxisSpacing: 4, mainAxisSpacing: 4),
-            itemBuilder: (_, i) {
-              final family = SoundMatchEngine.families.indexOf(_sound.board[i]);
-              return Semantics(
-                  key: ValueKey('sound-tile-$i'),
-                  label: 'Sound /${_sound.board[i]}/ tile ${i + 1}',
-                  selected: _selected == i,
-                  button: true,
-                  child: Material(
-                      color: colors[family],
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: BorderSide(
-                              color: _selected == i
-                                  ? Colors.white
-                                  : Colors.transparent,
-                              width: 3)),
-                      child: InkWell(
-                          onTap: () => _tapSound(i),
-                          borderRadius: BorderRadius.circular(12),
-                          child: Center(
-                              child: FittedBox(
-                                  child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                  _sound.stars.contains(i)
-                                      ? Icons.star
-                                      : icons[family],
-                                  color: Colors.white,
-                                  size: 18),
-                              Text('/${_sound.board[i]}/',
-                                  style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.bold)),
-                            ],
-                          ))))));
-            }));
+      aspectRatio: 1,
+      child: GridView.builder(
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: 36,
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 6,
+          crossAxisSpacing: 4,
+          mainAxisSpacing: 4,
+        ),
+        itemBuilder: (_, i) {
+          final family = SoundMatchEngine.families.indexOf(_sound.board[i]);
+          return Semantics(
+            key: ValueKey('sound-tile-$i'),
+            label: 'Sound /${_sound.board[i]}/ tile ${i + 1}',
+            selected: _selected == i,
+            button: true,
+            child: Material(
+              color: colors[family],
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(
+                  color: _selected == i ? Colors.white : Colors.transparent,
+                  width: 3,
+                ),
+              ),
+              child: InkWell(
+                onTap: () => _tapSound(i),
+                borderRadius: BorderRadius.circular(12),
+                child: Center(
+                  child: FittedBox(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          _sound.stars.contains(i) ? Icons.star : icons[family],
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                        Text(
+                          '/${_sound.board[i]}/',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 }

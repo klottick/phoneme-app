@@ -62,7 +62,8 @@ final class CancellingCueAudio implements CourseAudio, CueAudioProbe {
     _pending = settle;
     final Future<void> delivery = settle.future.then((Object? _) {});
     unawaited(
-        delivery.then<void>((Object? value) {}, onError: (Object error) {}));
+      delivery.then<void>((Object? value) {}, onError: (Object error) {}),
+    );
     return delivery;
   }
 
@@ -129,7 +130,8 @@ final class HeldCueAudio implements CourseAudio, CueAudioProbe {
     // async failure, regardless of how soon (or never) the caller is
     // listening.
     unawaited(
-        delivery.then<void>((Object? value) {}, onError: (Object error) {}));
+      delivery.then<void>((Object? value) {}, onError: (Object error) {}),
+    );
     return delivery;
   }
 
@@ -163,17 +165,20 @@ Future<CourseAudio> openLesson(
   GlobalKey<NavigatorState> navigator,
   CourseAudio audio,
 ) async {
-  await tester.pumpWidget(ProviderScope(
-    overrides: <Override>[
-      courseAudioProvider.overrideWithValue(audio),
-      courseLearningStoreProvider
-          .overrideWithValue(CourseLearningWidgetStore()),
-    ],
-    child: MaterialApp(
-      navigatorKey: navigator,
-      home: const CourseLessonScreen(lessonId: 'en-fr-vowels'),
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: <Override>[
+        courseAudioProvider.overrideWithValue(audio),
+        courseLearningStoreProvider.overrideWithValue(
+          CourseLearningWidgetStore(),
+        ),
+      ],
+      child: MaterialApp(
+        navigatorKey: navigator,
+        home: const CourseLessonScreen(lessonId: 'en-fr-vowels'),
+      ),
     ),
-  ));
+  );
   await settle(tester);
   return audio;
 }
@@ -181,18 +186,25 @@ Future<CourseAudio> openLesson(
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues(<String, Object>{}));
 
-  testWidgets('the lesson listening surface pins the exact alpha disclosure',
-      (WidgetTester tester) async {
-    await openLesson(tester, GlobalKey<NavigatorState>(), CancellingCueAudio());
-    expect(
-      find.text(alphaDisclosure),
-      findsOneWidget,
-      reason: 'listening surfaces must carry the exact alpha label',
-    );
-  });
+  testWidgets(
+    'the lesson listening surface omits the routine alpha disclosure',
+    (WidgetTester tester) async {
+      await openLesson(
+        tester,
+        GlobalKey<NavigatorState>(),
+        CancellingCueAudio(),
+      );
+      expect(
+        find.text(alphaDisclosure),
+        findsNothing,
+        reason: 'routine alpha qualifiers are removed from learner-facing copy',
+      );
+    },
+  );
 
-  testWidgets('held completion keeps the choices locked until actual success',
-      (WidgetTester tester) async {
+  testWidgets('held completion keeps the choices locked until actual success', (
+    WidgetTester tester,
+  ) async {
     final HeldCueAudio fake = HeldCueAudio();
     await openLesson(tester, GlobalKey<NavigatorState>(), fake);
     await tester.tap(find.text('Listen to French word'));
@@ -216,8 +228,9 @@ void main() {
     expect(find.text('Please wait…'), findsNothing);
   });
 
-  testWidgets('a failed recording shows Retry/unavailable, not voice setup',
-      (WidgetTester tester) async {
+  testWidgets('a failed recording shows Retry/unavailable, not voice setup', (
+    WidgetTester tester,
+  ) async {
     final HeldCueAudio fake = HeldCueAudio();
     await openLesson(tester, GlobalKey<NavigatorState>(), fake);
     await tester.tap(find.text('Listen to French word'));
@@ -227,7 +240,8 @@ void main() {
     expect(
       find.textContaining('Install a French voice'),
       findsNothing,
-      reason: 'a bundled-recording failure is never a voice-installation '
+      reason:
+          'a bundled-recording failure is never a voice-installation '
           'instruction',
     );
     expect(
@@ -254,8 +268,7 @@ void main() {
     expect(answerEnabled(tester, 'i'), isTrue);
   });
 
-  testWidgets(
-      'a realistically cancelled playback is silent: no failure '
+  testWidgets('a realistically cancelled playback is silent: no failure '
       'feedback, still retryable', (WidgetTester tester) async {
     final CancellingCueAudio fake = CancellingCueAudio();
     await openLesson(tester, GlobalKey<NavigatorState>(), fake);
@@ -290,10 +303,10 @@ void main() {
     expect(answerEnabled(tester, 'i'), isTrue);
   });
 
-  testWidgets(
-      'app suspension retires a held playback: stopped, retryable, '
-      'and a stale success during a newer held request cannot unlock',
-      (WidgetTester tester) async {
+  testWidgets('app suspension retires a held playback: stopped, retryable, '
+      'and a stale success during a newer held request cannot unlock', (
+    WidgetTester tester,
+  ) async {
     final HeldCueAudio fake = HeldCueAudio();
     await openLesson(tester, GlobalKey<NavigatorState>(), fake);
     await tester.tap(find.text('Listen to French word'));
@@ -325,8 +338,11 @@ void main() {
       findsNothing,
       reason: 'no automatic replay on resume: a fresh listen is required',
     );
-    expect(fake.spoken, hasLength(1),
-        reason: 'resume must not replay the retired request');
+    expect(
+      fake.spoken,
+      hasLength(1),
+      reason: 'resume must not replay the retired request',
+    );
 
     // A newer, current request: the retired one's late success (really
     // settled after its retirement) must not touch this one.
@@ -355,8 +371,7 @@ void main() {
     );
   });
 
-  testWidgets(
-      'a stale error after suspension cannot publish failure '
+  testWidgets('a stale error after suspension cannot publish failure '
       'feedback or unlock', (WidgetTester tester) async {
     final HeldCueAudio fake = HeldCueAudio();
     await openLesson(tester, GlobalKey<NavigatorState>(), fake);
@@ -378,7 +393,8 @@ void main() {
     expect(
       find.textContaining('unavailable'),
       findsNothing,
-      reason: 'a stale error must not publish failure feedback over a '
+      reason:
+          'a stale error must not publish failure feedback over a '
           'newer request',
     );
     expect(
@@ -399,40 +415,46 @@ void main() {
 
   final List<(Object?, CueFactory, String)> lateCases =
       <(Object?, CueFactory, String)>[
-    (null, () => HeldCueAudio(), 'success'),
-    (StateError('late engine failure'), () => HeldCueAudio(), 'error'),
-    (
-      const CourseAudioCancelledException(),
-      () => CancellingCueAudio(),
-      'cancellation'
-    ),
-  ];
+        (null, () => HeldCueAudio(), 'success'),
+        (StateError('late engine failure'), () => HeldCueAudio(), 'error'),
+        (
+          const CourseAudioCancelledException(),
+          () => CancellingCueAudio(),
+          'cancellation',
+        ),
+      ];
   for (final (Object? lateError, CueFactory makeFake, String label)
       in lateCases) {
-    testWidgets(
-        'a late $label settlement after leaving the lesson '
+    testWidgets('a late $label settlement after leaving the lesson '
         'settles quietly', (WidgetTester tester) async {
       final navigator = GlobalKey<NavigatorState>();
       final CueAudioProbe fake = makeFake();
-      await tester.pumpWidget(ProviderScope(
-        overrides: <Override>[
-          courseAudioProvider.overrideWithValue(fake),
-          courseLearningStoreProvider
-              .overrideWithValue(CourseLearningWidgetStore()),
-        ],
-        child: MaterialApp(
-          navigatorKey: navigator,
-          home: Builder(builder: (BuildContext context) {
-            return TextButton(
-              onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<Widget>(
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            courseAudioProvider.overrideWithValue(fake),
+            courseLearningStoreProvider.overrideWithValue(
+              CourseLearningWidgetStore(),
+            ),
+          ],
+          child: MaterialApp(
+            navigatorKey: navigator,
+            home: Builder(
+              builder: (BuildContext context) {
+                return TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<Widget>(
                       builder: (_) =>
-                          const CourseLessonScreen(lessonId: 'en-fr-vowels'))),
-              child: const Text('Open lesson'),
-            );
-          }),
+                          const CourseLessonScreen(lessonId: 'en-fr-vowels'),
+                    ),
+                  ),
+                  child: const Text('Open lesson'),
+                );
+              },
+            ),
+          ),
         ),
-      ));
+      );
       await settle(tester);
       await tester.tap(find.text('Open lesson'));
       // Let the route transition finish before interacting.

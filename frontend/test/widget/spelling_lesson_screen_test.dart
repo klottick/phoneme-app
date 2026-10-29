@@ -30,53 +30,49 @@ import '../support/sentence_hunt_fixtures.dart';
 
 const _activityId = 'en-fr-u-y-spelling';
 const _prompt = 'Listen, then choose how the vowel is written.';
-const _alphaDisclosure =
-    'Alpha audio: recordings are unverified; device speech is practice-only.';
-const _practiceDisclosure =
-    'Demo practice: this authored spelling content has not had qualified French review. It is practice, not an assessment.';
-
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({'selected_course_id': 'en-fr'});
     courseBackend = null;
   });
 
-  testWidgets(
-    'spelling_prompt_and_disclosures_are_exact_and_options_wait_for_audio',
-    (tester) async {
-      final store = _HeldSpellingStore();
-      final audio = _ControlledSpellingAudio();
-      final app = await _mountSpelling(tester, store, audio);
-      addTearDown(() => app.dispose(tester));
+  testWidgets('spelling_prompt_is_clear_and_options_wait_for_audio', (
+    tester,
+  ) async {
+    final store = _HeldSpellingStore();
+    final audio = _ControlledSpellingAudio();
+    final app = await _mountSpelling(tester, store, audio);
+    addTearDown(() => app.dispose(tester));
 
-      expect(find.text(_prompt), findsOneWidget);
-      expect(find.text(_alphaDisclosure), findsOneWidget);
-      expect(find.text(_practiceDisclosure), findsOneWidget);
-      expect(find.text('u'), findsOneWidget);
-      expect(find.text('ou'), findsOneWidget);
-      expect(_option(tester, 'u').onPressed, isNull);
-      expect(_option(tester, 'ou').onPressed, isNull);
-      expect(store.submissions, isEmpty, reason: 'entry must not auto-start');
+    expect(find.text(_prompt), findsOneWidget);
+    expect(find.textContaining('Alpha audio:'), findsNothing);
+    expect(find.textContaining('Demo practice:'), findsNothing);
+    expect(find.text('u'), findsOneWidget);
+    expect(find.text('ou'), findsOneWidget);
+    expect(find.text('0/10 completed · 10 remaining'), findsOneWidget);
+    expect(_option(tester, 'u').onPressed, isNull);
+    expect(_option(tester, 'ou').onPressed, isNull);
+    expect(store.submissions, isEmpty, reason: 'entry must not auto-start');
 
-      await tester.tap(find.text('Start practice'));
-      await tester.pumpAndSettle();
-      expect(store.submissions, hasLength(1));
-      expect(store.submissions.single.action, isA<StartSpellingPractice>());
+    await tester.tap(find.text('Start practice'));
+    await tester.pumpAndSettle();
+    expect(find.text('0/10 completed · 10 remaining'), findsOneWidget);
+    expect(store.submissions, hasLength(1));
+    expect(store.submissions.single.action, isA<StartSpellingPractice>());
 
-      await tester.tap(find.text('Listen to the word'));
-      await tester.pump();
-      expect(audio.requests, hasLength(1));
-      expect(audio.requests.single.referenceId, 'fr-word-tout');
-      expect(audio.requests.single.use, CourseAudioUse.alphaPractice);
-      expect(audio.requests.single.allowPracticeTts, isFalse);
-      expect(_option(tester, 'u').onPressed, isNull);
-      audio.requests.single.complete();
-      await tester.pump();
-      await tester.pump();
-      expect(_option(tester, 'u').onPressed, isNotNull);
-      expect(_option(tester, 'ou').onPressed, isNotNull);
-    },
-  );
+    await tester.tap(find.text('Listen to the word'));
+    await tester.pump();
+    expect(audio.requests, hasLength(1));
+    expect(audio.requests.single.referenceId, 'fr-word-tout');
+    expect(audio.requests.single.use, CourseAudioUse.alphaPractice);
+    expect(audio.requests.single.allowPracticeTts, isFalse);
+    expect(_option(tester, 'u').onPressed, isNull);
+    audio.requests.single.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(_option(tester, 'u').onPressed, isNotNull);
+    expect(_option(tester, 'ou').onPressed, isNotNull);
+  });
 
   testWidgets('held_answer_save_stays_secret_until_durable_ack', (
     tester,
@@ -91,6 +87,11 @@ void main() {
     await tester.tap(find.text('ou'));
     await tester.pump();
     expect(find.text('Saving your answer…'), findsOneWidget);
+    expect(
+      find.text('0/10 completed · 10 remaining'),
+      findsOneWidget,
+      reason: 'pending answer save must not count as acknowledged progress',
+    );
     expect(find.text('tout'), findsNothing);
     expect(
       find.text('In tout, ou represents the authored target /u/.'),
@@ -116,6 +117,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Correct'), findsOneWidget);
+    expect(find.text('1/10 completed · 9 remaining'), findsOneWidget);
     expect(find.text('Continue'), findsOneWidget);
     final Text highlightedWord = tester.widget<Text>(
       find.byKey(const ValueKey<String>('spelling-feedback-word')),

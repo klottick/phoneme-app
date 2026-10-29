@@ -15,10 +15,14 @@ import '../../core/course/french_course.dart';
 import '../../core/services/recording_service.dart';
 import '../../core/services/audio_service.dart';
 import 'package:path_provider/path_provider.dart';
+import 'lesson_progress_indicator.dart';
 
 class CourseLessonScreen extends ConsumerStatefulWidget {
-  const CourseLessonScreen(
-      {super.key, required this.lessonId, this.review = false});
+  const CourseLessonScreen({
+    super.key,
+    required this.lessonId,
+    this.review = false,
+  });
   final String lessonId;
   final bool review;
 
@@ -53,9 +57,10 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
   int _generation = 0, _listenGeneration = 0, _saveOperation = 0;
   int _recordingGeneration = 0;
 
-  CourseLesson get _lesson =>
-      frenchLessons.firstWhere((lesson) => lesson.id == widget.lessonId,
-          orElse: () => frenchLessons.last);
+  CourseLesson get _lesson => frenchLessons.firstWhere(
+    (lesson) => lesson.id == widget.lessonId,
+    orElse: () => frenchLessons.last,
+  );
   bool get _isKnownLesson =>
       frenchLessons.any((lesson) => lesson.id == widget.lessonId);
   String get _activityId => 'lesson:${widget.lessonId}';
@@ -70,6 +75,22 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
         _candidateAnswer ||
         (candidate is LegacyLessonCheckpoint &&
             candidate.selectedSound != null);
+  }
+
+  int? get _acknowledgedCompleted {
+    final CourseLearningState? state = _state;
+    if (state == null) return null;
+    final ActivitySlot? slot = state.activities[_activityId];
+    if (slot == null) return 0;
+    if (slot.contentRevision != _definition.contentRevision ||
+        slot.snapshot is! LegacyLessonCheckpoint) {
+      return null;
+    }
+    final LegacyLessonCheckpoint checkpoint =
+        slot.snapshot as LegacyLessonCheckpoint;
+    final int submitted =
+        checkpoint.wordIndex + (checkpoint.selectedSound == null ? 0 : 1);
+    return submitted.clamp(0, _lesson.words.length).toInt();
   }
 
   @override
@@ -260,8 +281,10 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
       // Cancellation is quiet and never counts as hearing.
     } catch (_) {
       if (mounted && generation == _listenGeneration) {
-        setState(() => _feedback =
-            'French audio is unavailable right now. Tap "Listen to French word" to try again. You can still read the examples below.');
+        setState(
+          () => _feedback =
+              'French audio is unavailable right now. Tap "Listen to French word" to try again. You can still read the examples below.',
+        );
       }
     } finally {
       if (mounted && generation == _listenGeneration) {
@@ -422,7 +445,10 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
   }
 
   void _showSaveFailure(
-      int generation, int operation, LearningCommand command) {
+    int generation,
+    int operation,
+    LearningCommand command,
+  ) {
     if (!mounted || generation != _generation || operation != _saveOperation) {
       return;
     }
@@ -462,7 +488,10 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
       return;
     }
     final command = _store!.prepare(
-        state: _state!, activityId: _activityId, action: const AdvanceLesson());
+      state: _state!,
+      activityId: _activityId,
+      action: const AdvanceLesson(),
+    );
     _pending = command;
     _pendingStore = _store;
     await _submitPending();
@@ -570,9 +599,10 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
       return;
     }
     final command = _store!.prepare(
-        state: _state!,
-        activityId: _activityId,
-        action: StartLearningRun(options: RunOptions()));
+      state: _state!,
+      activityId: _activityId,
+      action: StartLearningRun(options: RunOptions()),
+    );
     _pending = command;
     _pendingStore = _store;
     await _submitPending();
@@ -586,122 +616,192 @@ class _CourseLessonScreenState extends ConsumerState<CourseLessonScreen>
         body: const Center(child: Text('This lesson is unavailable.')),
       );
     }
+    final int? completed = _acknowledgedCompleted;
+    final Widget content = _loadMessage != null
+        ? Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(_loadMessage!, textAlign: TextAlign.center),
+                if (_saveFailed)
+                  FilledButton(
+                    onPressed: _busy ? null : _retrySave,
+                    child: const Text('Retry saving'),
+                  )
+                else if (_conflict)
+                  FilledButton(
+                    onPressed: _busy ? null : () => _load(_store!),
+                    child: const Text('Reload saved progress'),
+                  )
+                else if (!_contentChanged && !_finished)
+                  FilledButton(
+                    onPressed: _busy ? null : () => _load(_store!, retry: true),
+                    child: const Text('Retry loading'),
+                  ),
+              ],
+            ),
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              const Text('ENGLISH → FRENCH'),
+              const SizedBox(height: 12),
+              Text(
+                _lesson.explanation,
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Listen ${_index + 1} of ${_lesson.words.length}',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const Text('Which focus sound do you hear?'),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: _busy || _recording ? null : _listen,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                ),
+                icon: const Icon(Icons.volume_up),
+                label: Text(_busy ? 'Please wait…' : 'Listen to French word'),
+              ),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                children: <Widget>[
+                  for (final sound in _options)
+                    OutlinedButton(
+                      onPressed: _heard && !_answered && !_busy
+                          ? () => _answer(sound)
+                          : null,
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(64, 52),
+                      ),
+                      child: Text(
+                        '/$sound/',
+                        style: const TextStyle(fontSize: 24),
+                      ),
+                    ),
+                ],
+              ),
+              if (_feedback.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text(_feedback),
+                ),
+              if (_hasSubmittedAnswer) ...<Widget>[
+                const Text(
+                  'Say it yourself. Recording and self-comparison are optional; no automated pronunciation grade.',
+                ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: <Widget>[
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : _record,
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(48, 52),
+                      ),
+                      icon: Icon(_recording ? Icons.stop : Icons.mic),
+                      label: Text(
+                        _recording ? 'Stop recording' : 'Record yourself',
+                      ),
+                    ),
+                    if (_recordingPath != null)
+                      TextButton(
+                        onPressed: () async {
+                          try {
+                            await ref
+                                .read(audioServiceProvider)
+                                .play(_recordingPath!);
+                          } catch (_) {
+                            if (mounted) {
+                              setState(
+                                () => _feedback =
+                                    'Recording playback unavailable.',
+                              );
+                            }
+                          }
+                        },
+                        child: const Text('Hear your recording'),
+                      ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 12),
+              ExpansionTile(
+                enabled: _pending == null,
+                title: const Text('Word reference'),
+                onExpansionChanged: _openReference,
+                children: <Widget>[
+                  for (final text in _lesson.words)
+                    ListTile(
+                      title: Text('$text /${wordByText(text).ipa}/'),
+                      subtitle: Text(wordByText(text).meaning),
+                    ),
+                ],
+              ),
+            ],
+          );
     return Scaffold(
       appBar: AppBar(title: Text(_lesson.title)),
-      body: _loadMessage != null
-          ? Center(
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Text(_loadMessage!, textAlign: TextAlign.center),
-              if (_saveFailed)
-                FilledButton(
-                    onPressed: _busy ? null : _retrySave,
-                    child: const Text('Retry saving'))
-              else if (_conflict)
-                FilledButton(
-                    onPressed: _busy ? null : () => _load(_store!),
-                    child: const Text('Reload saved progress'))
-              else if (_contentChanged || _finished)
-                FilledButton(
-                    onPressed: _busy ? null : _startNewRun,
-                    child: const Text('Start new run'))
-              else
-                FilledButton(
-                    onPressed: _busy ? null : () => _load(_store!, retry: true),
-                    child: const Text('Retry loading')),
-            ]))
-          : Center(
-              child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 640),
-                  child: ListView(
-                    padding: const EdgeInsets.all(20),
-                    children: [
-                      const Text('ENGLISH → FRENCH'),
-                      const SizedBox(height: 12),
-                      Text(_lesson.explanation,
-                          style: Theme.of(context).textTheme.bodyLarge),
-                      const SizedBox(height: 20),
-                      LinearProgressIndicator(
-                          value: _index / _lesson.words.length),
-                      const SizedBox(height: 16),
-                      Text('Listen ${_index + 1} of ${_lesson.words.length}',
-                          style: Theme.of(context).textTheme.titleLarge),
-                      const Text('Which focus sound do you hear?'),
-                      const SizedBox(height: 12),
-                      FilledButton.icon(
-                        onPressed: _busy || _recording ? null : _listen,
-                        icon: const Icon(Icons.volume_up),
-                        label: Text(
-                            _busy ? 'Please wait…' : 'Listen to French word'),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(alphaAudioDisclosure,
-                          style: Theme.of(context).textTheme.bodySmall),
-                      Wrap(spacing: 12, children: [
-                        for (final sound in _options)
-                          OutlinedButton(
-                            onPressed: _heard && !_answered && !_busy
-                                ? () => _answer(sound)
-                                : null,
-                            child: Text('/$sound/',
-                                style: const TextStyle(fontSize: 24)),
-                          ),
-                      ]),
-                      if (_feedback.isNotEmpty)
-                        Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            child: Text(_feedback)),
-                      if (_saveFailed)
-                        FilledButton(
-                            onPressed: _busy ? null : _retrySave,
-                            child: const Text('Retry saving')),
-                      if (_hasSubmittedAnswer) ...[
-                        const Text(
-                            'Say it yourself. Recording and self-comparison are optional; no automated pronunciation grade.'),
-                        Wrap(spacing: 8, children: [
-                          OutlinedButton.icon(
-                              onPressed: _busy ? null : _record,
-                              icon: Icon(_recording ? Icons.stop : Icons.mic),
-                              label: Text(_recording
-                                  ? 'Stop recording'
-                                  : 'Record yourself')),
-                          if (_recordingPath != null)
-                            TextButton(
-                                onPressed: () async {
-                                  try {
-                                    await ref
-                                        .read(audioServiceProvider)
-                                        .play(_recordingPath!);
-                                  } catch (_) {
-                                    if (mounted) {
-                                      setState(() => _feedback =
-                                          'Recording playback unavailable.');
-                                    }
-                                  }
-                                },
-                                child: const Text('Hear your recording')),
-                        ]),
-                        FilledButton(
-                            onPressed: _busy || _recording || _saveFailed
-                                ? null
-                                : _next,
-                            child: Text(_index == _lesson.words.length - 1
-                                ? 'Finish'
-                                : 'Next word')),
-                      ],
-                      const SizedBox(height: 24),
-                      ExpansionTile(
-                        enabled: _pending == null,
-                        title: const Text('Word reference'),
-                        onExpansionChanged: _openReference,
-                        children: [
-                          for (final text in _lesson.words)
-                            ListTile(
-                                title: Text('$text /${wordByText(text).ipa}/'),
-                                subtitle: Text(wordByText(text).meaning))
-                        ],
-                      ),
-                    ],
-                  ))),
+      body: SafeArea(
+        child: Column(
+          children: <Widget>[
+            if (completed != null)
+              LessonProgressIndicator(
+                completed: completed,
+                total: _lesson.words.length,
+              ),
+            Expanded(
+              child: LessonContentViewport(
+                maxWidth: 640,
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                child: content,
+              ),
+            ),
+          ],
+        ),
+      ),
+      bottomNavigationBar: _bottomAction(),
+    );
+  }
+
+  Widget? _bottomAction() {
+    String? label;
+    VoidCallback? action;
+    bool canAct = !_busy && !_recording && _pending == null;
+    if (_saveFailed && _pending != null) {
+      label = 'Retry saving';
+      action = _retrySave;
+      canAct = !_busy;
+    } else if (_loadMessage != null && (_contentChanged || _finished)) {
+      label = 'Start new run';
+      action = _startNewRun;
+    } else if (_loadMessage == null && _hasSubmittedAnswer) {
+      label = _index == _lesson.words.length - 1 ? 'Finish' : 'Next word';
+      action = _next;
+      canAct = canAct && !_saveFailed && !_conflict && !_contentChanged;
+    }
+    if (label == null || action == null) return null;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: canAct ? action : null,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(52),
+              ),
+              child: Text(label),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
