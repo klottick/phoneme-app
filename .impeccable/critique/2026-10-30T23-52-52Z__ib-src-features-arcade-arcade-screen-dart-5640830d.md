@@ -2,7 +2,7 @@
 target: "both arcade games: confirmed space theme, look and feel, and learning fit"
 total_score: 24
 max_score: 40
-na_heuristics: 
+na_heuristics: ""
 p0_count: 0
 p1_count: 3
 target_identity: "file:/home/klottick/.paseo/worktrees/34ubk100/arcade-evaluation/frontend/lib/src/features/arcade/arcade_screen.dart"
