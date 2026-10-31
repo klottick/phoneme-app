@@ -159,6 +159,8 @@ word.` Route the pod and light its mission node only from committed state.
 
 There are twelve unique words in the first pass, six per target. Explicitly bind
 the correct spelling and range; never derive correctness from a substring rule.
+Freeze a shuffled word order per run; the grouped table below is not presentation
+order. Do not use predictable target blocks or a fixed alternating answer pattern.
 
 | Word | Target | Correct option | Grapheme range [start,end) |
 | --- | --- | --- | --- |
@@ -203,6 +205,8 @@ target spelling and explain the correct family. Then offer **Next word**. A wron
 answer joins the revisit queue. The initial twelve unique words and targets are
 the table above; the word is visible here by design. No audio provider is created,
 no voice/audio request is made, and no audio setting blocks a silent mission.
+Freeze a shuffled word order per run here too, independently of the other games;
+never present the table's six `/u/` words followed by its six `/y/` words as blocks.
 
 Avoid multiple simultaneous answerable words: they split attention, encourage
 uncredited accidental responses and make accessible equivalent play harder.
