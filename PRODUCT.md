@@ -65,6 +65,20 @@ need device verification.
 - Favor legible, stable controls, clear current objectives and specific recoverable
   feedback. Test both web and native behavior rather than extrapolating from one.
 
+## Confirmed Arcade Redesign Direction
+
+On 2026-10-31 the user authorized complete game redesign, specified that **all
+games must be learning first**, and selected a three-game set. At least one game
+must work silently. The user's proposed silent interaction is falling words
+swiped left or right according to the phoneme they contain.
+
+The selected scope separates listening discrimination, sound-to-spelling and
+silent written-word classification. The detailed
+[three-game design](docs/superpowers/specs/2026-10-31-learning-first-arcade-design.md)
+is a proposal awaiting review; it is not implemented capability. The older game
+descriptions above record current behavior rather than requirements to preserve
+their mechanics. Preserve their saved data and the confirmed space identity.
+
 ## Brand Commitments
 
 **Space exploration is the correct, user-confirmed product theme.** The user
